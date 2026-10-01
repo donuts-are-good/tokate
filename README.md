@@ -59,7 +59,8 @@ python -m compute_donor github checks --run .runs/github-OWNER-REPO-123-RUNID --
 ```
 
 Checks with failures exit nonzero. Missing, pending, or entirely skipped checks
-are never reported as passed. A timeout returns `pending`. If the PR head has
+are never reported as passed. Pending checks, including watch timeouts, exit
+with code 8. If the PR head has
 changed since publication, the command stops rather than attributing unrelated
 checks to this run. CI evidence is saved as `checks.json`. On `goo-widgets`, the
 existing `pull_request` workflow runs `bash scripts/verify.sh`. Fork PRs may

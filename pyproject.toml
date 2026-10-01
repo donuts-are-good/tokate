@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "compute-donor"
 version = "0.1.0"
-description = "Donate local Codex runs to a project's task queue"
+description = "Donate Codex runs to approved GitHub issues and pull requests"
 requires-python = ">=3.11"
 dependencies = []
 

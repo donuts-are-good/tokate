@@ -61,7 +61,10 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "github":
-            print(json.dumps(github.dispatch(args), indent=2))
+            output = github.dispatch(args)
+            print(json.dumps(output, indent=2))
+            if args.github_command == "checks" and output["status"] == "pending":
+                parser.exit(8)
             return
         if args.command == "init":
             Queue(args.state)
