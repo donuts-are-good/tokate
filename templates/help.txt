@@ -1,0 +1,31 @@
+Tokate 0.2.0 (toh-KAH-teh)
+Donate compute to approved GitHub issues.
+
+  tokate doctor                           Check tools and sandbox without inference
+
+Owner:
+  tokate init [--path DIR]                 Create policy and PR template
+  tokate policy --repo OWNER/REPO          Read upstream policy
+  tokate approve --repo OWNER/REPO --issue N --donor LOGIN
+  tokate assign  --repo OWNER/REPO --issue N --donor LOGIN
+  tokate revoke  --repo OWNER/REPO --issue N
+
+Donor:
+  tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
+              [--seconds 1800] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
+  tokate claim <same options>              Reserve without starting compute
+  tokate work --run DIR                    Execute a saved claim once
+  tokate publish --run DIR                 Retry publication without compute
+  tokate status --run DIR                  Show saved run
+
+Review:
+  tokate verify-pr --repo OWNER/REPO --pr N Validate approval and receipt
+  tokate checks --repo OWNER/REPO --pr N [--watch] [--timeout 1200]
+  tokate checks --run DIR [--watch] [--timeout 1200]
+
+Requires Linux, git, gh, setsid, and a current native Codex CLI with permission
+profiles. Sign in with gh auth login and codex login. Create your fork with
+ gh repo fork OWNER/REPO --clone=false
+
+Checks exit 0 when all owner-required checks pass, 8 when pending, 1 on failure.
+PRs are drafts. The owner reviews and merges. No quota transfer or correctness guarantee.
