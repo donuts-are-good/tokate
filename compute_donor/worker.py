@@ -100,10 +100,8 @@ def execute(job, repo, run_dir, codex, model=None):
             except subprocess.TimeoutExpired:
                 result["status"] = "timed_out"
                 result["error"] = "Donor runtime limit reached"
+            finally:
                 stop_process(process)
-            except BaseException:
-                stop_process(process)
-                raise
         if result["status"] != "timed_out":
             result["error"] = f"Codex exited with code {process.returncode}" if process.returncode else None
         completed = False
@@ -132,7 +130,7 @@ def execute(job, repo, run_dir, codex, model=None):
             result["patch"] = git(checkout, "diff", "--cached", "--binary", job["revision"], timeout=10)
             (run_dir / "changes.patch").write_text(result["patch"])
     except subprocess.TimeoutExpired:
-        result["status"], result["error"] = "timed_out", "Donor runtime limit reached during checkout"
+        result["status"], result["error"] = "timed_out", "Runtime limit reached during Git operation"
     except (OSError, subprocess.CalledProcessError) as error:
         result["error"] = str(error)
     result["seconds"] = round(time.monotonic() - started, 3)
