@@ -1,15 +1,90 @@
 # Compute Donor
 
-A working prototype for donating Codex runs to a project's task queue.
-Maintainers choose the work. Donors choose a project, job count, runtime limit,
-and whether their worker may edit its temporary checkout.
+A working prototype for donating Codex runs to upstream GitHub issues.
+The maintainer approves an issue and assigns a donor. The donor runs Codex using
+their own subscription, opens a linked PR, and checks GitHub CI. The maintainer
+accepts the PR in GitHub. No automatic merge or release is performed.
+
+## GitHub issue to PR
+
+Requires Linux, Python 3.11+, Git, a recent Codex CLI, and GitHub CLI (`gh`).
+Sign in to both Codex and GitHub on the donor machine. No Python dependencies
+or hosted coordinator are needed for this workflow. Commands run from this
+directory. Replace `123` with an actual issue number.
+
+The repo owner approves an existing issue and assigns a GitHub username:
+
+```sh
+python -m compute_donor github approve --repo obselate/goo-widgets --issue 123 --donor @me
+```
+
+`@me` resolves to the signed-in GitHub user. Approval requires repository write
+permission and adds `compute:approved` while assigning the donor. Once the label
+exists, the owner can also apply it and assign the donor directly in GitHub.
+
+The assigned donor starts a run:
+
+```sh
+python -m compute_donor github work --repo obselate/goo-widgets --issue 123 \
+  --model gpt-6.1-sol --effort high --seconds 1200 --allow-network
+```
+
+The worker reads the issue from upstream, verifies approval and assignment,
+resolves the current default-branch commit, and reserves
+`compute-donor/issue-123` in the push repository. Existing branches or PRs stop
+another attempt before inference begins. The worker clones upstream directly,
+implements the task, commits on that branch, pushes, and opens a PR containing
+`Fixes #123`, its report, model, and token usage. Your ordinary working checkout
+is never used. The owner can remove approval or assignment before publication
+to prevent a PR from being opened. Changes to the issue's title or body during
+execution also stop publication for inspection.
+
+`--model` is required in this workflow and recorded in the receipt. `--effort`
+is optional. `--seconds` caps the agent and checkout time, not subsequent GitHub
+operations or CI. `--allow-network` permits network access for dependency
+restores in the Codex workspace sandbox. Omit it when the task needs no network.
+`--instructions-file FILE` adds local maintainer instructions to the issue task.
+
+For a donor without upstream push permission, create a fork with
+`gh repo fork OWNER/REPO --clone=false`, then pass `--fork DONOR/REPO` to `work`.
+The head repo must be a writable fork of the selected upstream. The PR still
+targets the upstream default branch. The fork must contain the chosen base
+commit so GitHub can reserve the donor branch.
+
+The command prints its run directory and PR URL. Check CI for that exact saved
+commit, using the printed directory:
+
+```sh
+python -m compute_donor github checks --run .runs/github-OWNER-REPO-123-RUNID --watch
+```
+
+Checks with failures exit nonzero. Missing, pending, or entirely skipped checks
+are never reported as passed. A timeout returns `pending`. If the PR head has
+changed since publication, the command stops rather than attributing unrelated
+checks to this run. CI evidence is saved as `checks.json`. On `goo-widgets`, the
+existing `pull_request` workflow runs `bash scripts/verify.sh`. Fork PRs may
+require GitHub workflow approval from a maintainer. Once checks and review are
+satisfactory, the owner merges using GitHub's normal controls.
+
+If publication fails after compute finishes, retry without spending another run:
+
+```sh
+python -m compute_donor github publish --run .runs/github-OWNER-REPO-123-RUNID
+```
+
+Repeated publication returns the existing matching PR. Failed/no-change agent
+runs keep their report and reserved branch for inspection. There is no automatic
+retry. To authorize a fresh attempt, inspect the old run and remove its empty
+reserved branch in GitHub first. Do not remove a branch containing work or a PR.
+
+## Local queue mode
 
 The coordinator stores tasks and results in SQLite. A worker claims a task over
 HTTP, clones the pinned commit, runs the donor's local Codex CLI, and returns a
 report, measured usage, and an optional Git patch. The donor's ChatGPT credentials
 stay on their machine. No API key or Python dependencies are required.
 
-## Run the goo-widgets example
+### Run the local goo-widgets example
 
 Requires Linux, Python 3.11+, Git, and a recent Codex CLI with
 `--ignore-user-config` and `--ephemeral`. Tested with Codex CLI 0.159.3.
@@ -61,7 +136,7 @@ The initial live example already registered `goo-widgets` at
 and `project`, submit another task, and issue a fresh grant with a new file path.
 The first grant has been spent. The live job was `f649589f8a4d255a`.
 
-## Tasks that produce patches
+### Local tasks that produce patches
 
 Both the maintainer and donor must select `workspace-write`:
 
@@ -79,7 +154,7 @@ Projects are pinned at registration. Use another project name to test a new
 commit. Workers supply their own local repository containing that commit, so
 the coordinator cannot select an arbitrary donor filesystem path.
 
-## Donation limits and failures
+### Local donation limits and failures
 
 - `grant --jobs` is a persistent claim allowance. A claimed attempt spends one
   job even if it fails or the worker disappears.
@@ -110,7 +185,7 @@ existing allowance as work runs. No balance is transferred to the project.
 
 ## Scope
 
-This is a local experiment for trusted maintainers and repositories. Codex's
+This is a prototype for trusted maintainers and repositories. Codex's
 read-only or workspace-write sandbox is used with approvals set to never.
 An independent checkout protects the source working tree, but is not a VM or a
 complete confidentiality boundary around the donor's home directory. There is
@@ -137,7 +212,10 @@ python -m unittest discover -s tests -v
 ```
 
 The end-to-end tests use real HTTP requests, SQLite, Git repositories, and CLI
-subprocesses. A deterministic fake Codex executable covers patch application,
+subprocesses. Deterministic Codex and GitHub fixtures cover upstream issue
+approval, assignment, branch claims, commits pushed to a bare Git repo, linked
+PR publication, duplicate suppression, revocation before publishing, and CI
+status for a specific commit. The local-queue tests cover patch application,
 dirty source checkout preservation, competing claims, project scope, grant
 exhaustion, revocation, failures, process-group timeouts, and expired leases.
 Tests do not spend subscription usage. The separate live goo-widgets run used

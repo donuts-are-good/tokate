@@ -66,12 +66,14 @@ def stop_process(process):
     process.wait()
 
 
-def execute(job, repo, run_dir, codex, model=None):
+def execute(job, repo, run_dir, codex, model=None, effort=None, network=False):
     started = time.monotonic()
-    run_dir.mkdir(parents=True, mode=0o700)
+    run_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
     checkout = run_dir / "checkout"
+    if checkout.exists():
+        raise ValueError("Run checkout already exists; use a new run directory")
     result = {"status": "failed", "report": "", "patch": "", "usage": None,
-              "revision": job["revision"], "error": None}
+              "revision": job["revision"], "model": model, "reasoning_effort": effort, "error": None}
     process = None
     try:
         remaining = lambda: max(0.01, job["seconds"] - (time.monotonic() - started))
@@ -79,8 +81,9 @@ def execute(job, repo, run_dir, codex, model=None):
             timeout=remaining())
         git(checkout, "checkout", "--quiet", "--detach", job["revision"], timeout=remaining())
         git(checkout, "remote", "remove", "origin", timeout=remaining())
-        prompt = ("You are running a maintainer's task using donated compute. Work only in this checkout. "
-                  "Do not access donor credentials, account configuration, or files outside this checkout. "
+        prompt = ("You are running a maintainer's task using donated compute. Modify files only in this checkout. "
+                  "Use installed toolchains as needed. Do not inspect donor credentials, account configuration, "
+                  "or personal files outside this checkout. "
                   "Do not push, publish, contact people, or spawn other agents. "
                   "Return the requested artifact in your final response. "
                   "For edits, leave changes uncommitted. "
@@ -91,6 +94,10 @@ def execute(job, repo, run_dir, codex, model=None):
                    "--output-last-message", str(run_dir / "report.md")]
         if model:
             command += ["--model", model]
+        if effort:
+            command += ["-c", "model_reasoning_effort=" + json.dumps(effort)]
+        if network:
+            command += ["-c", "sandbox_workspace_write.network_access=true"]
         command.append("-")
         with (run_dir / "events.jsonl").open("w") as events, (run_dir / "stderr.log").open("w") as errors:
             process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=events, stderr=errors,

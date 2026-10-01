@@ -6,6 +6,7 @@ from urllib.error import URLError
 
 from .queue import Queue, private_write, server
 from .worker import git, request, work
+from . import github
 
 
 def positive(value):
@@ -20,6 +21,7 @@ def main():
     parser.add_argument("--state", type=Path, default=Path(".state"))
     parser.add_argument("--url", default="http://127.0.0.1:8768")
     commands = parser.add_subparsers(dest="command", required=True)
+    github.configure(commands, positive)
     commands.add_parser("init", help="Create the local queue and admin credential")
     serve = commands.add_parser("serve", help="Run the coordinator")
     serve.add_argument("--host", default="127.0.0.1")
@@ -58,6 +60,9 @@ def main():
     publish.add_argument("--runs", type=Path, default=Path(".runs"))
     args = parser.parse_args()
     try:
+        if args.command == "github":
+            print(json.dumps(github.dispatch(args), indent=2))
+            return
         if args.command == "init":
             Queue(args.state)
             print(f"Queue ready: {args.state.resolve()}")
