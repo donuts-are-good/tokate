@@ -1,49 +1,51 @@
 # Tokate
 
-**toh-KAH-teh**. Donate local Codex compute to approved GitHub issues.
+**toh-KAH-teh**. Donate your local Codex compute to a GitHub project.
 
-One G# NativeAOT executable. GitHub holds the task, owner policy, assignment, approval, claim branch, PR, and checks. Spectre.Console provides terminal formatting. No coordinator server or Python runtime. This release supports Linux x64 and public GitHub repositories.
+The owner approves an issue. A donor runs it with their own accounts. Tokate opens a draft PR after local checks pass. The owner reviews and merges it.
 
-## Install
+Early prototype for **Linux x64 (glibc 2.34+) and public GitHub repositories**. Start with one small issue.
 
-Build with .NET 10 and an installed NativeAOT toolchain (Clang and zlib development headers):
+## Install Tokate
+
+Extract the trial archive, open its folder, then install the `tokate` binary:
 
 ```sh
-dotnet publish Tokate.gsproj -c Release -r linux-x64 -o artifacts/linux-x64
-install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
+mkdir -p ~/.local/bin
+install -m 755 ./tokate ~/.local/bin/tokate
+export PATH="$HOME/.local/bin:$PATH"
+tokate --version
 ```
 
-The binary needs `git`, `gh`, `setsid`, and a current native `codex` executable with restrictive permission-profile support. Tested with Codex 0.159.3. It does not need .NET or Python installed on the donor machine. Verification commands also need the repository's build tools installed in standard system locations.
+Keep `~/.local/bin` in your shell's PATH. No .NET or Python runtime is needed. To build the binary yourself, see [Build from source](docs/reference.md#build-from-source).
+
+## I own the repository
+
+### 1. Sign in to GitHub
+
+Install Git, GitHub CLI (`gh`), and `setsid` from util-linux. Use an account with repository write access:
 
 ```sh
 gh auth login
-codex login
-tokate --help
-tokate doctor
+gh auth status
 ```
 
-Every launch checks PATH for executable `git`, `gh`, `codex`, and `setsid` files. Missing tools are listed with installation guidance. Commands stop before work if a tool they need is absent. Help, version, local setup, and saved status remain usable. Owners can approve and review work without installing Codex.
+Owners do not need Codex installed.
 
-`tokate doctor` collects tool versions and runs the existing sandbox probe, showing all results together. It exits nonzero if a tool or the probe fails. It does not run inference or test authentication. Terminal output uses Spectre.Console for colored states, tables, and workflow steps. Redirected output stays plain, and `policy` / `status` keep their JSON output when piped. `NO_COLOR` disables ANSI styling.
+### 2. Configure the repository once
 
-Codex must use a ChatGPT subscription login. No quota or credentials move between people. Tokate runs work locally against the donor's allowance.
-
-## Owner setup
-
-From the repository:
+From your repository checkout:
 
 ```sh
 tokate init
 ```
 
-Edit `.github/tokate.json`, then commit it and `.github/tokate-pr.md` to the default branch:
+Edit `.github/tokate.json`:
 
 ```json
 {
   "version": 1,
-  "models": {
-    "gpt-6.1-sol": ["high", "xhigh"]
-  },
+  "models": { "gpt-6.1-sol": ["high"] },
   "max_seconds": 1800,
   "allow_network": false,
   "required_checks": ["verify"],
@@ -51,99 +53,78 @@ Edit `.github/tokate.json`, then commit it and `.github/tokate-pr.md` to the def
 }
 ```
 
-Model names are exact. Efforts are allowed per model, not one global list. There are no silent fallbacks. Select names supported by your donors' Codex installation. `verification` is a nonempty list of argument arrays. Tokate runs these commands independently after the agent finishes. Replace the example with checks your repository actually provides. `required_checks` contains exact GitHub check names and cannot be empty.
+Choose a model and effort your donor can use. Replace `verification` with your actual test command and `required_checks` with your exact GitHub CI check names. `max_seconds` covers compute and local verification. Leave `allow_network` false unless the build needs downloads.
 
-Write an issue with explicit acceptance criteria and a bounded scope. Then approve and assign it:
+Commit `.github/tokate.json` and `.github/tokate-pr.md` to the default branch. Keep the PR template's `{{placeholders}}`. Skip `init` if these files already exist.
 
-```sh
-tokate approve --repo owner/project --issue 42 --donor contributor
-```
+### 3. Approve an issue for a donor
 
-The donor must be eligible for GitHub issue assignment. A contributor who has commented on the issue can normally be assigned. Approval requires repository write permission. Tokate uses one assignee per issue.
-
-Approval creates `tokate:approved` and an owner-written approval record on `tokate/approvals/42`. The record pins the issue text, donor, base commit, policy, and PR template. It does not change the default branch. Removing the label revokes approval. Editing the issue, policy, template, or assignment requires fresh approval.
+Write a small issue with clear acceptance criteria. Have the donor comment on it so they can be assigned. Replace `OWNER/REPO`, `42`, and `DONOR` below:
 
 ```sh
-tokate assign --repo owner/project --issue 42 --donor another-contributor
-tokate revoke --repo owner/project --issue 42
-tokate policy --repo owner/project
+tokate approve --repo OWNER/REPO --issue 42 --donor DONOR
 ```
 
-`assign` replaces approval for an already approved issue. `approve` can also issue fresh approval after a failed or abandoned attempt. Existing runs then fail revalidation. Revocation prevents compliant clients from publishing, but cannot remotely stop computation already running on another person's machine.
+Send the donor the repository, issue number, and required build tools. They follow the donor steps below.
 
-## Donating
+### 4. Review the PR
 
-Create a fork once, then run an approved task:
+Replace `43` with the PR number:
 
 ```sh
-gh repo fork owner/project --clone=false
-tokate work --repo owner/project --issue 42 \
-  --model gpt-6.1-sol --effort high --seconds 1200
+tokate verify-pr --repo OWNER/REPO --pr 43
+tokate checks --repo OWNER/REPO --pr 43 --watch
 ```
 
-Tokate checks approval and policy before compute, reserves a deterministic branch in your fork, creates a separate checkout, runs Codex once, runs owner verification, and opens a **draft PR** upstream. The GitHub identity must match the assigned donor. `--fork contributor/renamed-fork` supports a renamed fork owned by that donor. Network access requires both `allow_network: true` in owner policy and `--allow-network` from the donor.
+If CI is waiting for permission, review and [approve the fork workflow in GitHub](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks). Ensure CI runs on draft PRs. Review the diff and acceptance criteria, mark the PR ready, then merge it yourself. Tokate never merges.
 
-Claims for the same approval use the same branch and GitHub's atomic ref creation. A duplicate claim fails before compute. Exactly one donor is assigned. Changing the assignment replaces approval and invalidates the previous donor's claim.
+## I want to donate compute
 
-To reserve now and execute later:
+### 1. Prepare your machine
+
+Install Git, GitHub CLI, `setsid` from util-linux, a native Codex CLI, and the project's build tools. Tokate has been tested with Codex 0.159.3.
+
+Use your own GitHub account and ChatGPT subscription:
 
 ```sh
-tokate claim --repo owner/project --issue 42 --model gpt-6.1-sol --effort high
-tokate work --run /path/printed/by/claim
+gh auth login
+gh auth status
+codex login
+tokate doctor
 ```
 
-Runs live in `~/.local/state/tokate/runs/`, or the explicit `--runs` directory. Each contains the saved claim, agent events, report, independent verification output, patch, PR body, and check results. The agent cannot read or modify these control files through sandboxed commands.
+Fix any failed checks before continuing. `doctor` tests the tools and sandbox without inference. It does not check project build dependencies. The sandbox cannot use your home-directory package caches or tools, so install build tools in standard system locations. Ask the owner about setup before spending compute.
+
+### 2. Get assigned and create your fork
+
+Comment on the issue and wait for the owner to approve it for your GitHub username. Create a fork once:
 
 ```sh
-tokate status --run /path/to/run
-tokate publish --run /path/to/run
-tokate checks --run /path/to/run --watch
+gh repo fork OWNER/REPO --clone=false
+tokate policy --repo OWNER/REPO
 ```
 
-`publish` retries Git/PR publication without inference. It checks the saved patch and commit, current owner approval, and remote branch before publishing. Failed or interrupted compute is never retried automatically. Ask the owner for fresh approval for a new attempt. Claims and approval branches are retained for inspection and can be deleted manually after review.
+### 3. Run the task
 
-## Quality and review
-
-The model whitelist controls eligible runs. It does not prove task correctness or cryptographically attest which model an arbitrary donor actually used.
-
-Tokate applies these gates:
-
-1. Pin owner-approved task text, base revision, policy, and template.
-2. Enforce the selected model/effort pair and a runtime budget, including independent verification.
-3. Require a completed agent turn, a report, and a nonempty patch.
-4. Run every owner verification command separately. A failure prevents PR creation even if the agent claims success.
-5. Reject changes to `.github/workflows/` and Tokate policy, approval, and template files.
-6. Open a draft PR with acceptance-criteria reporting, actual verification commands, limitations, and a compute receipt.
-7. Require all named GitHub checks to pass for the exact PR commit. Missing, pending, cancelled, and skipped required checks never count as success.
-8. Leave acceptance and merging to the owner.
-
-Owners can inspect a PR without the donor's local run directory:
+Use a model and effort listed in the policy:
 
 ```sh
-tokate verify-pr --repo owner/project --pr 43
-tokate checks --repo owner/project --pr 43 --watch
+tokate work --repo OWNER/REPO --issue 42 --model gpt-6.1-sol --effort high
 ```
 
-`verify-pr` checks PR author, claim branch, commit, current approval, issue text, policy, and the reported model/effort pair. It is read-only and does not check out or execute PR code. Receipt validation is not independent proof of inference usage. `checks` also validates the receipt and checks the head before and after reading CI. It exits 0 on pass, 8 on pending or watch timeout, and 1 on failure. It never marks the PR ready or merges it.
+Tokate creates a separate checkout, runs Codex, runs the owner's verification commands, then opens a draft PR. Save the printed run path. Your subscription is used locally, and no credentials or quota are transferred to the owner.
 
-Keep required checks and human review enforced in GitHub branch protection. Use ordinary `pull_request` CI without repository secrets for fork code. Do not execute untrusted PR code in a privileged `pull_request_target` job. Client-side rules do not stop a malicious person from bypassing Tokate and submitting an ordinary PR. Tests also cannot prove every aspect of correctness. Clear acceptance criteria and owner review remain necessary.
+To lower the time budget, add `--seconds 600`. For dependency downloads, both the owner must set `allow_network: true` and you must add `--allow-network`. This grants internet access to agent commands and verification scripts.
 
-## Isolation
+### 4. Check the result
 
-Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
-
-Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before spending compute. Unsupported sandbox configurations fail closed.
-
-Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
-
-Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop burns additional compute. Time caps are not exact token or subscription-percentage caps.
-
-## Development
+Replace `DIR` with the printed run path:
 
 ```sh
-scripts/verify.sh
+tokate status --run DIR
+tokate checks --run DIR --watch
 ```
 
-The pinned public G# SDK is 0.4.591. Verification runs strict GSLint, builds and publishes NativeAOT, and tests the actual binary with two simulated GitHub identities, real local Git repositories, and a deterministic Codex fixture. Python is only a development test dependency. Tests do not spend compute or modify GitHub.
+If only publication failed, run `tokate publish --run DIR` without spending compute again. If compute or verification failed, inspect the run logs and ask the owner for fresh approval before another attempt.
 
-The earlier Python prototype remains in Git history. Its `.state` and `.runs` artifacts are preserved locally, but native Tokate does not resume legacy runs.
+See the [command and security reference](docs/reference.md) for reassignment, revocation, saved claims, and isolation limits. Passing tests and a model whitelist do not guarantee correctness. The owner still reviews every PR.
