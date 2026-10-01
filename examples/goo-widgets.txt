@@ -1,0 +1,6 @@
+Read README.md and scripts/verify.sh in this Goo Widgets checkout. Produce a short
+maintainer report listing each verification stage, what it checks, and the exact
+command a contributor should run. Cite repository paths and line numbers. Use no
+more than 250 words. Read only these files and any script directly invoked by
+verify.sh if needed. Do not modify files or run the builds. This is a bounded
+documentation task to demonstrate donated compute.
