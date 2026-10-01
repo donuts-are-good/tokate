@@ -95,6 +95,8 @@ repo = '/'.join(parts[1:3])
 folder = 'upstream' if repo == 'owner/project' else 'fork'
 tail = '/'.join(parts[3:])
 if not tail:
+    if folder == 'fork' and s.get('missing_fork'):
+        fail('HTTP 404')
     answer({'default_branch': 'main', 'permissions': {'push': actor == repo.split('/')[0]}, 'parent': {'full_name': 'owner/project'}})
 if tail.startswith('commits/'):
     answer({'sha': git(folder, 'rev-parse', tail[8:])})
@@ -107,7 +109,11 @@ if tail.startswith('issues/'):
     if method == 'GET':
         answer(s['issue'])
     if tail.endswith('/assignees'):
-        s['issue']['assignees'] = [] if method == 'DELETE' else [{'login': x} for x in body['assignees']]
+        people = s['issue']['assignees']
+        if method == 'DELETE':
+            s['issue']['assignees'] = [x for x in people if x['login'] not in body['assignees']]
+        elif not s.get('unassignable'):
+            people.extend({'login': x} for x in body['assignees'] if x not in [p['login'] for p in people])
     elif tail.endswith('/labels'):
         s['issue']['labels'] = [{'name': x} for x in body['labels']]
     elif method == 'DELETE':

@@ -55,7 +55,7 @@ func Main(args[]string) int32 {
             options.Allow("run")
             Terminal.Json(Data.Load(Path.GetFullPath(options.Need("run"))).Element(), "Donor run")
         } else if options.Command == "--version" {
-            Console.WriteLine("tokate 0.2.1")
+            Console.WriteLine("tokate 0.2.2")
         } else {
             throw Exception("Unknown command. Run tokate --help")
         }

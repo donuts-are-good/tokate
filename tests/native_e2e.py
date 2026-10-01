@@ -126,6 +126,48 @@ class NativeFlow(unittest.TestCase):
         self.reload()
         self.assertNotIn('exec_count', self.state)
 
+    def test_failed_reassignment_keeps_existing_approval_and_assignee(self):
+        self.approve()
+        self.reload()
+        self.state['unassignable'] = True
+        self.save()
+        result = self.call('assign', '--repo', 'owner/project', '--issue', '1', '--donor', 'new-donor', owner=True, code=1)
+        self.assertIn('comment on the issue', result.stderr)
+        self.reload()
+        self.assertEqual(self.state['issue']['assignees'], [{'login': 'donor'}])
+        self.claim()
+        self.reload()
+        self.state['unassignable'] = False
+        self.save()
+        self.call('assign', '--repo', 'owner/project', '--issue', '1', '--donor', 'new-donor', owner=True)
+        self.reload()
+        self.assertEqual(self.state['issue']['assignees'], [{'login': 'new-donor'}])
+
+    def test_missing_fork_gives_setup_command_before_claim(self):
+        self.approve()
+        self.reload()
+        self.state['missing_fork'] = True
+        self.save()
+        result = self.call('claim', '--repo', 'owner/project', '--issue', '1', '--model', 'gpt-6.1-sol', '--effort', 'high', code=1)
+        self.assertIn('gh repo fork owner/project --clone=false', result.stderr)
+        self.reload()
+        self.assertNotIn('exec_count', self.state)
+
+    def test_default_budget_respects_owner_limit(self):
+        upstream = self.bin / 'upstream'
+        path = upstream / '.github/tokate.json'
+        value = json.loads(path.read_text())
+        value['max_seconds'] = 30
+        path.write_text(json.dumps(value))
+        self.git('-C', str(upstream), 'add', '.')
+        self.git('-C', str(upstream), '-c', 'user.name=Fixture', '-c', 'user.email=test@example.test', 'commit', '-m', 'Lower budget')
+        self.git('-C', str(self.bin / 'fork'), 'fetch', str(upstream), 'main')
+        self.approve()
+        result = self.call('claim', '--repo', 'owner/project', '--issue', '1', '--model', 'gpt-6.1-sol', '--effort', 'high', '--runs', str(self.root / 'runs'))
+        run = result.stdout.split('Run: ')[-1].strip()
+        self.assertEqual(json.loads((Path(run) / 'run.json').read_text())['seconds'], 30)
+        self.call('work', '--run', run)
+
     def test_issue_edit_invalidates_approval(self):
         self.approve()
         self.reload()

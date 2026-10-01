@@ -50,17 +50,28 @@ internal class Workflow {
             let policy = Policy.Load(repo, revision)
             let template = GitHub.FileAt(repo, ".github/tokate-pr.md", revision)
             ValidateTemplate(template)
-            let people = List[string]()
-            for person in J.Items(J.Get(issue, "assignees")) {
-                people.Add(J.Text(person, "login"))
-            }
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
-            if people.Count > 0 {
-                GitHub.Api(issuePath + "/assignees", J.Map("assignees", people), "DELETE")
+            var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
+            let others = List[string]()
+            var found bool
+            for person in J.Items(J.Get(assigned, "assignees")) {
+                let login = J.Text(person, "login")
+                if String.Equals(login, donor, StringComparison.OrdinalIgnoreCase) {
+                    found = true
+                } else {
+                    others.Add(login)
+                }
             }
-            let assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
+            if !found {
+                throw Exception(
+                    "GitHub could not assign this donor. Ask them to comment on the issue, then approve again. Existing assignees were kept."
+                )
+            }
+            if others.Count > 0 {
+                assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", others), "DELETE")
+            }
             if !GitHub.Assigned(assigned, donor) {
-                throw Exception("GitHub could not assign this donor. They must be eligible for assignment.")
+                throw Exception("Issue assignment changed. Approve again with exactly one donor.")
             }
             let label = GitHub.Api("repos/" + repo + "/labels/tokate%3Aapproved", missing: true)
             if label.ValueKind == JsonValueKind.Undefined {
@@ -235,14 +246,17 @@ internal class Workflow {
             let approval = J.Get(record, "approval")
             let model = args.Need("model")
             let effort = args.Need("effort")
-            let seconds = args.Number("seconds", "1800")
+            let seconds = args.Number(
+                "seconds",
+                Math.Min(1800, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
+            )
             let network = args.Get("allow-network") == "true"
             Policy(J.Write(J.Get(record, "policy"))).Validate(model, effort, seconds, network)
             let head = Data.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
             if !String.Equals(head.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Use a fork owned by your signed-in account")
             }
-            let headInfo = GitHub.Api("repos/" + head)
+            let headInfo = GitHub.Api("repos/" + head, missing: true)
             if !J.Bool(J.Get(headInfo, "permissions"), "push") ||
                 (
                 head != repo && !String.Equals(
