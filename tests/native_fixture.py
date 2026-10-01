@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent
 STATE = ROOT / 'state.json'
 a = sys.argv[1:]
 name = Path(sys.argv[0]).name
@@ -74,6 +74,10 @@ if name.startswith('codex'):
         (workflows / 'verify.yml').write_text('tampered')
     Path(a[a.index('--output-last-message') + 1]).write_text('### Changes\nAdded result.\n### Acceptance criteria addressed\nFixture.\n### Verification\nFixture check passed.\n### Unresolved limitations\nNone.\n')
     print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 100, 'cached_input_tokens': 50, 'output_tokens': 10}}))
+    sys.exit(0)
+
+if a == ['--version']:
+    print('gh version fixture')
     sys.exit(0)
 
 actor = os.environ.get('FIXTURE_ACTOR', 'donor')

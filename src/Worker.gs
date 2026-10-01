@@ -78,10 +78,6 @@ internal class Worker {
         }
 
         internal func Doctor() {
-            Console.WriteLine(Commands.Checked("git", []string{"--version"}))
-            Console.WriteLine(Commands.Checked("gh", []string{"--version"}).Split('\n')[0])
-            Console.WriteLine(Commands.Checked(CodexPath(), []string{"--version"}))
-            Console.WriteLine("Codex executable: " + CodexPath())
             let root = Path.Combine(Path.GetTempPath(), "tokate-doctor-" + Guid.NewGuid().ToString("N"))
             let checkout = Path.Combine(root, "checkout")
             Directory.CreateDirectory(Path.Combine(checkout, ".git"))
@@ -89,9 +85,6 @@ internal class Worker {
             File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
             try {
                 Probe(root, checkout)
-                Console.WriteLine(
-                    "Sandbox probe passed: checkout writable, control files and Git metadata unreadable. No inference was run."
-                )
             } finally {
                 Directory.Delete(root, true)
             }
@@ -110,6 +103,7 @@ internal class Worker {
                     "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
                 )
             }
+            Terminal.Step("Checking owner approval and donor login...")
             let record = Workflow.Recheck(run)
             let login = Commands.Run("codex", []string{"login", "status"}, clean: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
@@ -125,6 +119,7 @@ internal class Worker {
                     "Checkout already exists. Inspect this interrupted run before requesting fresh approval."
                 )
             }
+            Terminal.Step("Preparing isolated checkout...")
             Commands.Git(
                 directory,
                 "clone",
@@ -201,6 +196,10 @@ internal class Worker {
             run.Fields["state"] = "running"
             run.Fields["codex_version"] = version
             run.Save(directory)
+            Terminal.Step(
+                "Running " + run.Text("model") + " / " + run.Text("effort") + " with a " + run.Number("seconds")
+                    .ToString() + "s budget..."
+            )
             let timer = Stopwatch.StartNew()
             try {
                 let result = Commands.Run(CodexPath(), args.ToArray(), directory, prompt, run.Number("seconds"), true)
@@ -233,6 +232,7 @@ internal class Worker {
                 if Commands.Git(checkout, "status", "--porcelain") == "" {
                     throw Exception("No changes returned. No PR will be opened.")
                 }
+                Terminal.Step("Running independent owner verification...")
                 let verification = List[Object]()
                 for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
                     let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)

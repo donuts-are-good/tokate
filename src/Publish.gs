@@ -175,7 +175,7 @@ internal class Publication {
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["state"] = "published"
             run.Save(directory)
-            Console.WriteLine("Draft PR: " + run.Text("pr_url"))
+            Terminal.Message("Draft PR: " + run.Text("pr_url"))
         }
 
         internal func Verify(repo string, number int32) Data {
@@ -303,7 +303,10 @@ internal class Publication {
                         J.Write(J.Map("head", run.Text("commit"), "status", status, "checks", rows))
                     )
                 }
-                Console.WriteLine("Checks " + status + ": " + run.Text("pr_url"))
+                Terminal.Message(
+                    "Checks " + status + ": " + run.Text("pr_url"),
+                    failed ? "red": (pending ? "yellow": "green")
+                )
                 if failed {
                     return 1
                 }

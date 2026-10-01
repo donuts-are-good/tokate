@@ -8,9 +8,10 @@
     <OptimizationPreference>Size</OptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="templates/*" />
+    <PackageReference Include="Spectre.Console" Version="0.57.2" />
   </ItemGroup>
 </Project>

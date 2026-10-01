@@ -66,6 +66,37 @@ class NativeFlow(unittest.TestCase):
         self.call('approve', '--unknown', 'true', code=1)
         self.call('init', '--path', str(self.bin / 'upstream'), code=1)
 
+    def test_startup_reports_all_missing_tools_without_blocking_help(self):
+        empty = self.root / 'empty-path'
+        empty.mkdir()
+        env = {**self.env, 'PATH': str(empty)}
+        help_result = subprocess.run([str(BINARY), '--help'], env=env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(help_result.returncode, 0)
+        self.assertIn('toh-KAH-teh', help_result.stdout)
+        for name in ['git', 'gh', 'codex', 'setsid']:
+            self.assertIn(name + ': missing', help_result.stderr)
+        self.assertNotIn('\x1b', help_result.stdout + help_result.stderr)
+        doctor = subprocess.run([str(BINARY), 'doctor'], env=env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(doctor.returncode, 1)
+        self.assertIn('sandbox: skipped', doctor.stdout)
+        for name in ['git', 'gh', 'codex', 'setsid']:
+            self.assertIn(name + ': missing', doctor.stdout)
+        work = subprocess.run([str(BINARY), 'work', '--repo', 'owner/project', '--issue', '1'], env=env, capture_output=True, text=True, timeout=10)
+        self.assertEqual(work.returncode, 1)
+        self.assertIn('Install the tools needed', work.stderr)
+        self.reload()
+        self.assertNotIn('exec_count', self.state)
+
+    def test_startup_allows_owner_without_codex_and_rejects_nonexecutable(self):
+        (self.bin / 'codex').unlink()
+        (self.bin / 'codex').write_text('not executable')
+        self.env['PATH'] = str(self.bin) + ':/usr/bin:/bin'
+        result = self.call('approve', '--repo', 'owner/project', '--issue', '1', '--donor', 'donor', owner=True)
+        self.assertIn('codex: missing', result.stderr)
+        self.assertIn('Approved', result.stdout)
+        result = self.call('work', '--repo', 'owner/project', '--issue', '1', code=1)
+        self.assertIn('Install the tools needed', result.stderr)
+
     def test_cross_account_flow_and_exact_required_checks(self):
         self.approve()
         run = self.claim()

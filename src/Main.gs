@@ -10,12 +10,16 @@ func Main(args[]string) int32 {
             throw Exception("This release supports Linux")
         }
         if options.Get("help") == "true" || options.Command == "--help" || options.Command == "help" {
-            Console.WriteLine(Data.Resource("help.txt"))
+            Startup.Check("help")
+            Terminal.Help()
             return 0
+        }
+        if options.Command != "doctor" {
+            Startup.Check(options.Command)
         }
         if options.Command == "doctor" {
             options.Allow("")
-            Worker.Doctor()
+            return Startup.Doctor()
         } else if options.Command == "init" {
             Workflow.Init(options)
         } else if options.Command == "approve" || options.Command == "assign" {
@@ -42,22 +46,22 @@ func Main(args[]string) int32 {
             options.Allow("repo")
             let repo = Data.Repo(options.Need("repo"))
             let info = GitHub.Api("repos/" + repo)
-            Console.WriteLine(J.Write(Policy.Load(repo, J.Text(info, "default_branch")).Value))
+            Terminal.Json(Policy.Load(repo, J.Text(info, "default_branch")).Value, "Repository policy")
         } else if options.Command == "verify-pr" {
             options.Allow("repo,pr")
             Publication.Verify(Data.Repo(options.Need("repo")), options.Number("pr"))
-            Console.WriteLine("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
+            Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
         } else if options.Command == "status" {
             options.Allow("run")
-            Console.WriteLine(J.Write(Data.Load(Path.GetFullPath(options.Need("run"))).Fields))
+            Terminal.Json(Data.Load(Path.GetFullPath(options.Need("run"))).Element(), "Donor run")
         } else if options.Command == "--version" {
-            Console.WriteLine("tokate 0.2.0")
+            Console.WriteLine("tokate 0.2.1")
         } else {
             throw Exception("Unknown command. Run tokate --help")
         }
         return 0
     } catch (error Exception) {
-        Console.Error.WriteLine("tokate: " + error.Message)
+        Terminal.Message("tokate: " + error.Message, "red", true)
         return 1
     }
 }

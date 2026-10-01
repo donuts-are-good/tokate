@@ -2,7 +2,7 @@
 
 **toh-KAH-teh**. Donate local Codex compute to approved GitHub issues.
 
-One G# NativeAOT executable. GitHub holds the task, owner policy, assignment, approval, claim branch, PR, and checks. No coordinator server or Python runtime. This release supports Linux x64 and public GitHub repositories.
+One G# NativeAOT executable. GitHub holds the task, owner policy, assignment, approval, claim branch, PR, and checks. Spectre.Console provides terminal formatting. No coordinator server or Python runtime. This release supports Linux x64 and public GitHub repositories.
 
 ## Install
 
@@ -21,6 +21,10 @@ codex login
 tokate --help
 tokate doctor
 ```
+
+Every launch checks PATH for executable `git`, `gh`, `codex`, and `setsid` files. Missing tools are listed with installation guidance. Commands stop before work if a tool they need is absent. Help, version, local setup, and saved status remain usable. Owners can approve and review work without installing Codex.
+
+`tokate doctor` collects tool versions and runs the existing sandbox probe, showing all results together. It exits nonzero if a tool or the probe fails. It does not run inference or test authentication. Terminal output uses Spectre.Console for colored states, tables, and workflow steps. Redirected output stays plain, and `policy` / `status` keep their JSON output when piped. `NO_COLOR` disables ANSI styling.
 
 Codex must use a ChatGPT subscription login. No quota or credentials move between people. Tokate runs work locally against the donor's allowance.
 

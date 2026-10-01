@@ -19,7 +19,7 @@ internal class Workflow {
             }
             File.WriteAllText(policy, Data.Resource("tokate.json"))
             File.WriteAllText(template, Data.Resource("tokate-pr.md"))
-            Console.WriteLine(
+            Terminal.Message(
                 "Created .github/tokate.json and .github/tokate-pr.md. Set allowed model/effort pairs and required checks, then commit to the default branch."
             )
         }
@@ -148,7 +148,7 @@ internal class Workflow {
                 )
             }
             GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
-            Console.WriteLine("Approved https://github.com/" + repo + "/issues/" + number.ToString() + " for @" + donor)
+            Terminal.Message("Approved https://github.com/" + repo + "/issues/" + number.ToString() + " for @" + donor)
         }
 
         internal func ValidateTemplate(text string) {
@@ -178,7 +178,7 @@ internal class Workflow {
                 "repos/" + repo + "/issues/" + args.Number("issue").ToString() + "/labels/tokate%3Aapproved",
                 method: "DELETE"
             )
-            Console.WriteLine(
+            Terminal.Message(
                 "Approval revoked. Active local computation may continue, but Tokate will refuse publication."
             )
         }
@@ -297,7 +297,7 @@ internal class Workflow {
             )
             run.Fields["state"] = "claimed"
             run.Save(directory)
-            Console.WriteLine("Claimed issue #" + number.ToString() + ". Run: " + directory)
+            Terminal.Message("Claimed issue #" + number.ToString() + ". Run: " + directory)
             return directory
         }
 
