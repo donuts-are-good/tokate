@@ -1,223 +1,145 @@
-# Compute Donor
+# Tokate
 
-A working prototype for donating Codex runs to upstream GitHub issues.
-The maintainer approves an issue and assigns a donor. The donor runs Codex using
-their own subscription, opens a linked PR, and checks GitHub CI. The maintainer
-accepts the PR in GitHub. No automatic merge or release is performed.
+**toh-KAH-teh**. Donate local Codex compute to approved GitHub issues.
 
-## GitHub issue to PR
+One G# NativeAOT executable. GitHub holds the task, owner policy, assignment, approval, claim branch, PR, and checks. No coordinator server or Python runtime. This release supports Linux x64 and public GitHub repositories.
 
-Requires Linux, Python 3.11+, Git, a recent Codex CLI, and GitHub CLI (`gh`).
-Sign in to both Codex and GitHub on the donor machine. No Python dependencies
-or hosted coordinator are needed for this workflow. Commands run from this
-directory. Replace `123` with an actual issue number.
+## Install
 
-The repo owner approves an existing issue and assigns a GitHub username:
+Build with .NET 10 and an installed NativeAOT toolchain (Clang and zlib development headers):
 
 ```sh
-python -m compute_donor github approve --repo obselate/goo-widgets --issue 123 --donor @me
+dotnet publish Tokate.gsproj -c Release -r linux-x64 -o artifacts/linux-x64
+install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 ```
 
-`@me` resolves to the signed-in GitHub user. Approval requires repository write
-permission and adds `compute:approved` while assigning the donor. Once the label
-exists, the owner can also apply it and assign the donor directly in GitHub.
-
-The assigned donor starts a run:
+The binary needs `git`, `gh`, `setsid`, and a current native `codex` executable with restrictive permission-profile support. Tested with Codex 0.159.3. It does not need .NET or Python installed on the donor machine. Verification commands also need the repository's build tools installed in standard system locations.
 
 ```sh
-python -m compute_donor github work --repo obselate/goo-widgets --issue 123 \
-  --model gpt-6.1-sol --effort high --seconds 1200 --allow-network
+gh auth login
+codex login
+tokate --help
+tokate doctor
 ```
 
-The worker reads the issue from upstream, verifies approval and assignment,
-resolves the current default-branch commit, and reserves
-`compute-donor/issue-123` in the push repository. Existing branches or PRs stop
-another attempt before inference begins. The worker clones upstream directly,
-implements the task, commits on that branch, pushes, and opens a PR containing
-`Fixes #123`, its report, model, and token usage. Your ordinary working checkout
-is never used. The owner can remove approval or assignment before publication
-to prevent a PR from being opened. Changes to the issue's title or body during
-execution also stop publication for inspection.
+Codex must use a ChatGPT subscription login. No quota or credentials move between people. Tokate runs work locally against the donor's allowance.
 
-`--model` is required in this workflow and recorded in the receipt. `--effort`
-is optional. `--seconds` caps the agent and checkout time, not subsequent GitHub
-operations or CI. `--allow-network` permits network access for dependency
-restores in the Codex workspace sandbox. Omit it when the task needs no network.
-`--instructions-file FILE` adds local maintainer instructions to the issue task.
+## Owner setup
 
-For a donor without upstream push permission, create a fork with
-`gh repo fork OWNER/REPO --clone=false`, then pass `--fork DONOR/REPO` to `work`.
-The head repo must be a writable fork of the selected upstream. The PR still
-targets the upstream default branch. The fork must contain the chosen base
-commit so GitHub can reserve the donor branch.
-
-The command prints its run directory and PR URL. Check CI for that exact saved
-commit, using the printed directory:
+From the repository:
 
 ```sh
-python -m compute_donor github checks --run .runs/github-OWNER-REPO-123-RUNID --watch
+tokate init
 ```
 
-Checks with failures exit nonzero. Missing, pending, or entirely skipped checks
-are never reported as passed. Pending checks, including watch timeouts, exit
-with code 8. If the PR head has
-changed since publication, the command stops rather than attributing unrelated
-checks to this run. CI evidence is saved as `checks.json`. On `goo-widgets`, the
-existing `pull_request` workflow runs `bash scripts/verify.sh`. Fork PRs may
-require GitHub workflow approval from a maintainer. Once checks and review are
-satisfactory, the owner merges using GitHub's normal controls.
+Edit `.github/tokate.json`, then commit it and `.github/tokate-pr.md` to the default branch:
 
-If publication fails after compute finishes, retry without spending another run:
+```json
+{
+  "version": 1,
+  "models": {
+    "gpt-6.1-sol": ["high", "xhigh"]
+  },
+  "max_seconds": 1800,
+  "allow_network": false,
+  "required_checks": ["verify"],
+  "verification": [["bash", "scripts/verify.sh"]]
+}
+```
+
+Model names are exact. Efforts are allowed per model, not one global list. There are no silent fallbacks. Select names supported by your donors' Codex installation. `verification` is a nonempty list of argument arrays. Tokate runs these commands independently after the agent finishes. Replace the example with checks your repository actually provides. `required_checks` contains exact GitHub check names and cannot be empty.
+
+Write an issue with explicit acceptance criteria and a bounded scope. Then approve and assign it:
 
 ```sh
-python -m compute_donor github publish --run .runs/github-OWNER-REPO-123-RUNID
+tokate approve --repo owner/project --issue 42 --donor contributor
 ```
 
-Repeated publication returns the existing matching PR. Failed/no-change agent
-runs keep their report and reserved branch for inspection. There is no automatic
-retry. To authorize a fresh attempt, inspect the old run and remove its empty
-reserved branch in GitHub first. Do not remove a branch containing work or a PR.
+The donor must be eligible for GitHub issue assignment. A contributor who has commented on the issue can normally be assigned. Approval requires repository write permission. Tokate uses one assignee per issue.
 
-## Local queue mode
-
-The coordinator stores tasks and results in SQLite. A worker claims a task over
-HTTP, clones the pinned commit, runs the donor's local Codex CLI, and returns a
-report, measured usage, and an optional Git patch. The donor's ChatGPT credentials
-stay on their machine. No API key or Python dependencies are required.
-
-### Run the local goo-widgets example
-
-Requires Linux, Python 3.11+, Git, and a recent Codex CLI with
-`--ignore-user-config` and `--ephemeral`. Tested with Codex CLI 0.159.3.
-
-In the project directory, start the coordinator:
+Approval creates `tokate:approved` and an owner-written approval record on `tokate/approvals/42`. The record pins the issue text, donor, base commit, policy, and PR template. It does not change the default branch. Removing the label revokes approval. Editing the issue, policy, template, or assignment requires fresh approval.
 
 ```sh
-python -m compute_donor init
-python -m compute_donor serve
+tokate assign --repo owner/project --issue 42 --donor another-contributor
+tokate revoke --repo owner/project --issue 42
+tokate policy --repo owner/project
 ```
 
-In another terminal, register the repository's committed HEAD and queue a task:
+`assign` replaces approval for an already approved issue. `approve` can also issue fresh approval after a failed or abandoned attempt. Existing runs then fail revalidation. Revocation prevents compliant clients from publishing, but cannot remotely stop computation already running on another person's machine.
+
+## Donating
+
+Create a fork once, then run an approved task:
 
 ```sh
-python -m compute_donor project goo-widgets --repo ../goo-widgets
-python -m compute_donor submit goo-widgets --prompt-file examples/goo-widgets.txt
-python -m compute_donor grant goo-widgets --donor xaz --jobs 1 --task-seconds 180 --out .state/donor.json
+gh repo fork owner/project --clone=false
+tokate work --repo owner/project --issue 42 \
+  --model gpt-6.1-sol --effort high --seconds 1200
 ```
 
-On the donor machine, use an existing ChatGPT login or run `codex login`, then:
+Tokate checks approval and policy before compute, reserves a deterministic branch in your fork, creates a separate checkout, runs Codex once, runs owner verification, and opens a **draft PR** upstream. The GitHub identity must match the assigned donor. `--fork contributor/renamed-fork` supports a renamed fork owned by that donor. Network access requires both `allow_network: true` in owner policy and `--allow-network` from the donor.
+
+Claims for the same approval use the same branch and GitHub's atomic ref creation. A duplicate claim fails before compute. Exactly one donor is assigned. Changing the assignment replaces approval and invalidates the previous donor's claim.
+
+To reserve now and execute later:
 
 ```sh
-python -m compute_donor work --grant .state/donor.json --repo ../goo-widgets --jobs 1 --seconds 180
+tokate claim --repo owner/project --issue 42 --model gpt-6.1-sol --effort high
+tokate work --run /path/printed/by/claim
 ```
 
-The worker requires `codex login status` to report a ChatGPT login. It does not
-pass API-key environment variables or load the donor's user config, MCP servers,
-or configured user hooks into the run. An optional `--model` selects a model.
-Without it, Codex uses its default model.
-
-The queue and worker are separate processes. For this first experiment they can
-run on the same machine. The grant contains only a credential for this queue,
-its origin, and the pinned project identity. It is not an OpenAI credential.
-
-Inspect the job ID printed by `submit`:
+Runs live in `~/.local/state/tokate/runs/`, or the explicit `--runs` directory. Each contains the saved claim, agent events, report, independent verification output, patch, PR body, and check results. The agent cannot read or modify these control files through sandboxed commands.
 
 ```sh
-python -m compute_donor status
-python -m compute_donor show JOB_ID
+tokate status --run /path/to/run
+tokate publish --run /path/to/run
+tokate checks --run /path/to/run --watch
 ```
 
-Artifacts remain in `.runs/JOB_ID/`: `report.md`, `receipt.json`, `events.jsonl`,
-`stderr.log`, and the independent `checkout/`. The receipt includes elapsed
-seconds and the usage fields Codex actually returned. Missing usage is `null`,
-not zero. Cached tokens are part of input usage, not an additional total.
+`publish` retries Git/PR publication without inference. It checks the saved patch and commit, current owner approval, and remote branch before publishing. Failed or interrupted compute is never retried automatically. Ask the owner for fresh approval for a new attempt. Claims and approval branches are retained for inspection and can be deleted manually after review.
 
-The initial live example already registered `goo-widgets` at
-`74379dbd3e9b6d301232e8ba0e9056466df7f8f8`. If that state is present, skip `init`
-and `project`, submit another task, and issue a fresh grant with a new file path.
-The first grant has been spent. The live job was `f649589f8a4d255a`.
+## Quality and review
 
-### Local tasks that produce patches
+The model whitelist controls eligible runs. It does not prove task correctness or cryptographically attest which model an arbitrary donor actually used.
 
-Both the maintainer and donor must select `workspace-write`:
+Tokate applies these gates:
+
+1. Pin owner-approved task text, base revision, policy, and template.
+2. Enforce the selected model/effort pair and a runtime budget, including independent verification.
+3. Require a completed agent turn, a report, and a nonempty patch.
+4. Run every owner verification command separately. A failure prevents PR creation even if the agent claims success.
+5. Reject changes to `.github/workflows/` and Tokate policy, approval, and template files.
+6. Open a draft PR with acceptance-criteria reporting, actual verification commands, limitations, and a compute receipt.
+7. Require all named GitHub checks to pass for the exact PR commit. Missing, pending, cancelled, and skipped required checks never count as success.
+8. Leave acceptance and merging to the owner.
+
+Owners can inspect a PR without the donor's local run directory:
 
 ```sh
-python -m compute_donor submit goo-widgets --prompt-file my-task.txt --mode workspace-write
-python -m compute_donor work --grant .state/donor.json --repo ../goo-widgets --sandbox workspace-write
+tokate verify-pr --repo owner/project --pr 43
+tokate checks --repo owner/project --pr 43 --watch
 ```
 
-The worker stages changes only in its separate clone and returns a binary-safe
-Git patch, including new unignored files, as `changes.patch` and in the receipt.
-It does not apply changes to the source checkout or push them upstream. Check
-the patch against its recorded base commit before applying it.
+`verify-pr` checks PR author, claim branch, commit, current approval, issue text, policy, and the reported model/effort pair. It is read-only and does not check out or execute PR code. Receipt validation is not independent proof of inference usage. `checks` also validates the receipt and checks the head before and after reading CI. It exits 0 on pass, 8 on pending or watch timeout, and 1 on failure. It never marks the PR ready or merges it.
 
-Projects are pinned at registration. Use another project name to test a new
-commit. Workers supply their own local repository containing that commit, so
-the coordinator cannot select an arbitrary donor filesystem path.
+Keep required checks and human review enforced in GitHub branch protection. Use ordinary `pull_request` CI without repository secrets for fork code. Do not execute untrusted PR code in a privileged `pull_request_target` job. Client-side rules do not stop a malicious person from bypassing Tokate and submitting an ordinary PR. Tests also cannot prove every aspect of correctness. Clear acceptance criteria and owner review remain necessary.
 
-### Local donation limits and failures
+## Isolation
 
-- `grant --jobs` is a persistent claim allowance. A claimed attempt spends one
-  job even if it fails or the worker disappears.
-- `grant --task-seconds` limits each claimed job. The donor's `work --seconds`
-  further limits the session's execution time, including checkout setup.
-  Process cleanup, artifact collection, and HTTP requests can add overhead.
-- `work --jobs` limits attempts during that invocation. It cannot increase the
-  grant's remaining allowance. The worker exits when no compatible work exists.
-- Read-only workers never claim write tasks. Each grant is scoped to one
-  project and can have only one active job.
-- Codex failures and usage-limit errors stop the worker. There is no automatic
-  retry or switch to API billing.
-- A runtime timeout terminates the Codex process group. Interrupted workers'
-  jobs expire after their allotted runtime plus 30 seconds. Expired jobs are
-  never automatically requeued, avoiding duplicate subscription spending.
-- If a result upload fails, the local receipt survives. Retry with
-  `python -m compute_donor publish JOB_ID --grant .state/donor.json` before the
-  lease ends. Repeated identical uploads are idempotent. After expiry, inspect
-  the local artifact directly.
-- `python -m compute_donor revoke GRANT_ID` disables new claims and uploads.
-  It does not remotely kill an already running donor process. Stop that worker
-  locally to end it immediately.
+Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 
-These are execution limits, not a hard token cap or a percentage of the user's
-remaining subscription. Codex reports usage at turn completion, so this
-prototype cannot promise “use only my leftover 20%.” It consumes the donor's
-existing allowance as work runs. No balance is transferred to the project.
+Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before spending compute. Unsupported sandbox configurations fail closed.
 
-## Scope
+Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
-This is a prototype for trusted maintainers and repositories. Codex's
-read-only or workspace-write sandbox is used with approvals set to never.
-An independent checkout protects the source working tree, but is not a VM or a
-complete confidentiality boundary around the donor's home directory. There is
-no sandbox-bypass option. Public task execution needs stronger host isolation.
+Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop burns additional compute. Time caps are not exact token or subscription-percentage caps.
 
-The server binds to `127.0.0.1:8768`. Keep it local or use an SSH tunnel for this
-prototype. A remote origin must use HTTPS, with TLS termination managed outside
-this server. Admin commands read `.state/admin.token`; workers receive only
-their project grant. Credentials are created with mode 0600, grants are hashed
-in SQLite, and runtime directories are ignored by Git. Results and usage are
-worker-reported, not independently verified for billing.
-
-The documented [Codex non-interactive interface](https://learn.chatgpt.com/docs/non-interactive-mode)
-provides JSONL events and final-message artifacts. OpenAI also documents
-[ChatGPT plan usage for local open-source apps](https://developers.openai.com/siwc/token-sharing-open-source),
-which could replace the CLI dependency in a later client. This prototype does
-not implement that OAuth flow or establish provider approval for a public
-donation service.
-
-## Verification
+## Development
 
 ```sh
-python -m unittest discover -s tests -v
+scripts/verify.sh
 ```
 
-The end-to-end tests use real HTTP requests, SQLite, Git repositories, and CLI
-subprocesses. Deterministic Codex and GitHub fixtures cover upstream issue
-approval, assignment, branch claims, commits pushed to a bare Git repo, linked
-PR publication, duplicate suppression, revocation before publishing, and CI
-status for a specific commit. The local-queue tests cover patch application,
-dirty source checkout preservation, competing claims, project scope, grant
-exhaustion, revocation, failures, process-group timeouts, and expired leases.
-Tests do not spend subscription usage. The separate live goo-widgets run used
-the real signed-in CLI and returned a verification-stage report in 35.276s.
+The pinned public G# SDK is 0.4.591. Verification runs strict GSLint, builds and publishes NativeAOT, and tests the actual binary with two simulated GitHub identities, real local Git repositories, and a deterministic Codex fixture. Python is only a development test dependency. Tests do not spend compute or modify GitHub.
+
+The earlier Python prototype remains in Git history. Its `.state` and `.runs` artifacts are preserved locally, but native Tokate does not resume legacy runs.
