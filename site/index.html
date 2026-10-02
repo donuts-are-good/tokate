@@ -125,20 +125,21 @@
                                     <stop offset=".6" stop-color="#936939" />
                                     <stop offset="1" stop-color="#674c2c" />
                                 </radialGradient>
-                                <filter id="sclera-grain" x="0" y="0" width="100%" height="100%">
-                                    <feTurbulence type="fractalNoise" baseFrequency=".16" numOctaves="3" seed="7" />
+                                <filter id="eye-grain" x="0" y="0" width="100%" height="100%">
+                                    <feTurbulence type="fractalNoise" baseFrequency=".16" numOctaves="3" seed="7" result="grain" />
                                     <feColorMatrix type="matrix" values=".3 .3 .3 0 .55 .3 .3 .3 0 .55 .3 .3 .3 0 .55 0 0 0 0 1" />
                                     <feBlend in2="SourceGraphic" mode="multiply" />
                                     <feComposite in2="SourceGraphic" operator="in" />
+                                    <feDisplacementMap in2="grain" scale="1.2" xChannelSelector="R" yChannelSelector="G" />
                                 </filter>
                             </defs>
                             <g class="eye eye-left">
                                 <path
-                                    class="white" filter="url(#sclera-grain)"
+                                    class="white" filter="url(#eye-grain)"
                                     d="M430 548C452 536 478 514 505 514C532 514 554 533 568 557C542 582 516 592 489 583C465 575 447 558 430 548"
                                 />
                                 <g clip-path="url(#left-eye)">
-                                    <g class="pupil">
+                                    <g class="pupil" filter="url(#eye-grain)">
                                         <circle
                                             cx="501"
                                             cy="560"
@@ -167,11 +168,11 @@
                             </g>
                             <g class="eye eye-right">
                                 <path
-                                    class="white" filter="url(#sclera-grain)"
+                                    class="white" filter="url(#eye-grain)"
                                     d="M684 557C698 533 721 514 748 513C776 512 800 531 823 543C804 562 782 582 756 586C729 590 703 578 684 557"
                                 />
                                 <g clip-path="url(#right-eye)">
-                                    <g class="pupil">
+                                    <g class="pupil" filter="url(#eye-grain)">
                                         <circle
                                             cx="748"
                                             cy="560"
@@ -226,8 +227,8 @@
                                 </radialGradient>
                             </defs>
                             <g clip-path="url(#moon-eye)">
-                                <path fill="url(#moon-white)" filter="url(#sclera-grain)" d="M760 545H870V605H760Z" />
-                                <g class="pupil">
+                                <path fill="url(#moon-white)" filter="url(#eye-grain)" d="M760 545H870V605H760Z" />
+                                <g class="pupil" filter="url(#eye-grain)">
                                     <ellipse cx="806" cy="573" rx="16" ry="23" fill="url(#moon-iris)" />
                                     <ellipse cx="806" cy="571" rx="7" ry="12" fill="#384342" />
                                     <circle cx="802" cy="563" r="3" fill="#f0e6cc" opacity=".8" />
