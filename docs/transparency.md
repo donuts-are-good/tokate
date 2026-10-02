@@ -2,14 +2,13 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes the current Tokate 0.2.3 implementation and the agreed
-requirements for future harness integrations. Planned behavior is not a claim
-about protection already provided by the released binary.
+This document describes how Tokate 0.2.3 discovers tools, handles data, and
+delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
 
-Tokate supports the native Codex CLI with a ChatGPT login. Other harnesses and
-automatic import of model or effort defaults are not implemented.
+Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
+effort explicitly.
 
 - Startup looks for `git`, `gh`, `codex`, and `setsid` in absolute directories
   listed in `PATH`. It checks file existence and executable permissions. It does
@@ -106,26 +105,6 @@ This document is not a claim about their retention practices.
 
 Source: [Core.gs](../src/Core.gs), [Workflow.gs](../src/Workflow.gs),
 [Worker.gs](../src/Worker.gs), [Publish.gs](../src/Publish.gs).
-
-## Required boundary for future adapters
-
-These requirements are agreed design, not implemented multi-harness support:
-
-1. Discover supported executables without scanning private directories.
-2. Obtain model and effort defaults only through reviewed, narrowly scoped
-   interfaces that return nonsecret fields. Do not open mixed configuration,
-   `.env` files, credential stores, or full environment/configuration dumps and
-   then redact them. If no safe interface exists, ask the donor to select the
-   settings and save only those choices.
-3. Leave authentication with the harness. Never request, collect, copy, store,
-   or transmit API keys or other credential values through Tokate.
-4. Document each adapter's exact discovery commands, settings interface, fields
-   read, environment handling, authentication delegation, saved artifacts,
-   published data, and limitations before release.
-5. Identify supported versions and verify the boundary with synthetic credentials
-   and fixtures. Do not inspect real credentials to test an adapter.
-6. Reconcile the current environment and raw-output limitations before claiming
-   that an integration meets the full secret-free discovery contract.
 
 Users should be able to compare this document with the source for the version
 they run. Update it whenever discovery, authentication, data handling, or

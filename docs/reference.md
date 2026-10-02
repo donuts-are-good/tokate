@@ -123,7 +123,7 @@ Keep required checks and human review enforced in GitHub branch protection. Use 
 
 See [Harness and data transparency](transparency.md) for discovery commands,
 credential boundaries, environment inheritance, local logs, published data, and
-the distinction between current behavior and planned harness integrations.
+the limits of the current implementation.
 
 Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 

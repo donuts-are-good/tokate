@@ -2,170 +2,49 @@
 
 # Tokate
 
-**toh-KAH-teh**. Donate your local Codex compute to a GitHub project.
+**toh-KAH-teh**. Put your spare AI usage to work for open source.
 
-The owner approves an issue. A donor runs it with their own accounts. Tokate opens a draft PR after local checks pass. The owner reviews and merges it.
+An owner approves an issue. A donor runs it with their own accounts. Tokate checks the result and opens a draft PR for owner review.
 
-Early prototype for **Linux x64 (glibc 2.34+) and public GitHub repositories**. Start with one small issue.
+## Get started with your AI
 
-Using a coding agent? Give it this prompt:
+Give your coding assistant this prompt:
 
-> Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up Tokate for my repository. First establish whether I am the owner or donor, then guide me through the next step.
+> Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up Tokate. Establish whether I am an owner or donor, then guide me through the next step.
 
-## Install Tokate
-
-On Linux x64 with glibc 2.34 or newer:
+## Install
 
 ```sh
 curl -qfsSL https://tokate.dev/install.sh | sh
 ```
 
-The installer verifies the release checksum, installs for your user without sudo,
-and sets up your shell's PATH. Open a new terminal if prompted. No additional
-runtime is needed.
+Installs for your user and sets up PATH. Open a new terminal if prompted.
+Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved work.
 
-Update or remove it at any time:
-
-```sh
-tokate update
-tokate uninstall
-```
-
-Uninstall keeps your saved work. See [installation details](docs/reference.md#installation)
-for requirements, shell setup, and manual installation. Windows and macOS support
-will follow Linux.
+Supports **Linux x64 (glibc 2.34+) and public GitHub repositories**. Donor execution uses the native Codex CLI with a ChatGPT login. See [installation details](docs/reference.md#installation).
 
 ## For Owners:
 
-### 1. Sign in to GitHub
-
-Install Git, GitHub CLI (`gh`), and `setsid` from util-linux. Use an account with repository write access:
-
-```sh
-gh auth login
-gh auth status
-```
-
-Owners do not need Codex installed.
-
-### 2. Configure the repository once
-
-From your repository checkout:
-
-```sh
-tokate init
-```
-
-Edit `.github/tokate.json`:
-
-```json
-{
-  "version": 1,
-  "models": { "gpt-6.1-sol": ["high"] },
-  "max_seconds": 1800,
-  "allow_network": false,
-  "required_checks": ["verify"],
-  "verification": [["bash", "scripts/verify.sh"]]
-}
-```
-
-Choose a model and effort your donor can use. Replace `verification` with your actual test command and `required_checks` with your exact GitHub CI check names. `max_seconds` covers compute and local verification. Leave `allow_network` false unless the build needs downloads.
-
-Commit `.github/tokate.json` and `.github/tokate-pr.md` to the default branch. Keep the PR template's `{{placeholders}}`. Skip `init` if these files already exist.
-
-### 3. Approve an issue for a donor
-
-Write a small issue with clear acceptance criteria. Have the donor comment on it so they can be assigned. Replace `OWNER/REPO`, `42`, and `DONOR` below:
+1. Sign in with `gh auth login` and run `tokate init` in your repository.
+2. Set the project's checks and allowed model/effort pairs, then commit the generated files. Your AI can follow the [owner setup guide](AGENTS.md#guide-a-repository-owner).
+3. Write an issue with clear acceptance criteria and approve a donor:
 
 ```sh
 tokate approve --repo OWNER/REPO --issue 42 --donor DONOR
 ```
 
-Send the donor the repository, issue number, and required build tools. They follow the donor steps below.
-
-### 4. Review the PR
-
-Replace `43` with the PR number:
-
-```sh
-tokate verify-pr --repo OWNER/REPO --pr 43
-tokate checks --repo OWNER/REPO --pr 43 --watch
-```
-
-If CI is waiting for permission, review and [approve the fork workflow in GitHub](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks). Ensure CI runs on draft PRs. Review the diff and acceptance criteria, mark the PR ready, then merge it yourself. Tokate never merges.
+Review the resulting PR and [required checks](docs/reference.md#quality-and-review), then merge when satisfied.
 
 ## For Donors:
 
-### 1. Prepare your machine
-
-Install Git, GitHub CLI, `setsid` from util-linux, a native Codex CLI, and the project's build tools. Tokate has been tested with Codex 0.159.3.
-
-Use your own GitHub account and ChatGPT subscription:
+1. Follow the [donor setup guide](AGENTS.md#guide-a-compute-donor) to sign in and check your tools with `tokate doctor`.
+2. Get assigned to an approved issue and create or reuse your fork.
+3. Choose an allowed model/effort pair and start:
 
 ```sh
-gh auth login
-gh auth status
-codex login
-tokate doctor
+tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 ```
 
-Fix any failed checks before continuing. `doctor` tests the tools and sandbox without inference. It does not check project build dependencies. The sandbox cannot use your home-directory package caches or tools, so install build tools in standard system locations. Ask the owner about setup before spending compute.
+Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and compute stay under your control.
 
-### 2. Get assigned and create your fork
-
-Comment on the issue and wait for the owner to approve it for your GitHub username. Create a fork once:
-
-```sh
-gh repo fork OWNER/REPO --clone=false
-tokate policy --repo OWNER/REPO
-```
-
-### 3. Run the task
-
-Use a model and effort listed in the policy:
-
-```sh
-tokate work --repo OWNER/REPO --issue 42 --model gpt-6.1-sol --effort high
-```
-
-Tokate creates a separate checkout, runs Codex, runs the owner's verification commands, then opens a draft PR. Save the printed run path. Your subscription is used locally, and no credentials or quota are transferred to the owner.
-
-To lower the time budget, add `--seconds 600`. For dependency downloads, both the owner must set `allow_network: true` and you must add `--allow-network`. This grants internet access to agent commands and verification scripts.
-
-### 4. Check the result
-
-Replace `DIR` with the printed run path:
-
-```sh
-tokate status --run DIR
-tokate checks --run DIR --watch
-```
-
-If only publication failed, run `tokate publish --run DIR` without spending compute again. If compute or verification failed, inspect the run logs and ask the owner for fresh approval before another attempt.
-
-See the [command and security reference](docs/reference.md) for reassignment, revocation, saved claims, and isolation limits. Passing tests and a model whitelist do not guarantee correctness. The owner still reviews every PR.
-
-## Build and run
-
-Install the exact .NET SDK from `global.json`, Clang, zlib development headers, and Git. Dependencies restore from public NuGet only.
-
-```sh
-git clone https://github.com/obselate/tokate.git
-cd tokate
-bash scripts/verify.sh
-dotnet run --project Tokate.gsproj -- --help
-```
-
-The verification script checks formatting, builds NativeAOT with warnings as errors, and runs the existing offline regression tests. It does not spend compute or modify GitHub.
-
-The website is in `site/`. Serve that directory with a local static HTTP server to preview it.
-
-## Links
-
-- [Website](https://tokate.dev/)
-- [Releases and checksums](https://github.com/obselate/tokate/releases)
-- [Guide for AI assistants](AGENTS.md)
-- [Command and security reference](docs/reference.md)
-- [Harness and data transparency](docs/transparency.md)
-- [Report an issue](https://github.com/obselate/tokate/issues)
-- [MIT license](LICENSE)
+[Website](https://tokate.dev/) · [Releases](https://github.com/obselate/tokate/releases) · [Commands and recovery](docs/reference.md) · [Data transparency](docs/transparency.md) · [Build from source](docs/reference.md#build-from-source) · [Issues](https://github.com/obselate/tokate/issues) · [MIT license](LICENSE)

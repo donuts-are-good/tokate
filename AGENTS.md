@@ -11,7 +11,7 @@ This guide is for helping someone set up or use Tokate. If you are already execu
 3. Explain the next action in one or two sentences, perform authorized work, and report the result. Keep track of which account and repository each command affects.
 4. Use [README.md](README.md) for installation and [docs/reference.md](docs/reference.md) for commands and limits. Check `tokate --help` against the installed version.
 
-Current support: Linux x64, public GitHub repositories, and the native Codex CLI with a ChatGPT login. Other harnesses and providers are not implemented. Owners do not need Codex installed.
+Supported: Linux x64, public GitHub repositories, and the native Codex CLI with a ChatGPT login. Owners do not need Codex installed.
 
 ## Guide a repository owner
 
@@ -113,9 +113,3 @@ Report the PR URL, verification result, and any action needed from the owner. Ke
 | CI pending | Check for fork-workflow approval, a missing job, or a job still running. Pending is not success |
 
 Never weaken owner checks, switch models silently, bypass the sandbox, or automatically retry failed compute to obtain a green result.
-
-## If the task is to change Tokate itself
-
-Read the local `CONSTITUTION.md` if present. It is intentionally excluded from version control and release artifacts.
-
-Keep the implementation small. Use the pinned SDKs and packages. Run `bash scripts/verify.sh` for code changes. For documentation-only changes, check links, commands, and the diff. Add tests only for a meaningful regression or end-to-end behavior. Do not spend inference or modify an external project merely to verify documentation.
