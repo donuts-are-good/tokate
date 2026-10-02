@@ -130,9 +130,7 @@ internal class GitHub {
             body Object? = nil,
             method string = "",
             missing bool = false
-        ) JsonElement {
-            return ApiTransport.Request(path, body, method, missing)
-        }
+        ) JsonElement -> ApiTransport.Request(path, body, method, missing)
 
         internal func FileAt(repo string, path string, revision string) string {
             let result = Api("repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision))

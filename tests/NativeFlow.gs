@@ -641,9 +641,8 @@ internal class NativeFlow : IDisposable {
                 mutations++
                 let start = Int64.Parse(Check.Text(call["start"]))
                 if last != 0 {
-                    // Fixture entry follows process startup; allow 30ms of startup jitter.
                     Check.That(
-                        Convert.ToDouble(start - last) / Convert.ToDouble(Stopwatch.Frequency) >= 0.97,
+                        Convert.ToDouble(start - last) / Convert.ToDouble(Stopwatch.Frequency) >= 1.0,
                         "Mutation starts were not paced"
                     )
                 }
@@ -720,7 +719,6 @@ internal class NativeFlow : IDisposable {
         )
         Traffic(9, 1, 0, 0, claimed)
         let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
-        // Generate with the existing deterministic completed-turn fixture, then inspect a saved publish.
         Mode("push_fail")
         Call([]string{"work", "--run", run}, 1)
         Mode("")
@@ -772,7 +770,6 @@ internal class NativeFlow : IDisposable {
     }
 
     internal func ReadTraffic() {
-        // A successful retry must still load the real policy, not a synthetic parser result.
         for mode in[]string{"retry-after", "retry-date", "reset", "server", "transport"} {
             let faults = JsonArray()
             var headers string
@@ -823,12 +820,10 @@ internal class NativeFlow : IDisposable {
             }
             NoInference()
         }
-        // A full 60-second delay cannot fit, even on attempt one.
         Faults("repos/owner/project", Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 60\\r\\n\"}]"))
         let failure = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
         Traffic(1, 0, 0, 0, failure)
         Check.Contains(failure.Error, "Retry at or after")
-        // Subprocess time consumes the same deadline as waits and later attempts.
         Faults(
             "repos/owner/project",
             Check.Json("[{\"status\":503,\"pause_ms\":40000},{\"status\":503,\"pause_ms\":40000}]")
@@ -872,7 +867,6 @@ internal class NativeFlow : IDisposable {
             NoInference()
             Faults("", JsonArray())
         }
-        // PUT has no public CLI caller yet; exercise the same production boundary with the gh fixture.
         Faults(
             "repos/owner/project/issues/1/assignees",
             Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 2\\r\\n\"}]")

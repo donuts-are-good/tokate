@@ -6,9 +6,7 @@ import System.Collections.Generic
 import System.Diagnostics
 import System.Globalization
 import System.Text.Json
-import System.Threading
 
-// Response metadata is transient. Neither gh output nor its stderr becomes a diagnostic.
 internal class ApiResponse {
     internal var Status int32
     internal var Body string = ""
@@ -39,7 +37,6 @@ internal class ApiResponse {
                 continue
             }
             let name = lines[i].Substring(0, colon).ToLowerInvariant()
-            // Inspect only the allowlisted nonsecret response fields.
             if name != "etag" &&
                 name != "retry-after" &&
                 name != "x-ratelimit-remaining" &&
@@ -123,7 +120,6 @@ internal class ApiResponse {
             delay = Math.Max(delay, Math.Max(0.0, (DateTimeOffset.FromUnixTimeSeconds(reset) - server).TotalSeconds))
             supplied = true
         }
-        // A secondary limit without a server delay must wait at least one minute.
         if rateLimited && !supplied {
             delay = 60.0
         }
@@ -138,7 +134,6 @@ internal class ApiCache {
 
 internal class ApiTransport {
     shared {
-        private let Gate SemaphoreSlim = SemaphoreSlim(1, 1)
         private let Cache Dictionary[string, ApiCache] = Dictionary[string, ApiCache]()
         private let Clock Stopwatch = Stopwatch.StartNew()
         private var NextMutation double
@@ -194,7 +189,6 @@ internal class ApiTransport {
             message += read ? "At most three attempts within 60 seconds are allowed.":
             "No automatic retry was made. The outcome may be uncertain; inspect remote state before retrying. For publication, use tokate publish --run with the saved run."
             if delay > 0 {
-                // Bound malformed remote values before constructing a useful wall-clock hint.
                 let bounded = Math.Min(delay, (DateTimeOffset.MaxValue - DateTimeOffset.UtcNow).TotalSeconds - 1.0)
                 message += " Retry at or after " +
                     DateTimeOffset
@@ -210,26 +204,9 @@ internal class ApiTransport {
 
         internal suspend func Request(path string, body Object?, method string, missing bool) JsonElement {
             let timer = Stopwatch.StartNew()
-            if !Gate.Wait(60000) {
-                throw Failure(0, method == "" ? body == nil: method.ToUpperInvariant() == "GET", 0.0)
-            }
-            try {
-                return SerialRequest(path, body, method, missing, timer)
-            } finally {
-                Gate.Release()
-            }
-        }
-
-        private func SerialRequest(
-            path string,
-            body Object?,
-            method string,
-            missing bool,
-            timer Stopwatch
-        ) JsonElement {
             let verb = (method == "" ? (body == nil ? "GET": "POST"): method).ToUpperInvariant()
             let read = verb == "GET"
-            var input string? = body == nil ? nil: J.Write(body)
+            let input string? = body == nil ? nil: J.Write(body)
             let key = path + "\n" + input
             for attempt in 0 ... (read ? 3: 1) {
                 if !read {
@@ -259,7 +236,6 @@ internal class ApiTransport {
                     }
                 } else {
                     Mutations++
-                    NextMutation = Clock.Elapsed.TotalSeconds + 1.0
                 }
                 var result CommandResult = CommandResult{Code: 1}
                 try {
@@ -270,15 +246,14 @@ internal class ApiTransport {
                         github: true,
                         milliseconds: Math.Max(1, Convert.ToInt32(Math.Floor(remaining * 1000.0)))
                     )
-                } catch {
-                    // A timeout/start failure has no authoritative response; never expose raw output.
-
+                } catch { }
+                if !read {
+                    NextMutation = Clock.Elapsed.TotalSeconds + 1.0
                 }
                 let response = ApiResponse(result.Output)
                 if timer.Elapsed.TotalSeconds >= 60.0 {
                     throw Failure(response.Status, read, response.Delay(response.RateLimited()))
                 }
-                // gh 2.102.0 exits 1 for a header-only 304: HTTP status is authoritative.
                 if response.Status == 304 {
                     ConditionalResponses++
                     if !conditional || (response.ETag != "" && response.ETag != cached.ETag) {

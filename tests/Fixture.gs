@@ -1,5 +1,6 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.Diagnostics
@@ -8,7 +9,6 @@ import System.IO
 import System.Security.Cryptography
 import System.Text
 import System.Text.Json.Nodes
-import System.Threading
 
 internal class Fixture {
     internal let Root string
@@ -287,7 +287,9 @@ internal class Fixture {
                 Save()
                 let pause = Check.Text(fault["pause_ms"])
                 if pause != "" {
-                    Thread.Sleep(Int32.Parse(pause))
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(Int32.Parse(pause))) { }
+                    }
                 }
                 let status = Int32.Parse(Check.Text(fault["status"]))
                 if status == 0 {
