@@ -228,6 +228,10 @@ footer a:hover {
 }
 .eyes {
     overflow: visible;
+    visibility: hidden;
+}
+.art-ready .eyes {
+    visibility: visible;
 }
 .eye {
     transform-box: fill-box;
@@ -387,9 +391,9 @@ h1 em {
     padding-bottom: 4px;
     background: url(assets/laurel.svg) center / contain no-repeat;
     color: var(--rust);
-    font-variant-numeric: lining-nums;
     font-family: var(--display);
-    font-size: 24px;
+    font-size: 28px;
+    line-height: 1;
     font-weight: 500;
 }
 h2 {
@@ -716,6 +720,7 @@ body.modal-open {
     }
     .steps {
         margin: 0 5%;
+        grid-template-columns: 1fr;
         padding-left: 0;
         padding-right: 0;
     }

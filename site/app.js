@@ -9,6 +9,13 @@ const themeButtons = document.querySelectorAll("button[data-theme]");
 const themeToggle = document.querySelector("#theme-toggle");
 const copyButton = document.querySelector("#copy-prompt");
 const copyStatus = document.querySelector("#copy-status");
+for (const image of document.querySelectorAll(
+    ".sun > img, .moon > img:not(.moon-stars)",
+)) {
+    image.decode()
+        .then(() => image.parentElement.classList.add("art-ready"))
+        .catch(() => {});
+}
 function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     themeButtons.forEach((button) =>
