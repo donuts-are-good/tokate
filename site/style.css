@@ -94,7 +94,6 @@ footer a:hover {
     overflow: hidden;
     position: relative;
     text-align: center;
-    max-width: 1600px;
     margin: 0 auto;
 }
 .heavens {
@@ -111,7 +110,7 @@ footer a:hover {
     left: 50%;
     top: -10px;
     transform: translateX(-50%);
-    z-index: 1;
+    z-index: 3;
     animation: sun-appear 1.6s ease both;
 }
 .sun img,
@@ -456,14 +455,14 @@ body.modal-open {
 }
 @media (min-width: 1500px) {
     .heavens {
-        height: 400px;
+        height: 25vw;
     }
     .sun {
-        width: 390px;
-        height: 390px;
+        width: 24.375vw;
+        height: 24.375vw;
     }
     .hands {
-        top: -300px;
+        top: -18.75vw;
     }
 }
 @media (max-width: 900px) {
