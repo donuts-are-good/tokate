@@ -49,7 +49,7 @@ user-local location.
 
 ```text
 Tokate 0.2.3 (toh-KAH-teh)
-Donate compute to approved GitHub issues.
+Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
   tokate update                           Install the latest stable release
@@ -65,9 +65,9 @@ Owner:
 Donor:
   tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
               [--seconds 1800] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
-  tokate claim <same options>              Reserve without starting compute
+  tokate claim <same options>              Reserve without starting inference
   tokate work --run DIR                    Execute a saved claim once
-  tokate publish --run DIR                 Retry publication without compute
+  tokate publish --run DIR                 Retry publication without inference
   tokate status --run DIR                  Show saved run
 
 Review:
@@ -87,7 +87,7 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, agent events, report, verification results, patch, PR body, and check results. Keep these files private and inspect logs before sharing them.
 
-`publish --run DIR` retries publication after a successful run without spending compute again. Failed or interrupted compute requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
+`publish --run DIR` retries publication after a successful run without running inference again. Failed or interrupted runs requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 
 `--seconds` caps agent execution plus independent verification. The default is the smaller of 1800 seconds and the owner's limit. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 
@@ -104,7 +104,7 @@ Tokate applies these gates:
 3. Require a completed agent turn, a report, and a nonempty patch.
 4. Run every owner verification command separately. A failure prevents PR creation even if the agent claims success.
 5. Reject changes to `.github/workflows/` and Tokate policy, approval, and template files.
-6. Open a draft PR with acceptance-criteria reporting, actual verification commands, limitations, and a compute receipt.
+6. Open a draft PR with acceptance-criteria reporting, actual verification commands, limitations, and a run receipt.
 7. Require all named GitHub checks to pass for the exact PR commit. Missing, pending, cancelled, and skipped required checks never count as success.
 8. Leave acceptance and merging to the owner.
 
@@ -127,11 +127,11 @@ the limits of the current implementation.
 
 Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 
-Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before spending compute. Unsupported sandbox configurations fail closed.
+Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before starting inference. Unsupported sandbox configurations fail closed.
 
 Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
-Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop burns additional compute. Time caps are not exact token or subscription-percentage caps.
+Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop uses additional inference. Time caps are not exact token or subscription-percentage caps.
 
 ## Build from source
 
@@ -153,6 +153,6 @@ The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter,
 builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end
 harness against the actual binary. It uses two simulated GitHub identities, real
 local Git repositories, and deterministic Codex and release-download fixtures.
-Tests cover contribution boundaries and install/update/removal without spending
-compute, downloading a release, or modifying GitHub. No external test framework
+Tests cover contribution boundaries and install/update/removal without running
+inference, downloading a release, or modifying GitHub. No external test framework
 or Python runtime is required.

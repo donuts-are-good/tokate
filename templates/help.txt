@@ -1,5 +1,5 @@
 Tokate {{version}} (toh-KAH-teh)
-Donate compute to approved GitHub issues.
+Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
   tokate update                           Install the latest stable release
@@ -15,9 +15,9 @@ Owner:
 Donor:
   tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
               [--seconds 1800] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
-  tokate claim <same options>              Reserve without starting compute
+  tokate claim <same options>              Reserve without starting inference
   tokate work --run DIR                    Execute a saved claim once
-  tokate publish --run DIR                 Retry publication without compute
+  tokate publish --run DIR                 Retry publication without inference
   tokate status --run DIR                  Show saved run
 
 Review:

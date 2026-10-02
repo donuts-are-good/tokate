@@ -1,7 +1,7 @@
 {
     "name": "Tokate",
     "short_name": "Tokate",
-    "description": "Give your compute a purpose. Help the open-source projects you love.",
+    "description": "Give your AI usage a purpose. Help the open-source projects you love.",
     "id": "/",
     "start_url": "/",
     "scope": "/",

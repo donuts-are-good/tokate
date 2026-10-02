@@ -1,4 +1,4 @@
-[![Tokate: Give your compute a purpose. Painted hands cradle a sun above a Renaissance landscape.](site/assets/social-card.jpg)](https://tokate.dev/)
+[![Tokate: Give your AI usage a purpose. Painted hands cradle a sun above a Renaissance landscape.](site/assets/social-card.jpg)](https://tokate.dev/)
 
 # Tokate
 
@@ -37,7 +37,7 @@ Review the resulting PR and [required checks](docs/reference.md#quality-and-revi
 
 ## For Donors:
 
-1. Follow the [donor setup guide](AGENTS.md#guide-a-compute-donor) to sign in and check your tools with `tokate doctor`.
+1. Follow the [donor setup guide](AGENTS.md#guide-a-donor) to sign in and check your tools with `tokate doctor`.
 2. Get assigned to an approved issue and create or reuse your fork.
 3. Choose an allowed model/effort pair and start:
 
@@ -45,6 +45,6 @@ Review the resulting PR and [required checks](docs/reference.md#quality-and-revi
 tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 ```
 
-Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and compute stay under your control.
+Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and AI usage stay under your control.
 
 [Website](https://tokate.dev/) · [Releases](https://github.com/obselate/tokate/releases) · [Commands and recovery](docs/reference.md) · [Data transparency](docs/transparency.md) · [Build from source](docs/reference.md#build-from-source) · [Issues](https://github.com/obselate/tokate/issues) · [MIT license](LICENSE)

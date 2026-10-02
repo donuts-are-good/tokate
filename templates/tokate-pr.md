@@ -4,7 +4,7 @@ Fixes #{{issue}}
 
 {{report}}
 
-## Donated compute
+## Donated AI usage
 
 | Field | Value |
 | --- | --- |

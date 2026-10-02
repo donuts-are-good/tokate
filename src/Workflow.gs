@@ -83,7 +83,7 @@ internal class Workflow {
                         "color",
                         "0e8a16",
                         "description",
-                        "Approved and assigned for donated compute"
+                        "Approved and assigned for donated AI usage"
                     )
                 )
             }

@@ -6,7 +6,7 @@ This guide is for helping someone set up or use Tokate. If you are already execu
 
 ## Start here
 
-1. Identify the user's role: repository owner, compute donor, or both. Infer it from the conversation when possible.
+1. Identify the user's role: repository owner, donor, or both. Infer it from the conversation when possible.
 2. Confirm the upstream repository, issue, and GitHub usernames. Read the issue and existing configuration before suggesting changes. Ask only for missing information.
 3. Explain the next action in one or two sentences, perform authorized work, and report the result. Keep track of which account and repository each command affects.
 4. Use [README.md](README.md) for installation and [docs/reference.md](docs/reference.md) for commands and limits. Check `tokate --help` against the installed version.
@@ -60,7 +60,7 @@ tokate checks --repo OWNER/REPO --pr PR --watch
 
 For a first-time donor, GitHub may wait for the owner to approve the fork workflow. Inspect the diff before approving it. Check acceptance criteria as well as CI. Leave final acceptance and merging with the owner.
 
-## Guide a compute donor
+## Guide a donor
 
 ### 1. Confirm readiness
 
@@ -83,7 +83,7 @@ Reuse an existing fork. Use `--fork DONOR/NAME` if it has a different name.
 
 ### 3. Run once
 
-Use an allowed model and effort. Running this command spends the donor's allowance, so it needs the user's authorization to donate compute.
+Use an allowed model and effort. Running this command spends the donor's allowance, so it needs the user's authorization to donate AI usage.
 
 ```sh
 tokate work --repo OWNER/REPO --issue ISSUE --model MODEL --effort EFFORT
@@ -100,7 +100,7 @@ tokate checks --run DIR --watch
 
 Report the PR URL, verification result, and any action needed from the owner. Keep logs private and remove secrets before sharing them. Report usage as supplied by the runner, not as independently proven model identity or billing.
 
-## Recover without wasting compute
+## Recover without wasting AI usage
 
 | Situation | Next action |
 | --- | --- |
@@ -108,8 +108,8 @@ Report the PR URL, verification result, and any action needed from the owner. Ke
 | Donor cannot be assigned | Have the donor comment, then let the owner approve again |
 | Claim branch already exists | Find the existing run. Do not delete the branch and silently start another attempt |
 | Approval changed or was revoked | Stop and return to the owner |
-| Compute or verification failed | Inspect the saved logs. A new attempt needs fresh owner approval |
-| Successful compute, publication failed | `tokate publish --run DIR` retries publication without inference |
+| Agent run or verification failed | Inspect the saved logs. A new attempt needs fresh owner approval |
+| Successful run, publication failed | `tokate publish --run DIR` retries publication without inference |
 | CI pending | Check for fork-workflow approval, a missing job, or a job still running. Pending is not success |
 
-Never weaken owner checks, switch models silently, bypass the sandbox, or automatically retry failed compute to obtain a green result.
+Never weaken owner checks, switch models silently, bypass the sandbox, or automatically retry failed runs to obtain a green result.

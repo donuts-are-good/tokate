@@ -99,9 +99,9 @@ internal class NativeFlow : IDisposable {
         Save()
     }
 
-    internal func NoCompute() {
+    internal func NoInference() {
         Reload()
-        Check.That(State["exec_count"] == nil, "Unexpected compute")
+        Check.That(State["exec_count"] == nil, "Unexpected inference")
     }
 
     internal func NoPr() {
@@ -133,7 +133,7 @@ internal class NativeFlow : IDisposable {
         }
         let work = Call([]string{"work", "--repo", "owner/project", "--issue", "1"}, 1)
         Check.Contains(work.Error, "Install the tools needed")
-        NoCompute()
+        NoInference()
     }
 
     internal func OwnerWithoutCodex() {
@@ -159,7 +159,7 @@ internal class NativeFlow : IDisposable {
         Call([]string{"work", "--run", run})
         Call([]string{"publish", "--run", run})
         Reload()
-        Check.That(Check.Text(State["exec_count"]) == "1", "Publication reran compute")
+        Check.That(Check.Text(State["exec_count"]) == "1", "Publication reran inference")
         Check.That(Check.Text(State["pulls"]?[0]?["draft"]) == "true", "PR must be draft")
         Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Call([]string{"checks", "--run", run}, 8)
@@ -184,7 +184,7 @@ internal class NativeFlow : IDisposable {
         Approve()
         Claim(model: "not-allowed", code: 1)
         Claim(seconds: "2000", code: 1)
-        NoCompute()
+        NoInference()
     }
 
     internal func FailedReassignment() {
@@ -239,7 +239,7 @@ internal class NativeFlow : IDisposable {
             ).Error,
             "gh repo fork owner/project --clone=false"
         )
-        NoCompute()
+        NoInference()
     }
 
     internal func DefaultBudget() {
@@ -301,7 +301,7 @@ internal class NativeFlow : IDisposable {
         Check.That(!File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z", "Descendant survived timeout")
         Call([]string{"work", "--run", run}, 1)
         Reload()
-        Check.That(Check.Text(State["exec_count"]) == "1", "Failed run retried compute")
+        Check.That(Check.Text(State["exec_count"]) == "1", "Failed run retried inference")
     }
 
     internal func Reapproval() {
@@ -309,7 +309,7 @@ internal class NativeFlow : IDisposable {
         let run = Claim()
         Call([]string{"assign", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}, owner: true)
         Call([]string{"work", "--run", run}, 1)
-        NoCompute()
+        NoInference()
     }
 
     internal func FalseSuccess() {
@@ -333,7 +333,7 @@ internal class NativeFlow : IDisposable {
         File.WriteAllText(path, policy.ToJsonString())
         Commit("Change policy")
         Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "policy or template changed")
-        NoCompute()
+        NoInference()
     }
 
     internal func WorkflowEdit() {
@@ -352,7 +352,7 @@ internal class NativeFlow : IDisposable {
         Approve()
         let run = Claim()
         Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Repository Codex configuration")
-        NoCompute()
+        NoInference()
     }
 
     internal func NoPatch() {
