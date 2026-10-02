@@ -149,6 +149,10 @@ install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 scripts/verify.sh
 ```
 
-The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter, builds and publishes NativeAOT with warnings as errors, and tests the actual binary with two simulated GitHub identities, real local Git repositories, and a deterministic Codex fixture. Python is only a development test dependency. Tests do not spend compute or modify GitHub.
-
-The earlier Python prototype remains in Git history. Its `.state` and `.runs` artifacts are preserved locally, but native Tokate does not resume legacy runs.
+The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter,
+builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end
+harness against the actual binary. It uses two simulated GitHub identities, real
+local Git repositories, and deterministic Codex and release-download fixtures.
+Tests cover contribution boundaries and install/update/removal without spending
+compute, downloading a release, or modifying GitHub. No external test framework
+or Python runtime is required.

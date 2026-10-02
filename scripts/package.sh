@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version=$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("Tokate.gsproj").findtext(".//Version"))')
+version=$(dotnet msbuild Tokate.gsproj -getProperty:Version -nologo)
 test "$(artifacts/linux-x64/tokate --version)" = "tokate $version"
 bundle="tokate-$version-linux-x64"
 mkdir -p "artifacts/$bundle"

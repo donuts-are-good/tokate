@@ -21,7 +21,7 @@ curl -qfsSL https://tokate.dev/install.sh | sh
 ```
 
 The installer verifies the release checksum, installs for your user without sudo,
-and sets up your shell's PATH. Open a new terminal if prompted. No .NET or Python
+and sets up your shell's PATH. Open a new terminal if prompted. No additional
 runtime is needed.
 
 Update or remove it at any time:
@@ -147,7 +147,7 @@ See the [command and security reference](docs/reference.md) for reassignment, re
 
 ## Build and run
 
-Install the exact .NET SDK from `global.json`, Clang, zlib development headers, Git, and Python 3. Dependencies restore from public NuGet only.
+Install the exact .NET SDK from `global.json`, Clang, zlib development headers, and Git. Dependencies restore from public NuGet only.
 
 ```sh
 git clone https://github.com/obselate/tokate.git
@@ -158,7 +158,7 @@ dotnet run --project Tokate.gsproj -- --help
 
 The verification script checks formatting, builds NativeAOT with warnings as errors, and runs the existing offline regression tests. It does not spend compute or modify GitHub.
 
-The website is in `site/`. Preview it with `python3 -m http.server 4173 --directory site`.
+The website is in `site/`. Serve that directory with a local static HTTP server to preview it.
 
 ## Links
 
