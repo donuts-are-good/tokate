@@ -18,11 +18,16 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 2 && args[0] == "--shell" {
+            Installer.Lifecycle(project, binary, args[1])
+            Console.WriteLine("PASS installer lifecycle for " + args[1])
+            return 0
+        }
         NativeFlow.All(binary)
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
-        Installer.RefuseSymlink(project)
-        Console.WriteLine("PASS installer rejects symlink replacement")
+        Installer.RefuseInvalidPath(project)
+        Console.WriteLine("PASS installer rejects symlink and directory replacement")
         return 0
     } catch (error Exception) {
         Console.Error.WriteLine(error.ToString())

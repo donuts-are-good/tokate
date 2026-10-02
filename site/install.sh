@@ -72,6 +72,7 @@ main() {
         [ -f "$tokate_data/installed" ] || fail 'This copy was not installed by the Tokate installer.'
     fi
     [ ! -L "$tokate_bin" ] || fail "Refusing to replace a symlink at $tokate_bin"
+    [ ! -e "$tokate_bin" ] || [ -f "$tokate_bin" ] || fail "Expected a regular file at $tokate_bin"
     if [ "$tokate_action" = uninstall ]; then
         rm -f "$tokate_bin" "$tokate_data/env" "$tokate_data/installed"
         if [ -f "$tokate_data/path-fish" ]; then

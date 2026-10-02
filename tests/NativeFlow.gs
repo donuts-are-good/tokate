@@ -197,7 +197,12 @@ internal class NativeFlow : IDisposable {
             "comment on the issue"
         )
         Reload()
-        Check.That(Check.Text(State["issue"]?["assignees"]?[0]?["login"]) == "donor", "Failed assignment changed donor")
+        Check.That(
+            State["issue"]?["assignees"]?.AsArray().Count == 1 && Check.Text(
+                State["issue"]?["assignees"]?[0]?["login"]
+            ) == "donor",
+            "Failed assignment changed donor"
+        )
         Claim()
         Reload()
         State["unassignable"] = JsonValue.Create(false)

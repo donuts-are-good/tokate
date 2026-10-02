@@ -46,7 +46,7 @@ const roles = {
             "Set your checks and approve a donor",
             "Review the tested pull request and decide what merges",
         ],
-        anchor: "i-own-the-repository",
+        anchor: "for-owners",
         prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up my repository to receive donated compute\nI am the repository owner\nInspect my project, help me choose appropriate checks, and guide me through approving an issue for a donor",
     },
     donor: {
@@ -56,7 +56,7 @@ const roles = {
             "Get assigned to an approved issue and run the task",
             "Your AI works, then Tokate checks and opens a draft PR",
         ],
-        anchor: "i-want-to-donate-compute",
+        anchor: "for-donors",
         prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me donate compute to a repository\nI am the donor\nConfirm my tools, the approved issue, and my assignment\nExplain the budget before starting a run",
     },
 };
