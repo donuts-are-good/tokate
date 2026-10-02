@@ -150,7 +150,7 @@ The website is in `site/`. Preview it with `python3 -m http.server 4173 --direct
 
 ## Links
 
-- [Website](https://obselate.github.io/tokate/)
+- [Website](https://tokate.dev/)
 - [Releases and checksums](https://github.com/obselate/tokate/releases)
 - [Guide for AI assistants](AGENTS.md)
 - [Command and security reference](docs/reference.md)

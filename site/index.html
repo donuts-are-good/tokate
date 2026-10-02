@@ -11,6 +11,7 @@
         <title>Tokate · Give your compute a purpose</title>
         <link rel="icon" href="assets/mark.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="style.css" />
+        <link rel="canonical" href="https://tokate.dev/" />
         <link
             rel="preload"
             as="image"
@@ -214,9 +215,8 @@
             ><button id="motion" aria-pressed="false">Pause animation</button>
         </footer>
         <dialog id="setup" aria-labelledby="setup-title">
-            <button class="close" aria-label="Close guide">×</button>
-            <div class="scroll-content">
-                <span class="eyebrow" id="setup-label"></span>
+            <div class="scroll-content" tabindex="-1" autofocus>
+                <p class="decree-opening">A decree of the commons</p>
                 <h2 id="setup-title"></h2>
                 <ol id="setup-steps"></ol>
                 <div class="agent-help">
@@ -231,10 +231,7 @@
                     href="https://github.com/obselate/tokate/blob/main/README.md"
                     >Or follow the step-by-step guide ↗</a
                 >
-                <p class="requirement">
-                    Early prototype · Linux x64 · Codex + ChatGPT subscription
-                    for donors
-                </p>
+                <button id="dismiss">Roll up the scroll</button>
                 <textarea
                     id="prompt-fallback"
                     aria-label="Setup prompt to copy"
@@ -242,6 +239,11 @@
                     hidden
                 ></textarea>
             </div>
+            <button
+                class="roll-handle"
+                aria-label="Drag upward to roll up"
+                title="Drag upward to roll up"
+            ></button>
         </dialog>
     </body>
 </html>

@@ -3,10 +3,11 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const motionButton = document.querySelector("#motion");
 const sun = document.querySelector(".sun");
 const pupils = document.querySelectorAll(".pupil");
+const rollHandle = document.querySelector(".roll-handle");
+const scrollContent = document.querySelector(".scroll-content");
 const roles = {
     owner: {
-        label: "For project owners",
-        title: "A little help for your project",
+        title: "For Project Owners",
         steps: [
             "Choose a small issue with a clear result",
             "Set your checks and approve a donor",
@@ -16,8 +17,7 @@ const roles = {
         prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up my repository to receive donated compute\nI am the repository owner\nInspect my project, help me choose appropriate checks, and guide me through approving an issue for a donor",
     },
     donor: {
-        label: "For compute donors",
-        title: "Give a project a little lift",
+        title: "For Compute Donors",
         steps: [
             "Install Tokate and sign in with your own accounts",
             "Get assigned to an approved issue and run the task",
@@ -33,18 +33,24 @@ let paused = reducedMotion.matches;
 let gazeTimer;
 let blinkTimer;
 let blinkEnd;
+let rollStart = null;
+let rollOffset = 0;
+let maxRoll = 0;
+let rollOverlap = 0;
+let rollCloseTimer;
 
 for (const button of document.querySelectorAll("[data-role]")) {
     button.addEventListener("click", () => {
         selectedRole = button.dataset.role;
         trigger = button;
         const role = roles[selectedRole];
-        document.querySelector("#setup-label").textContent = role.label;
         document.querySelector("#setup-title").textContent = role.title;
         document.querySelector("#setup-steps").replaceChildren(
             ...role.steps.map((text) => {
                 const item = document.createElement("li");
-                item.textContent = text;
+                const wording = document.createElement("span");
+                wording.textContent = text;
+                item.append(wording);
                 return item;
             }),
         );
@@ -53,12 +59,61 @@ for (const button of document.querySelectorAll("[data-role]")) {
         document.querySelector("#copy-status").textContent = "";
         document.querySelector("#prompt-fallback").hidden = true;
         dialog.showModal();
+        scrollContent.scrollTop = 0;
         document.body.classList.add("modal-open");
     });
 }
-document
-    .querySelector(".close")
-    .addEventListener("click", () => dialog.close());
+function measureRoll() {
+    maxRoll = Math.max(1, dialog.clientHeight - rollHandle.clientHeight - 90);
+    rollOverlap =
+        rollHandle.clientHeight -
+        (dialog.getBoundingClientRect().bottom -
+            scrollContent.getBoundingClientRect().bottom);
+}
+function moveRoll(distance) {
+    rollOffset = Math.max(0, Math.min(distance, maxRoll));
+    dialog.style.setProperty("--roll-offset", `${rollOffset}px`);
+    dialog.style.setProperty(
+        "--text-clip",
+        `${Math.max(0, rollOffset + rollOverlap)}px`,
+    );
+}
+function rollUp() {
+    measureRoll();
+    moveRoll(maxRoll);
+    clearTimeout(rollCloseTimer);
+    rollCloseTimer = setTimeout(
+        () => dialog.close(),
+        reducedMotion.matches ? 0 : 200,
+    );
+}
+document.querySelector("#dismiss").addEventListener("click", rollUp);
+rollHandle.addEventListener("pointerdown", (event) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    measureRoll();
+    rollStart = event.clientY;
+    dialog.classList.add("rolling");
+    rollHandle.setPointerCapture(event.pointerId);
+});
+rollHandle.addEventListener("pointermove", (event) => {
+    if (rollStart !== null) moveRoll(rollStart - event.clientY);
+});
+rollHandle.addEventListener("pointerup", (event) => {
+    if (rollStart === null) return;
+    rollStart = null;
+    dialog.classList.remove("rolling");
+    rollHandle.releasePointerCapture(event.pointerId);
+    if (rollOffset < 6 || rollOffset >= Math.min(140, maxRoll * 0.35)) rollUp();
+    else moveRoll(0);
+});
+rollHandle.addEventListener("pointercancel", () => {
+    rollStart = null;
+    dialog.classList.remove("rolling");
+    moveRoll(0);
+});
+rollHandle.addEventListener("click", (event) => {
+    if (event.detail === 0) rollUp();
+});
 dialog.addEventListener("click", (event) => {
     const box = dialog.getBoundingClientRect();
     if (
@@ -71,6 +126,12 @@ dialog.addEventListener("click", (event) => {
         dialog.close();
 });
 dialog.addEventListener("close", () => {
+    clearTimeout(rollCloseTimer);
+    rollStart = null;
+    dialog.classList.remove("rolling");
+    dialog.style.removeProperty("--roll-offset");
+    dialog.style.removeProperty("--text-clip");
+    rollOffset = 0;
     document.body.classList.remove("modal-open");
     trigger?.focus();
 });
