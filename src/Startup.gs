@@ -127,7 +127,12 @@ internal class Startup {
                     continue
                 }
                 try {
-                    let result = Commands.Run(tool.Path, []string{"--version"}, seconds: 10)
+                    let result = Commands.Run(
+                        tool.Path,
+                        []string{"--version"},
+                        seconds: 10,
+                        harness: tool.Name == "codex"
+                    )
                     if result.Code != 0 {
                         throw Exception("Version check failed. " + tool.Hint)
                     }

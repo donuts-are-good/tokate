@@ -136,11 +136,11 @@ internal class Worker {
             }
             Terminal.Step("Checking owner approval and donor login...")
             let record = Workflow.Recheck(run)
-            let login = Commands.Run("codex", []string{"login", "status"}, clean: true)
+            let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw Exception("Run codex login with your ChatGPT subscription first")
             }
-            let version = Commands.Checked("codex", []string{"--version"})
+            let version = Commands.Checked("codex", []string{"--version"}, harness: true)
             if !version.StartsWith("codex-cli 0.") {
                 throw Exception("A supported Codex CLI is required")
             }

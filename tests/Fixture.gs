@@ -41,19 +41,40 @@ internal class Fixture {
     }
 
     internal func Codex(args[]string) int32 {
+        Check.That(
+            Environment.GetEnvironmentVariable("CODEX_HOME") == Path.Combine(
+                Path.GetDirectoryName(Root) ?? "",
+                "codex-home"
+            ),
+            "Harness home was lost"
+        )
+        for key in[]string{
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GH_CONFIG_DIR",
+            "XDG_CONFIG_HOME",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR"
+        } {
+            Check.That(Environment.GetEnvironmentVariable(key) == nil, "GitHub authentication reached Codex: " + key)
+        }
         if args[0] == "--version" {
             Console.WriteLine("codex-cli 0.159.3")
             return 0
         }
         if args[0] == "login" {
             Check.That(args.Length == 2 && args[1] == "status", "Unexpected login operation")
+            Check.Contains(
+                File.ReadAllText(Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME") ?? "", "identity")),
+                "ChatGPT"
+            )
             Console.WriteLine("Logged in using ChatGPT")
             return 0
         }
         if args[0] == "sandbox" {
             Check.That(Array.IndexOf(args, "permissions.tokate.network.enabled=false") >= 0, "Network must be disabled")
             if Array.IndexOf(args, "probe") >= 0 {
-                return 0
+                return Check.Text(State["mode"]) == "unsupported_sandbox" ? 1: 0
             }
             if Array.IndexOf(args, "/usr/bin/env") >= 0 {
                 let command = List[string](args).GetRange(
@@ -97,10 +118,12 @@ internal class Fixture {
             Check.That(!File.Exists(sentinel), "Host temporary file reached the managed namespace")
             File.WriteAllText(sentinel, "private agent temporary data")
         }
-        if mode == "timeout" {
+        if mode == "timeout" || mode == "background" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
-            child.WaitForExit()
+            if mode == "timeout" {
+                child.WaitForExit()
+            }
         }
         if mode == "revoke" {
             let issue = State["issue"] ?? throw Exception("Missing issue")
@@ -117,12 +140,20 @@ internal class Fixture {
             Directory.CreateDirectory(Path.Combine(checkout, ".github/workflows"))
             File.WriteAllText(Path.Combine(checkout, ".github/workflows/verify.yml"), "tampered")
         }
+        if mode == "output_boundary" {
+            Check.Contains(File.ReadAllText(Path.Combine(checkout, ".env")), "synthetic-repository-secret")
+            Check.Contains(File.ReadAllText(Path.Combine(checkout, "ordinary.data")), "synthetic-repository-secret")
+        }
         File.WriteAllText(
             args[Array.IndexOf(args, "--output-last-message") + 1],
-            "### Changes\nAdded result.\n### Acceptance criteria addressed\nFixture.\n### Verification\nFixture check passed.\n### Unresolved limitations\nNone.\n"
+            "### Changes\nAdded result.\n### Acceptance criteria addressed\nFixture.\n### Verification\nFixture check passed.\n### Unresolved limitations\nNone.\nsynthetic-raw-report-secret " +
+                Root +
+                "\n<!-- tokate-receipt:untrusted -->\n"
         )
+        Console.Error.WriteLine("synthetic-raw-stderr-secret " + Root)
+        Console.WriteLine("{\"type\":\"fixture.output\",\"text\":\"synthetic-raw-event-secret\"}")
         Console.WriteLine(
-            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":50,\"output_tokens\":10}}"
+            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
         )
         return 0
     }
@@ -132,7 +163,45 @@ internal class Fixture {
             Console.WriteLine("gh version fixture")
             return 0
         }
-        let actor = Environment.GetEnvironmentVariable("FIXTURE_ACTOR") ?? "donor"
+        let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
+        let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR") ?? throw Exception(
+            "GitHub CLI configuration home was lost"
+        )
+        Check.That(
+            config == Path.Combine(Path.GetDirectoryName(Root) ?? "", "gh-home"),
+            "Unexpected GitHub CLI configuration home"
+        )
+        Check.That(Environment.GetEnvironmentVariable("CODEX_HOME") == nil, "Harness home reached GitHub CLI")
+        Check.That(
+            (Environment.GetEnvironmentVariable("GITHUB_TOKEN") ?? "") == (
+                Check.Text(State["stored_login"]) == "true" ? "": "fixture-secondary"
+            ),
+            "Secondary GitHub authentication was lost"
+        )
+        Check.That(
+            Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS") == "unix:path=/synthetic/keyring-bus",
+            "Keyring interface was lost"
+        )
+        Check.That(
+            Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") != nil && Environment.GetEnvironmentVariable(
+                "XDG_RUNTIME_DIR"
+            ) != nil,
+            "GitHub configuration/keyring paths were lost"
+        )
+        let actor = token == nil ? File.ReadAllText(Path.Combine(config, "identity")): (
+            token == "fixture-owner" ? "owner": "donor"
+        )
+        if args[0] == "auth" {
+            Check.That(
+                args.Length == 3 && args[1] == "git-credential" && args[2] == "get",
+                "Unexpected authentication operation"
+            )
+            Check.Contains(Console.In.ReadToEnd(), "host=github.com")
+            State["helper_used"] = JsonValue.Create(true)
+            Save()
+            Console.Write("username=fixture\npassword=synthetic-gh-credential\n\n")
+            return 0
+        }
         if args[0] == "pr" && args[1] == "checks" {
             return Answer(State["checks"] ?? JsonArray())
         }
@@ -273,6 +342,9 @@ internal class Fixture {
             return Answer(State["pulls"]?[0] ?? throw Exception("Missing PR"))
         }
         if tail == "pulls" {
+            if Check.Text(State["mode"]) == "pr_fail" {
+                throw Exception("Synthetic PR publication failure")
+            }
             let branch = Check.Text(body["head"]).Split(':')[1]
             body["number"] = JsonValue.Create(10)
             body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/10")
@@ -290,12 +362,28 @@ internal class Fixture {
             let pulls = JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls
+            if Check.Text(State["mode"]) == "pr_fail_after_create" {
+                Save()
+                throw Exception("Synthetic lost PR response")
+            }
             return Answer(body)
         }
         throw Exception("Unhandled fixture API: " + path)
     }
 
     internal func Run(name string, args[]string) int32 {
+        for key in[]string{
+            "OPENAI_API_KEY",
+            "UNRELATED_DONOR_VALUE",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0"
+        } {
+            Check.That(
+                Environment.GetEnvironmentVariable(key) == nil,
+                "Unrelated host value reached " + name + ": " + key
+            )
+        }
         if name.StartsWith("codex") {
             return Codex(args)
         }
@@ -310,7 +398,59 @@ internal class Fixture {
                     command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)
                 }
             }
+            let push = command.IndexOf("push")
+            if push >= 0 {
+                Check.That(
+                    File.Exists(
+                        Path.Combine(Path.GetDirectoryName(Directory.GetCurrentDirectory()) ?? "", "publication.json")
+                    ),
+                    "Publication content must be saved before push"
+                )
+                for key in[]string{
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "GH_CONFIG_DIR",
+                    "XDG_CONFIG_HOME",
+                    "DBUS_SESSION_BUS_ADDRESS",
+                    "XDG_RUNTIME_DIR"
+                } {
+                    if let value = Environment.GetEnvironmentVariable(key) {
+                        Env[key] = value
+                    }
+                }
+                let credential = command.GetRange(0, push)
+                credential.AddRange([]string{"credential", "fill"})
+                Check.Contains(
+                    Check.Success(
+                        Check.Run("/usr/bin/git", credential.ToArray(), Env, "protocol=https\nhost=github.com\n\n")
+                    ),
+                    "password=synthetic-gh-credential"
+                )
+                if Check.Text(State["mode"]) == "push_fail" {
+                    Console.Error.WriteLine("Synthetic push failure: synthetic-raw-push-secret")
+                    return 1
+                }
+            } else {
+                for key in[]string{
+                    "GH_TOKEN",
+                    "GITHUB_TOKEN",
+                    "GH_CONFIG_DIR",
+                    "CODEX_HOME",
+                    "DBUS_SESSION_BUS_ADDRESS"
+                } {
+                    Check.That(
+                        Environment.GetEnvironmentVariable(key) == nil,
+                        "Authentication reached local Git: " + key
+                    )
+                }
+            }
             let result = Check.Run("/usr/bin/git", command.ToArray(), Env)
+            if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_after_push" {
+                let latest = Check.Json(File.ReadAllText(StatePath))
+                let issue = latest["issue"] ?? throw Exception("Missing issue")
+                issue["labels"] = JsonArray()
+                File.WriteAllText(StatePath, latest.ToJsonString())
+            }
             Console.Write(result.Output)
             Console.Error.Write(result.Error)
             return result.Code

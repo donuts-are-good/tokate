@@ -85,7 +85,7 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
-`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, agent events, report, verification results, patch, PR body, and check results. Keep these files private and inspect logs before sharing them.
+`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. Failed or interrupted runs requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 
@@ -114,7 +114,7 @@ Tokate applies these gates:
 3. Require a completed agent turn, a report, and a nonempty patch.
 4. Run every owner verification command separately. A failure prevents PR creation even if the agent claims success.
 5. Reject changes to `.github/workflows/` and Tokate policy, approval, and template files.
-6. Open a draft PR with acceptance-criteria reporting, actual verification commands, limitations, and a run receipt.
+6. Open a draft PR from approved public task/template data, a generated check-count summary, bounded donor-reported usage, and a minimal approval/head receipt. Raw agent reports and execution/verification output remain local. Owner review assesses acceptance criteria and limitations.
 7. Require all named GitHub checks to pass for the exact PR commit. Missing, pending, cancelled, and skipped required checks never count as success.
 8. Leave acceptance and merging to the owner.
 
@@ -137,7 +137,7 @@ the limits of the current implementation.
 
 Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 
-Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, the checkout, and private temporary storage allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. Bubblewrap gives each managed invocation a fresh private `/tmp`, including runtime IPC paths that ignore `TMPDIR`. Shared host temporary files are not mounted into that storage. A preflight probes read denial and temporary writes before starting inference. Repositories with `global.json` also receive a system .NET/MSBuild startup check. This does not verify dependency restore or model availability. Unsupported sandbox configurations fail closed.
+Every host command starts with only explicit environment requirements. Codex receives `PATH`, `HOME`, `LANG`, and optional `CODEX_HOME`, without GitHub/API-key credentials. GitHub CLI commands and Git push receive narrowly selected GitHub authentication and Linux keyring variables; local Git and other tools receive only the base requirements. See the exact lists in [transparency.md](transparency.md#authentication-and-process-environments). User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, the checkout, and private temporary storage allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. Bubblewrap gives each managed invocation a fresh private `/tmp`, including runtime IPC paths that ignore `TMPDIR`. Shared host temporary files are not mounted into that storage. A preflight probes read denial and temporary writes before starting inference. Repositories with `global.json` also receive a system .NET/MSBuild startup check. This does not verify dependency restore or model availability. Unsupported Tokate-launched sandbox configurations fail closed. External execution is not sandboxed by Tokate.
 
 Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata and a separate fresh private `/tmp`. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex, bubblewrap and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
@@ -163,6 +163,8 @@ The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter,
 builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end
 harness against the actual binary. It uses two simulated GitHub identities, real
 local Git repositories, and deterministic Codex and release-download fixtures.
-Tests cover contribution boundaries and install/update/removal without running
+Tests use synthetic values for process environments, tool-owned authentication,
+repository/output boundaries, cleanup, revocation, publication failures and
+recovery, and install/update/removal without running
 inference, downloading a release, or modifying GitHub. No external test framework
 or Python runtime is required.

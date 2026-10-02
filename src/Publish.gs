@@ -9,19 +9,39 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
-        internal func VerificationReport(run Data) string {
-            var report = ""
+        internal func VerificationReport(run Data, record JsonElement) string {
             let checks = J.Items(J.Get(run.Element(), "verification"))
-            if checks.Count == 0 {
+            let commands = J.Items(J.Get(J.Get(record, "policy"), "verification"))
+            if checks.Count == 0 || checks.Count != commands.Count {
                 throw Exception("Missing independent verification results")
             }
-            for check in checks {
-                if J.Number(check, "exit_code") != 0 {
+            for i in 0 ... checks.Count {
+                var code int32
+                let check = checks[i]
+                if !J.Get(check, "exit_code").TryGetInt32(out code) || code != 0 || J.Write(
+                    J.Get(check, "command")
+                ) != J.Write(commands[i]) {
                     throw Exception("Owner verification did not pass")
                 }
-                report += "- Passed: `" + J.Write(J.Get(check, "command")) + "`\n"
             }
-            return report
+            return "Generated a patch for the approved issue. Independent owner verification: " +
+                checks
+                .Count
+                .ToString() + "/" + checks.Count.ToString() +
+                " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+        }
+
+        internal func Usage(run Data) string {
+            let usage = J.Get(run.Element(), "usage")
+            let counts = Dictionary[string, Object?]()
+            for key in[]string{"input_tokens", "cached_input_tokens", "output_tokens"} {
+                let item = J.Get(usage, key)
+                var count int64
+                if item.ValueKind == JsonValueKind.Number && item.TryGetInt64(out count) && count >= 0 {
+                    counts[key] = count
+                }
+            }
+            return J.Write(counts)
         }
 
         internal func Find(run Data) JsonElement {
@@ -89,27 +109,9 @@ internal class Publication {
             ) != "" {
                 throw Exception("Saved commit or checkout changed")
             }
-            let remote = GitHub.Api("repos/" + run.Text("head_repo") + "/git/ref/heads/" + run.Text("branch"))
-            let sha = J.Text(J.Get(remote, "object"), "sha")
-            if sha != run.Text("base") && sha != run.Text("commit") {
-                throw Exception("Remote claim changed. Refusing to overwrite it")
-            }
-            Commands.Git(
-                checkout,
-                "-c",
-                "credential.helper=",
-                "-c",
-                "credential.helper=!gh auth git-credential",
-                "push",
-                "https://github.com/" + run.Text("head_repo") + ".git",
-                "HEAD:refs/heads/" + run.Text("branch")
-            )
-            Workflow.Recheck(run)
             let receipt = J.Map(
                 "version",
                 1,
-                "run",
-                run.Text("id"),
                 "repo",
                 run.Text("repo"),
                 "issue",
@@ -133,40 +135,51 @@ internal class Publication {
             )
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            values["report"] = File.ReadAllText(Path.Combine(directory, "report.md")).Replace(
-                "<!-- tokate-",
-                "&lt;!-- tokate-"
-            ) +
-                "\n\n### Independent owner checks\n\n" +
-                VerificationReport(run)
+            values["report"] = VerificationReport(run, record)
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
             values["seconds"] = run.Number("elapsed_seconds").ToString()
             values["base"] = run.Text("base")
             values["policy"] = run.Text("policy_hash")
-            values["usage"] = J.Write(J.Get(run.Element(), "usage"))
+            values["usage"] = Usage(run)
             values["receipt"] = marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
             var body = J.Text(record, "template")
             body = Regex.Replace(body, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
             File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
-            let pull = GitHub.Api(
-                "repos/" + run.Text("repo") + "/pulls",
-                J.Map(
-                    "title",
-                    J.Text(J.Get(record, "issue"), "title"),
-                    "body",
-                    body,
-                    "head",
-                    run.Text("donor") + ":" + run.Text("branch"),
-                    "base",
-                    run.Text("base_branch"),
-                    "draft",
-                    true,
-                    "maintainer_can_modify",
-                    true
-                )
+            let publication = J.Map(
+                "title",
+                J.Text(J.Get(record, "issue"), "title"),
+                "body",
+                body,
+                "head",
+                run.Text("donor") + ":" + run.Text("branch"),
+                "base",
+                run.Text("base_branch"),
+                "draft",
+                true,
+                "maintainer_can_modify",
+                true
             )
+            File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(publication) + "\n")
+            Terminal.Message("Publication content: " + Path.Combine(directory, "publication.json"))
+            let remote = GitHub.Api("repos/" + run.Text("head_repo") + "/git/ref/heads/" + run.Text("branch"))
+            let sha = J.Text(J.Get(remote, "object"), "sha")
+            if sha != run.Text("base") && sha != run.Text("commit") {
+                throw Exception("Remote claim changed. Refusing to overwrite it")
+            }
+            Commands.Git(
+                checkout,
+                "-c",
+                "credential.helper=",
+                "-c",
+                "credential.helper=!gh auth git-credential",
+                "push",
+                "https://github.com/" + run.Text("head_repo") + ".git",
+                "HEAD:refs/heads/" + run.Text("branch")
+            )
+            Workflow.Recheck(run)
+            let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
             SavePr(directory, run, pull)
         }
 
@@ -263,7 +276,8 @@ internal class Publication {
                         run.Text("repo"),
                         "--json",
                         "name,state,bucket,link,workflow"
-                    }
+                    },
+                    github: true
                 )
                 var rows = J.Parse("[]")
                 if result.Output.Trim().StartsWith("[") {

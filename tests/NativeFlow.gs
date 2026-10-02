@@ -23,8 +23,21 @@ internal class NativeFlow : IDisposable {
         }
         Directory.CreateSymbolicLink(Path.Combine(Bin, "alias"), Bin)
         File.CreateSymbolicLink(Path.Combine(Bin, "codex"), Path.Combine(Bin, "alias/codex-impl"))
-        Temp.Env["GH_TOKEN"] = "fixture-secret"
-        Temp.Env["OPENAI_API_KEY"] = "fixture-secret"
+        Temp.Env["GH_TOKEN"] = "fixture-donor"
+        Temp.Env["GITHUB_TOKEN"] = "fixture-secondary"
+        Temp.Env["OPENAI_API_KEY"] = "synthetic-unrelated-secret"
+        Temp.Env["UNRELATED_DONOR_VALUE"] = "synthetic-unrelated-secret"
+        Temp.Env["GIT_CONFIG_COUNT"] = "1"
+        Temp.Env["GIT_CONFIG_KEY_0"] = "core.hooksPath"
+        Temp.Env["GIT_CONFIG_VALUE_0"] = "synthetic-untrusted-hooks"
+        Temp.Env["CODEX_HOME"] = Path.Combine(Temp.Root, "codex-home")
+        Temp.Env["GH_CONFIG_DIR"] = Path.Combine(Temp.Root, "gh-home")
+        Temp.Env["XDG_CONFIG_HOME"] = Path.Combine(Temp.Root, "config-home")
+        Temp.Env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/synthetic/keyring-bus"
+        Temp.Env["XDG_RUNTIME_DIR"] = Path.Combine(Temp.Root, "runtime")
+        Directory.CreateDirectory(Temp.Env["CODEX_HOME"])
+        Directory.CreateDirectory(Temp.Env["GH_CONFIG_DIR"])
+        File.WriteAllText(Path.Combine(Temp.Env["CODEX_HOME"], "identity"), "ChatGPT synthetic login")
         Save()
     }
 
@@ -47,7 +60,13 @@ internal class NativeFlow : IDisposable {
         State = Check.Json(File.ReadAllText(Path.Combine(Bin, "state.json")))
     }
 
-    internal func Git(args ...string) string -> Check.Success(Check.Run("/usr/bin/git", args, Temp.Env))
+    internal func Git(args ...string) string {
+        let env = Dictionary[string, string](Temp.Env)
+        for key in[]string{"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"} {
+            env.Remove(key)
+        }
+        return Check.Success(Check.Run("/usr/bin/git", args, env))
+    }
 
     internal func Commit(message string) {
         Git("-C", Upstream, "add", ".")
@@ -56,7 +75,10 @@ internal class NativeFlow : IDisposable {
 
     internal func Call(args[]string, code int32 = 0, owner bool = false) Result {
         let env = Dictionary[string, string](Temp.Env)
-        env["FIXTURE_ACTOR"] = owner ? "owner": "donor"
+        if env.ContainsKey("GH_TOKEN") {
+            env["GH_TOKEN"] = owner ? "fixture-owner": "fixture-donor"
+        }
+        File.WriteAllText(Path.Combine(Temp.Env["GH_CONFIG_DIR"], "identity"), owner ? "owner": "donor")
         let result = Check.Run(Binary, args, env)
         Check.That(
             result.Code == code,
@@ -402,6 +424,128 @@ internal class NativeFlow : IDisposable {
         }
     }
 
+    internal func PublicContent(run string) {
+        Reload()
+        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "publication.json")))
+        let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
+        Check.That(Check.Text(saved["body"]) == body, "Saved publication body differs")
+        Check.Contains(body, "Independent owner verification: 1/1 checks passed")
+        Check.Contains(body, "input_tokens")
+        for value in[]string{
+            "synthetic-raw",
+            "synthetic-usage-secret",
+            "synthetic-repository-secret",
+            Temp.Root,
+            "cached_input_tokens",
+            "extra"
+        } {
+            Check.That(!saved.ToJsonString().Contains(value), "Local data reached publication: " + value)
+        }
+        if State["pulls"] != nil {
+            Check.That(Check.Text(State["pulls"]?[0]?["body"]) == body, "PR differs from inspectable publication")
+        }
+        Check.Contains(File.ReadAllText(Path.Combine(run, "report.md")), "synthetic-raw-report-secret")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "synthetic-raw-event-secret")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-raw-stderr-secret")
+    }
+
+    internal func OutputBoundary() {
+        File.WriteAllText(Path.Combine(Upstream, ".env"), "synthetic-repository-secret")
+        File.WriteAllText(Path.Combine(Upstream, "ordinary.data"), "synthetic-repository-secret")
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let policy = Check.Json(File.ReadAllText(path))
+        policy["verification"] = Check.Json(
+            "[[\"/bin/sh\",\"-c\",\"test -f result.txt && test -z \\\"$$GH_TOKEN$$CODEX_HOME$$UNRELATED_DONOR_VALUE$$OPENAI_API_KEY\\\" && printf synthetic-raw-verification-secret && printf synthetic-raw-verification-error >&2\"]]"
+        )
+        File.WriteAllText(path, policy.ToJsonString())
+        Commit("Synthetic repository/output boundary")
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+        Approve()
+        let run = Claim()
+        Mode("output_boundary")
+        Call([]string{"work", "--run", run})
+        PublicContent(run)
+        let verification = File.ReadAllText(Path.Combine(run, "verification.json"))
+        Check.Contains(verification, "synthetic-raw-verification-secret")
+        Check.Contains(verification, "synthetic-raw-verification-error")
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+    }
+
+    internal func ToolAuthentication() {
+        Temp.Env.Remove("GH_TOKEN")
+        Temp.Env.Remove("GITHUB_TOKEN")
+        State["stored_login"] = JsonValue.Create(true)
+        Save()
+        Approve()
+        let run = Claim()
+        Call([]string{"work", "--run", run})
+        Reload()
+        Check.That(Check.Text(State["helper_used"]) == "true", "Git did not use GitHub CLI authentication")
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+    }
+
+    internal func PublicationFailures() {
+        for mode in[]string{"push_fail", "pr_fail", "pr_fail_after_create"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode(mode)
+            flow.Call([]string{"work", "--run", run}, 1)
+            let failed = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(Check.Text(failed["state"]) == "generated", "Publication failure discarded generated work")
+            flow.PublicContent(run)
+            if mode != "pr_fail_after_create" {
+                flow.NoPr()
+            }
+            flow.Mode("")
+            flow.Call([]string{"publish", "--run", run})
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Publication retry ran inference")
+            Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Retry duplicated PR")
+            let published = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(published["commit"]) == Check.Text(failed["commit"]),
+                "Publication retry changed commit"
+            )
+            flow.PublicContent(run)
+        }
+    }
+
+    internal func PublicationRevocation() {
+        Approve()
+        let run = Claim()
+        Mode("revoke_after_push")
+        Call([]string{"work", "--run", run}, 1)
+        NoPr()
+        PublicContent(run)
+        Call([]string{"publish", "--run", run}, 1)
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Revocation ran extra inference")
+    }
+
+    internal func BackgroundCleanup() {
+        Approve()
+        let run = Claim()
+        Mode("background")
+        Call([]string{"work", "--run", run})
+        let pid = File.ReadAllText(Path.Combine(Bin, "child.pid"))
+        let status = "/proc/" + pid + "/stat"
+        Check.That(
+            !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
+            "Descendant survived normal completion"
+        )
+    }
+
+    internal func UnsupportedSandbox() {
+        Approve()
+        let run = Claim()
+        Mode("unsupported_sandbox")
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Sandbox preflight failed")
+        NoInference()
+        NoPr()
+    }
+
     shared {
         internal func All(binary string) {
             for name in[]string{
@@ -423,7 +567,13 @@ internal class NativeFlow : IDisposable {
                 "RepositoryConfig",
                 "NoPatch",
                 "TemporaryIsolation",
-                "TemporaryHomeRejected"
+                "TemporaryHomeRejected",
+                "OutputBoundary",
+                "ToolAuthentication",
+                "PublicationFailures",
+                "PublicationRevocation",
+                "BackgroundCleanup",
+                "UnsupportedSandbox"
             } {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
@@ -484,6 +634,24 @@ internal class NativeFlow : IDisposable {
                     }
                     case "TemporaryHomeRejected" {
                         flow.TemporaryHomeRejected()
+                    }
+                    case "OutputBoundary" {
+                        flow.OutputBoundary()
+                    }
+                    case "ToolAuthentication" {
+                        flow.ToolAuthentication()
+                    }
+                    case "PublicationFailures" {
+                        flow.PublicationFailures()
+                    }
+                    case "PublicationRevocation" {
+                        flow.PublicationRevocation()
+                    }
+                    case "BackgroundCleanup" {
+                        flow.BackgroundCleanup()
+                    }
+                    case "UnsupportedSandbox" {
+                        flow.UnsupportedSandbox()
                     }
                     default {
                         throw Exception("Unknown test: " + name)

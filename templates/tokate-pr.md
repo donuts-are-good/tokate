@@ -1,6 +1,6 @@
 Fixes #{{issue}}
 
-## Changes and verification
+## Task and independent verification
 
 {{report}}
 
@@ -9,13 +9,13 @@ Fixes #{{issue}}
 | Field | Value |
 | --- | --- |
 | Donor | @{{donor}} |
-| Model | `{{model}}` |
+| Selected model (donor-reported) | `{{model}}` |
 | Reasoning effort | `{{effort}}` |
 | Runtime | {{seconds}} seconds |
 | Base commit | `{{base}}` |
 | Policy digest | `{{policy}}` |
-| Usage reported by Codex | {{usage}} |
+| Token counts (donor-reported) | {{usage}} |
 
-Agent results and model usage are donor-reported. GitHub checks and maintainer review determine acceptance. No automatic merge.
+Model selection and token counts are donor-reported. Raw agent reports and command output remain local. Review the patch against the approved issue; the generated check summary does not establish acceptance. GitHub checks and maintainer review determine acceptance. No automatic merge.
 
 {{receipt}}

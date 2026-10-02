@@ -142,7 +142,7 @@ internal class GitHub {
             if body != nil {
                 input = J.Write(body)
             }
-            let result = Commands.Run("gh", args.ToArray(), input: input)
+            let result = Commands.Run("gh", args.ToArray(), input: input, github: true)
             if result.Code != 0 {
                 if missing && result.Error.Contains("HTTP 404") {
                     return JsonElement{}

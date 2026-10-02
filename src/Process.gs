@@ -41,7 +41,8 @@ internal class Commands {
             cwd string = "",
             input string? = nil,
             seconds int32 = 60,
-            clean bool = false
+            harness bool = false,
+            github bool = false
         ) CommandResult {
             let info = ProcessStartInfo("setsid")
             info.ArgumentList.Add(exe)
@@ -55,18 +56,26 @@ internal class Commands {
             for arg in args {
                 info.ArgumentList.Add(arg)
             }
-            if clean {
-                info.Environment.Clear()
-                for key in[]string{"PATH", "HOME", "USER", "LANG", "CODEX_HOME", "DOTNET_ROOT"} {
-                    if let value = Environment.GetEnvironmentVariable(key) {
-                        info.Environment[key] = value
-                    }
-                }
+            info.Environment.Clear()
+            let requirements = List[string]{"PATH", "HOME", "LANG"}
+            if harness {
+                requirements.Add("CODEX_HOME")
             }
-            let inherited = List[string](info.Environment.Keys)
-            for key in inherited {
-                if key.StartsWith("GIT_") {
-                    info.Environment.Remove(key)
+            if github {
+                requirements.AddRange(
+                    []string{
+                        "GH_TOKEN",
+                        "GITHUB_TOKEN",
+                        "GH_CONFIG_DIR",
+                        "XDG_CONFIG_HOME",
+                        "DBUS_SESSION_BUS_ADDRESS",
+                        "XDG_RUNTIME_DIR"
+                    }
+                )
+            }
+            for key in requirements {
+                if let value = Environment.GetEnvironmentVariable(key) {
+                    info.Environment[key] = value
                 }
             }
             info.Environment["GH_HOST"] = "github.com"
@@ -110,9 +119,11 @@ internal class Commands {
             args[]string,
             cwd string = "",
             input string? = nil,
-            seconds int32 = 60
+            seconds int32 = 60,
+            harness bool = false,
+            github bool = false
         ) string {
-            let result = Run(exe, args, cwd, input, seconds)
+            let result = Run(exe, args, cwd, input, seconds, harness, github)
             if result.Code != 0 {
                 throw Exception(exe + " failed: " + result.Error + result.Output)
             }
@@ -131,7 +142,12 @@ internal class Commands {
                 "protocol.ext.allow=never"
             }
             all.AddRange(args)
-            return Checked("git", all.ToArray(), cwd)
+            return Checked(
+                "git",
+                all.ToArray(),
+                cwd,
+                github: Array.IndexOf(args, "credential.helper=!gh auth git-credential") >= 0
+            )
         }
     }
 }

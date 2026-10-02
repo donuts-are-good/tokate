@@ -50,20 +50,41 @@ delegates authentication to `gh auth git-credential`. Codex authenticates its ow
 inference requests. Tokate does not copy credentials into task prompts, receipts,
 or a shared account.
 
-There are distinct process boundaries:
+Tokate clears each host command's child environment and copies only explicit
+requirements using individual environment-variable lookups. It does not inspect
+authentication files, mixed settings, `.env` files, or environment dumps to
+infer harness defaults. Donors choose model and effort explicitly.
 
-| Process | Current environment behavior |
+| Process | Inherited requirements |
 | --- | --- |
-| Codex login check, execution, and sandbox invocations | Starts with `PATH`, `HOME`, `USER`, `LANG`, `CODEX_HOME`, and `DOTNET_ROOT` when present, plus Tokate's Git/GitHub process controls |
-| Agent shell commands | Configured with no inherited environment and a fixed system `PATH`, scratch `HOME`, and scratch `TMPDIR` |
-| Owner verification commands | Uses `env -i` with the same system path and scratch directories |
-| Other host commands, including Git/GitHub and version checks | Inherit the parent environment, with `GIT_*` variables removed and Tokate's process controls added |
+| Ordinary host commands, including local Git and tool version checks | `PATH`, `HOME`, `LANG` |
+| Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
+| GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
+| Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
+| Owner verification commands | `env -i` with the same system path and scratch directories |
 
-The last row is a real limitation: host subprocesses can receive sensitive
-environment variables already present in the caller's environment. The process
-helper also accesses the inherited environment to construct child environments.
-The current implementation must not be described as never handling any sensitive
-environment data. It does not intentionally dump the environment to a log.
+`PATH` selects installed trusted tools, `HOME` locates tool-owned authentication,
+and `LANG` supplies locale. `CODEX_HOME` preserves an explicitly selected native
+harness home. GitHub token variables and configuration paths preserve GitHub
+CLI authentication; the D-Bus address and runtime directory preserve its Linux
+keyring interface. These GitHub requirements reach Git push so its existing
+GitHub credential helper can authenticate. They do not reach local Git or Codex.
+Codex API-key variables are not passed; Tokate requires its ChatGPT login.
+
+All host commands also receive fixed Git/GitHub controls: `GH_HOST=github.com`,
+`GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`, and
+`GIT_CONFIG_GLOBAL=/dev/null`. Other caller values, including inherited `GIT_*`
+configuration, proxy settings, debug flags, and loader variables, are omitted.
+Custom proxy, certificate, or home-directory toolchain setups may consequently
+need a supported system installation; Tokate does not discover additional
+requirements from private configuration or provide arbitrary passthrough.
+
+The trusted tool processes can still access their own host files and
+configuration. Narrow environments do not isolate the complete harness or
+make installed executables safe. Token values necessarily reach the GitHub
+CLI and its host-side Git publishing helper, and Tokate handles those narrowly
+selected environment values while launching them. They are not intentionally
+logged or copied into prompts or public metadata.
 
 The sandbox restricts repository commands, not the trusted harness host process
 that authenticates inference. Installed executables remain trusted code.
@@ -73,7 +94,11 @@ a bubblewrap mount namespace with a fresh private `/tmp`. Run directories,
 harness homes and tools located under host `/tmp` are rejected before inference.
 They cannot be restored without exposing shared temporary data or compromising
 the filesystem boundary.
-The wrapper does not copy credentials. The harness still owns authentication.
+The wrapper preserves the narrowly selected harness authentication environment.
+The harness still owns access to authentication storage.
+Tokate-launched runs fail closed when their managed sandbox preflight or
+configuration is unsupported. Work executed outside this path is not sandboxed
+by Tokate and must not be represented as such.
 Private `/tmp` contents disappear with the namespace and do not carry over from
 agent execution to verification. Scratch files inside the checkout remain local
 run artifacts. The namespace is not whole-harness data isolation: the trusted
@@ -89,23 +114,49 @@ own saved run artifacts. It does not directly open `.env` files or credential
 stores to discover settings. However, the checkout is readable by the agent and
 verification commands. There is no blanket `.env` filename exclusion within that
 checkout. Do not interpret the discovery behavior as a guarantee that repository
-content cannot contain or expose a secret.
+content cannot contain or expose a secret. Neutral filenames can contain the
+same sensitive values as `.env` files. Filename refusals protect Tokate control
+files and unsupported repository Codex configuration; they do not prove secrecy.
+Do not place private donor files in a checkout intended for inference or review.
 
 Runs are stored under `~/.local/state/tokate/runs/`, or the selected `--runs`
 directory. Artifacts include run metadata, the checkout, agent events, stderr,
-the final report, verification output, the patch, PR body, and check results.
+the final report, verification output, the patch, PR body, publication request,
+and check results.
 These files persist for inspection and recovery. There is no automatic expiry or
 general secret scrubber. Raw tool output can contain sensitive content if a tool
 prints it. Command errors can also appear in terminal output.
 
 - GitHub receives coordination records, branch commits, and the draft PR.
-  The PR template includes the agent report, verification command names, and
-  receipt/usage metadata. Changes to tracked content become part of the PR.
+  The PR title comes from the approved public issue title, and its body comes
+  from the approved public repository template with generated substitutions.
+  `report` contains a fixed patch/review statement and the number of independent
+  owner checks passed, not agent text, command arguments, or check output.
+  Other substitutions contain the issue number, donor login, selected model and
+  effort, elapsed seconds, base commit, policy digest, and only nonnegative
+  integer `input_tokens`, `cached_input_tokens`, and `output_tokens` when supplied.
+  Usage and model selection remain donor-reported, not independently attested.
+  The receipt contains only version, repository, issue, donor, approval revision,
+  head commit, model, effort, time budget, network choice, and policy digest for
+  current approval/head validation. A separate run-ID marker supports publication
+  recovery. No local filesystem paths are generated into the PR text.
+  Branch names, Git commit contents, the approved issue title as commit message,
+  and donor noreply commit identity are also public. Changes to tracked content
+  and newly staged files become part of the PR and still require owner review.
 - Codex receives the approved issue and accesses the checkout to perform the
   task. Inference sends task context through the donor's Codex service. A local
   CLI does not mean local inference or that repository content stays offline.
-- Raw local event and verification logs are not separately uploaded by Tokate's
-  publishing path. Reports and patches can nevertheless reproduce their content.
+- Raw agent reports, event logs, stderr, verification output, arbitrary usage
+  fields, and publication errors stay in local artifacts or terminal output.
+  Publication does not read the raw report or copy these outputs into the PR.
+  `pr-body.md` and `publication.json` save the generated body and exact PR-create
+  request before Git push or PR creation. Inspect them together with
+  `changes.patch` and the checkout; they also remain available after a publication
+  failure. Existing `work` still publishes automatically, with no additional
+  approval prompt. `publish --run DIR` regenerates content and retries publication
+  without inference; editing these saved previews does not change the generated
+  request. Repository changes or an approved public template can nevertheless
+  contain or reproduce sensitive content. There is no general secret scrubber.
 - Agent command network access requires both owner policy and donor opt-in.
   Harness inference connectivity is separate. With command network access enabled,
   repository commands can contact additional destinations.
@@ -133,8 +184,9 @@ No recognized credential values were identified in that review. It does not
 cover deleted or edited prior material, all historical binaries and deployments,
 arbitrary encodings, donor home credential stores, or private configuration and
 `.env` files; it does not establish an absolute absence of secrets. The
-environment inheritance and raw output limitations described above remain;
-runtime data boundaries are tracked in [#17](https://github.com/obselate/tokate/issues/17).
+harness, repository-content, local raw output, and external-service limitations
+described above remain; runtime data boundaries are tracked in
+[#17](https://github.com/obselate/tokate/issues/17).
 Historical contact details are not reproduced here; their follow-up is tracked
 in [#36](https://github.com/obselate/tokate/issues/36). An exposed credential would
 require private revocation/rotation and removal coordination; deleting it from
