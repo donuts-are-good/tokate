@@ -6,9 +6,7 @@
 <link rel="stylesheet" href="../site/style.css" />
 <style>
 body { width: 1200px; height: 630px; overflow: hidden; background: #f3e7d4 url(../site/assets/backdrop.webp) center / cover; }
-header { position: absolute; inset: 20px 40px auto; padding: 0; z-index: 4; }
-.wordmark { font-size: 48px; gap: 9px; }
-.wordmark img { width: 44px; height: 44px; }
+header { position: absolute; inset: 20px 40px auto; min-height: 48px; padding: 0; justify-content: flex-end; z-index: 4; }
 .address { color: var(--ink); font-size: 28px; }
 main { padding-top: 95px; }
 .heavens { height: 300px; }
@@ -19,7 +17,7 @@ main > p { margin: 0; font-size: 25px; text-align: center; color: var(--muted); 
 </style>
 </head>
 <body>
-<header><div class="wordmark"><img src="../site/assets/mark.svg" alt="" />tokate</div><span class="address">tokate.dev</span></header>
+<header><span class="address">tokate.dev</span></header>
 <main><div class="heavens">
                     <button
                         class="sun art-ready"
