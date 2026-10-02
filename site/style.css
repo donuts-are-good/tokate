@@ -359,22 +359,12 @@ h1 em {
 .steps {
     max-width: 1050px;
     margin: 8px auto 0;
-    padding: 42px 26px 36px;
-    border-top: 1px solid var(--line);
-    scroll-margin-top: 30px;
-}
-.section-heading {
-    text-align: center;
-    margin-bottom: 44px;
-}
-.section-heading h2 {
-    font-size: 42px;
-    margin: 0 0 12px;
-}
-.step-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 30px;
+    padding: 30px 26px 33px;
+    gap: 24px;
+    border-top: 1px solid var(--line);
+    scroll-margin-top: 30px;
 }
 .steps article {
     display: flex;
@@ -400,9 +390,7 @@ h2 {
     font-family: var(--display);
     font-weight: 500;
 }
-.steps h3 {
-    font-family: var(--display);
-    font-weight: 500;
+.steps h2 {
     font-size: 23px;
     margin: 2px 0 10px;
     line-height: 1;
@@ -412,20 +400,6 @@ h2 {
     color: var(--muted);
     line-height: 1.4;
     margin: 0;
-}
-.steps article p + p {
-    margin-top: 14px;
-}
-.workflow-note {
-    text-align: center;
-    margin-top: 34px;
-}
-.workflow-note a {
-    display: inline-block;
-    margin-top: 14px;
-    color: var(--rust);
-    text-decoration: underline;
-    text-underline-offset: 4px;
 }
 .commons {
     display: inline-flex;
@@ -727,13 +701,7 @@ body.modal-open {
         padding-left: 0;
         padding-right: 0;
     }
-    .step-grid {
-        grid-template-columns: 1fr;
-        gap: 30px;
-        max-width: 600px;
-        margin-inline: auto;
-    }
-    .steps h3 {
+    .steps h2 {
         font-size: 21px;
     }
     .steps p {
@@ -767,9 +735,6 @@ body.modal-open {
     nav {
         gap: 18px;
         font-size: 18px;
-    }
-    nav a:first-child {
-        display: none;
     }
     .heavens {
         height: 265px;
@@ -829,16 +794,16 @@ body.modal-open {
         padding: 15px 23px;
     }
     .steps {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
         margin: 0 8%;
         padding: 27px 0;
-    }
-    .section-heading {
-        margin-bottom: 34px;
     }
     .steps article {
         gap: 16px;
     }
-    .steps h3 {
+    .steps h2 {
         font-size: 23px;
         margin-bottom: 7px;
     }

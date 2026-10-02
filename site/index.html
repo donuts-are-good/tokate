@@ -14,6 +14,11 @@
                 document.documentElement.dataset.theme =
                     localStorage.getItem("tokate-theme") || "light";
             } catch {}
+            if (location.hash === "#how-it-works") {
+                history.replaceState(null, "", location.pathname + location.search);
+                history.scrollRestoration = "manual";
+                window.scrollTo(0, 0);
+            }
         </script>
         <link rel="icon" href="assets/mark.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="style.css" />
@@ -58,8 +63,7 @@
                 >tokate</a
             >
             <nav aria-label="Main navigation">
-                <a href="#how-it-works">How it works</a
-                ><a
+                <a
                     href="https://github.com/obselate/tokate/blob/main/README.md"
                     >Guide</a
                 ><a href="https://github.com/obselate/tokate"
@@ -232,64 +236,29 @@
             </section>
             <section
                 class="steps"
-                id="how-it-works"
-                aria-labelledby="how-title"
+                aria-label="How Tokate works"
             >
-                <div class="section-heading">
-                    <h2 id="how-title">How it works</h2>
-                    <p>From an approved issue to a contribution you can review</p>
-                </div>
-                <div class="step-grid">
-                    <article>
-                        <span class="number">1</span>
-                        <div>
-                            <h3>Choose a task</h3>
-                            <p>
-                                The owner picks a GitHub issue, sets a time budget
-                                and checks, then approves a donor
-                            </p>
-                            <p>
-                                The donor knows the scope before spending compute
-                            </p>
-                        </div>
-                    </article>
-                    <article>
-                        <span class="number">2</span>
-                        <div>
-                            <h3>Run it locally</h3>
-                            <p>
-                                The donor runs Tokate with their own Codex account
-                                and the project’s build tools
-                            </p>
-                            <p>
-                                The AI works in a separate checkout on the donor’s
-                                machine
-                            </p>
-                        </div>
-                    </article>
-                    <article>
-                        <span class="number">3</span>
-                        <div>
-                            <h3>Review the result</h3>
-                            <p>
-                                Tokate runs the checks and opens a draft pull
-                                request when they pass
-                            </p>
-                            <p>
-                                The owner reviews the changes and decides what to
-                                merge
-                            </p>
-                        </div>
-                    </article>
-                </div>
-                <div class="workflow-note">
-                    <p>
-                        Your accounts stay yours, and the owner keeps the final say
-                    </p>
-                    <a href="https://github.com/obselate/tokate/blob/main/README.md"
-                        >Read the setup guide <span aria-hidden="true">↗</span></a
-                    >
-                </div>
+                <article>
+                    <span class="number">1</span>
+                    <div>
+                        <h2>Choose a task</h2>
+                        <p>The owner approves an issue</p>
+                    </div>
+                </article>
+                <article>
+                    <span class="number">2</span>
+                    <div>
+                        <h2>Give some compute</h2>
+                        <p>A donor’s AI works on it</p>
+                    </div>
+                </article>
+                <article>
+                    <span class="number">3</span>
+                    <div>
+                        <h2>Make it better</h2>
+                        <p>Checks run, then the owner reviews the PR</p>
+                    </div>
+                </article>
             </section>
         </main>
         <footer>
