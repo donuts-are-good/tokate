@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Tokate social card</title>
+<link rel="stylesheet" href="../site/style.css" />
+<style>
+body { width: 1200px; height: 630px; overflow: hidden; background: #f3e7d4 url(../site/assets/backdrop.webp) center / cover; }
+header { position: absolute; inset: 20px 40px auto; padding: 0; z-index: 4; }
+.wordmark { font-size: 48px; gap: 9px; }
+.wordmark img { width: 44px; height: 44px; }
+.address { color: var(--muted); font-size: 20px; }
+main { padding-top: 95px; }
+.heavens { height: 300px; }
+.sun { width: 300px; height: 300px; top: 0; animation: none; }
+.hands { top: -270px; animation: none; }
+h1 { margin: 12px 0 18px; font-size: 72px; line-height: .95; text-align: center; }
+main > p { margin: 0; font-size: 25px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+<header><div class="wordmark"><img src="../site/assets/mark.svg" alt="" />tokate</div><span class="address">tokate.dev</span></header>
+<main><div class="heavens">
+                    <button
+                        class="sun art-ready"
+                        type="button"
+                        aria-label="Daylight"
+                        aria-pressed="true"
+                        data-theme="light"
+                    >
+                        <img
+                            src="../site/assets/sun.webp"
+                            alt=""
+                            fetchpriority="high"
+                            draggable="false"
+                        />
+                        <svg class="eyes" viewBox="0 0 1254 1254" aria-hidden="true">
+                            <defs>
+                                <clipPath id="left-eye">
+                                    <path
+                                        d="M430 548C452 536 478 514 505 514C532 514 554 533 568 557C542 582 516 592 489 583C465 575 447 558 430 548"
+                                    />
+                                </clipPath>
+                                <clipPath id="right-eye">
+                                    <path
+                                        d="M684 557C698 533 721 514 748 513C776 512 800 531 823 543C804 562 782 582 756 586C729 590 703 578 684 557"
+                                    />
+                                </clipPath>
+                                <radialGradient
+                                    id="eye-white"
+                                    cx=".5"
+                                    cy=".75"
+                                    r=".8"
+                                >
+                                    <stop stop-color="#e1c58d" />
+                                    <stop offset=".65" stop-color="#c6a466" />
+                                    <stop offset="1" stop-color="#96703a" />
+                                </radialGradient>
+                                <radialGradient id="iris">
+                                    <stop stop-color="#654b2d" />
+                                    <stop offset=".6" stop-color="#936939" />
+                                    <stop offset="1" stop-color="#674c2c" />
+                                </radialGradient>
+                                <filter id="eye-grain" x="0" y="0" width="100%" height="100%">
+                                    <feTurbulence type="fractalNoise" baseFrequency=".16" numOctaves="3" seed="7" result="grain" />
+                                    <feColorMatrix type="matrix" values=".3 .3 .3 0 .55 .3 .3 .3 0 .55 .3 .3 .3 0 .55 0 0 0 0 1" />
+                                    <feBlend in2="SourceGraphic" mode="multiply" />
+                                    <feComposite in2="SourceGraphic" operator="in" />
+                                    <feDisplacementMap in2="grain" scale="1.2" xChannelSelector="R" yChannelSelector="G" />
+                                </filter>
+                            </defs>
+                            <g class="eye eye-left">
+                                <path
+                                    class="white" filter="url(#eye-grain)"
+                                    d="M430 548C452 536 478 514 505 514C532 514 554 533 568 557C542 582 516 592 489 583C465 575 447 558 430 548"
+                                />
+                                <g clip-path="url(#left-eye)">
+                                    <g class="pupil" filter="url(#eye-grain)">
+                                        <circle
+                                            cx="501"
+                                            cy="560"
+                                            r="21"
+                                            fill="url(#iris)"
+                                        />
+                                        <circle
+                                            cx="501"
+                                            cy="560"
+                                            r="9"
+                                            fill="#503a26"
+                                        />
+                                        <circle
+                                            cx="496"
+                                            cy="555"
+                                            r="3"
+                                            fill="#ebd5a7"
+                                            opacity=".8"
+                                        />
+                                    </g>
+                                </g>
+                                <path
+                                    class="lid"
+                                    d="M430 548C452 536 478 514 505 514C532 514 554 533 568 557"
+                                />
+                            </g>
+                            <g class="eye eye-right">
+                                <path
+                                    class="white" filter="url(#eye-grain)"
+                                    d="M684 557C698 533 721 514 748 513C776 512 800 531 823 543C804 562 782 582 756 586C729 590 703 578 684 557"
+                                />
+                                <g clip-path="url(#right-eye)">
+                                    <g class="pupil" filter="url(#eye-grain)">
+                                        <circle
+                                            cx="748"
+                                            cy="560"
+                                            r="21"
+                                            fill="url(#iris)"
+                                        />
+                                        <circle
+                                            cx="748"
+                                            cy="560"
+                                            r="9"
+                                            fill="#503a26"
+                                        />
+                                        <circle
+                                            cx="743"
+                                            cy="555"
+                                            r="3"
+                                            fill="#ebd5a7"
+                                            opacity=".8"
+                                        />
+                                    </g>
+                                </g>
+                                <path
+                                    class="lid"
+                                    d="M684 557C698 533 721 514 748 513C776 512 800 531 823 543"
+                                />
+                            </g>
+                        </svg>
+                    </button>
+<img class="hands hand-left" src="../site/assets/hands-smooth.webp" alt="" />
+<img class="hands hand-right" src="../site/assets/hands-smooth.webp" alt="" />
+</div><h1>Give your compute<br /><em>a purpose</em></h1>
+<p>Put your spare AI usage to work for open source.</p>
+</main>
+</body>
+</html>
