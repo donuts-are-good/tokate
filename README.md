@@ -21,7 +21,7 @@ curl -qfsSL https://tokate.dev/install.sh | sh
 Installs for your user and sets up PATH. Open a new terminal if prompted.
 Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved work.
 
-Supports **Linux x64 (glibc 2.34+) and public GitHub repositories**. Donor execution uses the native Codex CLI with a ChatGPT login. See [installation details](docs/reference.md#installation).
+The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. The initial observed systems are Ubuntu 24.04 x86_64 CI and a CachyOS rolling x86_64 host; the glibc minimum does not establish support for every distribution. ARM64, musl, Windows, and macOS are not supported. Donor execution uses the native Codex CLI with a ChatGPT login. See the [validation matrix and limits](docs/reference.md#linux-compatibility).
 
 ## For Owners:
 

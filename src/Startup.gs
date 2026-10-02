@@ -157,9 +157,12 @@ internal class Startup {
             }
             if canProbe {
                 try {
-                    Worker.Doctor()
+                    let pinned = Worker.Doctor()
                     sandbox.Status = "ready"
                     sandbox.Detail = "Checkout and private /tmp writable. Control files and Git metadata unreadable."
+                    if pinned {
+                        sandbox.Detail += " Repository global.json SDK/MSBuild starts inside the sandbox."
+                    }
                 } catch (error Exception) {
                     sandbox.Status = "failed"
                     sandbox.Detail = error.Message

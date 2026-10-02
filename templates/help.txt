@@ -25,7 +25,7 @@ Review:
   tokate checks --repo OWNER/REPO --pr N [--watch] [--timeout 1200]
   tokate checks --run DIR [--watch] [--timeout 1200]
 
-Requires Linux, git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
+Requires Linux x86_64 (glibc 2.34+), git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
 profiles. Sign in with gh auth login and codex login. Create your fork with
  gh repo fork OWNER/REPO --clone=false
 

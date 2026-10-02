@@ -62,7 +62,8 @@ main() {
     tokate_action=${1:-install}
     case "$tokate_action" in install|update|uninstall) ;; *) fail 'Use install, update, or uninstall.' ;; esac
     [ "$#" -le 2 ] || fail 'Too many arguments.'
-    [ "$(uname -s)" = Linux ] || fail 'This installer currently supports Linux only.'
+    tokate_os=$(uname -s)
+    [ "$tokate_os" = Linux ] || fail "Unsupported operating system: $tokate_os. Tokate requires Linux x86_64 with glibc 2.34+; Windows and macOS are not supported."
     [ -n "${HOME:-}" ] && [ "${HOME#/}" != "$HOME" ] || fail 'HOME must be an absolute path.'
     tokate_shell=${SHELL:-/bin/sh}
     tokate_bin="$HOME/.local/bin/tokate"
@@ -82,13 +83,20 @@ main() {
         printf 'Tokate removed. Saved runs and shell setup markers were kept.\n'
         return
     fi
-    [ "$(uname -m)" = x86_64 ] || fail 'This release supports Linux x64 only.'
-    tokate_libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail 'Tokate requires glibc 2.34 or newer.'
+    tokate_arch=$(uname -m)
+    [ "$tokate_arch" = x86_64 ] || fail "Unsupported architecture: $tokate_arch. Install on Linux x86_64; ARM64 is not supported."
+    tokate_libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail 'Cannot detect glibc. Tokate requires Linux x86_64 with glibc 2.34+; musl is not supported.'
+    case "$tokate_libc" in
+        'glibc '*) ;;
+        *) fail "Unsupported libc: $tokate_libc. Tokate requires glibc 2.34+; musl is not supported." ;;
+    esac
     tokate_libc=${tokate_libc#glibc }
     tokate_major=${tokate_libc%%.*}
     tokate_minor=${tokate_libc#*.}
     tokate_minor=${tokate_minor%%.*}
-    [ "$tokate_major" -gt 2 ] || { [ "$tokate_major" -eq 2 ] && [ "$tokate_minor" -ge 34 ]; } || fail 'Tokate requires glibc 2.34 or newer.'
+    case "$tokate_major" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
+    case "$tokate_minor" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
+    [ "$tokate_major" -gt 2 ] || { [ "$tokate_major" -eq 2 ] && [ "$tokate_minor" -ge 34 ]; } || fail "Unsupported glibc version: $tokate_libc. Use a system with glibc 2.34 or newer. Existing installation was kept."
     for tokate_tool in curl tar sha256sum mktemp install; do
         command -v "$tokate_tool" >/dev/null 2>&1 || fail "Install $tokate_tool first."
     done

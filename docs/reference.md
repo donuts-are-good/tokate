@@ -8,8 +8,13 @@
 curl -qfsSL https://tokate.dev/install.sh | sh
 ```
 
-The installer supports Linux x64 with glibc 2.34 or newer. It needs `curl`, `tar`,
-and standard system tools including `sha256sum`. It does not need GitHub CLI,
+The binary requires Linux x86_64 with glibc 2.34 or newer. Installation and update refuse
+other operating systems, architectures, missing/non-glibc libc, and older glibc
+before downloading or changing an installation. ARM64, musl, Windows, and macOS
+are not supported. The minimum is a binary requirement, not evidence that every
+Linux distribution works; see [Linux compatibility](#linux-compatibility).
+The installer needs `curl`, `tar`, and standard system tools including
+`sha256sum`. It does not need GitHub CLI,
 Codex, Python, or a .NET runtime. It never uses sudo.
 
 It resolves the latest stable GitHub release, downloads the archive and SHA-256
@@ -75,7 +80,7 @@ Review:
   tokate checks --repo OWNER/REPO --pr N [--watch] [--timeout 1200]
   tokate checks --run DIR [--watch] [--timeout 1200]
 
-Requires Linux, git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
+Requires Linux x86_64 (glibc 2.34+), git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
 profiles. Sign in with gh auth login and codex login. Create your fork with
  gh repo fork OWNER/REPO --clone=false
 
@@ -91,7 +96,15 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 
-Startup checks warn about missing tools. Owner commands work without Codex. `doctor` checks all tools and probes the sandbox, but does not test authentication, model access, or repository build dependencies. `NO_COLOR` disables styling. Redirected output is plain, and `policy` and `status` output JSON when piped.
+Startup checks warn about missing tools. Owner commands work without Codex.
+`doctor` checks all tools and probes the real managed sandbox without login or
+inference. Run it from the repository root: when that directory contains
+`global.json`, the same probe also starts .NET/MSBuild using that file's SDK
+selection rules. Linked `global.json` files are refused. Install the required SDK in a standard system path; a
+home-directory SDK is unavailable inside the sandbox. This checks SDK startup,
+not dependency restore, the build, authentication, or model access. `NO_COLOR`
+disables styling. Redirected output is plain, and `policy` and `status` output
+JSON when piped.
 
 Managed run directories, harness homes and tool installations must be outside
 `/tmp`, which is replaced with private temporary storage. The default run
@@ -102,6 +115,40 @@ The operating system must permit bubblewrap to create user namespaces. On
 Ubuntu 24.04, an administrator may need to enable an AppArmor profile for
 bubblewrap as described in the [Ubuntu release notes](https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890).
 Run `doctor` after setup. Tokate does not change system security settings.
+
+## Linux compatibility
+
+The current NativeAOT binary requires symbols through `GLIBC_2.34`. The initial
+observed matrix is deliberately small:
+
+| System | Installation, update, removal | Real managed isolation probe |
+| --- | --- | --- |
+| Ubuntu 24.04 x86_64 CI | Passed with the actual binary and controlled release-download fixtures | Native Codex 0.160.0 passed in [run 37044046383](https://github.com/obselate/tokate/actions/runs/37044046383), with the CI bubblewrap user-namespace profile |
+| CachyOS rolling x86_64 host, glibc 2.44, system .NET 10.0.401 | Same repository suite passed with the actual binary and controlled release-download fixtures | Native Codex 0.160.0 real probe passed, including the repository's pinned SDK/MSBuild startup |
+
+For each matrix system, run `bash scripts/verify.sh` for the actual binary's
+install/update/offline-removal lifecycle and refusal/preservation checks, then
+`artifacts/linux-x64/tokate doctor` from the repository root with checksum-pinned
+native Codex 0.160.0 available on PATH. These are separate checks: download and
+Codex fixtures do not establish OS isolation. The real probe checks control-file
+and Git metadata read denial, checkout and private `/tmp` writes, and now the
+repository's `global.json` SDK/MSBuild startup. Earlier observations do not prove
+this added SDK check on every matrix system; the real doctor result must pass
+for the revision being validated.
+
+No other distribution is claimed as tested. These observations do not establish
+end-to-end inference on Ubuntu, all-distribution compatibility, or support for
+every kernel/security policy. ARM64, musl, Windows, and macOS remain separate
+decisions. Codex's own `linux-musl` download name does not imply musl support for
+Tokate's glibc-linked binary.
+
+Blocked user namespaces, denied namespace/mount operations, incompatible native
+Codex permission profiles, and missing/inaccessible system SDKs are unsupported
+execution configurations. Preserve the failing `doctor` output and record the
+system, kernel/security configuration, Codex version, and SDK version for review.
+Do not disable confinement, expose home tools/caches, or relax filesystem policy
+to make a probe pass. An administrator must assess prerequisites; rerun `doctor`
+after an approved environment fix before donating usage.
 
 ## Quality and review
 
@@ -145,7 +192,8 @@ Process groups are killed on timeout, cancellation, and normal completion to cle
 
 ## Build from source
 
-Requires .NET 10 and a NativeAOT toolchain (Clang and zlib development headers).
+Requires the .NET SDK selected by `global.json` (currently 10.0.401, with roll
+forward disabled) and a NativeAOT toolchain (Clang and zlib development headers).
 
 ```sh
 dotnet restore Tokate.gsproj --locked-mode
@@ -168,3 +216,5 @@ repository/output boundaries, cleanup, revocation, publication failures and
 recovery, and install/update/removal without running
 inference, downloading a release, or modifying GitHub. No external test framework
 or Python runtime is required.
+The real native Codex `doctor` probe is a separate required matrix check; passing
+this fixture suite alone does not prove OS isolation.

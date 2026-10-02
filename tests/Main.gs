@@ -10,6 +10,9 @@ func Main(args[]string) int32 {
             return Installer.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
+        if name == "uname" || name == "getconf" {
+            return Installer.PlatformFixture(name, args, Path.GetDirectoryName(exe) ?? "")
+        }
         if name == "git" || name == "gh" || name.StartsWith("codex") {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
@@ -28,6 +31,8 @@ func Main(args[]string) int32 {
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
         Installer.RefuseInvalidPath(project)
         Console.WriteLine("PASS installer rejects symlink and directory replacement")
+        Installer.RefuseUnsupportedPlatform(project, binary)
+        Console.WriteLine("PASS unsupported architecture/libc refusal preserves installations and permits removal")
         return 0
     } catch (error Exception) {
         Console.Error.WriteLine(error.ToString())

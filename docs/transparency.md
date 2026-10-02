@@ -14,7 +14,11 @@ effort explicitly.
   listed in `PATH`. It checks file existence and executable permissions. It does
   not recursively search the home directory or open harness configuration files.
 - `tokate doctor` invokes `--version` on discovered tools and runs a local
-  sandbox probe. It does not run inference or check authentication.
+  real sandbox probe. From a repository root containing `global.json`, it copies
+  that file into the probe checkout and starts the selected system .NET
+  SDK/MSBuild under the same filesystem policy. It does not run inference, check
+  authentication, or validate dependency restore/build success. See the
+  [observed Linux matrix and limits](reference.md#linux-compatibility).
 - Starting work invokes `codex login status` and checks the output for a ChatGPT
   login. Codex handles access to its own authentication storage. Tokate does not
   open that storage or request the credential value.

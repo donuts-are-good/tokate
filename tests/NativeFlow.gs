@@ -175,6 +175,39 @@ internal class NativeFlow : IDisposable {
         )
     }
 
+    internal func DoctorToolchain() {
+        let env = Dictionary[string, string](Temp.Env)
+        let global = Path.Combine(Upstream, "global.json")
+        File.Copy(Path.Combine(Directory.GetCurrentDirectory(), "global.json"), global)
+        let ready = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
+        Check.Success(ready)
+        Check.Contains(ready.Output, "Repository global.json SDK/MSBuild starts inside the sandbox")
+        File.WriteAllText(global, "{\"sdk\":{\"version\":\"99.0.100\",\"rollForward\":\"disable\"}}")
+        let missing = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
+        Check.That(missing.Code == 1, "Doctor accepted unavailable pinned SDK")
+        Check.Contains(missing.Output, "sandbox: failed")
+        Check.Contains(missing.Output, "99.0.100")
+        Check.Contains(missing.Output, "standard system path")
+        File.Delete(global)
+        let unpinned = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
+        Check.Success(unpinned)
+        Check.Contains(unpinned.Output, "sandbox: ready")
+        Check.That(!unpinned.Output.Contains("Repository global.json"), "Doctor claimed an absent SDK pin")
+        let outside = Path.Combine(Temp.Root, "outside-global.json")
+        File.Copy(Path.Combine(Directory.GetCurrentDirectory(), "global.json"), outside)
+        File.CreateSymbolicLink(global, outside)
+        for dangling in[]bool{false, true} {
+            if dangling {
+                File.Delete(outside)
+            }
+            let linked = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
+            Check.That(linked.Code == 1, "Doctor accepted a linked SDK file")
+            Check.Contains(linked.Output, "not a symbolic link")
+        }
+        File.Delete(global)
+        NoInference()
+    }
+
     internal func CrossAccountFlow() {
         Approve()
         let run = Claim()
@@ -566,6 +599,7 @@ internal class NativeFlow : IDisposable {
             for name in[]string{
                 "HelpAndArguments",
                 "MissingTools",
+                "DoctorToolchain",
                 "OwnerWithoutCodex",
                 "CrossAccountFlow",
                 "OwnerPolicy",
@@ -600,6 +634,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "MissingTools" {
                         flow.MissingTools()
+                    }
+                    case "DoctorToolchain" {
+                        flow.DoctorToolchain()
                     }
                     case "OwnerWithoutCodex" {
                         flow.OwnerWithoutCodex()

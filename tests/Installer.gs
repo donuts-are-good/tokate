@@ -10,6 +10,22 @@ internal class Installer {
         internal func Hash(path string) string -> Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))
             .ToLowerInvariant()
 
+        internal func PlatformFixture(name string, args[]string, root string) int32 {
+            let state = Check.Json(File.ReadAllText(Path.Combine(root, "platform.json")))
+            if name == "uname" {
+                Check.That(args.Length == 1 && (args[0] == "-s" || args[0] == "-m"), "Unexpected uname arguments")
+                Console.WriteLine(Check.Text(state[args[0] == "-s" ? "os": "arch"]))
+                return 0
+            }
+            Check.That(args.Length == 1 && args[0] == "GNU_LIBC_VERSION", "Unexpected getconf arguments")
+            let libc = Check.Text(state["libc"])
+            if libc == "" {
+                return 1
+            }
+            Console.WriteLine(libc)
+            return 0
+        }
+
         internal func Fixture(args[]string, root string) int32 {
             let statePath = Path.Combine(root, "state.json")
             let state = Check.Json(File.ReadAllText(statePath))
@@ -139,6 +155,82 @@ internal class Installer {
                 Directory.GetFileSystemEntries(destination).Length == 0,
                 "Installer wrote into a conflicting directory"
             )
+        }
+
+        internal func RefuseUnsupportedPlatform(project string, binary string) {
+            using let temp = Temp()
+            for name in[]string{"uname", "getconf"} {
+                temp.Tool(name)
+            }
+            let tools = Path.Combine(temp.Root, "bin")
+            let statePath = Path.Combine(tools, "platform.json")
+            let installed = Path.Combine(temp.Env["HOME"], ".local/bin/tokate")
+            let data = Path.Combine(temp.Env["HOME"], ".local/share/tokate")
+            let profile = Path.Combine(temp.Env["HOME"], ".bashrc")
+            let script = Path.Combine(project, "site/install.sh")
+            let cases = []string{
+                "aarch64",
+                "glibc 2.44",
+                "Unsupported architecture: aarch64",
+                "x86_64",
+                "glibc 2.33",
+                "Unsupported glibc version: 2.33",
+                "x86_64",
+                "",
+                "Cannot detect glibc",
+                "x86_64",
+                "musl 1.2.5",
+                "Unsupported libc: musl 1.2.5",
+                "x86_64",
+                "glibc unknown",
+                "Cannot parse glibc version"
+            }
+            for existing in[]bool{false, true} {
+                if existing {
+                    Directory.CreateDirectory(Path.GetDirectoryName(installed) ?? "")
+                    Directory.CreateDirectory(data)
+                    File.Copy(binary, installed)
+                    File.WriteAllText(Path.Combine(data, "installed"), "keep-marker")
+                    File.WriteAllText(Path.Combine(data, "env"), "keep-path")
+                    File.WriteAllText(profile, "keep-profile")
+                }
+                for i in 0 ... cases.Length / 3 {
+                    File.WriteAllText(
+                        statePath,
+                        Check.Map("os", "Linux", "arch", cases[i * 3], "libc", cases[i * 3 + 1]).ToJsonString()
+                    )
+                    for action in existing ? []string{"install", "update"}: []string{"install"} {
+                        let result = action == "update" ? Check.Run(installed, []string{"update"}, temp.Env): Check.Run(
+                            "/bin/sh",
+                            []string{script},
+                            temp.Env
+                        )
+                        Check.That(result.Code != 0, "Installer accepted unsupported platform: " + cases[i * 3 + 1])
+                        Check.Contains(result.Error, cases[i * 3 + 2])
+                        Check.That(!result.Output.Contains("Downloading"), "Unsupported platform reached downloads")
+                        if existing {
+                            Check.That(Hash(installed) == Hash(binary), "Platform refusal changed existing binary")
+                            Check.That(
+                                File.ReadAllText(Path.Combine(data, "installed")) == "keep-marker",
+                                "Install marker changed"
+                            )
+                            Check.That(
+                                File.ReadAllText(Path.Combine(data, "env")) == "keep-path",
+                                "PATH configuration changed"
+                            )
+                            Check.That(File.ReadAllText(profile) == "keep-profile", "Shell profile changed")
+                        } else {
+                            Check.That(
+                                !Directory.Exists(data) && !File.Exists(installed),
+                                "Platform refusal created installation"
+                            )
+                            Check.That(!File.Exists(profile), "Platform refusal created shell profile")
+                        }
+                    }
+                }
+            }
+            Check.Success(Check.Run(installed, []string{"uninstall"}, temp.Env))
+            Check.That(!File.Exists(installed), "Unsupported libc blocked offline removal")
         }
     }
 }

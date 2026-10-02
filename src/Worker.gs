@@ -100,22 +100,40 @@ internal class Worker {
             File.Delete(sentinel)
             if result.Code != 0 {
                 throw Exception(
-                    "Sandbox preflight failed. Check bubblewrap, Codex permission profiles, and system toolchain requirements: " +
+                    "Sandbox preflight failed. Check bubblewrap user namespaces, kernel/security policy, and native Codex permission profiles. If global.json is present, install its required .NET SDK in a standard system path; home-directory tools are unavailable: " +
                         result.Error +
                         result.Output
                 )
             }
         }
 
-        internal func Doctor() {
+        internal func Doctor() bool {
             let root = Path.Combine("/var/tmp", "tokate-doctor-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
-            let checkout = Path.Combine(root, "checkout")
-            Directory.CreateDirectory(Path.Combine(checkout, ".git"))
-            Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
-            File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
             try {
+                Directory.CreateDirectory(
+                    root,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                )
+            } catch (error Exception) {
+                throw Exception(
+                    "Cannot prepare the sandbox probe. Ensure /var/tmp exists and is writable: " + error.Message
+                )
+            }
+            let checkout = Path.Combine(root, "checkout")
+            try {
+                Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+                Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
+                File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
+                let global = Path.Combine(Directory.GetCurrentDirectory(), "global.json")
+                if FileInfo(global).LinkTarget != nil {
+                    throw Exception("Repository global.json must be a regular file, not a symbolic link.")
+                }
+                let pinned = File.Exists(global)
+                if pinned {
+                    File.Copy(global, Path.Combine(checkout, "global.json"))
+                }
                 Probe(root, checkout)
+                return pinned
             } finally {
                 Directory.Delete(root, true)
             }

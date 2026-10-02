@@ -74,7 +74,22 @@ internal class Fixture {
         if args[0] == "sandbox" {
             Check.That(Array.IndexOf(args, "permissions.tokate.network.enabled=false") >= 0, "Network must be disabled")
             if Array.IndexOf(args, "probe") >= 0 {
-                return Check.Text(State["mode"]) == "unsupported_sandbox" ? 1: 0
+                if Check.Text(State["mode"]) == "unsupported_sandbox" {
+                    return 1
+                }
+                let checkout = args[Array.IndexOf(args, "-C") + 1]
+                if File.Exists(Path.Combine(checkout, "global.json")) {
+                    let result = Check.Run(
+                        "/usr/bin/dotnet",
+                        []string{"msbuild", "-nologo", "-version"},
+                        Env,
+                        cwd: checkout
+                    )
+                    Console.Write(result.Output)
+                    Console.Error.Write(result.Error)
+                    return result.Code
+                }
+                return 0
             }
             if Array.IndexOf(args, "/usr/bin/env") >= 0 {
                 let command = List[string](args).GetRange(
