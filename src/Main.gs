@@ -9,10 +9,19 @@ func Main(args[]string) int32 {
         if !OperatingSystem.IsLinux() {
             throw Exception("This release supports Linux")
         }
+        if options.Command == "--version" {
+            options.Allow("")
+            Console.WriteLine("tokate " + Data.Version())
+            return 0
+        }
         if options.Get("help") == "true" || options.Command == "--help" || options.Command == "help" {
             Startup.Check("help")
             Terminal.Help()
             return 0
+        }
+        if options.Command == "update" || options.Command == "uninstall" {
+            options.Allow("")
+            return Installation.Run(options.Command)
         }
         if options.Command != "doctor" {
             Startup.Check(options.Command)
@@ -54,8 +63,6 @@ func Main(args[]string) int32 {
         } else if options.Command == "status" {
             options.Allow("run")
             Terminal.Json(Data.Load(Path.GetFullPath(options.Need("run"))).Element(), "Donor run")
-        } else if options.Command == "--version" {
-            Console.WriteLine("tokate " + Data.Version())
         } else {
             throw Exception("Unknown command. Run tokate --help")
         }

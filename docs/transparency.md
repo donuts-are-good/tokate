@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes the current Tokate 0.2.2 implementation and the agreed
+This document describes the current Tokate 0.2.3 implementation and the agreed
 requirements for future harness integrations. Planned behavior is not a claim
 about protection already provided by the released binary.
 
@@ -25,6 +25,24 @@ automatic import of model or effort defaults are not implemented.
   subcommand ignores all configuration or authentication storage.
 
 Source: [Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
+
+## Installer access
+
+The installer contacts public GitHub release URLs using curl with user curl
+configuration disabled. It downloads a release archive and checksum, extracts
+only the binary, verifies its version, and installs under `~/.local/bin`.
+It does not open credential stores or `.env` files. The shell bootstrap runs in
+the caller's process environment, so it is not an environment isolation boundary.
+The `update` and `uninstall` CLI commands launch the embedded installer with only
+`HOME`, `PATH`, `SHELL`, `LANG`, `ZDOTDIR`, `XDG_CONFIG_HOME`, and `TMPDIR` inherited.
+
+Shell setup appends a guarded PATH hook without reading existing shell startup
+contents. Installer-owned files under `~/.local/share/tokate` record setup state.
+Fish gets a dedicated configuration snippet. No shell configuration contents are
+uploaded. Uninstall preserves saved work and credentials. See
+[installation details](reference.md#installation) for retained setup markers.
+
+Source: [install.sh](../site/install.sh), [Installation.gs](../src/Installation.gs).
 
 ## Authentication and process environments
 

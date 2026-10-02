@@ -2,13 +2,58 @@
 
 [Back to the setup guide](../README.md)
 
+## Installation
+
+```sh
+curl -qfsSL https://tokate.dev/install.sh | sh
+```
+
+The installer supports Linux x64 with glibc 2.34 or newer. It needs `curl`, `tar`,
+and standard system tools including `sha256sum`. It does not need GitHub CLI,
+Codex, Python, or a .NET runtime. It never uses sudo.
+
+It resolves the latest stable GitHub release, downloads the archive and SHA-256
+checksum over HTTPS, verifies the archive, and checks the binary's version before
+replacing `~/.local/bin/tokate` atomically. Download or validation failures leave
+the existing binary in place. The checksum detects corruption, not compromise of
+the release account. [Read the installer](../site/install.sh) before running it
+if you prefer to inspect downloaded scripts.
+
+The installer sets up PATH for Bash, Zsh, and Fish. Bash/Zsh startup files receive
+an appended, guarded reference to `~/.local/share/tokate/env`. Existing startup
+contents are not read or rewritten. Fish uses its own `conf.d/tokate.fish` file.
+Other shells receive a `.profile` hook and may need shell-specific PATH setup.
+Open a new terminal when prompted. The installer also prints the absolute command
+path for use in the current terminal.
+
+```sh
+tokate update
+tokate uninstall
+```
+
+These commands work for installer-managed copies and do not require GitHub CLI
+or Codex. Update uses the same verified download flow. Uninstall works offline
+and removes the binary and active PATH configuration. It preserves saved runs,
+forks, credentials, and repository files. Guarded Bash/Zsh/profile hook lines and
+small setup markers remain so reinstalling does not duplicate them. The hooks do
+nothing while the managed environment file is absent. Run `hash -r` if Bash still
+remembers the removed executable in the current terminal.
+
+For manual installation, download and verify an archive from
+[Releases](https://github.com/obselate/tokate/releases), extract it, and put its
+`tokate` binary in a directory on PATH. Installer management commands do not
+manage arbitrary manual locations. Rerun the installer to adopt the standard
+user-local location.
+
 ## Commands and recovery
 
 ```text
-Tokate 0.2.2 (toh-KAH-teh)
+Tokate 0.2.3 (toh-KAH-teh)
 Donate compute to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
+  tokate update                           Install the latest stable release
+  tokate uninstall                        Remove Tokate, keep saved runs
 
 Owner:
   tokate init [--path DIR]                 Create policy and PR template

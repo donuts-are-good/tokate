@@ -14,18 +14,28 @@ Using a coding agent? Give it this prompt:
 
 ## Install Tokate
 
-Download the Linux x64 archive from [Releases](https://github.com/obselate/tokate/releases/latest), extract it, and open its folder. Then install:
+On Linux x64 with glibc 2.34 or newer:
 
 ```sh
-mkdir -p ~/.local/bin
-install -m 755 ./tokate ~/.local/bin/tokate
-export PATH="$HOME/.local/bin:$PATH"
-tokate --version
+curl -qfsSL https://tokate.dev/install.sh | sh
 ```
 
-Keep `~/.local/bin` in your shell's PATH. No .NET or Python runtime is needed. To build the binary yourself, see [Build from source](docs/reference.md#build-from-source).
+The installer verifies the release checksum, installs for your user without sudo,
+and sets up your shell's PATH. Open a new terminal if prompted. No .NET or Python
+runtime is needed.
 
-## I own the repository
+Update or remove it at any time:
+
+```sh
+tokate update
+tokate uninstall
+```
+
+Uninstall keeps your saved work. See [installation details](docs/reference.md#installation)
+for requirements, shell setup, and manual installation. Windows and macOS support
+will follow Linux.
+
+## For Owners:
 
 ### 1. Sign in to GitHub
 
@@ -84,7 +94,7 @@ tokate checks --repo OWNER/REPO --pr 43 --watch
 
 If CI is waiting for permission, review and [approve the fork workflow in GitHub](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks). Ensure CI runs on draft PRs. Review the diff and acceptance criteria, mark the PR ready, then merge it yourself. Tokate never merges.
 
-## I want to donate compute
+## For Donors:
 
 ### 1. Prepare your machine
 
