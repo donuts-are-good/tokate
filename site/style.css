@@ -117,8 +117,35 @@ nav {
     display: flex;
     gap: 34px;
     font-size: 21px;
-    align-items: baseline;
+    align-items: center;
     line-height: 1.2;
+}
+#theme-toggle {
+    display: grid;
+    place-items: center;
+    padding: 8px 0;
+    border: 0;
+    background: none;
+    color: var(--ink);
+}
+#theme-toggle:hover {
+    color: var(--rust);
+}
+#theme-toggle svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.theme-sun,
+:root[data-theme="dark"] .theme-moon {
+    display: none;
+}
+:root[data-theme="dark"] .theme-sun {
+    display: inline;
 }
 nav a {
     display: inline-flex;
@@ -544,7 +571,10 @@ dialog li:before {
     text-align: center;
 }
 .agent-help .button {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     font-size: 21px;
     min-width: 0;
     min-height: 80px;
@@ -553,15 +583,23 @@ dialog li:before {
     background-size: 100% auto;
     margin-inline: auto;
 }
-#copy-status {
+.copy-check {
+    display: none;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.copied .copy-check {
     display: block;
-    min-height: 20px;
-    margin-top: 9px;
-    color: var(--sage);
-    font-size: 15px;
 }
 .guide-link {
     display: block;
+    margin-top: 12px;
     text-align: center;
     font-family: var(--display);
     font-size: 19px;
@@ -705,7 +743,7 @@ body.modal-open {
         padding: 22px 6% 8px;
     }
     .wordmark {
-        font-size: 38px;
+        font-size: 30px;
         gap: 6px;
     }
     .wordmark svg {
@@ -713,8 +751,8 @@ body.modal-open {
         height: 36px;
     }
     nav {
-        gap: 18px;
-        font-size: 18px;
+        gap: 10px;
+        font-size: 16px;
     }
     .heavens {
         height: 265px;

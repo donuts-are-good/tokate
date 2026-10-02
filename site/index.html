@@ -66,7 +66,17 @@
                 <a
                     href="https://github.com/obselate/tokate/blob/main/README.md"
                     >Guide</a
-                ><a href="https://github.com/obselate/tokate"
+                >
+                <button id="theme-toggle" type="button" aria-label="Switch to moonlight" title="Switch to moonlight">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path class="theme-moon" d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" />
+                        <g class="theme-sun">
+                            <circle cx="12" cy="12" r="4" />
+                            <path d="M12 1V4M12 20V23M1 12H4M20 12H23M4.2 4.2L6.3 6.3M17.7 17.7L19.8 19.8M4.2 19.8L6.3 17.7M17.7 6.3L19.8 4.2" />
+                        </g>
+                    </svg>
+                </button>
+                <a href="https://github.com/obselate/tokate"
                     >GitHub <span aria-hidden="true">↗</span></a
                 >
             </nav>
@@ -92,12 +102,12 @@
                             <defs>
                                 <clipPath id="left-eye">
                                     <path
-                                        d="M430 548C469 520 531 512 568 558C538 602 466 604 430 548"
+                                        d="M430 548C463 538 505 514 532 511C550 519 565 539 577 556C548 589 521 594 490 587C467 577 448 562 430 548"
                                     />
                                 </clipPath>
                                 <clipPath id="right-eye">
                                     <path
-                                        d="M684 557C716 516 779 510 823 543C796 600 724 606 684 557"
+                                        d="M682 560C687 536 702 521 725 515C757 502 793 520 826 533C803 548 788 570 770 583C740 595 710 584 682 560"
                                     />
                                 </clipPath>
                                 <radialGradient
@@ -119,7 +129,7 @@
                             <g class="eye eye-left">
                                 <path
                                     class="white"
-                                    d="M430 548C469 520 531 512 568 558C538 602 466 604 430 548"
+                                    d="M430 548C463 538 505 514 532 511C550 519 565 539 577 556C548 589 521 594 490 587C467 577 448 562 430 548"
                                 />
                                 <g clip-path="url(#left-eye)">
                                     <g class="pupil">
@@ -146,13 +156,13 @@
                                 </g>
                                 <path
                                     class="lid"
-                                    d="M430 548C469 520 531 512 568 558"
+                                    d="M430 548C463 538 505 514 532 511C550 519 565 539 577 556"
                                 />
                             </g>
                             <g class="eye eye-right">
                                 <path
                                     class="white"
-                                    d="M684 557C716 516 779 510 823 543C796 600 724 606 684 557"
+                                    d="M682 560C687 536 702 521 725 515C757 502 793 520 826 533C803 548 788 570 770 583C740 595 710 584 682 560"
                                 />
                                 <g clip-path="url(#right-eye)">
                                     <g class="pupil">
@@ -179,7 +189,7 @@
                                 </g>
                                 <path
                                     class="lid"
-                                    d="M684 557C716 516 779 510 823 543"
+                                    d="M682 560C687 536 702 521 725 515C757 502 793 520 826 533"
                                 />
                             </g>
                         </svg>
@@ -193,6 +203,31 @@
                         title="Switch to moonlight"
                     >
                         <img src="assets/moon.webp" alt="" draggable="false" />
+                        <svg class="eyes" viewBox="0 0 1254 1254" aria-hidden="true">
+                            <defs>
+                                <clipPath id="moon-eye">
+                                    <path d="M764 549C796 548 833 568 865 578C838 592 799 600 773 590C763 580 760 564 764 549" />
+                                </clipPath>
+                                <radialGradient id="moon-white" cx=".6" cy=".8" r=".9">
+                                    <stop stop-color="#e4d4ac" />
+                                    <stop offset=".65" stop-color="#cabb97" />
+                                    <stop offset="1" stop-color="#8b8874" />
+                                </radialGradient>
+                                <radialGradient id="moon-iris">
+                                    <stop stop-color="#485453" />
+                                    <stop offset=".65" stop-color="#79837a" />
+                                    <stop offset="1" stop-color="#535e5b" />
+                                </radialGradient>
+                            </defs>
+                            <g clip-path="url(#moon-eye)">
+                                <path fill="url(#moon-white)" d="M760 545H870V605H760Z" />
+                                <g class="pupil">
+                                    <ellipse cx="806" cy="573" rx="16" ry="23" fill="url(#moon-iris)" />
+                                    <ellipse cx="806" cy="571" rx="7" ry="12" fill="#384342" />
+                                    <circle cx="802" cy="563" r="3" fill="#f0e6cc" opacity=".8" />
+                                </g>
+                            </g>
+                        </svg>
                         <img class="moon-stars" src="assets/painted-stars.webp" alt="" draggable="false" />
                     </button>
                     <img
@@ -271,8 +306,9 @@
                 <div class="agent-help">
                     <p>Have a coding agent? Let it guide you</p>
                     <button class="button primary" id="copy-prompt">
-                        Copy setup prompt</button
-                    ><span id="copy-status" role="status"></span>
+                        <svg class="copy-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12L10 17L20 6" /></svg>
+                        <span id="copy-status" aria-live="polite" aria-atomic="true">Copy setup prompt</span>
+                    </button>
                 </div>
                 <a
                     class="guide-link"

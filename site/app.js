@@ -6,6 +6,9 @@ const pupils = document.querySelectorAll(".pupil");
 const rollHandle = document.querySelector(".roll-handle");
 const scrollContent = document.querySelector(".scroll-content");
 const themeButtons = document.querySelectorAll("button[data-theme]");
+const themeToggle = document.querySelector("#theme-toggle");
+const copyButton = document.querySelector("#copy-prompt");
+const copyStatus = document.querySelector("#copy-status");
 function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     themeButtons.forEach((button) =>
@@ -13,14 +16,20 @@ function setTheme(theme) {
     );
     document.querySelector('meta[name="theme-color"]').content =
         theme === "dark" ? "#23324b" : "#f3e7d4";
+    const label = theme === "dark" ? "Switch to daylight" : "Switch to moonlight";
+    themeToggle.setAttribute("aria-label", label);
+    themeToggle.title = label;
+    try {
+        localStorage.setItem("tokate-theme", theme);
+    } catch {}
 }
 setTheme(document.documentElement.dataset.theme || "light");
+themeToggle.addEventListener("click", () =>
+    setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"),
+);
 for (const button of themeButtons) {
     button.addEventListener("click", () => {
         setTheme(button.dataset.theme);
-        try {
-            localStorage.setItem("tokate-theme", button.dataset.theme);
-        } catch {}
     });
 }
 const roles = {
@@ -91,7 +100,8 @@ for (const button of document.querySelectorAll("[data-role]")) {
         );
         document.querySelector("#full-guide").href =
             `https://github.com/obselate/tokate/blob/main/README.md#${role.anchor}`;
-        document.querySelector("#copy-status").textContent = "";
+        copyStatus.textContent = "Copy setup prompt";
+        copyButton.classList.remove("copied");
         document.querySelector("#prompt-fallback").hidden = true;
         dialog.showModal();
         scrollContent.scrollTop = 0;
@@ -170,20 +180,20 @@ dialog.addEventListener("close", () => {
     document.body.classList.remove("modal-open");
     trigger?.focus();
 });
-document.querySelector("#copy-prompt").addEventListener("click", async () => {
+copyButton.addEventListener("click", async () => {
     const prompt = roles[selectedRole].prompt;
     try {
         await navigator.clipboard.writeText(prompt);
-        document.querySelector("#copy-status").textContent =
-            "Copied, paste it into your coding agent";
+        copyStatus.textContent = "Prompt copied";
+        copyButton.classList.add("copied");
     } catch {
         const fallback = document.querySelector("#prompt-fallback");
         fallback.hidden = false;
         fallback.value = prompt;
         fallback.focus();
         fallback.select();
-        document.querySelector("#copy-status").textContent =
-            "Select and copy the prompt below";
+        copyStatus.textContent = "Copy prompt below";
+        copyButton.classList.remove("copied");
     }
 });
 function animateEyes() {
