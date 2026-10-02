@@ -3,6 +3,8 @@ package TokateTests
 import System
 import System.Collections.Generic
 import System.IO
+import System.Net
+import System.Net.Sockets
 import System.Text.Json.Nodes
 
 internal class NativeFlow : IDisposable {
@@ -93,25 +95,31 @@ internal class NativeFlow : IDisposable {
         owner: true
     )
 
-    internal func Claim(seconds string = "30", model string = "gpt-6.1-sol", code int32 = 0) string {
-        let result = Call(
-            []string{
-                "claim",
-                "--repo",
-                "owner/project",
-                "--issue",
-                "1",
-                "--model",
-                model,
-                "--effort",
-                "high",
-                "--seconds",
-                seconds,
-                "--runs",
-                Path.Combine(Temp.Root, "runs")
-            },
-            code
-        )
+    internal func Claim(
+        seconds string = "30",
+        model string = "gpt-6.1-sol",
+        code int32 = 0,
+        network bool = false
+    ) string {
+        let args = List[string]{
+            "claim",
+            "--repo",
+            "owner/project",
+            "--issue",
+            "1",
+            "--model",
+            model,
+            "--effort",
+            "high",
+            "--seconds",
+            seconds,
+            "--runs",
+            Path.Combine(Temp.Root, "runs")
+        }
+        if network {
+            args.Add("--allow-network")
+        }
+        let result = Call(args.ToArray(), code)
         let index = result.Output.LastIndexOf("Run: ")
         return index < 0 ? "": result.Output.Substring(index + 5).Trim()
     }
@@ -594,6 +602,108 @@ internal class NativeFlow : IDisposable {
         NoPr()
     }
 
+    internal func VerificationPolicy(script string, network bool = false) {
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let policy = Check.Json(File.ReadAllText(path))
+        let command = JsonArray()
+        for word in[]string{"/bin/bash", "-c", script} {
+            command.Add(JsonValue.Create(word) as JsonNode)
+        }
+        let commands = JsonArray()
+        commands.Add(command as JsonNode)
+        policy["verification"] = commands
+        policy["allow_network"] = JsonValue.Create(network)
+        File.WriteAllText(path, policy.ToJsonString())
+        Commit("Verify real independent boundary")
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func VerificationBoundary() {
+        let temporary = Path.Combine("/tmp", Path.GetFileName(Temp.Root) + "-private")
+        let persistent = Path.Combine(Temp.Root, "private")
+        File.WriteAllText(temporary, "synthetic host tmp credential")
+        File.WriteAllText(persistent, "synthetic sibling contribution")
+        let socketPath = Path.Combine(Temp.Root, "private.socket")
+        using let socket = Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+        socket.Bind(UnixDomainSocketEndPoint(socketPath))
+        socket.Listen(1)
+        try {
+            let script = "set -eu\ntest -f result.txt\n" +
+                "test \"$$PATH\" = /usr/local/bin:/usr/bin:/bin\n" +
+                "test \"$$HOME\" = \"$$PWD/.tokate-scratch\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
+                "test -z \"$${GH_TOKEN-}$${GITHUB_TOKEN-}$${CODEX_HOME-}$${GH_CONFIG_DIR-}$${OPENAI_API_KEY-}$${UNRELATED_DONOR_VALUE-}$${DBUS_SESSION_BUS_ADDRESS-}$${XDG_RUNTIME_DIR-}$${GIT_CONFIG_COUNT-}\"\n" +
+                "for file in " +
+                temporary +
+                " " +
+                persistent +
+                " " +
+                socketPath +
+                " " +
+                Temp.Env["HOME"] +
+                " " +
+                Temp.Env["CODEX_HOME"] +
+                " " +
+                Temp.Env["GH_CONFIG_DIR"] +
+                " " +
+                Bin +
+                " ../run.json ../.lock ../events.jsonl ../stderr.log ../report.md /etc/passwd /etc/shadow /run /sys; do test ! -e \"$$file\"; done\n" +
+                "test ! -r outside-link\n" +
+                "test -z \"$$(tr '\\0' '\\n' < /proc/1/environ | /usr/bin/grep -E 'synthetic|tokate-e2e|CODEX_HOME|GH_TOKEN' || true)\"\n" +
+                "test \"$$(awk '/CapEff:/{print $$2}' /proc/self/status)\" = 0000000000000000\n" +
+                "for ns in pid user ipc uts mnt net; do test \"$$(readlink /proc/self/ns/$$ns)\" != \"$$(cat expected-$$ns-namespace)\"; done\n" +
+                "test -r .git/config && git status --porcelain | /usr/bin/grep result.txt\n" +
+                "if printf tampered >> .git/config; then exit 1; fi\n" +
+                "if rm .git/config; then exit 1; fi\n" +
+                "if mv .git .git-moved; then exit 1; fi\n" +
+                "if touch /usr/tokate-verification-write; then exit 1; fi\n" +
+                "touch /tmp/private /var/tmp/private \"$$TMPDIR/private\"\n" +
+                "bwrap --unshare-user --unshare-pid --ro-bind / / --tmpfs /tmp -- /bin/sh -c 'touch /tmp/nested-probe'\n" +
+                "printf verified-independent-boundary\n"
+            VerificationPolicy(script)
+            Approve()
+            let run = Claim()
+            Mode("verification_boundary")
+            Call([]string{"work", "--run", run})
+            Check.Contains(File.ReadAllText(Path.Combine(run, "verification.json")), "verified-independent-boundary")
+            Check.That(File.ReadAllText(temporary) == "synthetic host tmp credential", "Host tmp changed")
+            Check.That(File.ReadAllText(persistent) == "synthetic sibling contribution", "Sibling contribution changed")
+            Check.That(
+                (File.GetUnixFileMode(Path.Combine(Bin, "codex-impl")) & UnixFileMode.UserExecute) == 0,
+                "Fixture harness was not disabled"
+            )
+        } finally {
+            File.Delete(temporary)
+        }
+    }
+
+    internal func VerificationNetwork() {
+        let listener = TcpListener(IPAddress.Loopback, 0)
+        listener.Start()
+        try {
+            let port = (listener.LocalEndpoint as IPEndPoint)?.Port.ToString() ?? throw Exception("No listener port")
+            for mode in[]string{"owner-denied", "donor-denied", "allowed"} {
+                using let flow = NativeFlow(Binary)
+                flow.Initialize()
+                let connect = "exec 3<>/dev/tcp/127.0.0.1/" + port
+                let script = mode == "allowed" ? connect: "if " + connect + "; then exit 1; fi"
+                flow.VerificationPolicy(script, mode != "owner-denied")
+                flow.Approve()
+                if mode == "owner-denied" {
+                    flow.Claim(code: 1, network: true)
+                    flow.NoInference()
+                }
+                let run = flow.Claim(network: mode == "allowed")
+                flow.Call([]string{"work", "--run", run})
+                Check.That(listener.Pending() == (mode == "allowed"), "Unexpected verification network access: " + mode)
+                if listener.Pending() {
+                    using let client = listener.AcceptTcpClient()
+                }
+            }
+        } finally {
+            listener.Stop()
+        }
+    }
+
     shared {
         internal func All(binary string) {
             for name in[]string{
@@ -624,7 +734,9 @@ internal class NativeFlow : IDisposable {
                 "PublicationFailures",
                 "PublicationRevocation",
                 "BackgroundCleanup",
-                "UnsupportedSandbox"
+                "UnsupportedSandbox",
+                "VerificationBoundary",
+                "VerificationNetwork"
             } {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
@@ -712,6 +824,12 @@ internal class NativeFlow : IDisposable {
                     }
                     case "UnsupportedSandbox" {
                         flow.UnsupportedSandbox()
+                    }
+                    case "VerificationBoundary" {
+                        flow.VerificationBoundary()
+                    }
+                    case "VerificationNetwork" {
+                        flow.VerificationNetwork()
                     }
                     default {
                         throw Exception("Unknown test: " + name)

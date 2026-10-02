@@ -9,4 +9,8 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/Verification.gs" />
+    <Compile Include="../src/Process.gs" />
+  </ItemGroup>
 </Project>

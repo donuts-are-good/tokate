@@ -42,9 +42,10 @@ internal class Commands {
             input string? = nil,
             seconds int32 = 60,
             harness bool = false,
-            github bool = false
+            github bool = false,
+            isolated bool = false
         ) CommandResult {
-            let info = ProcessStartInfo("setsid")
+            let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
             info.UseShellExecute = false
             info.RedirectStandardOutput = true
@@ -74,9 +75,15 @@ internal class Commands {
                 )
             }
             for key in requirements {
+                if isolated {
+                    continue
+                }
                 if let value = Environment.GetEnvironmentVariable(key) {
                     info.Environment[key] = value
                 }
+            }
+            if isolated {
+                info.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin"
             }
             info.Environment["GH_HOST"] = "github.com"
             info.Environment["GH_PROMPT_DISABLED"] = "1"

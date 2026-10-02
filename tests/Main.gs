@@ -2,6 +2,7 @@ package TokateTests
 
 import System
 import System.IO
+import Tokate
 
 func Main(args[]string) int32 {
     try {
@@ -17,6 +18,12 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
+        if args.Length == 2 && args[0] == "--verify-checkout" {
+            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 180)
+            Console.Write(result.Output)
+            Console.Error.Write(result.Error)
+            return result.Code
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
@@ -27,6 +34,10 @@ func Main(args[]string) int32 {
             return 0
         }
         NativeFlow.All(binary)
+        VerificationChecks.Alternatives()
+        VerificationChecks.Layouts()
+        VerificationChecks.FailClosed()
+        VerificationChecks.Cleanup()
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
         Installer.RefuseInvalidPath(project)

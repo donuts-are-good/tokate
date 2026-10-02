@@ -91,19 +91,7 @@ internal class Fixture {
                 }
                 return 0
             }
-            if Array.IndexOf(args, "/usr/bin/env") >= 0 {
-                let command = List[string](args).GetRange(
-                    Array.IndexOf(args, "--") + 1,
-                    args.Length - Array.IndexOf(args, "--") - 1
-                )
-                let exe = command[0]
-                command.RemoveAt(0)
-                let result = Check.Run(exe, command.ToArray(), Env, cwd: args[Array.IndexOf(args, "-C") + 1])
-                Console.Write(result.Output)
-                Console.Error.Write(result.Error)
-                return result.Code
-            }
-            return 0
+            throw Exception("Only the unchanged managed preflight may use the fixture sandbox")
         }
         Check.That(args[0] == "exec", "Expected exec")
         Check.That(Environment.GetEnvironmentVariable("GH_TOKEN") == nil, "GitHub credential reached agent")
@@ -146,6 +134,15 @@ internal class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        if mode == "verification_boundary" {
+            File.CreateSymbolicLink(Path.Combine(checkout, "outside-link"), Path.Combine(Root, "state.json"))
+            for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
+                File.WriteAllText(
+                    Path.Combine(checkout, "expected-" + name + "-namespace"),
+                    FileInfo("/proc/self/ns/" + name).LinkTarget ?? throw Exception("Missing namespace")
+                )
+            }
+        }
         if mode == "verification_fail" {
             File.WriteAllText(Path.Combine(checkout, "other.txt"), "False success")
         } else if mode != "empty" {
@@ -170,6 +167,7 @@ internal class Fixture {
         Console.WriteLine(
             "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
         )
+        File.SetUnixFileMode(Path.Combine(Root, "codex-impl"), UnixFileMode.UserRead | UnixFileMode.UserWrite)
         return 0
     }
 

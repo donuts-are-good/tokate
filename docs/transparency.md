@@ -65,7 +65,7 @@ infer harness defaults. Donors choose model and effort explicitly.
 | Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
 | GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
-| Owner verification commands | `env -i` with the same system path and scratch directories |
+| Independent verification wrapper and owner commands | No inherited values; fixed system `PATH`, command scratch `HOME`/`TMPDIR`, and `LANG=C.UTF-8` |
 
 `PATH` selects installed trusted tools, `HOME` locates tool-owned authentication,
 and `LANG` supplies locale. `CODEX_HOME` preserves an explicitly selected native
@@ -93,8 +93,8 @@ logged or copied into prompts or public metadata.
 The sandbox restricts repository commands, not the trusted harness host process
 that authenticates inference. Installed executables remain trusted code.
 
-Managed Codex execution, sandbox probes and each verification command run inside
-a bubblewrap mount namespace with a fresh private `/tmp`. Run directories,
+Managed Codex execution and sandbox probes run inside a bubblewrap mount
+namespace with a fresh private `/tmp`. Run directories,
 harness homes and tools located under host `/tmp` are rejected before inference.
 They cannot be restored without exposing shared temporary data or compromising
 the filesystem boundary.
@@ -108,8 +108,29 @@ agent execution to verification. Scratch files inside the checkout remain local
 run artifacts. The namespace is not whole-harness data isolation: the trusted
 harness retains its host file access outside the private temporary directory.
 
+Independent owner verification directly invokes Linux bubblewrap and does not
+discover or launch Codex. Each command starts with an empty mount namespace:
+the canonical checkout is writable, its actual `.git` directory is read-only,
+and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
+`/etc/alternatives` are read-only when present.
+Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
+are mounted; host `/`, `/etc`, `/home`, `/run`, and `/var` are never mounted
+wholesale. Checkout/Git path symlinks, Git symlinks, alternate object stores,
+worktree Git files and linked scratch directories are refused before repository
+code runs. The verifier does not inspect credentials or configuration to infer
+additional mounts.
+
+Each verifier has private `/tmp`, `/var/tmp`, `/dev`, and PID/IPC/UTS/user
+namespaces, a fresh `/proc`, dropped capabilities and a clean environment.
+Host credentials, sibling checkouts, run control files, logs and sockets are
+outside its mounts. Network is isolated unless both owner policy and donor
+opt-in permit it. Commands share the remaining total runtime budget and process
+cleanup. Missing or unsupported bubblewrap fails closed without host execution.
+Nested sandbox probes remain permitted. This verifies a checkout; it makes no
+claim that coding work performed outside the managed path was sandboxed.
+
 Source: [Process.gs](../src/Process.gs), [Worker.gs](../src/Worker.gs),
-[Publish.gs](../src/Publish.gs).
+[Verification.gs](../src/Verification.gs), [Publish.gs](../src/Publish.gs).
 
 ## Files, logs, and network destinations
 

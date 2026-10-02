@@ -288,23 +288,16 @@ internal class Worker {
                     if remaining < 1 {
                         throw Exception("Runtime budget exhausted before verification")
                     }
-                    let verifyArgs = List[string]{"sandbox", "-P", "tokate", "--include-managed-config", "-C", checkout}
-                    Config(verifyArgs, "permissions.tokate.filesystem", Filesystem(checkout, true))
-                    Config(verifyArgs, "permissions.tokate.network.enabled", run.Flag("network") ? "true": "false")
-                    verifyArgs.AddRange(
-                        []string{
-                            "--",
-                            "/usr/bin/env",
-                            "-i",
-                            "PATH=/usr/local/bin:/usr/bin:/bin",
-                            "HOME=" + scratch,
-                            "TMPDIR=" + scratch
-                        }
-                    )
+                    let verifyArgs = List[string]()
                     for word in J.Items(command) {
                         verifyArgs.Add(word.GetString() ?? "")
                     }
-                    let check = Run(directory, verifyArgs.ToArray(), seconds: remaining)
+                    let check = Verification.Run(
+                        checkout,
+                        verifyArgs.ToArray(),
+                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                        remaining
+                    )
                     verification.Add(
                         J.Map("command", command, "exit_code", check.Code, "output", check.Output, "error", check.Error)
                     )
