@@ -452,6 +452,9 @@ dialog h2 {
     background: url(assets/mark.svg) center bottom / 18px 24px no-repeat;
 }
 dialog ol {
+    width: fit-content;
+    max-width: 100%;
+    margin-inline: auto;
     padding: 0 20px;
     list-style: none;
     counter-reset: step;
@@ -460,8 +463,6 @@ dialog li {
     counter-increment: step;
     display: flex;
     align-items: baseline;
-    justify-content: center;
-    text-align: center;
     gap: 16px;
     line-height: 1.4;
     margin: 16px 0;

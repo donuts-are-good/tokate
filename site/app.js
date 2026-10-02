@@ -130,7 +130,7 @@ dialog.addEventListener("click", (event) => {
             event.clientY < box.top ||
             event.clientY > box.bottom)
     )
-        dialog.close();
+        rollUp();
 });
 dialog.addEventListener("close", () => {
     clearTimeout(rollCloseTimer);
