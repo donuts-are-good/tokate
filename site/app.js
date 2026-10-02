@@ -6,25 +6,25 @@ const pupils = document.querySelectorAll(".pupil");
 const roles = {
     owner: {
         label: "For project owners",
-        title: "A little help for your project.",
+        title: "A little help for your project",
         steps: [
-            "Choose a small issue with a clear result.",
-            "Set your checks and approve a donor.",
-            "Review the tested pull request. You decide what merges.",
+            "Choose a small issue with a clear result",
+            "Set your checks and approve a donor",
+            "Review the tested pull request and decide what merges",
         ],
         anchor: "i-own-the-repository",
-        prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up my repository to receive donated compute. I am the repository owner. Inspect my project, help me choose appropriate checks, and guide me through approving an issue for a donor.",
+        prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up my repository to receive donated compute\nI am the repository owner\nInspect my project, help me choose appropriate checks, and guide me through approving an issue for a donor",
     },
     donor: {
         label: "For compute donors",
-        title: "Give a project a little lift.",
+        title: "Give a project a little lift",
         steps: [
-            "Install Tokate and sign in with your own accounts.",
-            "Get assigned to an approved issue and run the task.",
-            "Your AI makes the changes. Tokate checks them and opens a draft PR.",
+            "Install Tokate and sign in with your own accounts",
+            "Get assigned to an approved issue and run the task",
+            "Your AI makes the changes, then Tokate checks them and opens a draft PR",
         ],
         anchor: "i-want-to-donate-compute",
-        prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me donate compute to a repository. I am the donor. Confirm my tools, the approved issue, and my assignment. Explain the budget before starting a run.",
+        prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me donate compute to a repository\nI am the donor\nConfirm my tools, the approved issue, and my assignment\nExplain the budget before starting a run",
     },
 };
 let selectedRole = "owner";
@@ -79,7 +79,7 @@ document.querySelector("#copy-prompt").addEventListener("click", async () => {
     try {
         await navigator.clipboard.writeText(prompt);
         document.querySelector("#copy-status").textContent =
-            "Copied. Paste it into your coding agent.";
+            "Copied, paste it into your coding agent";
     } catch {
         const fallback = document.querySelector("#prompt-fallback");
         fallback.hidden = false;
@@ -87,7 +87,7 @@ document.querySelector("#copy-prompt").addEventListener("click", async () => {
         fallback.focus();
         fallback.select();
         document.querySelector("#copy-status").textContent =
-            "Select and copy the prompt below.";
+            "Select and copy the prompt below";
     }
 });
 function animateEyes() {

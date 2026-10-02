@@ -110,7 +110,7 @@ footer a:hover {
     left: 50%;
     top: -10px;
     transform: translateX(-50%);
-    z-index: 3;
+    z-index: 1;
     animation: sun-appear 1.6s ease both;
 }
 .sun img,
