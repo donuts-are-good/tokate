@@ -1,0 +1,54 @@
+name: Work item
+description: Report a problem or propose a focused improvement.
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - Bug
+        - Feature
+        - Maintenance
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happens now, who is affected, and why does it matter? For a bug, include reproduction steps and versions.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired behavior
+      description: Describe the observable result. Keep it separate from a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: State what this issue includes and any important exclusions.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List specific outcomes that must be true to close this issue.
+      placeholder: "- [ ] A concrete, verifiable outcome"
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification
+      description: Explain how to check the result. Include relevant commands or manual checks.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and decisions
+      description: Link related issues or sources. Separate settled decisions from questions that still need an answer.
