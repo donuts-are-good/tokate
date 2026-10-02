@@ -116,4 +116,6 @@ Never weaken owner checks, switch models silently, bypass the sandbox, or automa
 
 ## If the task is to change Tokate itself
 
+Read the local `CONSTITUTION.md` if present. It is intentionally excluded from version control and release artifacts.
+
 Keep the implementation small. Use the pinned SDKs and packages. Run `bash scripts/verify.sh` for code changes. For documentation-only changes, check links, commands, and the diff. Add tests only for a meaningful regression or end-to-end behavior. Do not spend inference or modify an external project merely to verify documentation.
