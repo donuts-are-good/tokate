@@ -18,7 +18,6 @@ function setTheme(theme) {
         theme === "dark" ? "#23324b" : "#f3e7d4";
     const label = theme === "dark" ? "Switch to daylight" : "Switch to moonlight";
     themeToggle.setAttribute("aria-label", label);
-    themeToggle.title = label;
     try {
         localStorage.setItem("tokate-theme", theme);
     } catch {}
