@@ -10,7 +10,7 @@ An owner approves an issue. A donor runs it with their own accounts. Tokate chec
 
 Give your coding assistant this prompt:
 
-> Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up Tokate. Establish whether I am an owner or donor, then guide me through the next step.
+> Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me set up Tokate. Establish whether I am an owner or donor, then guide me through the next step.
 
 ## Install
 
