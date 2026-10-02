@@ -46,10 +46,17 @@ for (const button of document.querySelectorAll("[data-role]")) {
         const role = roles[selectedRole];
         document.querySelector("#setup-title").textContent = role.title;
         document.querySelector("#setup-steps").replaceChildren(
-            ...role.steps.map((text) => {
+            ...role.steps.map((text, index) => {
                 const item = document.createElement("li");
                 const wording = document.createElement("span");
                 wording.textContent = text;
+                if (index === 0) {
+                    const initial = document.createElement("img");
+                    initial.className = "illuminated-initial";
+                    initial.src = `assets/initial-${text[0].toLowerCase()}.png`;
+                    initial.alt = text[0];
+                    wording.replaceChildren(initial, text.slice(1));
+                }
                 item.append(wording);
                 return item;
             }),
