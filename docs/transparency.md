@@ -191,7 +191,8 @@ installed harness, GitHub CLI, and services have their own behavior and policies
 This document is not a claim about their retention practices.
 
 Source: [Core.gs](../src/Core.gs), [Workflow.gs](../src/Workflow.gs),
-[Worker.gs](../src/Worker.gs), [Publish.gs](../src/Publish.gs).
+[Worker.gs](../src/Worker.gs), [Contribution.gs](../src/Contribution.gs),
+[Publish.gs](../src/Publish.gs).
 
 ## Bounded public-content audit
 

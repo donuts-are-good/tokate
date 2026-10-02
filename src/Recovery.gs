@@ -23,6 +23,7 @@ internal class Recovery {
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
                 throw Exception("Recovery budget exceeds owner limit")
             }
+            let usage = Worker.CompletedUsage(directory, File.ReadAllText(Path.Combine(directory, "events.jsonl")))
             let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
             let archive = Path.Combine(directory, "recovery-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(archive)
@@ -46,14 +47,7 @@ internal class Recovery {
             let timer = Stopwatch.StartNew()
             try {
                 Terminal.Step("Recovering with independent verification only. No inference will run.")
-                Worker.Finish(
-                    directory,
-                    run,
-                    record,
-                    File.ReadAllText(Path.Combine(directory, "events.jsonl")),
-                    timer,
-                    seconds
-                )
+                Contribution.Finish(directory, run, record, usage, timer, seconds)
                 run.Fields.Remove("error")
                 run.Save(directory)
             } catch (error Exception) {

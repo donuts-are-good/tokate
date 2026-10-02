@@ -715,12 +715,29 @@ internal class NativeFlow : IDisposable {
         File.WriteAllText(exclude, savedExclude)
         let events = Path.Combine(run, "events.jsonl")
         let savedEvents = File.ReadAllText(events)
+        let savedRun = File.ReadAllText(Path.Combine(run, "run.json"))
+        let scratch = Path.Combine(run, "checkout/.tokate-scratch/cache.json")
+        let savedCache = File.ReadAllText(scratch)
+        let archives = Directory.GetDirectories(run, "recovery-*").Length
         File.WriteAllText(events, "")
-        Call([]string{"recover", "--run", run}, 1)
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "completed turn and report")
+        Check.That(File.ReadAllText(scratch) == savedCache, "Incomplete turn recovery moved the legacy cache")
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "verification.json")) == original,
+            "Incomplete turn recovery ran verification"
+        )
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "run.json")) == savedRun,
+            "Incomplete turn recovery changed the run"
+        )
+        Check.That(
+            Directory.GetDirectories(run, "recovery-*").Length == archives,
+            "Incomplete turn recovery archived evidence"
+        )
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Incomplete turn recovery spent inference")
+        NoPr()
         File.WriteAllText(events, savedEvents)
-        let data = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
-        data["error"] = JsonValue.Create("Owner verification failed. See verification.json. No PR will be opened.")
-        File.WriteAllText(Path.Combine(run, "run.json"), data.ToJsonString())
         Call([]string{"recover", "--run", run})
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")

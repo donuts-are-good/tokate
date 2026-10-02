@@ -53,7 +53,7 @@ user-local location.
 ## Commands and recovery
 
 ```text
-Tokate 0.2.5 (toh-KAH-teh)
+Tokate 0.2.6 (toh-KAH-teh)
 Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
@@ -227,4 +227,4 @@ fixtures do not replace the real verifier boundary.
 The real native Codex `doctor` probe is a separate required matrix check; passing
 the deterministic suite does not establish the managed Codex boundary.
 
-`tokate recover --run DIR [--seconds 300]` explicitly reruns all owner checks after a completed agent turn failed verification. It revalidates approval, preserves failure evidence, archives legacy managed scratch caches, and publishes only after success. The separate verification budget cannot exceed the owner limit. No inference runs. The PR discloses recovery and unknown original runtime. Failed inference still requires fresh approval.
+`tokate recover --run DIR [--seconds 300]` explicitly reruns all owner checks after a completed agent turn failed verification. It revalidates approval and the completed turn and report before archiving legacy managed scratch caches, preserves failure evidence, and publishes only after success. Incomplete turns leave those caches in place and run no verification. The separate verification budget cannot exceed the owner limit. No inference runs. The PR discloses recovery and unknown original runtime. Failed inference still requires fresh approval.
