@@ -48,10 +48,10 @@ internal class Terminal {
 
         internal func Help() {
             if !Rich() {
-                Console.WriteLine(Data.Resource("help.txt"))
+                Console.WriteLine(Data.Resource("help.txt").Replace("{{version}}", Data.Version()))
                 return
             }
-            for line in Data.Resource("help.txt").Split('\n') {
+            for line in Data.Resource("help.txt").Replace("{{version}}", Data.Version()).Split('\n') {
                 let style = line.StartsWith("Tokate") ? "bold cyan": (line.EndsWith(":") ? "bold": "default")
                 Message(line, style)
             }

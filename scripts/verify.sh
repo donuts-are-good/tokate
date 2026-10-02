@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-gslint --strict src
-dotnet build Tokate.gsproj -c Release --nologo
+dotnet restore Tokate.gsproj --locked-mode --nologo
 tokate_sdk_cache="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
 dotnet "$tokate_sdk_cache/gsharp.net.sdk/0.4.591/tools/formatter/gsfmt.dll" --check src
-dotnet publish Tokate.gsproj -c Release -r linux-x64 -o artifacts/linux-x64 --nologo
+dotnet build Tokate.gsproj -c Release --no-restore --nologo -warnaserror
+dotnet publish Tokate.gsproj -c Release --no-restore -o artifacts/linux-x64 --nologo -warnaserror
 python3 -W error::ResourceWarning -m unittest discover -s tests -p native_e2e.py -v
 artifacts/linux-x64/tokate --version
 git diff --check

@@ -86,6 +86,8 @@ internal class Data {
         File.Move(path + ".tmp", path, true)
     }
     shared {
+        internal func Version() string -> Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "unknown"
+
         internal func Load(directory string) Data {
             let result = Data()
             for field in J.Parse(File.ReadAllText(Path.Combine(directory, "run.json"))).EnumerateObject() {

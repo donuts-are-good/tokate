@@ -1,4 +1,4 @@
-Tokate 0.2.2 (toh-KAH-teh)
+Tokate {{version}} (toh-KAH-teh)
 Donate compute to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference

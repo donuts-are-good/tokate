@@ -89,7 +89,8 @@ Process groups are killed on timeout, cancellation, and normal completion to cle
 Requires .NET 10 and a NativeAOT toolchain (Clang and zlib development headers).
 
 ```sh
-dotnet publish Tokate.gsproj -c Release -r linux-x64 -o artifacts/linux-x64
+dotnet restore Tokate.gsproj --locked-mode
+dotnet publish Tokate.gsproj -c Release --no-restore -o artifacts/linux-x64
 install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 ```
 
@@ -99,6 +100,6 @@ install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 scripts/verify.sh
 ```
 
-The pinned public G# SDK is 0.4.591. Verification runs strict GSLint, builds and publishes NativeAOT, and tests the actual binary with two simulated GitHub identities, real local Git repositories, and a deterministic Codex fixture. Python is only a development test dependency. Tests do not spend compute or modify GitHub.
+The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter, builds and publishes NativeAOT with warnings as errors, and tests the actual binary with two simulated GitHub identities, real local Git repositories, and a deterministic Codex fixture. Python is only a development test dependency. Tests do not spend compute or modify GitHub.
 
 The earlier Python prototype remains in Git history. Its `.state` and `.runs` artifacts are preserved locally, but native Tokate does not resume legacy runs.

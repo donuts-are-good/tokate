@@ -8,6 +8,8 @@
     <OptimizationPreference>Size</OptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
     <Version>0.2.2</Version>
   </PropertyGroup>
   <ItemGroup>

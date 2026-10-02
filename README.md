@@ -8,7 +8,7 @@ Early prototype for **Linux x64 (glibc 2.34+) and public GitHub repositories**. 
 
 ## Install Tokate
 
-Extract the trial archive, open its folder, then install the `tokate` binary:
+Download the Linux x64 archive from [Releases](https://github.com/obselate/tokate/releases/latest), extract it, and open its folder. Then install:
 
 ```sh
 mkdir -p ~/.local/bin
@@ -128,3 +128,23 @@ tokate checks --run DIR --watch
 If only publication failed, run `tokate publish --run DIR` without spending compute again. If compute or verification failed, inspect the run logs and ask the owner for fresh approval before another attempt.
 
 See the [command and security reference](docs/reference.md) for reassignment, revocation, saved claims, and isolation limits. Passing tests and a model whitelist do not guarantee correctness. The owner still reviews every PR.
+
+## Build and run
+
+Install the exact .NET SDK from `global.json`, Clang, zlib development headers, Git, and Python 3. Dependencies restore from public NuGet only.
+
+```sh
+git clone https://github.com/obselate/tokate.git
+cd tokate
+bash scripts/verify.sh
+dotnet run --project Tokate.gsproj -- --help
+```
+
+The verification script checks formatting, builds NativeAOT with warnings as errors, and runs the existing offline regression tests. It does not spend compute or modify GitHub.
+
+## Links
+
+- [Releases and checksums](https://github.com/obselate/tokate/releases)
+- [Command and security reference](docs/reference.md)
+- [Report an issue](https://github.com/obselate/tokate/issues)
+- [MIT license](LICENSE)
