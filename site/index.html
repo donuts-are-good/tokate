@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="theme-color" content="#f3e7d4" />
+        <meta
+            name="description"
+            content="Give your compute a purpose. Help open-source projects with the AI usage you already have."
+        />
+        <title>Tokate · Give your compute a purpose</title>
+        <link rel="icon" href="assets/mark.svg" type="image/svg+xml" />
+        <link rel="stylesheet" href="style.css" />
+        <script src="app.js" defer></script>
+    </head>
+    <body>
+        <a class="skip" href="#main">Skip to content</a>
+        <header>
+            <a class="wordmark" href="./" aria-label="Tokate home"
+                ><svg viewBox="0 0 44 60" aria-hidden="true">
+                    <path
+                        d="M9 55C13 33 27 18 34 5M16 37C1 36 4 24 4 24c13 0 14 9 12 13M23 26C11 21 16 11 16 11c12 4 10 12 7 15M29 17C26 5 36 2 36 2c5 9-2 15-7 15M12 47c1-13 15-17 15-17 3 12-7 16-15 17M24 29c4-11 16-10 16-10-1 11-10 12-16 10"
+                    /></svg
+                >tokate</a
+            >
+            <nav aria-label="Main navigation">
+                <a href="#how-it-works">How it works</a
+                ><a
+                    href="https://github.com/obselate/tokate/blob/main/README.md"
+                    >Guide</a
+                ><a href="https://github.com/obselate/tokate"
+                    >GitHub <span aria-hidden="true">↗</span></a
+                >
+            </nav>
+        </header>
+        <main id="main">
+            <section class="hero" aria-labelledby="headline">
+                <div class="heavens" aria-hidden="true">
+                    <div class="sun">
+                        <img
+                            src="assets/sun.png"
+                            alt=""
+                            fetchpriority="high"
+                            draggable="false"
+                        />
+                        <svg class="eyes" viewBox="0 0 1254 1254">
+                            <defs>
+                                <clipPath id="left-eye">
+                                    <path
+                                        d="M435 558Q501 512 568 558Q501 586 435 558"
+                                    />
+                                </clipPath>
+                                <clipPath id="right-eye">
+                                    <path
+                                        d="M684 558Q748 512 813 558Q748 586 684 558"
+                                    />
+                                </clipPath>
+                                <radialGradient id="iris">
+                                    <stop stop-color="#654b2d" />
+                                    <stop offset=".6" stop-color="#936939" />
+                                    <stop offset="1" stop-color="#674c2c" />
+                                </radialGradient>
+                            </defs>
+                            <g class="eye eye-left">
+                                <path
+                                    class="white"
+                                    d="M435 558Q501 512 568 558Q501 586 435 558"
+                                />
+                                <g clip-path="url(#left-eye)">
+                                    <g class="pupil">
+                                        <circle
+                                            cx="501"
+                                            cy="551"
+                                            r="23"
+                                            fill="url(#iris)"
+                                        />
+                                        <circle
+                                            cx="501"
+                                            cy="551"
+                                            r="10"
+                                            fill="#503a26"
+                                        />
+                                        <circle
+                                            cx="496"
+                                            cy="546"
+                                            r="3"
+                                            fill="#ebd5a7"
+                                            opacity=".8"
+                                        />
+                                    </g>
+                                </g>
+                                <path
+                                    class="lid"
+                                    d="M435 558Q501 512 568 558"
+                                />
+                            </g>
+                            <g class="eye eye-right">
+                                <path
+                                    class="white"
+                                    d="M684 558Q748 512 813 558Q748 586 684 558"
+                                />
+                                <g clip-path="url(#right-eye)">
+                                    <g class="pupil">
+                                        <circle
+                                            cx="748"
+                                            cy="551"
+                                            r="23"
+                                            fill="url(#iris)"
+                                        />
+                                        <circle
+                                            cx="748"
+                                            cy="551"
+                                            r="10"
+                                            fill="#503a26"
+                                        />
+                                        <circle
+                                            cx="743"
+                                            cy="546"
+                                            r="3"
+                                            fill="#ebd5a7"
+                                            opacity=".8"
+                                        />
+                                    </g>
+                                </g>
+                                <path
+                                    class="lid"
+                                    d="M684 558Q748 512 813 558"
+                                />
+                            </g>
+                        </svg>
+                    </div>
+                    <img
+                        class="hands hand-left"
+                        src="assets/hands.png"
+                        alt=""
+                        draggable="false"
+                    />
+                    <img
+                        class="hands hand-right"
+                        src="assets/hands.png"
+                        alt=""
+                        draggable="false"
+                    />
+                    <span class="star star-one">✧</span
+                    ><span class="star star-two">✧</span>
+                </div>
+                <div class="hero-copy">
+                    <h1 id="headline">
+                        Give your compute<br /><em>a purpose.</em>
+                    </h1>
+                    <p>
+                        Put your spare AI usage to work<br
+                            class="mobile-break"
+                        />
+                        for the projects you love.
+                    </p>
+                    <div class="choices">
+                        <button class="button primary" data-role="owner">
+                            I own a project
+                            <span aria-hidden="true">↗</span></button
+                        ><button class="button secondary" data-role="donor">
+                            I want to donate <span aria-hidden="true">↗</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+            <section
+                class="steps"
+                id="how-it-works"
+                aria-label="How Tokate works"
+            >
+                <article>
+                    <span class="number">1</span>
+                    <div>
+                        <h2>Choose a task</h2>
+                        <p>The owner approves an issue.</p>
+                    </div>
+                </article>
+                <article>
+                    <span class="number">2</span>
+                    <div>
+                        <h2>Give some compute</h2>
+                        <p>A donor’s AI works on it.</p>
+                    </div>
+                </article>
+                <article>
+                    <span class="number">3</span>
+                    <div>
+                        <h2>Make it better</h2>
+                        <p>Checks run. The owner reviews the PR.</p>
+                    </div>
+                </article>
+            </section>
+        </main>
+        <footer>
+            <span>Made for the commons.</span
+            ><a href="https://github.com/obselate/tokate/releases/latest"
+                >Get Tokate <span aria-hidden="true">↗</span></a
+            ><button id="motion" aria-pressed="false">Pause animation</button>
+        </footer>
+        <dialog id="setup" aria-labelledby="setup-title">
+            <button class="close" aria-label="Close guide">×</button>
+            <span class="eyebrow" id="setup-label"></span>
+            <h2 id="setup-title"></h2>
+            <ol id="setup-steps"></ol>
+            <div class="agent-help">
+                <p>Have a coding agent? Let it guide you.</p>
+                <button class="button primary" id="copy-prompt">
+                    Copy setup prompt <span aria-hidden="true">↗</span></button
+                ><span id="copy-status" role="status"></span>
+            </div>
+            <a
+                class="guide-link"
+                id="full-guide"
+                href="https://github.com/obselate/tokate/blob/main/README.md"
+                >Or follow the step-by-step guide ↗</a
+            >
+            <p class="requirement">
+                Early prototype · Linux x64 · Codex + ChatGPT subscription for
+                donors
+            </p>
+            <textarea
+                id="prompt-fallback"
+                aria-label="Setup prompt to copy"
+                readonly
+                hidden
+            ></textarea>
+        </dialog>
+    </body>
+</html>

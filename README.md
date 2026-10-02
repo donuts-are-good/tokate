@@ -146,8 +146,11 @@ dotnet run --project Tokate.gsproj -- --help
 
 The verification script checks formatting, builds NativeAOT with warnings as errors, and runs the existing offline regression tests. It does not spend compute or modify GitHub.
 
+The website is in `site/`. Preview it with `python3 -m http.server 4173 --directory site`.
+
 ## Links
 
+- [Website](https://obselate.github.io/tokate/)
 - [Releases and checksums](https://github.com/obselate/tokate/releases)
 - [Guide for AI assistants](AGENTS.md)
 - [Command and security reference](docs/reference.md)
