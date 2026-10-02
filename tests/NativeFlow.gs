@@ -2,6 +2,8 @@ package TokateTests
 
 import System
 import System.Collections.Generic
+import System.Diagnostics
+import System.Globalization
 import System.IO
 import System.Net
 import System.Net.Sockets
@@ -76,13 +78,17 @@ internal class NativeFlow : IDisposable {
         Git("-C", Upstream, "-c", "user.name=Fixture", "-c", "user.email=test@example.test", "commit", "-m", message)
     }
 
-    internal func Call(args[]string, code int32 = 0, owner bool = false) Result {
+    internal func Call(args[]string, code int32 = 0, owner bool = false, traffic bool = false) Result {
         let env = Dictionary[string, string](Temp.Env)
         if env.ContainsKey("GH_TOKEN") {
             env["GH_TOKEN"] = owner ? "fixture-owner": "fixture-donor"
         }
         File.WriteAllText(Path.Combine(Temp.Env["GH_CONFIG_DIR"], "identity"), owner ? "owner": "donor")
-        let result = Check.Run(Binary, args, env)
+        let all = List[string](args)
+        if traffic {
+            all.Add("--traffic")
+        }
+        let result = Check.Run(Binary, all.ToArray(), env)
         Check.That(
             result.Code == code,
             "Expected exit " + code.ToString() + ", got " + result.Code.ToString() + "\n" + result.Output + result.Error
@@ -312,6 +318,32 @@ internal class NativeFlow : IDisposable {
             "gh repo fork owner/project --clone=false"
         )
         NoInference()
+        for status in[]int32{0, 403} {
+            let faults = JsonArray()
+            for i in 0 ... 3 {
+                faults.Add(Check.Map("status", status, "message", "Forbidden"))
+            }
+            Faults("repos/donor/project", faults)
+            let failure = Call(
+                []string{
+                    "claim",
+                    "--repo",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "high"
+                },
+                1,
+                traffic: true
+            )
+            Check.Contains(failure.Error, "GitHub read failed")
+            Check.That(!failure.Error.Contains("Create a writable fork"), "Non-404 error was treated as missing")
+            Traffic(status == 0 ? 11: 9, 0, 0, status == 0 ? 2: 0, failure)
+            NoInference()
+        }
     }
 
     internal func DefaultBudget(ownerSeconds int32 = 3600, expectedSeconds string = "3600") {
@@ -550,7 +582,13 @@ internal class NativeFlow : IDisposable {
             flow.Approve()
             let run = flow.Claim()
             flow.Mode(mode)
-            flow.Call([]string{"work", "--run", run}, 1)
+            flow.ResetTraffic()
+            let failure = flow.Call([]string{"work", "--run", run}, 1, traffic: true)
+            if mode != "push_fail" {
+                Check.Contains(failure.Error, "No automatic retry")
+                Check.Contains(failure.Error, "outcome may be uncertain")
+                flow.Traffic(26, 1, 16, 0)
+            }
             let failed = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(failed["state"]) == "generated", "Publication failure discarded generated work")
             flow.PublicContent(run)
@@ -558,7 +596,13 @@ internal class NativeFlow : IDisposable {
                 flow.NoPr()
             }
             flow.Mode("")
-            flow.Call([]string{"publish", "--run", run})
+            flow.ResetTraffic()
+            flow.Call([]string{"publish", "--run", run}, traffic: true)
+            if mode == "pr_fail_after_create" {
+                flow.Traffic(9, 0, 0, 0)
+            } else {
+                flow.Traffic(18, 1, 8, 0)
+            }
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Publication retry ran inference")
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Retry duplicated PR")
@@ -569,6 +613,274 @@ internal class NativeFlow : IDisposable {
             )
             flow.PublicContent(run)
         }
+    }
+
+    internal func ResetTraffic() {
+        Reload()
+        State["api_calls"] = JsonArray()
+        Save()
+    }
+
+    internal func Traffic(
+        readBudget int32,
+        mutationBudget int32,
+        conditionalBudget int32,
+        retries int32,
+        result Result? = nil
+    ) {
+        Reload()
+        let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
+        var reads int32
+        var mutations int32
+        var conditional int32
+        var last int64
+        for call in calls {
+            if Check.Text(call["method"]) == "GET" {
+                reads++
+            } else {
+                mutations++
+                let start = Int64.Parse(Check.Text(call["start"]))
+                if last != 0 {
+                    Check.That(
+                        Convert.ToDouble(start - last) / Convert.ToDouble(Stopwatch.Frequency) >= 1.0,
+                        "Mutation starts were not paced"
+                    )
+                }
+                last = start
+            }
+            if Check.Text(call["status"]) == "304" {
+                conditional++
+            }
+        }
+        Check.That(
+            reads == readBudget && mutations == mutationBudget && conditional == conditionalBudget,
+            "Traffic regression: " + reads.ToString() + " reads, " + mutations.ToString() +
+                " mutations, " +
+                conditional.ToString() + " conditional responses"
+        )
+        if result != nil {
+            let prefix = "Tokate API traffic: "
+            let index = result.Error.IndexOf(prefix, StringComparison.Ordinal)
+            Check.That(index >= 0, "Missing opt-in diagnostics")
+            let line = result.Error.Substring(index + prefix.Length).Split('\n')[0]
+            let counts = Check.Json(line)
+            Check.That(
+                Check.Text(counts["reads"]) == reads.ToString() && Check.Text(
+                    counts["mutations"]
+                ) == mutations.ToString() && Check.Text(counts["conditional_responses"]) == conditional.ToString() &&
+                    Check.Text(counts["retry_attempts"]) == retries.ToString(),
+                "Diagnostics disagreed with fixture observations"
+            )
+            Check.Contains(result.Error, "exclude unseen GitHub CLI/Git requests and workflow executions")
+            for secret in[]string{
+                "synthetic-response-secret",
+                "fixture-owner",
+                "fixture-donor",
+                Temp.Root,
+                "If-None-Match",
+                "Acceptance criteria"
+            } {
+                Check.That(!result.Error.Contains(secret), "Diagnostics exposed private data")
+            }
+        }
+        Console.WriteLine(
+            "Traffic budget: reads=" + reads.ToString() + " mutations=" + mutations.ToString() +
+                " conditional_responses=" +
+                conditional.ToString() + " retry_attempts=" + retries.ToString()
+        )
+    }
+
+    internal func TrafficBudgets() {
+        ResetTraffic()
+        let approval = Call(
+            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+            owner: true,
+            traffic: true
+        )
+        Traffic(8, 5, 0, 0, approval)
+        ResetTraffic()
+        let claimed = Call(
+            []string{
+                "claim",
+                "--repo",
+                "owner/project",
+                "--issue",
+                "1",
+                "--model",
+                "gpt-6.1-sol",
+                "--effort",
+                "high",
+                "--seconds",
+                "30",
+                "--runs",
+                Path.Combine(Temp.Root, "runs")
+            },
+            traffic: true
+        )
+        Traffic(9, 1, 0, 0, claimed)
+        let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
+        Mode("push_fail")
+        Call([]string{"work", "--run", run}, 1)
+        Mode("")
+        ResetTraffic()
+        let published = Call([]string{"publish", "--run", run}, traffic: true)
+        Traffic(18, 1, 8, 0, published)
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Publishing repeated inference")
+        ResetTraffic()
+        let repeated = Call([]string{"publish", "--run", run}, traffic: true)
+        Traffic(9, 0, 0, 0, repeated)
+        Reload()
+        Check.That(
+            State["pulls"]?.AsArray().Count == 1 && Check.Text(State["exec_count"]) == "1",
+            "Repeated publication duplicated work"
+        )
+    }
+
+    internal func ConditionalApproval() {
+        for mode in[]string{"after_304_edit", "after_304_revoke"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode(mode)
+            flow.ResetTraffic()
+            flow.Call([]string{"work", "--run", run}, 1)
+            flow.Reload()
+            var live bool
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                if Check.Text(call["status"]) == "304" {
+                    Check.That(Check.Text(call["conditional"]) == "true", "304 lacked a conditional request")
+                    live = true
+                }
+            }
+            Check.That(live, "No live 304 preceded approval change")
+            flow.NoPr()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Approval change repeated inference")
+        }
+    }
+
+    internal func Faults(path string, faults JsonNode) {
+        Reload()
+        State["fault_path"] = JsonValue.Create(path)
+        State["faults"] = faults
+        State["fault_index"] = JsonValue.Create(0)
+        Save()
+        ResetTraffic()
+    }
+
+    internal func ReadTraffic() {
+        for mode in[]string{"retry-after", "retry-date", "reset", "server", "transport"} {
+            let faults = JsonArray()
+            var headers string
+            var status int32 = 429
+            if mode == "retry-after" {
+                headers = "Retry-After: 2\r\n"
+            } else if mode == "retry-date" {
+                headers = "Date: Wed, 01 Jan 2031 00:00:00 GMT\r\nRetry-After: Wed, 01 Jan 2031 00:00:02 GMT\r\n"
+            } else if mode == "reset" {
+                headers = "Date: Wed, 01 Jan 2031 00:00:00 GMT\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: 1924992002\r\n"
+                status = 403
+            } else {
+                status = mode == "server" ? 503: 0
+            }
+            faults.Add(Check.Map("status", status, "headers", headers))
+            Faults("repos/owner/project", faults)
+            let timer = Stopwatch.StartNew()
+            let result = Call([]string{"policy", "--repo", "owner/project"}, traffic: true)
+            Check.That(
+                timer.Elapsed.TotalSeconds >= (status == 0 || status == 503 ? 1.0: 2.0),
+                "Server retry delay was ignored"
+            )
+            Check.That(timer.Elapsed.TotalSeconds < 10.0, "Retry used local time instead of server Date")
+            Check.That(Check.Text(Check.Json(result.Output)["version"]) == "1", "Retry lost policy result")
+            Traffic(3, 0, 0, 1, result)
+        }
+        for status in[]int32{0, 503, 401, 404, 422, 304, 403, 429} {
+            let faults = JsonArray()
+            for i in 0 ... 3 {
+                faults.Add(
+                    Check.Map(
+                        "status",
+                        status,
+                        "message",
+                        status == 403 ? "You have exceeded a secondary rate limit.": "failure"
+                    )
+                )
+            }
+            Faults("repos/owner/project", faults)
+            let timer = Stopwatch.StartNew()
+            let failure = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
+            let retryable = status == 0 || status == 503
+            Traffic(retryable ? 3: 1, 0, status == 304 ? 1: 0, retryable ? 2: 0, failure)
+            Check.That(timer.Elapsed.TotalSeconds < 10.0, "Unbounded read failure")
+            if status == 403 || status == 429 {
+                Check.Contains(failure.Error, "Retry at or after")
+                Check.Contains(failure.Error, "in 60 seconds")
+            }
+            NoInference()
+        }
+        Faults("repos/owner/project", Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 60\\r\\n\"}]"))
+        let failure = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
+        Traffic(1, 0, 0, 0, failure)
+        Check.Contains(failure.Error, "Retry at or after")
+        Faults(
+            "repos/owner/project",
+            Check.Json("[{\"status\":503,\"pause_ms\":40000},{\"status\":503,\"pause_ms\":40000}]")
+        )
+        let timer = Stopwatch.StartNew()
+        let timed = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
+        Check.That(
+            timer.Elapsed.TotalSeconds >= 59.0 && timer.Elapsed.TotalSeconds < 65.0,
+            "Subprocesses escaped the total read deadline"
+        )
+        Traffic(2, 0, 0, 1, timed)
+    }
+
+    internal func MutationTraffic() {
+        for verb in[]string{"POST", "PATCH", "DELETE"} {
+            if verb != "POST" {
+                Approve()
+            }
+            let path = verb == "PATCH" ? "repos/owner/project/git/refs/heads/tokate/approvals/1":
+            (
+                verb == "DELETE" ? "repos/owner/project/issues/1/labels/tokate%3Aapproved": "repos/owner/project/issues/1/assignees"
+            )
+            Faults(path, Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 2\\r\\n\"}]"))
+            let result = verb == "DELETE" ? Call(
+                []string{"revoke", "--repo", "owner/project", "--issue", "1"},
+                1,
+                owner: true,
+                traffic: true
+            ):
+            Call(
+                []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+                1,
+                owner: true,
+                traffic: true
+            )
+            Reload()
+            Check.That(Check.Text(State["fault_index"]) == "1", "Mutation retried a rate limit")
+            Check.Contains(result.Error, "No automatic retry")
+            Check.Contains(result.Error, "Retry at or after")
+            Check.That(!result.Error.Contains("synthetic-response-secret"), "Mutation failure leaked output")
+            NoInference()
+            Faults("", JsonArray())
+        }
+        Faults(
+            "repos/owner/project/issues/1/assignees",
+            Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 2\\r\\n\"}]")
+        )
+        let put = Check.Run(
+            Environment.ProcessPath ?? throw Exception("Missing executable"),
+            []string{"--api-write", "PUT"},
+            Temp.Env
+        )
+        Check.That(put.Code == 1, "PUT accepted a failed mutation")
+        Traffic(0, 1, 0, 0, put)
+        Check.Contains(put.Error, "No automatic retry")
+        Check.Contains(put.Error, "Retry at or after")
+        NoInference()
     }
 
     internal func PublicationRevocation() {
@@ -632,7 +944,9 @@ internal class NativeFlow : IDisposable {
         File.WriteAllText(persistent, "synthetic sibling contribution")
         let socketPath = Path.Combine(Temp.Root, "private.socket")
         using let socket = Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
-        socket.Bind(UnixDomainSocketEndPoint(socketPath))
+        let socketAddress = socketPath.Length < 100 ? socketPath:
+        Path.GetRelativePath(Directory.GetCurrentDirectory(), socketPath)
+        socket.Bind(UnixDomainSocketEndPoint(socketAddress))
         socket.Listen(1)
         try {
             let script = "set -eu\ntest -f result.txt\n" +
@@ -783,7 +1097,7 @@ internal class NativeFlow : IDisposable {
     }
 
     shared {
-        internal func All(binary string) {
+        internal func All(binary string, selected string = "") {
             for name in[]string{
                 "HelpAndArguments",
                 "MissingTools",
@@ -809,6 +1123,10 @@ internal class NativeFlow : IDisposable {
                 "TemporaryHomeRejected",
                 "OutputBoundary",
                 "ToolAuthentication",
+                "TrafficBudgets",
+                "ConditionalApproval",
+                "ReadTraffic",
+                "MutationTraffic",
                 "PublicationFailures",
                 "PublicationRevocation",
                 "BackgroundCleanup",
@@ -817,6 +1135,9 @@ internal class NativeFlow : IDisposable {
                 "VerificationNetwork",
                 "VerificationRecovery"
             } {
+                if selected != "" && selected != name {
+                    continue
+                }
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
                 switch name {
@@ -891,6 +1212,18 @@ internal class NativeFlow : IDisposable {
                     }
                     case "ToolAuthentication" {
                         flow.ToolAuthentication()
+                    }
+                    case "TrafficBudgets" {
+                        flow.TrafficBudgets()
+                    }
+                    case "ConditionalApproval" {
+                        flow.ConditionalApproval()
+                    }
+                    case "ReadTraffic" {
+                        flow.ReadTraffic()
+                    }
+                    case "MutationTraffic" {
+                        flow.MutationTraffic()
                     }
                     case "PublicationFailures" {
                         flow.PublicationFailures()

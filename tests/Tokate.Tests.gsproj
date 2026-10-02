@@ -12,5 +12,8 @@
   <ItemGroup>
     <Compile Include="../src/Verification.gs" />
     <Compile Include="../src/Process.gs" />
+    <Compile Include="../src/Core.gs" />
+    <Compile Include="../src/Json.gs" />
+    <Compile Include="../src/ApiTransport.gs" />
   </ItemGroup>
 </Project>

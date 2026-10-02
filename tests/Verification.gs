@@ -1,8 +1,8 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.IO
-import System.Threading
 import Tokate
 
 internal class VerificationChecks {
@@ -160,7 +160,9 @@ internal class VerificationChecks {
                 let heartbeat = Path.Combine(checkout, "heartbeat")
                 Check.That(File.Exists(heartbeat), "Detached descendant never started")
                 let length = FileInfo(heartbeat).Length
-                Thread.Sleep(400)
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(400.0)) { }
+                }
                 Check.That(FileInfo(heartbeat).Length == length, "Detached verifier descendant survived cleanup")
             }
             Console.WriteLine("PASS verification cleans detached descendants on normal exit and timeout")

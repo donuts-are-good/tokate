@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.4 discovers tools, handles data, and
+This document describes how Tokate 0.2.7 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -53,6 +53,16 @@ GitHub operations use the donor's or owner's installed GitHub CLI. Git publishin
 delegates authentication to `gh auth git-credential`. Codex authenticates its own
 inference requests. Tokate does not copy credentials into task prompts, receipts,
 or a shared account.
+
+The API boundary invokes sanitized `gh api --include` commands. It reads response
+status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
+Date and poll-interval metadata. Conditional reads keep bodies and ETags only
+in command memory and require live revalidation. Response headers, bodies and gh
+stderr are not persisted as diagnostics or copied into errors. `--traffic`
+reports only numeric attempted reads, mutations, live 304s and retries on stderr;
+it excludes unseen GitHub CLI/Git requests and workflow executions. See
+[API bounds and recovery](reference.md#commands-and-recovery) and
+[ApiTransport.gs](../src/ApiTransport.gs).
 
 Tokate clears each host command's child environment and copies only explicit
 requirements using individual environment-variable lookups. It does not inspect
