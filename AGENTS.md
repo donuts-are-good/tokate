@@ -108,7 +108,8 @@ Report the PR URL, verification result, and any action needed from the owner. Ke
 | Donor cannot be assigned | Have the donor comment, then let the owner approve again |
 | Claim branch already exists | Find the existing run. Do not delete the branch and silently start another attempt |
 | Approval changed or was revoked | Stop and return to the owner |
-| Agent run or verification failed | Inspect the saved logs. A new attempt needs fresh owner approval |
+| Agent run failed | Inspect saved logs. A new inference attempt needs fresh owner approval |
+| Completed agent, verification failed | Fix the cause, then explicitly use `tokate recover --run DIR` to rerun all checks without inference under unchanged approval |
 | Successful run, publication failed | `tokate publish --run DIR` retries publication without inference |
 | CI pending | Check for fork-workflow approval, a missing job, or a job still running. Pending is not success |
 

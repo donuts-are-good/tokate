@@ -399,6 +399,9 @@ internal class NativeFlow : IDisposable {
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "verification.json")))[0]?["exit_code"]) == "1",
             "Failed verification not recorded"
         )
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Owner verification failed")
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Failed recovery spent inference")
         NoPr()
     }
 
@@ -679,6 +682,44 @@ internal class NativeFlow : IDisposable {
         }
     }
 
+    internal func VerificationRecovery() {
+        VerificationPolicy("test -f result.txt && test ! -f .tokate-scratch/cache.json")
+        Approve()
+        let run = Claim()
+        Mode("verification_recovery")
+        Call([]string{"work", "--run", run}, 1)
+        NoPr()
+        let original = File.ReadAllText(Path.Combine(run, "verification.json"))
+        Call([]string{"recover", "--run", run, "--seconds", "86400"}, 1)
+        Reload()
+        let issue = State["issue"] ?? throw Exception("Missing issue")
+        issue["labels"] = JsonArray()
+        Save()
+        Call([]string{"recover", "--run", run}, 1)
+        issue["labels"] = Check.Json("[{\"name\":\"tokate:approved\"}]")
+        Save()
+        let events = Path.Combine(run, "events.jsonl")
+        let savedEvents = File.ReadAllText(events)
+        File.WriteAllText(events, "")
+        Call([]string{"recover", "--run", run}, 1)
+        File.WriteAllText(events, savedEvents)
+        let data = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        data["error"] = JsonValue.Create("Owner verification failed. See verification.json. No PR will be opened.")
+        File.WriteAllText(Path.Combine(run, "run.json"), data.ToJsonString())
+        Call([]string{"recover", "--run", run})
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "verification-only recovery")
+        var preserved bool
+        for archive in Directory.GetDirectories(run, "recovery-*") {
+            if File.ReadAllText(Path.Combine(archive, "verification.json")) == original {
+                preserved = true
+            }
+        }
+        Check.That(preserved, "Recovery lost failed verification evidence")
+        Call([]string{"recover", "--run", run}, 1)
+    }
+
     internal func VerificationNetwork() {
         let listener = TcpListener(IPAddress.Loopback, 0)
         listener.Start()
@@ -739,7 +780,8 @@ internal class NativeFlow : IDisposable {
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
                 "VerificationBoundary",
-                "VerificationNetwork"
+                "VerificationNetwork",
+                "VerificationRecovery"
             } {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
@@ -830,6 +872,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "VerificationBoundary" {
                         flow.VerificationBoundary()
+                    }
+                    case "VerificationRecovery" {
+                        flow.VerificationRecovery()
                     }
                     case "VerificationNetwork" {
                         flow.VerificationNetwork()

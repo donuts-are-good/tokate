@@ -225,3 +225,5 @@ cleanup on normal exit and timeout. These tests must pass on required Ubuntu CI;
 fixtures do not replace the real verifier boundary.
 The real native Codex `doctor` probe is a separate required matrix check; passing
 the deterministic suite does not establish the managed Codex boundary.
+
+`tokate recover --run DIR [--seconds 300]` explicitly reruns all owner checks after a completed agent turn failed verification. It revalidates approval, preserves failure evidence, archives legacy managed scratch caches, and publishes only after success. The separate verification budget cannot exceed the owner limit. No inference runs. The PR discloses recovery and unknown original runtime. Failed inference still requires fresh approval.

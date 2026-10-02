@@ -17,6 +17,7 @@ Donor:
               [--seconds 3600] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
   tokate claim <same options>              Reserve without starting inference
   tokate work --run DIR                    Execute a saved claim once
+  tokate recover --run DIR [--seconds 300]  Recheck failed verification without inference
   tokate publish --run DIR                 Retry publication without inference
   tokate status --run DIR                  Show saved run
 

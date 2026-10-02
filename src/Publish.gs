@@ -24,7 +24,11 @@ internal class Publication {
                     throw Exception("Owner verification did not pass")
                 }
             }
-            return "Generated a patch for the approved issue. Independent owner verification: " +
+            let recovery = run.Flag(
+                "recovered"
+            ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
+            return recovery +
+                "Generated a patch for the approved issue. Independent owner verification: " +
                 checks
                 .Count
                 .ToString() + "/" + checks.Count.ToString() +
@@ -139,7 +143,10 @@ internal class Publication {
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
-            values["seconds"] = run.Number("elapsed_seconds").ToString()
+            values["seconds"] = run.Flag("recovered") ? "unknown (verification-only recovery: " + run.Number(
+                "elapsed_seconds"
+            )
+                .ToString() + ")": run.Number("elapsed_seconds").ToString()
             values["base"] = run.Text("base")
             values["policy"] = run.Text("policy_hash")
             values["usage"] = Usage(run)
