@@ -97,7 +97,15 @@ header {
 nav {
     display: flex;
     gap: 34px;
-    font-size: 17px;
+    font-size: 21px;
+    align-items: baseline;
+    line-height: 1.2;
+}
+nav a {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 8px 0;
 }
 nav a:hover,
 .guide-link:hover,
@@ -140,16 +148,20 @@ footer a:hover {
 }
 .eye {
     transform-box: fill-box;
-    transform-origin: center;
-    transition: transform 0.13s ease;
+    transform-origin: center bottom;
+    transition:
+        transform 0.13s ease,
+        opacity 0.09s ease;
 }
 .blink .eye {
-    transform: scaleY(0.04);
+    transform: scaleY(0.1);
+    opacity: 0;
 }
 .white {
-    fill: #dabd7e;
-    stroke: #a17b45;
-    stroke-width: 2;
+    fill: url(#eye-white);
+    stroke: #916b3c;
+    stroke-opacity: 0.5;
+    stroke-width: 1.5;
 }
 .lid {
     fill: none;
@@ -255,57 +267,27 @@ h1 em {
 .secondary:hover {
     background: #e5d9c3;
 }
-.ornament-definitions {
-    position: absolute;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-}
-.choices .button {
-    position: relative;
-    isolation: isolate;
-    min-width: 280px;
-    min-height: 76px;
-    padding: 20px 43px;
+.choices .button,
+.agent-help .button {
+    min-width: 300px;
+    min-height: 92px;
+    padding: 22px 62px;
     border: 0;
-    border-radius: 0;
-    background: none;
+    border-radius: 8px;
+    background: url(assets/stone-olive.png) center / 100% 142% no-repeat;
+    color: var(--ink);
+    justify-content: center;
     font-family: var(--display);
     font-size: 23px;
     font-weight: 500;
-    gap: 20px;
-    --pigment: #944b32;
-    --edge: #824329;
-    --inlay: #efd2a4;
+    text-shadow: 0 1px #fff9e6;
+    transition:
+        filter 0.2s,
+        transform 0.2s;
 }
-.choices .secondary {
-    --pigment: #ede0bc;
-    --edge: #7a8059;
-    --inlay: #81875c;
-}
-.cartouche {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    z-index: -1;
-    overflow: visible;
-    transition: filter 0.2s;
-}
-.plaque-paint {
-    fill: var(--pigment);
-    fill-opacity: 0.88;
-    stroke: var(--edge);
-    stroke-width: 1;
-}
-.plaque-line,
-.plaque-detail {
-    fill: none;
-    stroke: var(--inlay);
-    stroke-width: 0.8;
-}
-.choices .button:hover .cartouche {
-    filter: brightness(1.08);
+.choices .button:hover,
+.agent-help .button:hover {
+    filter: brightness(1.05) drop-shadow(0 3px 2px #56482c26);
 }
 .choices .button:active {
     transform: translateY(0);
@@ -389,14 +371,20 @@ footer {
 }
 dialog {
     color: var(--ink);
-    background: #f8efdf;
-    border: 1px solid #bdae93;
-    border-radius: 8px;
-    padding: 42px;
-    max-width: 550px;
-    width: calc(100% - 32px);
-    max-height: 85svh;
-    box-shadow: 0 30px 100px #241b2b45;
+    background: url(assets/scroll.png) center / 100% 100% no-repeat;
+    border: 0;
+    padding: 100px 60px 94px;
+    max-width: 620px;
+    width: calc(100% - 20px);
+    max-height: 92svh;
+    filter: drop-shadow(0 18px 30px #241b2b55);
+}
+.scroll-content {
+    max-height: calc(92svh - 194px);
+    overflow-y: auto;
+    padding: 0 6px;
+    scrollbar-width: thin;
+    scrollbar-color: #a78a56 transparent;
 }
 dialog::backdrop {
     background: #2c261c85;
@@ -404,8 +392,8 @@ dialog::backdrop {
 }
 .close {
     position: absolute;
-    right: 15px;
-    top: 9px;
+    right: 42px;
+    top: 72px;
     border: 0;
     background: none;
     font-size: 34px;
@@ -451,7 +439,10 @@ dialog li:before {
     font-size: 17px;
 }
 .agent-help .button {
-    font-size: 17px;
+    font-size: 21px;
+    min-width: 0;
+    min-height: 80px;
+    padding: 18px 50px;
     width: 100%;
 }
 #copy-status {
@@ -600,7 +591,7 @@ body.modal-open {
     }
     nav {
         gap: 18px;
-        font-size: 15px;
+        font-size: 18px;
     }
     nav a:first-child {
         display: none;
@@ -689,7 +680,11 @@ body.modal-open {
         font-size: 13px;
     }
     dialog {
-        padding: 33px 25px;
+        padding: 100px 28px 94px;
+    }
+    .close {
+        top: 70px;
+        right: 28px;
     }
     dialog h2 {
         font-size: 35px;

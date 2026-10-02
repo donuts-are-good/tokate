@@ -11,46 +11,15 @@
         <title>Tokate · Give your compute a purpose</title>
         <link rel="icon" href="assets/mark.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="style.css" />
+        <link
+            rel="preload"
+            as="image"
+            href="assets/scroll.png"
+            fetchpriority="low"
+        />
         <script src="app.js" defer></script>
     </head>
     <body>
-        <svg
-            class="ornament-definitions"
-            aria-hidden="true"
-            xmlns="http://www.w3.org/2000/svg"
-        >
-            <defs>
-                <pattern
-                    id="plaster"
-                    patternUnits="userSpaceOnUse"
-                    width="600"
-                    height="400"
-                >
-                    <image
-                        href="assets/backdrop.png"
-                        width="600"
-                        height="400"
-                    />
-                </pattern>
-                <path
-                    id="plaque-shape"
-                    d="M28 12 Q38 12 44 4 H256 Q262 12 272 12 C272 26 288 28 296 38 C288 48 272 50 272 64 Q262 64 256 72 H44 Q38 64 28 64 C28 50 12 48 4 38 C12 28 28 26 28 12 Z"
-                />
-                <symbol id="plaque" viewBox="0 0 300 76">
-                    <use href="#plaque-shape" fill="url(#plaster)" />
-                    <use href="#plaque-shape" class="plaque-paint" />
-                    <use
-                        href="#plaque-shape"
-                        class="plaque-line"
-                        transform="translate(10 5) scale(.9333 .8684)"
-                    />
-                    <path
-                        class="plaque-detail"
-                        d="M17 38h12m242 0h12M150 5l4 4-4 4-4-4zM150 63l4 4-4 4-4-4z"
-                    />
-                </symbol>
-            </defs>
-        </svg>
         <a class="skip" href="#main">Skip to content</a>
         <header>
             <a class="wordmark" href="./" aria-label="Tokate home"
@@ -84,14 +53,24 @@
                             <defs>
                                 <clipPath id="left-eye">
                                     <path
-                                        d="M435 558Q501 512 568 558Q501 586 435 558"
+                                        d="M430 548C469 520 531 512 568 558C538 575 466 584 430 548"
                                     />
                                 </clipPath>
                                 <clipPath id="right-eye">
                                     <path
-                                        d="M684 558Q748 512 813 558Q748 586 684 558"
+                                        d="M684 557C716 516 779 510 823 543C796 568 724 585 684 557"
                                     />
                                 </clipPath>
+                                <radialGradient
+                                    id="eye-white"
+                                    cx=".5"
+                                    cy=".75"
+                                    r=".8"
+                                >
+                                    <stop stop-color="#e1c58d" />
+                                    <stop offset=".65" stop-color="#c6a466" />
+                                    <stop offset="1" stop-color="#96703a" />
+                                </radialGradient>
                                 <radialGradient id="iris">
                                     <stop stop-color="#654b2d" />
                                     <stop offset=".6" stop-color="#936939" />
@@ -101,20 +80,20 @@
                             <g class="eye eye-left">
                                 <path
                                     class="white"
-                                    d="M435 558Q501 512 568 558Q501 586 435 558"
+                                    d="M430 548C469 520 531 512 568 558C538 575 466 584 430 548"
                                 />
                                 <g clip-path="url(#left-eye)">
                                     <g class="pupil">
                                         <circle
                                             cx="501"
                                             cy="551"
-                                            r="23"
+                                            r="21"
                                             fill="url(#iris)"
                                         />
                                         <circle
                                             cx="501"
                                             cy="551"
-                                            r="10"
+                                            r="9"
                                             fill="#503a26"
                                         />
                                         <circle
@@ -128,26 +107,26 @@
                                 </g>
                                 <path
                                     class="lid"
-                                    d="M435 558Q501 512 568 558"
+                                    d="M430 548C469 520 531 512 568 558"
                                 />
                             </g>
                             <g class="eye eye-right">
                                 <path
                                     class="white"
-                                    d="M684 558Q748 512 813 558Q748 586 684 558"
+                                    d="M684 557C716 516 779 510 823 543C796 568 724 585 684 557"
                                 />
                                 <g clip-path="url(#right-eye)">
                                     <g class="pupil">
                                         <circle
                                             cx="748"
                                             cy="551"
-                                            r="23"
+                                            r="21"
                                             fill="url(#iris)"
                                         />
                                         <circle
                                             cx="748"
                                             cy="551"
-                                            r="10"
+                                            r="9"
                                             fill="#503a26"
                                         />
                                         <circle
@@ -161,20 +140,20 @@
                                 </g>
                                 <path
                                     class="lid"
-                                    d="M684 558Q748 512 813 558"
+                                    d="M684 557C716 516 779 510 823 543"
                                 />
                             </g>
                         </svg>
                     </div>
                     <img
                         class="hands hand-left"
-                        src="assets/hands.png"
+                        src="assets/hands-smooth.png"
                         alt=""
                         draggable="false"
                     />
                     <img
                         class="hands hand-right"
-                        src="assets/hands.png"
+                        src="assets/hands-smooth.png"
                         alt=""
                         draggable="false"
                     />
@@ -193,26 +172,9 @@
                     </p>
                     <div class="choices">
                         <button class="button primary" data-role="owner">
-                            <svg
-                                class="cartouche"
-                                viewBox="0 0 300 76"
-                                preserveAspectRatio="none"
-                                aria-hidden="true"
-                            >
-                                <use href="#plaque" />
-                            </svg>
-                            I own a project
-                            <span aria-hidden="true">↗</span></button
+                            I own a project</button
                         ><button class="button secondary" data-role="donor">
-                            <svg
-                                class="cartouche"
-                                viewBox="0 0 300 76"
-                                preserveAspectRatio="none"
-                                aria-hidden="true"
-                            >
-                                <use href="#plaque" />
-                            </svg>
-                            I want to donate <span aria-hidden="true">↗</span>
+                            I want to donate
                         </button>
                     </div>
                 </div>
@@ -253,31 +215,33 @@
         </footer>
         <dialog id="setup" aria-labelledby="setup-title">
             <button class="close" aria-label="Close guide">×</button>
-            <span class="eyebrow" id="setup-label"></span>
-            <h2 id="setup-title"></h2>
-            <ol id="setup-steps"></ol>
-            <div class="agent-help">
-                <p>Have a coding agent? Let it guide you</p>
-                <button class="button primary" id="copy-prompt">
-                    Copy setup prompt <span aria-hidden="true">↗</span></button
-                ><span id="copy-status" role="status"></span>
+            <div class="scroll-content">
+                <span class="eyebrow" id="setup-label"></span>
+                <h2 id="setup-title"></h2>
+                <ol id="setup-steps"></ol>
+                <div class="agent-help">
+                    <p>Have a coding agent? Let it guide you</p>
+                    <button class="button primary" id="copy-prompt">
+                        Copy setup prompt</button
+                    ><span id="copy-status" role="status"></span>
+                </div>
+                <a
+                    class="guide-link"
+                    id="full-guide"
+                    href="https://github.com/obselate/tokate/blob/main/README.md"
+                    >Or follow the step-by-step guide ↗</a
+                >
+                <p class="requirement">
+                    Early prototype · Linux x64 · Codex + ChatGPT subscription
+                    for donors
+                </p>
+                <textarea
+                    id="prompt-fallback"
+                    aria-label="Setup prompt to copy"
+                    readonly
+                    hidden
+                ></textarea>
             </div>
-            <a
-                class="guide-link"
-                id="full-guide"
-                href="https://github.com/obselate/tokate/blob/main/README.md"
-                >Or follow the step-by-step guide ↗</a
-            >
-            <p class="requirement">
-                Early prototype · Linux x64 · Codex + ChatGPT subscription for
-                donors
-            </p>
-            <textarea
-                id="prompt-fallback"
-                aria-label="Setup prompt to copy"
-                readonly
-                hidden
-            ></textarea>
         </dialog>
     </body>
 </html>
