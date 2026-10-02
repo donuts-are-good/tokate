@@ -92,6 +92,8 @@ internal class VerificationChecks {
         }
 
         internal func Layouts() {
+            Refused("/tmp/tokate-home", "Unsupported verification checkout layout")
+            Refused("/tmp/tokate-home/checkout", "Unsupported verification checkout layout")
             for mode in[]string{"checkout-link", "git-link", "git-file", "git-child-link", "alternates", "commondir"} {
                 using let temp = Temp()
                 let checkout = Path.Combine(temp.Root, "checkout")

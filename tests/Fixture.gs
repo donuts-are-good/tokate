@@ -100,7 +100,8 @@ internal class Fixture {
             "--strict-config",
             "--ignore-user-config",
             "--ignore-rules",
-            "approval_policy=\"never\""
+            "approval_policy=\"never\"",
+            "shell_environment_policy.set={ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = \"/tmp/tokate-home\", TMPDIR = \"/tmp/tokate-home\" }"
         } {
             Check.That(Array.IndexOf(args, required) >= 0, "Missing boundary: " + required)
         }

@@ -29,11 +29,10 @@ internal class Verification {
             }
         }
 
-        internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
-            if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
-                throw Exception(
-                    "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
-                )
+        internal func Validate(directory string) string {
+            let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory))
+            if absolute == "/tmp/tokate-home" || absolute.StartsWith("/tmp/tokate-home/") {
+                throw Exception("Unsupported verification checkout layout: " + absolute)
             }
             let checkout = DirectoryPath(directory)
             for root in[]string{"/home", "/run", "/var", "/tmp"} {
@@ -53,6 +52,17 @@ internal class Verification {
                     throw Exception("Verification requires self-contained Git metadata: " + file)
                 }
             }
+            return checkout
+        }
+
+        internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
+            if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
+                throw Exception(
+                    "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
+                )
+            }
+            let checkout = Validate(directory)
+            let git = Path.Combine(checkout, ".git")
             let args = List[string]{
                 "--die-with-parent",
                 "--new-session",

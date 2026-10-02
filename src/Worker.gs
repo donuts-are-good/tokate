@@ -102,7 +102,7 @@ internal class Worker {
                     "TMPDIR=/tmp/tokate-home",
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-probe /tmp/tokate-home/probe /tmp/tokate-probe && rm .tokate-probe && { test ! -f global.json || dotnet msbuild -nologo -version; }",
+                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && { test ! -f global.json || dotnet msbuild -nologo -version; }",
                     "probe",
                     sentinel
                 }

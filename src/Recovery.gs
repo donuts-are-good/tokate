@@ -23,11 +23,11 @@ internal class Recovery {
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
                 throw Exception("Recovery budget exceeds owner limit")
             }
+            let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
             let archive = Path.Combine(directory, "recovery-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(archive)
             File.Copy(Path.Combine(directory, "run.json"), Path.Combine(archive, "run.json"))
             File.Copy(Path.Combine(directory, "verification.json"), Path.Combine(archive, "verification.json"))
-            let checkout = Path.Combine(directory, "checkout")
             let scratch = Path.Combine(checkout, ".tokate-scratch")
             if FileInfo(scratch).LinkTarget != nil {
                 throw Exception("Legacy scratch must not be a symbolic link")
