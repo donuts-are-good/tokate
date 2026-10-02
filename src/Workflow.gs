@@ -248,7 +248,7 @@ internal class Workflow {
             let effort = args.Need("effort")
             let seconds = args.Number(
                 "seconds",
-                Math.Min(1800, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
+                Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
             let network = args.Get("allow-network") == "true"
             Policy(J.Write(J.Get(record, "policy"))).Validate(model, effort, seconds, network)

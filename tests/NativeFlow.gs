@@ -46,6 +46,7 @@ internal class NativeFlow : IDisposable {
         Call([]string{"init", "--path", Upstream})
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
+        Check.That(Check.Text(policy["max_seconds"]) == "3600", "New policy budget must be 3600 seconds")
         policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test -f result.txt\"]]")
         File.WriteAllText(path, policy.ToJsonString())
         Commit("Initial")
@@ -205,8 +206,16 @@ internal class NativeFlow : IDisposable {
         Call([]string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}, 1)
         Approve()
         Claim(model: "not-allowed", code: 1)
-        Claim(seconds: "2000", code: 1)
+        for seconds in[]string{"0", "3601", "86401"} {
+            Claim(seconds: seconds, code: 1)
+        }
         NoInference()
+        let run = Claim(seconds: "1800")
+        Call([]string{"work", "--run", run})
+        Check.That(
+            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == "1800",
+            "Saved explicit budget changed"
+        )
     }
 
     internal func FailedReassignment() {
@@ -264,13 +273,15 @@ internal class NativeFlow : IDisposable {
         NoInference()
     }
 
-    internal func DefaultBudget() {
+    internal func DefaultBudget(ownerSeconds int32 = 3600, expectedSeconds string = "3600") {
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
-        policy["max_seconds"] = JsonValue.Create(30)
-        File.WriteAllText(path, policy.ToJsonString())
-        Commit("Lower budget")
-        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+        if Check.Text(policy["max_seconds"]) != ownerSeconds.ToString() {
+            policy["max_seconds"] = JsonValue.Create(ownerSeconds)
+            File.WriteAllText(path, policy.ToJsonString())
+            Commit("Set budget " + ownerSeconds.ToString())
+            Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+        }
         Approve()
         let result = Call(
             []string{
@@ -289,10 +300,14 @@ internal class NativeFlow : IDisposable {
         )
         let run = result.Output.Substring(result.Output.LastIndexOf("Run: ") + 5).Trim()
         Check.That(
-            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == "30",
-            "Owner budget ignored"
+            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == expectedSeconds,
+            "Wrong default budget for owner limit " + ownerSeconds.ToString()
         )
         Call([]string{"work", "--run", run})
+        Check.That(
+            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == expectedSeconds,
+            "Saved default budget changed"
+        )
     }
 
     internal func IssueEdit() {
@@ -557,6 +572,8 @@ internal class NativeFlow : IDisposable {
                 "FailedReassignment",
                 "MissingFork",
                 "DefaultBudget",
+                "HigherOwnerBudget",
+                "LowerOwnerBudget",
                 "IssueEdit",
                 "Revocation",
                 "Timeout",
@@ -601,6 +618,12 @@ internal class NativeFlow : IDisposable {
                     }
                     case "DefaultBudget" {
                         flow.DefaultBudget()
+                    }
+                    case "HigherOwnerBudget" {
+                        flow.DefaultBudget(7200)
+                    }
+                    case "LowerOwnerBudget" {
+                        flow.DefaultBudget(30, "30")
                     }
                     case "IssueEdit" {
                         flow.IssueEdit()

@@ -14,7 +14,7 @@ Owner:
 
 Donor:
   tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
-              [--seconds 1800] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
+              [--seconds 3600] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
   tokate claim <same options>              Reserve without starting inference
   tokate work --run DIR                    Execute a saved claim once
   tokate publish --run DIR                 Retry publication without inference

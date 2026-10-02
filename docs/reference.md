@@ -64,7 +64,7 @@ Owner:
 
 Donor:
   tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
-              [--seconds 1800] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
+              [--seconds 3600] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
   tokate claim <same options>              Reserve without starting inference
   tokate work --run DIR                    Execute a saved claim once
   tokate publish --run DIR                 Retry publication without inference
@@ -89,7 +89,7 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 
 `publish --run DIR` retries publication after a successful run without running inference again. Failed or interrupted runs requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 
-`--seconds` caps agent execution plus independent verification. The default is the smaller of 1800 seconds and the owner's limit. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
+`--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 
 Startup checks warn about missing tools. Owner commands work without Codex. `doctor` checks all tools and probes the sandbox, but does not test authentication, model access, or repository build dependencies. `NO_COLOR` disables styling. Redirected output is plain, and `policy` and `status` output JSON when piped.
 
