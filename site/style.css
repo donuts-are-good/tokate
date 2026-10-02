@@ -440,13 +440,6 @@ dialog::backdrop {
     background: #2c261c85;
     backdrop-filter: blur(5px);
 }
-.decree-opening {
-    font-family: Manuscript, var(--display);
-    font-size: 31px;
-    text-align: center;
-    color: var(--rust);
-    margin: 0 0 14px;
-}
 dialog h2 {
     font-family: Decree, var(--display);
     font-weight: 400;
