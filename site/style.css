@@ -492,11 +492,14 @@ dialog li:before {
     text-align: center;
 }
 .agent-help .button {
+    display: block;
     font-size: 21px;
     min-width: 0;
     min-height: 80px;
     padding: 18px 50px;
-    width: 100%;
+    width: min(100%, 360px);
+    background-size: 100% auto;
+    margin-inline: auto;
 }
 #copy-status {
     display: block;
@@ -751,6 +754,11 @@ body.modal-open {
     dialog li {
         font-size: 21px;
         gap: 10px;
+    }
+    .agent-help .button {
+        min-height: 64px;
+        padding: 18px 20px;
+        font-size: 19px;
     }
     .illuminated-initial {
         width: 52px;
