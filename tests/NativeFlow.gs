@@ -122,13 +122,13 @@ internal class NativeFlow : IDisposable {
         Temp.Env["PATH"] = empty
         let help = Call([]string{"--help"})
         Check.Contains(help.Output, "toh-KAH-teh")
-        for name in[]string{"git", "gh", "codex", "setsid"} {
+        for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
             Check.Contains(help.Error, name + ": missing")
         }
         Check.That(!(help.Output + help.Error).Contains('\u001b'), "Redirected output contains ANSI")
         let doctor = Call([]string{"doctor"}, 1)
         Check.Contains(doctor.Output, "sandbox: skipped")
-        for name in[]string{"git", "gh", "codex", "setsid"} {
+        for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
             Check.Contains(doctor.Output, name + ": missing")
         }
         let work = Call([]string{"work", "--repo", "owner/project", "--issue", "1"}, 1)
@@ -363,6 +363,45 @@ internal class NativeFlow : IDisposable {
         NoPr()
     }
 
+    internal func TemporaryIsolation() {
+        let sentinel = Path.Combine("/tmp", Path.GetFileName(Temp.Root) + "-sentinel")
+        File.WriteAllText(sentinel, "synthetic host temporary data")
+        try {
+            let path = Path.Combine(Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(path))
+            policy["verification"] = Check.Json(
+                "[[\"/bin/sh\",\"-c\",\"test -f result.txt && test ! -e " + sentinel + "\"]]"
+            )
+            File.WriteAllText(path, policy.ToJsonString())
+            Commit("Verify fresh temporary namespace")
+            Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+            Approve()
+            let run = Claim()
+            Mode("temporary_isolation")
+            State["temporary_sentinel"] = JsonValue.Create(sentinel)
+            Save()
+            Call([]string{"work", "--run", run})
+            Check.That(File.ReadAllText(sentinel) == "synthetic host temporary data", "Host temporary data changed")
+        } finally {
+            File.Delete(sentinel)
+        }
+    }
+
+    internal func TemporaryHomeRejected() {
+        let home = Path.Combine("/tmp", Path.GetFileName(Temp.Root) + "-home")
+        Directory.CreateDirectory(home)
+        try {
+            Approve()
+            let run = Claim()
+            Temp.Env["HOME"] = home
+            Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "must be outside /tmp")
+            NoInference()
+            NoPr()
+        } finally {
+            Directory.Delete(home, true)
+        }
+    }
+
     shared {
         internal func All(binary string) {
             for name in[]string{
@@ -382,7 +421,9 @@ internal class NativeFlow : IDisposable {
                 "PolicyEdit",
                 "WorkflowEdit",
                 "RepositoryConfig",
-                "NoPatch"
+                "NoPatch",
+                "TemporaryIsolation",
+                "TemporaryHomeRejected"
             } {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
@@ -437,6 +478,12 @@ internal class NativeFlow : IDisposable {
                     }
                     case "NoPatch" {
                         flow.NoPatch()
+                    }
+                    case "TemporaryIsolation" {
+                        flow.TemporaryIsolation()
+                    }
+                    case "TemporaryHomeRejected" {
+                        flow.TemporaryHomeRejected()
                     }
                     default {
                         throw Exception("Unknown test: " + name)

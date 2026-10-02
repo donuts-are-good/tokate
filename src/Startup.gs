@@ -44,6 +44,7 @@ internal class Startup {
                     Hint: "Install the native Codex CLI, then run codex login. Needed for donor work."
                 },
                 ToolCheck{Name: "setsid", Hint: "Install util-linux and add setsid to PATH."},
+                ToolCheck{Name: "bwrap", Hint: "Install bubblewrap. Needed for isolated donor temporary storage."},
             }
             for tool in tools {
                 tool.Path = Find(tool.Name)
@@ -138,10 +139,14 @@ internal class Startup {
                     failed = true
                 }
             }
-            let sandbox = ToolCheck{Name: "sandbox", Status: "skipped", Detail: "Requires working codex and setsid."}
+            let sandbox = ToolCheck{
+                Name: "sandbox",
+                Status: "skipped",
+                Detail: "Requires working codex, setsid, and bubblewrap."
+            }
             var canProbe = runner
             for tool in tools {
-                if (tool.Name == "codex" || tool.Name == "setsid") && tool.Status != "ready" {
+                if (tool.Name == "codex" || tool.Name == "setsid" || tool.Name == "bwrap") && tool.Status != "ready" {
                     canProbe = false
                 }
             }
@@ -149,7 +154,7 @@ internal class Startup {
                 try {
                     Worker.Doctor()
                     sandbox.Status = "ready"
-                    sandbox.Detail = "Checkout writable. Control files and Git metadata unreadable."
+                    sandbox.Detail = "Checkout and private /tmp writable. Control files and Git metadata unreadable."
                 } catch (error Exception) {
                     sandbox.Status = "failed"
                     sandbox.Detail = error.Message

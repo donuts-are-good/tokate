@@ -17,5 +17,14 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           global-json-file: global.json
-      - run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap clang zlib1g-dev
+      - name: Permit bubblewrap user namespaces
+        run: |
+          sudo tee /etc/apparmor.d/bwrap <<'EOF'
+          abi <abi/4.0>,
+          profile bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/bwrap
       - run: bash scripts/verify.sh

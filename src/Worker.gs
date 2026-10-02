@@ -43,13 +43,36 @@ internal class Worker {
             throw Exception("Install the Codex CLI first")
         }
 
+        internal func Run(directory string, args[]string, input string? = nil, seconds int32 = 60) CommandResult {
+            for path in[]string{
+                directory,
+                CodexPath(),
+                Environment.GetEnvironmentVariable("HOME") ?? "",
+                Environment.GetEnvironmentVariable("CODEX_HOME") ?? "",
+                Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? ""
+            } {
+                if path == "" || !Path.IsPathFullyQualified(path) {
+                    continue
+                }
+                let canonical = CanonicalPath(path)
+                if canonical == "/tmp" || canonical.StartsWith("/tmp/") {
+                    throw Exception(
+                        "Managed runs, harness homes, and tools must be outside /tmp. Move them before starting work."
+                    )
+                }
+            }
+            let wrapper = List[string]{"--die-with-parent", "--bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp"}
+            wrapper.AddRange([]string{"--chdir", directory, "--", CodexPath()})
+            wrapper.AddRange(args)
+            return Commands.Run("bwrap", wrapper.ToArray(), directory, input, seconds, true)
+        }
+
         internal func Filesystem(checkout string, gitRead bool = false) string {
             let gitMode = gitRead ? "read": "deny"
-            return "{ \":root\" = \"deny\", \":minimal\" = \"read\", " + J.Write(checkout) + " = \"write\", " + J.Write(
-                Path.Combine(checkout, ".git")
-            ) +
-                " = " +
-                J.Write(gitMode) + ", " + J.Write(CodexPath()) + " = \"read\" }"
+            return "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " + J.Write(checkout) +
+                " = \"write\", " +
+                J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(CodexPath()) +
+                " = \"read\" }"
         }
 
         internal func Probe(directory string, checkout string) {
@@ -61,24 +84,32 @@ internal class Worker {
             args.AddRange(
                 []string{
                     "--",
+                    "/usr/bin/env",
+                    "-i",
+                    "PATH=/usr/local/bin:/usr/bin:/bin",
+                    "HOME=" + Path.Combine(checkout, ".tokate-scratch"),
+                    "TMPDIR=" + Path.Combine(checkout, ".tokate-scratch"),
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-scratch/probe",
+                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-scratch/probe /tmp/tokate-probe && { test ! -f global.json || dotnet msbuild -nologo -version; }",
                     "probe",
                     sentinel
                 }
             )
-            let result = Commands.Run(CodexPath(), args.ToArray(), directory, clean: true)
+            let result = Run(directory, args.ToArray())
             File.Delete(sentinel)
             if result.Code != 0 {
                 throw Exception(
-                    "Sandbox preflight failed. Codex must support restrictive permission profiles: " + result.Error
+                    "Sandbox preflight failed. Check bubblewrap, Codex permission profiles, and system toolchain requirements: " +
+                        result.Error +
+                        result.Output
                 )
             }
         }
 
         internal func Doctor() {
-            let root = Path.Combine(Path.GetTempPath(), "tokate-doctor-" + Guid.NewGuid().ToString("N"))
+            let root = Path.Combine("/var/tmp", "tokate-doctor-" + Guid.NewGuid().ToString("N"))
+            Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             let checkout = Path.Combine(root, "checkout")
             Directory.CreateDirectory(Path.Combine(checkout, ".git"))
             Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
@@ -202,7 +233,7 @@ internal class Worker {
             )
             let timer = Stopwatch.StartNew()
             try {
-                let result = Commands.Run(CodexPath(), args.ToArray(), directory, prompt, run.Number("seconds"), true)
+                let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"))
                 File.WriteAllText(Path.Combine(directory, "events.jsonl"), result.Output)
                 File.WriteAllText(Path.Combine(directory, "stderr.log"), result.Error)
                 if result.Code != 0 {
@@ -255,13 +286,7 @@ internal class Worker {
                     for word in J.Items(command) {
                         verifyArgs.Add(word.GetString() ?? "")
                     }
-                    let check = Commands.Run(
-                        CodexPath(),
-                        verifyArgs.ToArray(),
-                        directory,
-                        seconds: remaining,
-                        clean: true
-                    )
+                    let check = Run(directory, verifyArgs.ToArray(), seconds: remaining)
                     verification.Add(
                         J.Map("command", command, "exit_code", check.Code, "output", check.Output, "error", check.Error)
                     )

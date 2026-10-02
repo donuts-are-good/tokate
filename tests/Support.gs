@@ -109,7 +109,7 @@ internal class Check {
 }
 
 internal class Temp : IDisposable {
-    internal let Root string = Path.Combine(Path.GetTempPath(), "tokate-e2e-" + Guid.NewGuid().ToString("N"))
+    internal let Root string = Path.Combine("/var/tmp", "tokate-e2e-" + Guid.NewGuid().ToString("N"))
     internal let Env Dictionary[string, string] = Dictionary[string, string]()
 
     internal init() {

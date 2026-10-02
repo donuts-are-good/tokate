@@ -10,7 +10,7 @@ delegates authentication. Source links support the behavior described below.
 Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
 effort explicitly.
 
-- Startup looks for `git`, `gh`, `codex`, and `setsid` in absolute directories
+- Startup looks for `git`, `gh`, `codex`, `setsid`, and `bwrap` in absolute directories
   listed in `PATH`. It checks file existence and executable permissions. It does
   not recursively search the home directory or open harness configuration files.
 - `tokate doctor` invokes `--version` on discovered tools and runs a local
@@ -67,6 +67,17 @@ environment data. It does not intentionally dump the environment to a log.
 
 The sandbox restricts repository commands, not the trusted harness host process
 that authenticates inference. Installed executables remain trusted code.
+
+Managed Codex execution, sandbox probes and each verification command run inside
+a bubblewrap mount namespace with a fresh private `/tmp`. Run directories,
+harness homes and tools located under host `/tmp` are rejected before inference.
+They cannot be restored without exposing shared temporary data or compromising
+the filesystem boundary.
+The wrapper does not copy credentials. The harness still owns authentication.
+Private `/tmp` contents disappear with the namespace and do not carry over from
+agent execution to verification. Scratch files inside the checkout remain local
+run artifacts. The namespace is not whole-harness data isolation: the trusted
+harness retains its host file access outside the private temporary directory.
 
 Source: [Process.gs](../src/Process.gs), [Worker.gs](../src/Worker.gs),
 [Publish.gs](../src/Publish.gs).

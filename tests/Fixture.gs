@@ -52,6 +52,9 @@ internal class Fixture {
         }
         if args[0] == "sandbox" {
             Check.That(Array.IndexOf(args, "permissions.tokate.network.enabled=false") >= 0, "Network must be disabled")
+            if Array.IndexOf(args, "probe") >= 0 {
+                return 0
+            }
             if Array.IndexOf(args, "/usr/bin/env") >= 0 {
                 let command = List[string](args).GetRange(
                     Array.IndexOf(args, "--") + 1,
@@ -89,6 +92,11 @@ internal class Fixture {
         State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
         Save()
         let mode = Check.Text(State["mode"])
+        if mode == "temporary_isolation" {
+            let sentinel = Check.Text(State["temporary_sentinel"])
+            Check.That(!File.Exists(sentinel), "Host temporary file reached the managed namespace")
+            File.WriteAllText(sentinel, "private agent temporary data")
+        }
         if mode == "timeout" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())

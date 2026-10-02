@@ -75,7 +75,7 @@ Review:
   tokate checks --repo OWNER/REPO --pr N [--watch] [--timeout 1200]
   tokate checks --run DIR [--watch] [--timeout 1200]
 
-Requires Linux, git, gh, setsid, and a current native Codex CLI with permission
+Requires Linux, git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
 profiles. Sign in with gh auth login and codex login. Create your fork with
  gh repo fork OWNER/REPO --clone=false
 
@@ -92,6 +92,16 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 `--seconds` caps agent execution plus independent verification. The default is the smaller of 1800 seconds and the owner's limit. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 
 Startup checks warn about missing tools. Owner commands work without Codex. `doctor` checks all tools and probes the sandbox, but does not test authentication, model access, or repository build dependencies. `NO_COLOR` disables styling. Redirected output is plain, and `policy` and `status` output JSON when piped.
+
+Managed run directories, harness homes and tool installations must be outside
+`/tmp`, which is replaced with private temporary storage. The default run
+location meets this requirement. `doctor` uses a private directory under
+`/var/tmp` and removes it after the probe.
+
+The operating system must permit bubblewrap to create user namespaces. On
+Ubuntu 24.04, an administrator may need to enable an AppArmor profile for
+bubblewrap as described in the [Ubuntu release notes](https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890).
+Run `doctor` after setup. Tokate does not change system security settings.
 
 ## Quality and review
 
@@ -127,9 +137,9 @@ the limits of the current implementation.
 
 Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 
-Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before starting inference. Unsupported sandbox configurations fail closed.
+Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, the checkout, and private temporary storage allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. Bubblewrap gives each managed invocation a fresh private `/tmp`, including runtime IPC paths that ignore `TMPDIR`. Shared host temporary files are not mounted into that storage. A preflight probes read denial and temporary writes before starting inference. Repositories with `global.json` also receive a system .NET/MSBuild startup check. This does not verify dependency restore or model availability. Unsupported sandbox configurations fail closed.
 
-Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
+Verification runs under the same filesystem boundary and a clean environment, with read-only access to Git metadata and a separate fresh private `/tmp`. Agent network access defaults off. Allowing it permits outbound command network access and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex, bubblewrap and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
 Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop uses additional inference. Time caps are not exact token or subscription-percentage caps.
 
