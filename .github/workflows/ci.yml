@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           global-json-file: global.json
@@ -27,4 +29,12 @@ jobs:
           }
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/bwrap
+      - name: Install pinned native Codex
+        run: |
+          curl -qfsSL --proto '=https' --proto-redir '=https' https://github.com/openai/codex/releases/download/rust-v0.160.0/codex-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/codex.tar.gz"
+          echo "306865417d4ee7a927785852910a527f41e1e159add390ac5ae3accb67d44a13  $RUNNER_TEMP/codex.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/codex.tar.gz" -C "$RUNNER_TEMP" codex-x86_64-unknown-linux-musl
+          sudo install -m 755 "$RUNNER_TEMP/codex-x86_64-unknown-linux-musl" /usr/local/bin/codex
       - run: bash scripts/verify.sh
+      - name: Probe the real managed sandbox without inference
+        run: artifacts/linux-x64/tokate doctor
