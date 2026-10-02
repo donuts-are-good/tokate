@@ -1,38 +1,38 @@
 @font-face {
     font-family: Decree;
-    src: url(assets/cinzel-decorative.ttf) format("truetype");
+    src: url(assets/tokate-decree.woff2) format("woff2");
     font-weight: 400;
     font-display: swap;
 }
 @font-face {
     font-family: Manuscript;
-    src: url(assets/pinyon-script.ttf) format("truetype");
+    src: url(assets/pinyon-script.woff2) format("woff2");
     font-weight: 400;
     font-display: swap;
 }
 @font-face {
     font-family: Cormorant;
-    src: url(assets/cormorant.ttf) format("truetype");
+    src: url(assets/cormorant.woff2) format("woff2");
     font-weight: 500;
     font-display: swap;
 }
 @font-face {
     font-family: Cormorant;
-    src: url(assets/cormorant-italic.ttf) format("truetype");
+    src: url(assets/cormorant-italic.woff2) format("woff2");
     font-weight: 500;
     font-style: italic;
     font-display: swap;
 }
 @font-face {
     font-family: Newsreader;
-    src: url(assets/newsreader-italic.ttf) format("truetype");
+    src: url(assets/newsreader-italic.woff2) format("woff2");
     font-weight: 400;
     font-style: italic;
     font-display: swap;
 }
 @font-face {
     font-family: Newsreader;
-    src: url(assets/newsreader.ttf) format("truetype");
+    src: url(assets/newsreader.woff2) format("woff2");
     font-weight: 400;
     font-display: swap;
 }
@@ -47,6 +47,15 @@
     --serif: Newsreader, Georgia, serif;
     --display: Cormorant, Georgia, serif;
 }
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #23324b;
+    --ink: #eee5cf;
+    --muted: #c1c6cb;
+    --rust: #e2bb80;
+    --sage: #b0bfa6;
+    --line: #c4cbd536;
+}
 * {
     box-sizing: border-box;
 }
@@ -56,11 +65,15 @@ html {
 }
 body {
     margin: 0;
-    background: var(--paper) url(assets/backdrop.png) center top/cover no-repeat;
+    background: var(--paper) url(assets/backdrop.webp) center top/cover no-repeat;
     color: var(--ink);
     font-family: var(--serif);
     font-size: 18px;
     min-height: 100svh;
+    transition: background-color 0.7s ease, color 0.5s ease;
+}
+:root[data-theme="dark"] body {
+    background-blend-mode: multiply;
 }
 a {
     color: inherit;
@@ -131,13 +144,17 @@ footer a:hover {
     margin: 0 auto;
 }
 .heavens {
+    --orb-offset: clamp(108px, 22vw, 900px);
+    --orb-rise: clamp(65px, 8vw, 240px);
+    --orb-scale: 0.46;
     height: 340px;
     position: relative;
     isolation: isolate;
     overflow: visible;
     pointer-events: none;
 }
-.sun {
+.sun,
+.moon {
     position: absolute;
     width: 340px;
     height: 340px;
@@ -145,9 +162,43 @@ footer a:hover {
     top: -10px;
     transform: translateX(-50%);
     z-index: 1;
-    animation: sun-appear 1.6s ease both;
+    border: 0;
+    padding: 0;
+    background: none;
+    border-radius: 50%;
+    pointer-events: auto;
+    transition: transform 0.75s cubic-bezier(0.45, 0, 0.2, 1), opacity 0.65s ease;
+}
+.sun {
+    animation: sun-appear 0.3s ease both;
+}
+.moon {
+    transform: translate(calc(-50% + var(--orb-offset)), calc(-1 * var(--orb-rise))) scale(var(--orb-scale));
+    opacity: 0.75;
+    z-index: 3;
+}
+.moon-stars {
+    width: 100%;
+    height: 100%;
+    fill: #e9cf99;
+    opacity: 0.8;
+}
+:root[data-theme="dark"] .sun {
+    transform: translate(calc(-50% + var(--orb-offset)), calc(-1 * var(--orb-rise))) scale(var(--orb-scale));
+    opacity: 0.55;
+    animation: none;
+    z-index: 3;
+}
+:root[data-theme="dark"] .moon {
+    transform: translateX(-50%);
+    opacity: 1;
+    z-index: 1;
+}
+:root[data-theme="dark"] .hands {
+    filter: brightness(0.65) saturate(0.65);
 }
 .sun img,
+.moon img,
 .eyes {
     position: absolute;
     inset: 0;
@@ -193,14 +244,15 @@ footer a:hover {
     z-index: 2;
     will-change: transform;
     pointer-events: none;
+    transition: filter 0.7s ease;
 }
 .hand-left {
     clip-path: inset(0 50% 0 0);
-    animation: hand-left 1.8s 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: hand-left 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .hand-right {
     clip-path: inset(0 0 0 50%);
-    animation: hand-right 1.8s 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: hand-right 0.55s 0.08s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .star {
     position: absolute;
@@ -286,8 +338,8 @@ h1 em {
     padding: 22px 62px;
     border: 0;
     border-radius: 8px;
-    background: url(assets/stone-olive.png) center / 100% 142% no-repeat;
-    color: var(--ink);
+    background: url(assets/stone-olive.webp) center / 100% 142% no-repeat;
+    color: #303b2b;
     justify-content: center;
     font-family: var(--display);
     font-size: 23px;
@@ -307,12 +359,22 @@ h1 em {
 .steps {
     max-width: 1050px;
     margin: 8px auto 0;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    padding: 30px 26px 33px;
-    gap: 24px;
+    padding: 42px 26px 36px;
     border-top: 1px solid var(--line);
     scroll-margin-top: 30px;
+}
+.section-heading {
+    text-align: center;
+    margin-bottom: 44px;
+}
+.section-heading h2 {
+    font-size: 42px;
+    margin: 0 0 12px;
+}
+.step-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 30px;
 }
 .steps article {
     display: flex;
@@ -328,7 +390,7 @@ h1 em {
     margin-top: -15px;
     padding-bottom: 4px;
     background: url(assets/laurel.svg) center / contain no-repeat;
-    color: #795737;
+    color: var(--rust);
     font-variant-numeric: lining-nums;
     font-family: var(--display);
     font-size: 24px;
@@ -338,7 +400,9 @@ h2 {
     font-family: var(--display);
     font-weight: 500;
 }
-.steps h2 {
+.steps h3 {
+    font-family: var(--display);
+    font-weight: 500;
     font-size: 23px;
     margin: 2px 0 10px;
     line-height: 1;
@@ -348,6 +412,29 @@ h2 {
     color: var(--muted);
     line-height: 1.4;
     margin: 0;
+}
+.steps article p + p {
+    margin-top: 14px;
+}
+.workflow-note {
+    text-align: center;
+    margin-top: 34px;
+}
+.workflow-note a {
+    display: inline-block;
+    margin-top: 14px;
+    color: var(--rust);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+.commons {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+}
+.commons a {
+    padding-right: 12px;
+    border-right: 1px solid var(--line);
 }
 footer {
     margin: 0 auto;
@@ -382,6 +469,12 @@ footer {
     top: 15px;
 }
 dialog {
+    color-scheme: light;
+    --ink: #303b2b;
+    --muted: #625d4e;
+    --rust: #97492e;
+    --sage: #697459;
+    --line: #7e725338;
     --scroll-head: 125px;
     --scroll-foot: 110px;
     color: var(--ink);
@@ -398,7 +491,7 @@ dialog::before {
     position: absolute;
     inset: 0;
     z-index: -1;
-    background: url(assets/scroll.png) center / 100% 100% no-repeat;
+    background: url(assets/scroll.webp) center / 100% 100% no-repeat;
     clip-path: inset(0 0 calc(var(--roll-offset, 0px) + 10%));
     transition: clip-path 0.2s ease;
     pointer-events: none;
@@ -410,7 +503,7 @@ dialog::before {
     width: 100%;
     padding: 0;
     border: 0;
-    background: url(assets/scroll.png) center bottom / 100% 714.2857% no-repeat;
+    background: url(assets/scroll.webp) center bottom / 100% 714.2857% no-repeat;
     transform: translateY(calc(-1 * var(--roll-offset, 0px)));
     transition: transform 0.2s ease;
     cursor: grab;
@@ -439,6 +532,9 @@ dialog::before {
 dialog::backdrop {
     background: #2c261c85;
     backdrop-filter: blur(5px);
+}
+:root[data-theme="dark"] dialog::backdrop {
+    background: #07101caa;
 }
 dialog h2 {
     font-family: Decree, var(--display);
@@ -585,7 +681,8 @@ body.modal-open {
     .heavens {
         height: 25vw;
     }
-    .sun {
+    .sun,
+    .moon {
         width: 24.375vw;
         height: 24.375vw;
     }
@@ -606,7 +703,8 @@ body.modal-open {
     .heavens {
         height: 290px;
     }
-    .sun {
+    .sun,
+    .moon {
         width: 285px;
         height: 285px;
         top: 0;
@@ -628,9 +726,14 @@ body.modal-open {
         margin: 0 5%;
         padding-left: 0;
         padding-right: 0;
-        gap: 18px;
     }
-    .steps h2 {
+    .step-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+        max-width: 600px;
+        margin-inline: auto;
+    }
+    .steps h3 {
         font-size: 21px;
     }
     .steps p {
@@ -643,6 +746,10 @@ body.modal-open {
     }
 }
 @media (max-width: 600px) {
+    .heavens {
+        --orb-scale: 0.34;
+        --orb-rise: 65px;
+    }
     body {
         background-size: auto 100%;
     }
@@ -668,7 +775,8 @@ body.modal-open {
         height: 265px;
         margin-top: 8px;
     }
-    .sun {
+    .sun,
+    .moon {
         width: 250px;
         height: 250px;
         top: -5px;
@@ -721,16 +829,16 @@ body.modal-open {
         padding: 15px 23px;
     }
     .steps {
-        display: flex;
-        flex-direction: column;
-        gap: 24px;
         margin: 0 8%;
         padding: 27px 0;
+    }
+    .section-heading {
+        margin-bottom: 34px;
     }
     .steps article {
         gap: 16px;
     }
-    .steps h2 {
+    .steps h3 {
         font-size: 23px;
         margin-bottom: 7px;
     }

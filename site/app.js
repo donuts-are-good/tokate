@@ -5,6 +5,24 @@ const sun = document.querySelector(".sun");
 const pupils = document.querySelectorAll(".pupil");
 const rollHandle = document.querySelector(".roll-handle");
 const scrollContent = document.querySelector(".scroll-content");
+const themeButtons = document.querySelectorAll("button[data-theme]");
+function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    themeButtons.forEach((button) =>
+        button.setAttribute("aria-pressed", String(button.dataset.theme === theme)),
+    );
+    document.querySelector('meta[name="theme-color"]').content =
+        theme === "dark" ? "#23324b" : "#f3e7d4";
+}
+setTheme(document.documentElement.dataset.theme || "light");
+for (const button of themeButtons) {
+    button.addEventListener("click", () => {
+        setTheme(button.dataset.theme);
+        try {
+            localStorage.setItem("tokate-theme", button.dataset.theme);
+        } catch {}
+    });
+}
 const roles = {
     owner: {
         title: "For Project Owners",
@@ -40,6 +58,17 @@ let rollOverlap = 0;
 let rollCloseTimer;
 
 for (const button of document.querySelectorAll("[data-role]")) {
+    const prepareScroll = () => {
+        for (const name of [
+            "scroll",
+            button.dataset.role === "owner" ? "initial-c" : "initial-i",
+        ])
+            new Image().src = `assets/${name}.webp`;
+        document.fonts.load("32px Decree");
+        document.fonts.load("28px Manuscript");
+    };
+    button.addEventListener("pointerenter", prepareScroll, { once: true });
+    button.addEventListener("focus", prepareScroll, { once: true });
     button.addEventListener("click", () => {
         selectedRole = button.dataset.role;
         trigger = button;
@@ -53,7 +82,7 @@ for (const button of document.querySelectorAll("[data-role]")) {
                 if (index === 0) {
                     const initial = document.createElement("img");
                     initial.className = "illuminated-initial";
-                    initial.src = `assets/initial-${text[0].toLowerCase()}.png`;
+                    initial.src = `assets/initial-${text[0].toLowerCase()}.webp`;
                     initial.alt = text[0];
                     wording.replaceChildren(initial, text.slice(1));
                 }

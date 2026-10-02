@@ -9,14 +9,41 @@
             content="Give your compute a purpose, help open-source projects with the AI usage you already have"
         />
         <title>Tokate · Give your compute a purpose</title>
+        <script>
+            try {
+                document.documentElement.dataset.theme =
+                    localStorage.getItem("tokate-theme") || "light";
+            } catch {}
+        </script>
         <link rel="icon" href="assets/mark.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="style.css" />
         <link rel="canonical" href="https://tokate.dev/" />
         <link
             rel="preload"
             as="image"
-            href="assets/scroll.png"
-            fetchpriority="low"
+            href="assets/backdrop.webp"
+            fetchpriority="high"
+        />
+        <link
+            rel="preload"
+            as="font"
+            href="assets/cormorant.woff2"
+            type="font/woff2"
+            crossorigin
+        />
+        <link
+            rel="preload"
+            as="font"
+            href="assets/cormorant-italic.woff2"
+            type="font/woff2"
+            crossorigin
+        />
+        <link
+            rel="preload"
+            as="font"
+            href="assets/newsreader.woff2"
+            type="font/woff2"
+            crossorigin
         />
         <script src="app.js" defer></script>
     </head>
@@ -42,24 +69,31 @@
         </header>
         <main id="main">
             <section class="hero" aria-labelledby="headline">
-                <div class="heavens" aria-hidden="true">
-                    <div class="sun">
+                <div class="heavens">
+                    <button
+                        class="sun"
+                        type="button"
+                        aria-label="Daylight"
+                        aria-pressed="true"
+                        data-theme="light"
+                        title="Switch to daylight"
+                    >
                         <img
-                            src="assets/sun.png"
+                            src="assets/sun.webp"
                             alt=""
                             fetchpriority="high"
                             draggable="false"
                         />
-                        <svg class="eyes" viewBox="0 0 1254 1254">
+                        <svg class="eyes" viewBox="0 0 1254 1254" aria-hidden="true">
                             <defs>
                                 <clipPath id="left-eye">
                                     <path
-                                        d="M430 548C469 520 531 512 568 558C538 575 466 584 430 548"
+                                        d="M430 548C469 520 531 512 568 558C538 602 466 604 430 548"
                                     />
                                 </clipPath>
                                 <clipPath id="right-eye">
                                     <path
-                                        d="M684 557C716 516 779 510 823 543C796 568 724 585 684 557"
+                                        d="M684 557C716 516 779 510 823 543C796 600 724 606 684 557"
                                     />
                                 </clipPath>
                                 <radialGradient
@@ -81,25 +115,25 @@
                             <g class="eye eye-left">
                                 <path
                                     class="white"
-                                    d="M430 548C469 520 531 512 568 558C538 575 466 584 430 548"
+                                    d="M430 548C469 520 531 512 568 558C538 602 466 604 430 548"
                                 />
                                 <g clip-path="url(#left-eye)">
                                     <g class="pupil">
                                         <circle
                                             cx="501"
-                                            cy="551"
+                                            cy="560"
                                             r="21"
                                             fill="url(#iris)"
                                         />
                                         <circle
                                             cx="501"
-                                            cy="551"
+                                            cy="560"
                                             r="9"
                                             fill="#503a26"
                                         />
                                         <circle
                                             cx="496"
-                                            cy="546"
+                                            cy="555"
                                             r="3"
                                             fill="#ebd5a7"
                                             opacity=".8"
@@ -114,25 +148,25 @@
                             <g class="eye eye-right">
                                 <path
                                     class="white"
-                                    d="M684 557C716 516 779 510 823 543C796 568 724 585 684 557"
+                                    d="M684 557C716 516 779 510 823 543C796 600 724 606 684 557"
                                 />
                                 <g clip-path="url(#right-eye)">
                                     <g class="pupil">
                                         <circle
                                             cx="748"
-                                            cy="551"
+                                            cy="560"
                                             r="21"
                                             fill="url(#iris)"
                                         />
                                         <circle
                                             cx="748"
-                                            cy="551"
+                                            cy="560"
                                             r="9"
                                             fill="#503a26"
                                         />
                                         <circle
                                             cx="743"
-                                            cy="546"
+                                            cy="555"
                                             r="3"
                                             fill="#ebd5a7"
                                             opacity=".8"
@@ -145,21 +179,37 @@
                                 />
                             </g>
                         </svg>
-                    </div>
+                    </button>
+                    <button
+                        class="moon"
+                        type="button"
+                        aria-label="Moonlight"
+                        aria-pressed="false"
+                        data-theme="dark"
+                        title="Switch to moonlight"
+                    >
+                        <img src="assets/moon.webp" alt="" draggable="false" />
+                        <svg class="moon-stars" viewBox="0 0 400 400" aria-hidden="true">
+                            <path d="M0-20L4-5L13-13L5-4L20 0L5 4L13 13L4 5L0 20L-4 5L-13 13L-5 4L-20 0L-5-4L-13-13L-4-5Z" transform="translate(66 116)" />
+                            <path d="M0-20L4-5L13-13L5-4L20 0L5 4L13 13L4 5L0 20L-4 5L-13 13L-5 4L-20 0L-5-4L-13-13L-4-5Z" transform="translate(40 255) scale(.65)" />
+                            <path d="M0-20L4-5L13-13L5-4L20 0L5 4L13 13L4 5L0 20L-4 5L-13 13L-5 4L-20 0L-5-4L-13-13L-4-5Z" transform="translate(355 60) scale(.75)" />
+                        </svg>
+                    </button>
                     <img
                         class="hands hand-left"
-                        src="assets/hands-smooth.png"
+                        src="assets/hands-smooth.webp"
                         alt=""
+                        fetchpriority="high"
                         draggable="false"
                     />
                     <img
                         class="hands hand-right"
-                        src="assets/hands-smooth.png"
+                        src="assets/hands-smooth.webp"
                         alt=""
                         draggable="false"
                     />
-                    <span class="star star-one">✧</span
-                    ><span class="star star-two">✧</span>
+                    <span class="star star-one" aria-hidden="true">✧</span
+                    ><span class="star star-two" aria-hidden="true">✧</span>
                 </div>
                 <div class="hero-copy">
                     <h1 id="headline">
@@ -183,34 +233,71 @@
             <section
                 class="steps"
                 id="how-it-works"
-                aria-label="How Tokate works"
+                aria-labelledby="how-title"
             >
-                <article>
-                    <span class="number">1</span>
-                    <div>
-                        <h2>Choose a task</h2>
-                        <p>The owner approves an issue</p>
-                    </div>
-                </article>
-                <article>
-                    <span class="number">2</span>
-                    <div>
-                        <h2>Give some compute</h2>
-                        <p>A donor’s AI works on it</p>
-                    </div>
-                </article>
-                <article>
-                    <span class="number">3</span>
-                    <div>
-                        <h2>Make it better</h2>
-                        <p>Checks run, then the owner reviews the PR</p>
-                    </div>
-                </article>
+                <div class="section-heading">
+                    <h2 id="how-title">How it works</h2>
+                    <p>From an approved issue to a contribution you can review</p>
+                </div>
+                <div class="step-grid">
+                    <article>
+                        <span class="number">1</span>
+                        <div>
+                            <h3>Choose a task</h3>
+                            <p>
+                                The owner picks a GitHub issue, sets a time budget
+                                and checks, then approves a donor
+                            </p>
+                            <p>
+                                The donor knows the scope before spending compute
+                            </p>
+                        </div>
+                    </article>
+                    <article>
+                        <span class="number">2</span>
+                        <div>
+                            <h3>Run it locally</h3>
+                            <p>
+                                The donor runs Tokate with their own Codex account
+                                and the project’s build tools
+                            </p>
+                            <p>
+                                The AI works in a separate checkout on the donor’s
+                                machine
+                            </p>
+                        </div>
+                    </article>
+                    <article>
+                        <span class="number">3</span>
+                        <div>
+                            <h3>Review the result</h3>
+                            <p>
+                                Tokate runs the checks and opens a draft pull
+                                request when they pass
+                            </p>
+                            <p>
+                                The owner reviews the changes and decides what to
+                                merge
+                            </p>
+                        </div>
+                    </article>
+                </div>
+                <div class="workflow-note">
+                    <p>
+                        Your accounts stay yours, and the owner keeps the final say
+                    </p>
+                    <a href="https://github.com/obselate/tokate/blob/main/README.md"
+                        >Read the setup guide <span aria-hidden="true">↗</span></a
+                    >
+                </div>
             </section>
         </main>
         <footer>
-            <span>Made for the commons</span
-            ><a href="https://github.com/obselate/tokate/releases/latest"
+            <span class="commons">
+                <a href="https://github.com/obselate/tokate/blob/main/LICENSE">MIT</a>
+                <span>Made for the commons</span>
+            </span>
+            <a href="https://github.com/obselate/tokate/releases/latest"
                 >Get Tokate <span aria-hidden="true">↗</span></a
             ><button id="motion" aria-pressed="false">Pause animation</button>
         </footer>
