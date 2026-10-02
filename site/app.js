@@ -21,7 +21,7 @@ const roles = {
         steps: [
             "Install Tokate and sign in with your own accounts",
             "Get assigned to an approved issue and run the task",
-            "Your AI does the work, then Tokate checks it and opens a draft PR",
+            "Your AI works, then Tokate checks and opens a draft PR",
         ],
         anchor: "i-want-to-donate-compute",
         prompt: "Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me donate compute to a repository\nI am the donor\nConfirm my tools, the approved issue, and my assignment\nExplain the budget before starting a run",

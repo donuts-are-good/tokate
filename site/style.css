@@ -382,13 +382,13 @@ footer {
     top: 15px;
 }
 dialog {
-    --scroll-head: 142px;
-    --scroll-foot: clamp(110px, 14svh, 160px);
+    --scroll-head: 125px;
+    --scroll-foot: 110px;
     color: var(--ink);
     background: none;
     border: 0;
     padding: var(--scroll-head) 60px var(--scroll-foot);
-    max-width: 860px;
+    max-width: 780px;
     width: calc(100% - 20px);
     max-height: 92svh;
     filter: drop-shadow(0 18px 30px #241b2b55);
@@ -452,7 +452,7 @@ dialog h2 {
     background: url(assets/mark.svg) center bottom / 18px 24px no-repeat;
 }
 dialog ol {
-    padding: 0 0 0 20px;
+    padding: 0 20px;
     list-style: none;
     counter-reset: step;
 }
@@ -460,6 +460,8 @@ dialog li {
     counter-increment: step;
     display: flex;
     align-items: baseline;
+    justify-content: center;
+    text-align: center;
     gap: 16px;
     line-height: 1.4;
     margin: 16px 0;
@@ -483,8 +485,8 @@ dialog li:before {
 }
 .agent-help {
     border-top: 1px solid var(--line);
-    margin-top: 20px;
-    padding-top: 12px;
+    margin-top: 16px;
+    padding-top: 4px;
 }
 .agent-help p {
     font-family: var(--display);
