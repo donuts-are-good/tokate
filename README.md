@@ -6,6 +6,10 @@ The owner approves an issue. A donor runs it with their own accounts. Tokate ope
 
 Early prototype for **Linux x64 (glibc 2.34+) and public GitHub repositories**. Start with one small issue.
 
+Using a coding agent? Give it this prompt:
+
+> Read https://github.com/obselate/tokate/blob/main/AGENTS.md and help me set up Tokate for my repository. First establish whether I am the owner or donor, then guide me through the next step.
+
 ## Install Tokate
 
 Download the Linux x64 archive from [Releases](https://github.com/obselate/tokate/releases/latest), extract it, and open its folder. Then install:
@@ -145,6 +149,7 @@ The verification script checks formatting, builds NativeAOT with warnings as err
 ## Links
 
 - [Releases and checksums](https://github.com/obselate/tokate/releases)
+- [Guide for AI assistants](AGENTS.md)
 - [Command and security reference](docs/reference.md)
 - [Report an issue](https://github.com/obselate/tokate/issues)
 - [MIT license](LICENSE)
