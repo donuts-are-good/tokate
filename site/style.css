@@ -1,4 +1,17 @@
 @font-face {
+    font-family: Cormorant;
+    src: url(assets/cormorant.ttf) format("truetype");
+    font-weight: 500;
+    font-display: swap;
+}
+@font-face {
+    font-family: Cormorant;
+    src: url(assets/cormorant-italic.ttf) format("truetype");
+    font-weight: 500;
+    font-style: italic;
+    font-display: swap;
+}
+@font-face {
     font-family: Newsreader;
     src: url(assets/newsreader-italic.ttf) format("truetype");
     font-weight: 400;
@@ -20,6 +33,7 @@
     --sage: #697459;
     --line: #7e725338;
     --serif: Newsreader, Georgia, serif;
+    --display: Cormorant, Georgia, serif;
 }
 * {
     box-sizing: border-box;
@@ -184,7 +198,8 @@ footer a:hover {
     padding: 0 24px 32px;
 }
 h1 {
-    font-weight: 400;
+    font-family: var(--display);
+    font-weight: 500;
     font-size: clamp(48px, 5.8vw, 83px);
     line-height: 0.98;
     letter-spacing: -2.5px;
@@ -192,7 +207,7 @@ h1 {
 }
 h1 em {
     font-style: italic;
-    font-weight: 400;
+    font-weight: 500;
 }
 .hero-copy > p {
     font-size: 22px;
@@ -240,6 +255,61 @@ h1 em {
 .secondary:hover {
     background: #e5d9c3;
 }
+.ornament-definitions {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+.choices .button {
+    position: relative;
+    isolation: isolate;
+    min-width: 280px;
+    min-height: 76px;
+    padding: 20px 43px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    font-family: var(--display);
+    font-size: 23px;
+    font-weight: 500;
+    gap: 20px;
+    --pigment: #944b32;
+    --edge: #824329;
+    --inlay: #efd2a4;
+}
+.choices .secondary {
+    --pigment: #ede0bc;
+    --edge: #7a8059;
+    --inlay: #81875c;
+}
+.cartouche {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    overflow: visible;
+    transition: filter 0.2s;
+}
+.plaque-paint {
+    fill: var(--pigment);
+    fill-opacity: 0.88;
+    stroke: var(--edge);
+    stroke-width: 1;
+}
+.plaque-line,
+.plaque-detail {
+    fill: none;
+    stroke: var(--inlay);
+    stroke-width: 0.8;
+}
+.choices .button:hover .cartouche {
+    filter: brightness(1.08);
+}
+.choices .button:active {
+    transform: translateY(0);
+}
 .steps {
     max-width: 1050px;
     margin: 8px auto 0;
@@ -259,21 +329,20 @@ h1 em {
     display: grid;
     place-items: center;
     flex-shrink: 0;
-    width: 29px;
-    height: 29px;
-    border-radius: 50%;
-    background: #aa7057;
-    color: #fff7e8;
-    font-size: 17px;
-}
-.steps article:nth-child(2) .number {
-    background: var(--sage);
-}
-.steps article:nth-child(3) .number {
-    background: #74888b;
+    width: 60px;
+    height: 64px;
+    margin-top: -15px;
+    padding-bottom: 4px;
+    background: url(assets/laurel.svg) center / contain no-repeat;
+    color: #795737;
+    font-variant-numeric: lining-nums;
+    font-family: var(--display);
+    font-size: 24px;
+    font-weight: 500;
 }
 h2 {
-    font-weight: 400;
+    font-family: var(--display);
+    font-weight: 500;
 }
 .steps h2 {
     font-size: 23px;
@@ -493,6 +562,7 @@ body.modal-open {
         padding-bottom: 28px;
     }
     h1 {
+        font-family: var(--display);
         font-size: 65px;
     }
     .steps {
@@ -561,6 +631,7 @@ body.modal-open {
         padding: 2px 22px 34px;
     }
     h1 {
+        font-family: var(--display);
         font-size: 52px;
         letter-spacing: -1.8px;
         line-height: 1.02;
@@ -573,6 +644,11 @@ body.modal-open {
     }
     .mobile-break {
         display: block;
+    }
+    .choices .button {
+        min-width: 0;
+        width: 100%;
+        font-size: 23px;
     }
     .choices {
         gap: 10px;
