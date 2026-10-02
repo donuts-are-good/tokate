@@ -100,7 +100,8 @@ internal class Fixture {
             "--strict-config",
             "--ignore-user-config",
             "--ignore-rules",
-            "approval_policy=\"never\""
+            "approval_policy=\"never\"",
+            "shell_environment_policy.set={ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = \"/tmp/tokate-home\", TMPDIR = \"/tmp/tokate-home\" }"
         } {
             Check.That(Array.IndexOf(args, required) >= 0, "Missing boundary: " + required)
         }
@@ -134,7 +135,14 @@ internal class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        if mode == "verification_recovery" {
+            Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
+            File.WriteAllText(Path.Combine(checkout, ".tokate-scratch/cache.json"), "unformatted browser cache")
+            Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))
+            File.AppendAllText(Path.Combine(checkout, ".git/info/exclude"), "\n.tokate-scratch/\n")
+        }
         if mode == "verification_boundary" {
+            File.WriteAllText("/tmp/tokate-home/agent-cache.json", "unformatted cache")
             File.CreateSymbolicLink(Path.Combine(checkout, "outside-link"), Path.Combine(Root, "state.json"))
             for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
                 File.WriteAllText(

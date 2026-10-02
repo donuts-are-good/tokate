@@ -61,7 +61,18 @@ internal class Worker {
                     )
                 }
             }
-            let wrapper = List[string]{"--die-with-parent", "--bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp"}
+            let wrapper = List[string]{
+                "--die-with-parent",
+                "--bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/tmp/tokate-home"
+            }
             wrapper.AddRange([]string{"--chdir", directory, "--", CodexPath()})
             wrapper.AddRange(args)
             return Commands.Run("bwrap", wrapper.ToArray(), directory, input, seconds, true)
@@ -87,11 +98,11 @@ internal class Worker {
                     "/usr/bin/env",
                     "-i",
                     "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=" + Path.Combine(checkout, ".tokate-scratch"),
-                    "TMPDIR=" + Path.Combine(checkout, ".tokate-scratch"),
+                    "HOME=/tmp/tokate-home",
+                    "TMPDIR=/tmp/tokate-home",
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-scratch/probe /tmp/tokate-probe && { test ! -f global.json || dotnet msbuild -nologo -version; }",
+                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && { test ! -f global.json || dotnet msbuild -nologo -version; }",
                     "probe",
                     sentinel
                 }
@@ -122,7 +133,6 @@ internal class Worker {
             let checkout = Path.Combine(root, "checkout")
             try {
                 Directory.CreateDirectory(Path.Combine(checkout, ".git"))
-                Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
                 File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
                 let global = Path.Combine(Directory.GetCurrentDirectory(), "global.json")
                 if FileInfo(global).LinkTarget != nil {
@@ -186,10 +196,6 @@ internal class Worker {
                     throw Exception("Repository Codex configuration is not supported in donor runs")
                 }
             }
-            let scratch = Path.Combine(checkout, ".tokate-scratch")
-            Directory.CreateDirectory(scratch)
-            Directory.CreateDirectory(Path.Combine(checkout, ".git", "info"))
-            File.AppendAllText(Path.Combine(checkout, ".git", "info", "exclude"), "\n.tokate-scratch/\n")
             Probe(directory, checkout)
             let args = List[string]{
                 "exec",
@@ -218,10 +224,7 @@ internal class Worker {
             Config(
                 args,
                 "shell_environment_policy.set",
-                "{ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = " + J.Write(scratch) + ", TMPDIR = " + J.Write(
-                    scratch
-                ) +
-                    " }"
+                "{ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = \"/tmp/tokate-home\", TMPDIR = \"/tmp/tokate-home\" }"
             )
             Config(args, "skills.include_instructions", "false")
             Config(args, "features.skip_host_skill_discovery", "true")
@@ -257,81 +260,107 @@ internal class Worker {
                 if result.Code != 0 {
                     throw Exception("Codex failed. See stderr.log in " + directory)
                 }
-                var completed bool
-                let usage = Dictionary[string, Object?]()
-                for line in result.Output.Split('\n') {
-                    if String.IsNullOrWhiteSpace(line) {
-                        continue
-                    }
-                    let item = J.Parse(line)
-                    if J.Text(item, "type") == "turn.failed" {
-                        throw Exception("Codex reported a failed turn")
-                    }
-                    if J.Text(item, "type") == "turn.completed" {
-                        completed = true
-                        for field in J.Get(item, "usage").EnumerateObject() {
-                            usage[field.Name] = field.Value.Clone()
-                        }
-                    }
-                }
-                let report = File.ReadAllText(Path.Combine(directory, "report.md"))
-                if !completed || String.IsNullOrWhiteSpace(report) {
-                    throw Exception("Codex did not produce a completed turn and report")
-                }
-                if Commands.Git(checkout, "status", "--porcelain") == "" {
-                    throw Exception("No changes returned. No PR will be opened.")
-                }
-                Terminal.Step("Running independent owner verification...")
-                let verification = List[Object]()
-                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                    let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                    if remaining < 1 {
-                        throw Exception("Runtime budget exhausted before verification")
-                    }
-                    let verifyArgs = List[string]()
-                    for word in J.Items(command) {
-                        verifyArgs.Add(word.GetString() ?? "")
-                    }
-                    let check = Verification.Run(
-                        checkout,
-                        verifyArgs.ToArray(),
-                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                        remaining
-                    )
-                    verification.Add(
-                        J.Map("command", command, "exit_code", check.Code, "output", check.Output, "error", check.Error)
-                    )
-                    File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
-                    if check.Code != 0 {
-                        throw Exception("Owner verification failed. See verification.json. No PR will be opened.")
-                    }
-                }
-                run.Fields["verification"] = verification
-                if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
-                    throw Exception("Agent changed Git history")
-                }
-                Commands.Git(checkout, "add", "-A")
-                Commands.Git(checkout, "diff", "--cached", "--check")
-                let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
-                if patch == "" {
-                    throw Exception("No changes returned. No PR will be opened.")
-                }
-                for file in Commands.Git(checkout, "diff", "--cached", "--name-only", run.Text("base")).Split('\n') {
-                    if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
-                        throw Exception("Donor runs cannot change owner policy, approval, templates, or CI workflows")
-                    }
-                }
-                File.WriteAllText(Path.Combine(directory, "changes.patch"), patch + "\n")
-                run.Fields["usage"] = usage
-                run.Fields["elapsed_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                run.Fields["state"] = "generated"
-                run.Save(directory)
+                Finish(directory, run, record, result.Output, timer, run.Number("seconds"))
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
                 run.Fields["error"] = error.Message
                 run.Save(directory)
                 throw error
             }
+        }
+
+        internal func Finish(
+            directory string,
+            run Data,
+            record JsonElement,
+            output string,
+            timer Stopwatch,
+            seconds int32
+        ) {
+            let checkout = Path.Combine(directory, "checkout")
+            var completed bool
+            let usage = Dictionary[string, Object?]()
+            for line in output.Split('\n') {
+                if String.IsNullOrWhiteSpace(line) {
+                    continue
+                }
+                let item = J.Parse(line)
+                if J.Text(item, "type") == "turn.failed" {
+                    throw Exception("Codex reported a failed turn")
+                }
+                if J.Text(item, "type") == "turn.completed" {
+                    completed = true
+                    for field in J.Get(item, "usage").EnumerateObject() {
+                        usage[field.Name] = field.Value.Clone()
+                    }
+                }
+            }
+            let report = File.ReadAllText(Path.Combine(directory, "report.md"))
+            if !completed || String.IsNullOrWhiteSpace(report) {
+                throw Exception("Codex did not produce a completed turn and report")
+            }
+            if Commands.Git(checkout, "status", "--porcelain") == "" {
+                throw Exception("No changes returned. No PR will be opened.")
+            }
+            let candidate = Snapshot(checkout, run)
+            let candidatePath = Path.Combine(directory, "candidate.patch")
+            if File.Exists(candidatePath) && File.ReadAllText(candidatePath) != candidate {
+                throw Exception("Saved candidate patch changed")
+            }
+            File.WriteAllText(candidatePath, candidate)
+            Terminal.Step("Running independent owner verification...")
+            let verification = List[Object]()
+            for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                if remaining < 1 {
+                    throw Exception("Runtime budget exhausted before verification")
+                }
+                let verifyArgs = List[string]()
+                for word in J.Items(command) {
+                    verifyArgs.Add(word.GetString() ?? "")
+                }
+                let check = Verification.Run(
+                    checkout,
+                    verifyArgs.ToArray(),
+                    run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                    remaining
+                )
+                verification.Add(
+                    J.Map("command", command, "exit_code", check.Code, "output", check.Output, "error", check.Error)
+                )
+                File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
+                if check.Code != 0 {
+                    throw Exception("Owner verification failed. See verification.json. No PR will be opened.")
+                }
+            }
+            run.Fields["verification"] = verification
+            let patch = Snapshot(checkout, run)
+            if patch != candidate {
+                throw Exception("Verification changed the saved patch")
+            }
+            File.WriteAllText(Path.Combine(directory, "changes.patch"), patch + "\n")
+            run.Fields["usage"] = usage
+            run.Fields["elapsed_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
+            run.Fields["state"] = "generated"
+            run.Save(directory)
+        }
+
+        private func Snapshot(checkout string, run Data) string {
+            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+                throw Exception("Agent changed Git history")
+            }
+            Commands.Git(checkout, "add", "-A")
+            Commands.Git(checkout, "diff", "--cached", "--check")
+            let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
+            if patch == "" {
+                throw Exception("No changes returned. No PR will be opened.")
+            }
+            for file in Commands.Git(checkout, "diff", "--cached", "--name-only", run.Text("base")).Split('\n') {
+                if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
+                    throw Exception("Donor runs cannot change owner policy, approval, templates, or CI workflows")
+                }
+            }
+            return patch
         }
     }
 }

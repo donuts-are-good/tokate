@@ -46,6 +46,11 @@ func Main(args[]string) int32 {
             let directory = options.Get("run") == "" ? Workflow.Claim(options): Path.GetFullPath(options.Need("run"))
             Worker.Execute(directory)
             Publication.Publish(directory)
+        } else if options.Command == "recover" {
+            options.Allow("run,seconds")
+            let directory = Path.GetFullPath(options.Need("run"))
+            Recovery.Run(directory, options.Number("seconds", "300"))
+            Publication.Publish(directory)
         } else if options.Command == "publish" {
             options.Allow("run")
             Publication.Publish(Path.GetFullPath(options.Need("run")))

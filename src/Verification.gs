@@ -29,11 +29,10 @@ internal class Verification {
             }
         }
 
-        internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
-            if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
-                throw Exception(
-                    "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
-                )
+        internal func Validate(directory string) string {
+            let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory))
+            if absolute == "/tmp/tokate-home" || absolute.StartsWith("/tmp/tokate-home/") {
+                throw Exception("Unsupported verification checkout layout: " + absolute)
             }
             let checkout = DirectoryPath(directory)
             for root in[]string{"/home", "/run", "/var", "/tmp"} {
@@ -53,12 +52,17 @@ internal class Verification {
                     throw Exception("Verification requires self-contained Git metadata: " + file)
                 }
             }
-            let scratch = Path.Combine(checkout, ".tokate-scratch")
-            if FileInfo(scratch).LinkTarget != nil {
-                throw Exception("Verification scratch directory must not be a symbolic link")
+            return checkout
+        }
+
+        internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
+            if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
+                throw Exception(
+                    "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
+                )
             }
-            Directory.CreateDirectory(scratch)
-            DirectoryPath(scratch)
+            let checkout = Validate(directory)
+            let git = Path.Combine(checkout, ".git")
             let args = List[string]{
                 "--die-with-parent",
                 "--new-session",
@@ -74,10 +78,10 @@ internal class Verification {
                 "/usr/local/bin:/usr/bin:/bin",
                 "--setenv",
                 "HOME",
-                scratch,
+                "/tmp/tokate-home",
                 "--setenv",
                 "TMPDIR",
-                scratch,
+                "/tmp/tokate-home",
                 "--setenv",
                 "LANG",
                 "C.UTF-8"
@@ -111,6 +115,8 @@ internal class Verification {
                     "/dev",
                     "--tmpfs",
                     "/tmp",
+                    "--dir",
+                    "/tmp/tokate-home",
                     "--dir",
                     "/var",
                     "--tmpfs",

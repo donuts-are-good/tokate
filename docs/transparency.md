@@ -116,7 +116,7 @@ and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
 Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
 are mounted; host `/`, `/etc`, `/home`, `/run`, and `/var` are never mounted
 wholesale. Checkout/Git path symlinks, Git symlinks, alternate object stores,
-worktree Git files and linked scratch directories are refused before repository
+worktree Git files are refused before repository
 code runs. The verifier does not inspect credentials or configuration to infer
 additional mounts.
 
@@ -218,7 +218,9 @@ require private revocation/rotation and removal coordination; deleting it from
 the latest commit is insufficient. No history rewrite is authorized without a
 separate concrete review.
 
-Tracked ignore rules now exclude the managed `.tokate-scratch/` directory,
+Managed shell home and caches live at `/tmp/tokate-home` in private temporary
+storage, outside recursive repository scans. Verification gets fresh storage
+for each command. Historical `.tokate-scratch/` remains ignored,
 alongside local run artifacts and environment files. Release packaging uses
 fresh temporary staging, explicit current product documentation/license paths,
 numeric zero archive ownership, and staging cleanup. Existing releases remain

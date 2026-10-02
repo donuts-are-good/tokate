@@ -92,15 +92,9 @@ internal class VerificationChecks {
         }
 
         internal func Layouts() {
-            for mode in[]string{
-                "checkout-link",
-                "git-link",
-                "git-file",
-                "git-child-link",
-                "scratch-link",
-                "alternates",
-                "commondir"
-            } {
+            Refused("/tmp/tokate-home", "Unsupported verification checkout layout")
+            Refused("/tmp/tokate-home/checkout", "Unsupported verification checkout layout")
+            for mode in[]string{"checkout-link", "git-link", "git-file", "git-child-link", "alternates", "commondir"} {
                 using let temp = Temp()
                 let checkout = Path.Combine(temp.Root, "checkout")
                 let git = Path.Combine(checkout, ".git")
@@ -127,10 +121,6 @@ internal class VerificationChecks {
                         File.CreateSymbolicLink(Path.Combine(git, "config"), sentinel + "-missing")
                         Refused(checkout, "Git symlinks")
                     }
-                    case "scratch-link" {
-                        Directory.CreateSymbolicLink(Path.Combine(checkout, ".tokate-scratch"), temp.Root)
-                        Refused(checkout, "scratch directory")
-                    }
                     case "alternates" {
                         File.WriteAllText(Path.Combine(git, "objects/info/alternates"), temp.Root)
                         Refused(checkout, "self-contained Git metadata")
@@ -145,9 +135,7 @@ internal class VerificationChecks {
                     "Unsafe layout changed private data"
                 )
             }
-            Console.WriteLine(
-                "PASS verification refuses unsafe checkout, Git and scratch layouts before repository code"
-            )
+            Console.WriteLine("PASS verification refuses unsafe checkout and Git layouts before repository code")
         }
 
         internal func Cleanup() {

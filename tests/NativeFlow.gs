@@ -399,6 +399,9 @@ internal class NativeFlow : IDisposable {
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "verification.json")))[0]?["exit_code"]) == "1",
             "Failed verification not recorded"
         )
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Owner verification failed")
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Failed recovery spent inference")
         NoPr()
     }
 
@@ -602,15 +605,19 @@ internal class NativeFlow : IDisposable {
         NoPr()
     }
 
-    internal func VerificationPolicy(script string, network bool = false) {
+    internal func VerificationPolicy(script string, network bool = false, second string = "") {
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
-        let command = JsonArray()
-        for word in[]string{"/bin/bash", "-c", script} {
-            command.Add(JsonValue.Create(word) as JsonNode)
-        }
         let commands = JsonArray()
-        commands.Add(command as JsonNode)
+        for check in[]string{script, second} {
+            if check != "" {
+                let command = JsonArray()
+                for word in[]string{"/bin/bash", "-c", check} {
+                    command.Add(JsonValue.Create(word) as JsonNode)
+                }
+                commands.Add(command as JsonNode)
+            }
+        }
         policy["verification"] = commands
         policy["allow_network"] = JsonValue.Create(network)
         File.WriteAllText(path, policy.ToJsonString())
@@ -630,7 +637,10 @@ internal class NativeFlow : IDisposable {
         try {
             let script = "set -eu\ntest -f result.txt\n" +
                 "test \"$$PATH\" = /usr/local/bin:/usr/bin:/bin\n" +
-                "test \"$$HOME\" = \"$$PWD/.tokate-scratch\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
+                "test \"$$HOME\" = \"/tmp/tokate-home\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
+                "test ! -e \"$$HOME/agent-cache.json\"\n" +
+                "mkdir -p \"$$HOME/.cache/browser\" && printf unformatted > \"$$HOME/.cache/browser/cache.json\"\n" +
+                "test -z \"$$(find . -name cache.json -o -name agent-cache.json -o -name .tokate-scratch)\"\n" +
                 "test -z \"$${GH_TOKEN-}$${GITHUB_TOKEN-}$${CODEX_HOME-}$${GH_CONFIG_DIR-}$${OPENAI_API_KEY-}$${UNRELATED_DONOR_VALUE-}$${DBUS_SESSION_BUS_ADDRESS-}$${XDG_RUNTIME_DIR-}$${GIT_CONFIG_COUNT-}\"\n" +
                 "for file in " +
                 temporary +
@@ -659,7 +669,7 @@ internal class NativeFlow : IDisposable {
                 "touch /tmp/private /var/tmp/private \"$$TMPDIR/private\"\n" +
                 "bwrap --unshare-user --unshare-pid --ro-bind / / --tmpfs /tmp -- /bin/sh -c 'touch /tmp/nested-probe'\n" +
                 "printf verified-independent-boundary\n"
-            VerificationPolicy(script)
+            VerificationPolicy(script, second: "test ! -e \"$$HOME/.cache/browser/cache.json\"")
             Approve()
             let run = Claim()
             Mode("verification_boundary")
@@ -674,6 +684,57 @@ internal class NativeFlow : IDisposable {
         } finally {
             File.Delete(temporary)
         }
+    }
+
+    internal func VerificationRecovery() {
+        VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
+        Approve()
+        let run = Claim()
+        Mode("verification_recovery")
+        Call([]string{"work", "--run", run}, 1)
+        NoPr()
+        let original = File.ReadAllText(Path.Combine(run, "verification.json"))
+        Check.That(Check.Json(original).AsArray().Count == 2, "Original checks were not all run")
+        Call([]string{"recover", "--run", run, "--seconds", "86400"}, 1)
+        Reload()
+        let issue = State["issue"] ?? throw Exception("Missing issue")
+        issue["labels"] = JsonArray()
+        Save()
+        Call([]string{"recover", "--run", run}, 1)
+        issue["labels"] = Check.Json("[{\"name\":\"tokate:approved\"}]")
+        Save()
+        let exclude = Path.Combine(run, "checkout/.git/info/exclude")
+        let savedExclude = File.ReadAllText(exclude)
+        let sentinel = Path.Combine(Temp.Root, "private-recovery")
+        File.WriteAllText(sentinel, "synthetic recovery secret")
+        File.Delete(exclude)
+        File.CreateSymbolicLink(exclude, sentinel)
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Git symlinks")
+        Check.That(File.ReadAllText(sentinel) == "synthetic recovery secret", "Recovery changed private data")
+        File.Delete(exclude)
+        File.WriteAllText(exclude, savedExclude)
+        let events = Path.Combine(run, "events.jsonl")
+        let savedEvents = File.ReadAllText(events)
+        File.WriteAllText(events, "")
+        Call([]string{"recover", "--run", run}, 1)
+        File.WriteAllText(events, savedEvents)
+        let data = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        data["error"] = JsonValue.Create("Owner verification failed. See verification.json. No PR will be opened.")
+        File.WriteAllText(Path.Combine(run, "run.json"), data.ToJsonString())
+        Call([]string{"recover", "--run", run})
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "verification-only recovery")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "2/2 checks passed")
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+        var preserved bool
+        for archive in Directory.GetDirectories(run, "recovery-*") {
+            if File.ReadAllText(Path.Combine(archive, "verification.json")) == original {
+                preserved = true
+            }
+        }
+        Check.That(preserved, "Recovery lost failed verification evidence")
+        Call([]string{"recover", "--run", run}, 1)
     }
 
     internal func VerificationNetwork() {
@@ -736,7 +797,8 @@ internal class NativeFlow : IDisposable {
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
                 "VerificationBoundary",
-                "VerificationNetwork"
+                "VerificationNetwork",
+                "VerificationRecovery"
             } {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
@@ -827,6 +889,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "VerificationBoundary" {
                         flow.VerificationBoundary()
+                    }
+                    case "VerificationRecovery" {
+                        flow.VerificationRecovery()
                     }
                     case "VerificationNetwork" {
                         flow.VerificationNetwork()

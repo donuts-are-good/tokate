@@ -1,0 +1,67 @@
+package Tokate
+
+import System
+import System.Diagnostics
+import System.IO
+
+internal class Recovery {
+    shared {
+        internal func Run(directory string, seconds int32) {
+            using let lease = File.Open(
+                Path.Combine(directory, ".lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None
+            )
+            let run = Data.Load(directory)
+            if run.Text("state") != "failed" || run.Text(
+                "error"
+            ) != "Owner verification failed. See verification.json. No PR will be opened." {
+                throw Exception("Recovery requires a completed agent turn with failed owner verification")
+            }
+            let record = Workflow.Recheck(run)
+            if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
+                throw Exception("Recovery budget exceeds owner limit")
+            }
+            let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
+            let archive = Path.Combine(directory, "recovery-" + Guid.NewGuid().ToString("N"))
+            Directory.CreateDirectory(archive)
+            File.Copy(Path.Combine(directory, "run.json"), Path.Combine(archive, "run.json"))
+            File.Copy(Path.Combine(directory, "verification.json"), Path.Combine(archive, "verification.json"))
+            let scratch = Path.Combine(checkout, ".tokate-scratch")
+            if FileInfo(scratch).LinkTarget != nil {
+                throw Exception("Legacy scratch must not be a symbolic link")
+            }
+            if Directory.Exists(scratch) {
+                let exclude = Path.Combine(checkout, ".git/info/exclude")
+                if Commands.Git(checkout, "ls-files", "--", ".tokate-scratch") != "" || !File.Exists(exclude) ||
+                    !File
+                    .ReadAllText(exclude).Contains("\n.tokate-scratch/\n") {
+                    throw Exception("Refusing to move repository-owned scratch files")
+                }
+                Directory.Move(scratch, Path.Combine(archive, "legacy-scratch"))
+            }
+            run.Fields["recovered"] = true
+            run.Fields["recovery_seconds"] = seconds
+            let timer = Stopwatch.StartNew()
+            try {
+                Terminal.Step("Recovering with independent verification only. No inference will run.")
+                Worker.Finish(
+                    directory,
+                    run,
+                    record,
+                    File.ReadAllText(Path.Combine(directory, "events.jsonl")),
+                    timer,
+                    seconds
+                )
+                run.Fields.Remove("error")
+                run.Save(directory)
+            } catch (error Exception) {
+                run.Fields["state"] = "failed"
+                run.Fields["error"] = error.Message
+                run.Save(directory)
+                throw error
+            }
+        }
+    }
+}
