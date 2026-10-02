@@ -65,7 +65,6 @@ for (const button of document.querySelectorAll("[data-role]")) {
         ])
             new Image().src = `assets/${name}.webp`;
         document.fonts.load("32px Decree");
-        document.fonts.load("28px Manuscript");
     };
     button.addEventListener("pointerenter", prepareScroll, { once: true });
     button.addEventListener("focus", prepareScroll, { once: true });

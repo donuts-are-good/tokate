@@ -5,12 +5,6 @@
     font-display: swap;
 }
 @font-face {
-    font-family: Manuscript;
-    src: url(assets/pinyon-script.woff2) format("woff2");
-    font-weight: 400;
-    font-display: swap;
-}
-@font-face {
     font-family: Cormorant;
     src: url(assets/cormorant.woff2) format("woff2");
     font-weight: 500;
@@ -581,8 +575,9 @@ dialog li:before {
     border: 0;
     background: none;
     color: var(--rust);
-    font-family: Manuscript, var(--display);
-    font-size: 28px;
+    font-family: var(--display);
+    font-size: 25px;
+    font-weight: 500;
 }
 #dismiss:hover {
     color: var(--ink);
