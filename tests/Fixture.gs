@@ -3,15 +3,21 @@ package TokateTests
 import System
 import System.Collections.Generic
 import System.Diagnostics
+import System.Globalization
 import System.IO
+import System.Security.Cryptography
 import System.Text
 import System.Text.Json.Nodes
+import System.Threading
 
 internal class Fixture {
     internal let Root string
     internal let StatePath string
     internal let State JsonNode
     internal let Env Dictionary[string, string] = Dictionary[string, string]()
+    internal var Include bool
+    internal var Verb string = ""
+    internal var Conditional string = ""
 
     internal init(root string) {
         Root = root
@@ -29,8 +35,40 @@ internal class Fixture {
     internal func Save() -> File.WriteAllText(StatePath, State.ToJsonString())
 
     internal func Answer(value JsonNode) int32 {
+        if Include {
+            let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
+            let unchanged = Verb == "GET" && Conditional == "If-None-Match: " + etag
+            if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
+                let issue = State["issue"] ?? throw Exception("Missing issue")
+                if Check.Text(State["mode"]) == "after_304_edit" {
+                    issue["title"] = JsonValue.Create("Edited after live revalidation")
+                } else {
+                    issue["labels"] = JsonArray()
+                }
+                State["mode"] = JsonValue.Create("")
+            }
+            return Response(unchanged ? 304: 200, unchanged ? nil: value, "ETag: " + etag + "\r\n")
+        }
         Save()
         Console.WriteLine(value.ToJsonString())
+        return 0
+    }
+
+    internal func Response(status int32, value JsonNode? = nil, headers string = "") int32 {
+        let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic records")
+        let call = calls[calls.Count - 1] ?? throw Exception("Missing traffic entry")
+        call["status"] = JsonValue.Create(status)
+        Save()
+        Console.Write("HTTP/2.0 " + status.ToString() + " Synthetic\r\n")
+        Console.Write("Date: " + DateTimeOffset.UtcNow.ToString("r", CultureInfo.InvariantCulture) + "\r\n")
+        Console.Write("X-Poll-Interval: 2\r\nX-Synthetic-Ignored: synthetic-response-secret\r\n" + headers + "\r\n")
+        if value != nil {
+            Console.WriteLine(value.ToJsonString())
+        }
+        if status >= 400 || status == 304 {
+            Console.Error.WriteLine("gh: synthetic-response-secret (HTTP " + status.ToString() + ")")
+            return 1
+        }
         return 0
     }
 
@@ -227,8 +265,42 @@ internal class Fixture {
             return Answer(State["checks"] ?? JsonArray())
         }
         Check.That(args[0] == "api", "Expected GitHub API")
+        Include = Array.IndexOf(args, "--include") >= 0
+        Check.That(Include, "API must include response status and headers")
         let method = args[Array.IndexOf(args, "--method") + 1]
         let path = args[Array.IndexOf(args, "--method") + 2]
+        Verb = method
+        let header = Array.IndexOf(args, "-H")
+        Conditional = header >= 0 ? args[header + 1]: ""
+        let calls = State["api_calls"]?.AsArray() ?? JsonArray()
+        let call = Check.Map("method", method, "conditional", Conditional != "")
+        call["start"] = JsonValue.Create(Stopwatch.GetTimestamp())
+        calls.Add(call)
+        State["api_calls"] = calls
+        Save()
+        if path == Check.Text(State["fault_path"]) {
+            let faults = State["faults"]?.AsArray() ?? JsonArray()
+            let index = Int32.Parse(Check.Text(State["fault_index"] ?? JsonValue.Create(0)))
+            if index < faults.Count {
+                let fault = faults[index] ?? throw Exception("Missing fault")
+                State["fault_index"] = JsonValue.Create(index + 1)
+                Save()
+                let pause = Check.Text(fault["pause_ms"])
+                if pause != "" {
+                    Thread.Sleep(Int32.Parse(pause))
+                }
+                let status = Int32.Parse(Check.Text(fault["status"]))
+                if status == 0 {
+                    Console.Error.WriteLine("synthetic-response-secret HTTP 404 in an unauthoritative transport error")
+                    return 1
+                }
+                return Response(
+                    status,
+                    Check.Map("message", Check.Text(fault["message"])),
+                    Check.Text(fault["headers"])
+                )
+            }
+        }
         let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
         if path == "user" {
             return Answer(Check.Map("login", actor, "id", 123))
@@ -240,7 +312,7 @@ internal class Fixture {
         let tail = String.Join("/", parts, 3, parts.Length - 3)
         if tail == "" {
             if folder == "fork" && Check.Text(State["missing_fork"]) == "true" {
-                throw Exception("HTTP 404")
+                return Response(404)
             }
             return Answer(
                 Check.Map(
@@ -315,7 +387,7 @@ internal class Fixture {
             try {
                 sha = Git(folder, []string{"rev-parse", "--verify", "refs/heads/" + tail.Substring(14)})
             } catch (error Exception) {
-                throw Exception("HTTP 404")
+                return Response(404)
             }
             return Answer(Check.Map("object", Check.Map("sha", sha)))
         }
@@ -348,7 +420,7 @@ internal class Fixture {
             try {
                 Git(folder, []string{"update-ref", Check.Text(body["ref"]), Check.Text(body["sha"]), String('0', 40)})
             } catch (error Exception) {
-                throw Exception("Reference already exists")
+                return Response(422)
             }
             return Answer(Check.Map("ref", Check.Text(body["ref"])))
         }
@@ -364,7 +436,7 @@ internal class Fixture {
         }
         if tail == "pulls" {
             if Check.Text(State["mode"]) == "pr_fail" {
-                throw Exception("Synthetic PR publication failure")
+                return Response(500)
             }
             let branch = Check.Text(body["head"]).Split(':')[1]
             body["number"] = JsonValue.Create(10)
@@ -385,7 +457,8 @@ internal class Fixture {
             State["pulls"] = pulls
             if Check.Text(State["mode"]) == "pr_fail_after_create" {
                 Save()
-                throw Exception("Synthetic lost PR response")
+                Console.Error.WriteLine("Synthetic lost PR response: synthetic-response-secret")
+                return 1
             }
             return Answer(body)
         }

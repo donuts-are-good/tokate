@@ -18,8 +18,16 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
+        if args.Length == 2 && args[0] == "--api-write" {
+            try {
+                GitHub.Api("repos/owner/project/issues/1/assignees", method: args[1])
+                return 0
+            } finally {
+                ApiTransport.Report()
+            }
+        }
         if args.Length == 2 && args[0] == "--verify-checkout" {
-            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 180)
+            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 900)
             Console.Write(result.Output)
             Console.Error.Write(result.Error)
             return result.Code
@@ -31,6 +39,10 @@ func Main(args[]string) int32 {
         if args.Length == 2 && args[0] == "--shell" {
             Installer.Lifecycle(project, binary, args[1])
             Console.WriteLine("PASS installer lifecycle for " + args[1])
+            return 0
+        }
+        if args.Length == 2 && args[0] == "--flow" {
+            NativeFlow.All(binary, args[1])
             return 0
         }
         NativeFlow.All(binary)

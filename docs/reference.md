@@ -53,7 +53,7 @@ user-local location.
 ## Commands and recovery
 
 ```text
-Tokate 0.2.6 (toh-KAH-teh)
+Tokate 0.2.7 (toh-KAH-teh)
 Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
@@ -86,6 +86,8 @@ profiles. Sign in with gh auth login and codex login. Create your fork with
  gh repo fork OWNER/REPO --clone=false
 
 Checks exit 0 when all owner-required checks pass, 8 when pending, 1 on failure.
+Add --traffic to any command for numeric Tokate gh-api counts on stderr.
+Counts exclude unseen GitHub CLI/Git requests and workflow executions.
 PRs are drafts. The owner reviews and merges. No quota transfer or correctness guarantee.
 ```
 
@@ -94,6 +96,33 @@ PRs are drafts. The owner reviews and merges. No quota transfer or correctness g
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
+
+`--traffic` prints numeric `reads`, `mutations`, `conditional_responses` (live HTTP
+304s), and `retry_attempts` on stderr, including failed commands. Reads and
+mutations count attempted Tokate `gh api` invocations; retries are included in
+reads. The counters exclude unseen GitHub CLI/Git transport requests and workflow
+executions. Diagnostics contain no response bodies, headers, credentials, paths,
+or raw logs and are not saved in run or receipt files. Opt-in does not change JSON
+on stdout.
+
+GitHub CLI retains authentication responsibility. API calls are serial, and
+mutation starts are spaced at least one second apart in each Tokate process.
+GET bodies and ETags are held only in memory for that command. Every repeated
+read revalidates with `If-None-Match`; only a live 304 can reuse a cached body.
+GET transport failures, 5xx responses and rate limits allow at most three
+attempts within a total 60-second deadline, including subprocess time and waits.
+Server Retry-After and exhausted rate-limit reset times take precedence over
+the short retry backoff. A secondary limit without a delay requires at least
+60 seconds, so the command stops with a retry time. Other 4xx responses are not
+retried; only an HTTP 404 can count as a missing resource.
+
+POST, PATCH, PUT and DELETE are never automatically retried. After a failure,
+remote state may have changed even if the response was lost. Inspect that state
+before retrying; for publication use the saved run's `publish` command, which
+looks for an existing PR and reuses it without inference or another PR write.
+These transport bounds do not implement atomic coordination (#11),
+pause/resume/handoff or coordinator workflow traffic accounting (#19); those
+issues remain open for their integrated flows.
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 

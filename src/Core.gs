@@ -23,7 +23,7 @@ internal class Args {
             if !key.StartsWith("--") || Values.ContainsKey(key) {
                 throw Exception("Invalid or duplicate option: " + key)
             }
-            if key == "--watch" || key == "--allow-network" || key == "--help" {
+            if key == "--watch" || key == "--allow-network" || key == "--help" || key == "--traffic" {
                 Values.Add(key, "true")
             } else {
                 i++
@@ -61,7 +61,7 @@ internal class Args {
     }
 
     internal func Allow(names string) {
-        let allowed = ("," + names + ",help,")
+        let allowed = ("," + names + ",help,traffic,")
         for key in Values.Keys {
             if !allowed.Contains("," + key.Substring(2) + ",") {
                 throw Exception("Unknown option: " + key)
@@ -125,31 +125,13 @@ internal class Data {
 
 internal class GitHub {
     shared {
-        internal func Api(path string, body Object? = nil, method string = "", missing bool = false) JsonElement {
-            let args = List[string]{
-                "api",
-                "--hostname",
-                "github.com",
-                "--method",
-                method == "" ? (body == nil ? "GET": "POST"): method,
-                path
-            }
-            if body != nil {
-                args.Add("--input")
-                args.Add("-")
-            }
-            var input string?
-            if body != nil {
-                input = J.Write(body)
-            }
-            let result = Commands.Run("gh", args.ToArray(), input: input, github: true)
-            if result.Code != 0 {
-                if missing && result.Error.Contains("HTTP 404") {
-                    return JsonElement{}
-                }
-                throw Exception("GitHub request failed: " + result.Error)
-            }
-            return result.Output.Trim() == "" ? JsonElement{}: J.Parse(result.Output)
+        internal suspend func Api(
+            path string,
+            body Object? = nil,
+            method string = "",
+            missing bool = false
+        ) JsonElement {
+            return ApiTransport.Request(path, body, method, missing)
         }
 
         internal func FileAt(repo string, path string, revision string) string {

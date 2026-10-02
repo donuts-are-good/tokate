@@ -31,4 +31,6 @@ profiles. Sign in with gh auth login and codex login. Create your fork with
  gh repo fork OWNER/REPO --clone=false
 
 Checks exit 0 when all owner-required checks pass, 8 when pending, 1 on failure.
+Add --traffic to any command for numeric Tokate gh-api counts on stderr.
+Counts exclude unseen GitHub CLI/Git requests and workflow executions.
 PRs are drafts. The owner reviews and merges. No quota transfer or correctness guarantee.

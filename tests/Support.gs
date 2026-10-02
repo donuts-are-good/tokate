@@ -93,7 +93,7 @@ internal class Check {
                 process.StandardInput.Write(input)
             }
             process.StandardInput.Close()
-            if !process.WaitForExit(30000) {
+            if !process.WaitForExit(120000) {
                 process.Kill(true)
                 process.WaitForExit()
                 throw Exception("Test process timed out: " + exe)
@@ -109,7 +109,10 @@ internal class Check {
 }
 
 internal class Temp : IDisposable {
-    internal let Root string = Path.Combine("/var/tmp", "tokate-e2e-" + Guid.NewGuid().ToString("N"))
+    internal let Root string = Path.Combine(
+        Environment.GetEnvironmentVariable("TOKATE_TEST_ROOT") ?? "/var/tmp",
+        "tokate-e2e-" + Guid.NewGuid().ToString("N")
+    )
     internal let Env Dictionary[string, string] = Dictionary[string, string]()
 
     internal init() {

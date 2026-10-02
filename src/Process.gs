@@ -43,7 +43,8 @@ internal class Commands {
             seconds int32 = 60,
             harness bool = false,
             github bool = false,
-            isolated bool = false
+            isolated bool = false,
+            milliseconds int32 = 0
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
@@ -106,7 +107,7 @@ internal class Commands {
                     process.StandardInput.Write(input)
                 }
                 process.StandardInput.Close()
-                if !process.WaitForExit(seconds * 1000) {
+                if !process.WaitForExit(milliseconds > 0 ? milliseconds: seconds * 1000) {
                     KillGroup(-process.Id, 9)
                     process.WaitForExit()
                     throw Exception("Runtime limit reached for " + exe)

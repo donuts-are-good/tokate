@@ -4,8 +4,10 @@ import System
 import System.IO
 
 func Main(args[]string) int32 {
+    var traffic bool
     try {
         let options = Args(args)
+        traffic = options.Get("traffic") == "true"
         if !OperatingSystem.IsLinux() {
             throw Exception("This release supports Linux")
         }
@@ -75,5 +77,9 @@ func Main(args[]string) int32 {
     } catch (error Exception) {
         Terminal.Message("tokate: " + error.Message, "red", true)
         return 1
+    } finally {
+        if traffic {
+            ApiTransport.Report()
+        }
     }
 }
