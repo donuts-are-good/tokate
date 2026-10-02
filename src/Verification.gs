@@ -53,12 +53,6 @@ internal class Verification {
                     throw Exception("Verification requires self-contained Git metadata: " + file)
                 }
             }
-            let scratch = Path.Combine(checkout, ".tokate-scratch")
-            if FileInfo(scratch).LinkTarget != nil {
-                throw Exception("Verification scratch directory must not be a symbolic link")
-            }
-            Directory.CreateDirectory(scratch)
-            DirectoryPath(scratch)
             let args = List[string]{
                 "--die-with-parent",
                 "--new-session",
@@ -74,10 +68,10 @@ internal class Verification {
                 "/usr/local/bin:/usr/bin:/bin",
                 "--setenv",
                 "HOME",
-                scratch,
+                "/tmp/tokate-home",
                 "--setenv",
                 "TMPDIR",
-                scratch,
+                "/tmp/tokate-home",
                 "--setenv",
                 "LANG",
                 "C.UTF-8"
@@ -111,6 +105,8 @@ internal class Verification {
                     "/dev",
                     "--tmpfs",
                     "/tmp",
+                    "--dir",
+                    "/tmp/tokate-home",
                     "--dir",
                     "/var",
                     "--tmpfs",

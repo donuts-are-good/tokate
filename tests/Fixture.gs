@@ -135,6 +135,7 @@ internal class Fixture {
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
         if mode == "verification_boundary" {
+            File.WriteAllText("/tmp/tokate-home/agent-cache.json", "unformatted cache")
             File.CreateSymbolicLink(Path.Combine(checkout, "outside-link"), Path.Combine(Root, "state.json"))
             for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
                 File.WriteAllText(

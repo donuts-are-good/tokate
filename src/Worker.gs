@@ -61,7 +61,18 @@ internal class Worker {
                     )
                 }
             }
-            let wrapper = List[string]{"--die-with-parent", "--bind", "/", "/", "--dev", "/dev", "--tmpfs", "/tmp"}
+            let wrapper = List[string]{
+                "--die-with-parent",
+                "--bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/tmp/tokate-home"
+            }
             wrapper.AddRange([]string{"--chdir", directory, "--", CodexPath()})
             wrapper.AddRange(args)
             return Commands.Run("bwrap", wrapper.ToArray(), directory, input, seconds, true)
@@ -87,11 +98,11 @@ internal class Worker {
                     "/usr/bin/env",
                     "-i",
                     "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=" + Path.Combine(checkout, ".tokate-scratch"),
-                    "TMPDIR=" + Path.Combine(checkout, ".tokate-scratch"),
+                    "HOME=/tmp/tokate-home",
+                    "TMPDIR=/tmp/tokate-home",
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-scratch/probe /tmp/tokate-probe && { test ! -f global.json || dotnet msbuild -nologo -version; }",
+                    "test ! -r \"$1\" && test ! -r .git/config && touch .tokate-probe /tmp/tokate-home/probe /tmp/tokate-probe && rm .tokate-probe && { test ! -f global.json || dotnet msbuild -nologo -version; }",
                     "probe",
                     sentinel
                 }
@@ -122,7 +133,6 @@ internal class Worker {
             let checkout = Path.Combine(root, "checkout")
             try {
                 Directory.CreateDirectory(Path.Combine(checkout, ".git"))
-                Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
                 File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
                 let global = Path.Combine(Directory.GetCurrentDirectory(), "global.json")
                 if FileInfo(global).LinkTarget != nil {
@@ -186,10 +196,6 @@ internal class Worker {
                     throw Exception("Repository Codex configuration is not supported in donor runs")
                 }
             }
-            let scratch = Path.Combine(checkout, ".tokate-scratch")
-            Directory.CreateDirectory(scratch)
-            Directory.CreateDirectory(Path.Combine(checkout, ".git", "info"))
-            File.AppendAllText(Path.Combine(checkout, ".git", "info", "exclude"), "\n.tokate-scratch/\n")
             Probe(directory, checkout)
             let args = List[string]{
                 "exec",
@@ -218,10 +224,7 @@ internal class Worker {
             Config(
                 args,
                 "shell_environment_policy.set",
-                "{ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = " + J.Write(scratch) + ", TMPDIR = " + J.Write(
-                    scratch
-                ) +
-                    " }"
+                "{ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = \"/tmp/tokate-home\", TMPDIR = \"/tmp/tokate-home\" }"
             )
             Config(args, "skills.include_instructions", "false")
             Config(args, "features.skip_host_skill_discovery", "true")

@@ -630,7 +630,10 @@ internal class NativeFlow : IDisposable {
         try {
             let script = "set -eu\ntest -f result.txt\n" +
                 "test \"$$PATH\" = /usr/local/bin:/usr/bin:/bin\n" +
-                "test \"$$HOME\" = \"$$PWD/.tokate-scratch\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
+                "test \"$$HOME\" = \"/tmp/tokate-home\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
+                "test ! -e \"$$HOME/agent-cache.json\"\n" +
+                "mkdir -p \"$$HOME/.cache/browser\" && printf unformatted > \"$$HOME/.cache/browser/cache.json\"\n" +
+                "test -z \"$$(find . -name cache.json -o -name agent-cache.json -o -name .tokate-scratch)\"\n" +
                 "test -z \"$${GH_TOKEN-}$${GITHUB_TOKEN-}$${CODEX_HOME-}$${GH_CONFIG_DIR-}$${OPENAI_API_KEY-}$${UNRELATED_DONOR_VALUE-}$${DBUS_SESSION_BUS_ADDRESS-}$${XDG_RUNTIME_DIR-}$${GIT_CONFIG_COUNT-}\"\n" +
                 "for file in " +
                 temporary +
