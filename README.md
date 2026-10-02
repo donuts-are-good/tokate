@@ -1,3 +1,5 @@
+[![Tokate: Give your compute a purpose. Painted hands cradle a sun above a Renaissance landscape.](site/assets/social-card.jpg)](https://tokate.dev/)
+
 # Tokate
 
 **toh-KAH-teh**. Donate your local Codex compute to a GitHub project.
