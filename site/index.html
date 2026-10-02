@@ -125,10 +125,16 @@
                                     <stop offset=".6" stop-color="#936939" />
                                     <stop offset="1" stop-color="#674c2c" />
                                 </radialGradient>
+                                <filter id="sclera-grain" x="0" y="0" width="100%" height="100%">
+                                    <feTurbulence type="fractalNoise" baseFrequency=".16" numOctaves="3" seed="7" />
+                                    <feColorMatrix type="matrix" values=".3 .3 .3 0 .55 .3 .3 .3 0 .55 .3 .3 .3 0 .55 0 0 0 0 1" />
+                                    <feBlend in2="SourceGraphic" mode="multiply" />
+                                    <feComposite in2="SourceGraphic" operator="in" />
+                                </filter>
                             </defs>
                             <g class="eye eye-left">
                                 <path
-                                    class="white"
+                                    class="white" filter="url(#sclera-grain)"
                                     d="M430 548C452 536 478 514 505 514C532 514 554 533 568 557C542 582 516 592 489 583C465 575 447 558 430 548"
                                 />
                                 <g clip-path="url(#left-eye)">
@@ -161,7 +167,7 @@
                             </g>
                             <g class="eye eye-right">
                                 <path
-                                    class="white"
+                                    class="white" filter="url(#sclera-grain)"
                                     d="M684 557C698 533 721 514 748 513C776 512 800 531 823 543C804 562 782 582 756 586C729 590 703 578 684 557"
                                 />
                                 <g clip-path="url(#right-eye)">
@@ -220,7 +226,7 @@
                                 </radialGradient>
                             </defs>
                             <g clip-path="url(#moon-eye)">
-                                <path fill="url(#moon-white)" d="M760 545H870V605H760Z" />
+                                <path fill="url(#moon-white)" filter="url(#sclera-grain)" d="M760 545H870V605H760Z" />
                                 <g class="pupil">
                                     <ellipse cx="806" cy="573" rx="16" ry="23" fill="url(#moon-iris)" />
                                     <ellipse cx="806" cy="571" rx="7" ry="12" fill="#384342" />
