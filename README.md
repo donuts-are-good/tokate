@@ -154,5 +154,6 @@ The website is in `site/`. Preview it with `python3 -m http.server 4173 --direct
 - [Releases and checksums](https://github.com/obselate/tokate/releases)
 - [Guide for AI assistants](AGENTS.md)
 - [Command and security reference](docs/reference.md)
+- [Harness and data transparency](docs/transparency.md)
 - [Report an issue](https://github.com/obselate/tokate/issues)
 - [MIT license](LICENSE)

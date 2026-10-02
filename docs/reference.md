@@ -76,6 +76,10 @@ Keep required checks and human review enforced in GitHub branch protection. Use 
 
 ## Isolation
 
+See [Harness and data transparency](transparency.md) for discovery commands,
+credential boundaries, environment inheritance, local logs, published data, and
+the distinction between current behavior and planned harness integrations.
+
 Tokate invokes tools with argument arrays, never interpolated shell command strings. Git hooks, filesystem monitors, external transports, and user/system Git configuration are disabled for orchestration. The repository is cloned without templates or submodules. GitHub credentials stay with the host-side GitHub/publishing commands.
 
 Codex gets an allowlisted environment without GitHub/API-key credentials. User configuration, exec rules, hooks, plugins, host skill discovery, multi-agent features, and web search are disabled. Repository `.codex` configuration is rejected. Sandboxed commands have filesystem reads denied by default, with only minimal system runtime paths, the native Codex executable, and the checkout allowed. `.git` is denied. The shell has a scratch home and temp directory inside the checkout. A preflight probes read denial before spending compute. Unsupported sandbox configurations fail closed.
