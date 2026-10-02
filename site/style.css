@@ -452,7 +452,7 @@ dialog h2 {
     background: url(assets/mark.svg) center bottom / 18px 24px no-repeat;
 }
 dialog ol {
-    padding: 0;
+    padding: 0 0 0 20px;
     list-style: none;
     counter-reset: step;
 }
@@ -467,11 +467,12 @@ dialog li {
     font-size: 23px;
 }
 .illuminated-initial {
-    float: left;
-    width: 116px;
-    height: 116px;
+    display: inline-block;
+    width: 64px;
+    height: 72px;
     object-fit: contain;
-    margin: 0 12px 4px 0;
+    vertical-align: -0.2em;
+    margin-right: 2px;
 }
 dialog li:before {
     content: counter(step, upper-roman);
@@ -752,9 +753,8 @@ body.modal-open {
         gap: 10px;
     }
     .illuminated-initial {
-        width: 92px;
-        height: 92px;
-        margin-right: 8px;
+        width: 52px;
+        height: 60px;
     }
 }
 @media (prefers-reduced-motion: reduce) {
