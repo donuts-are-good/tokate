@@ -144,9 +144,9 @@ footer a:hover {
     margin: 0 auto;
 }
 .heavens {
-    --orb-offset: clamp(108px, 22vw, 900px);
-    --orb-rise: clamp(65px, 8vw, 240px);
-    --orb-scale: 0.46;
+    --orb-offset: clamp(108px, 19vw, 900px);
+    --orb-rise: clamp(65px, 6vw, 240px);
+    --orb-scale: 0.4;
     height: 340px;
     position: relative;
     isolation: isolate;
@@ -180,7 +180,6 @@ footer a:hover {
 .moon-stars {
     width: 100%;
     height: 100%;
-    fill: #e9cf99;
     opacity: 0.8;
 }
 :root[data-theme="dark"] .sun {
@@ -253,20 +252,6 @@ footer a:hover {
 .hand-right {
     clip-path: inset(0 0 0 50%);
     animation: hand-right 0.55s 0.08s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.star {
-    position: absolute;
-    color: #f9f2dd;
-    font-size: 37px;
-    top: 48px;
-}
-.star-one {
-    left: 33%;
-}
-.star-two {
-    right: 31%;
-    top: 120px;
-    font-size: 27px;
 }
 .hero-copy {
     position: relative;
@@ -750,14 +735,6 @@ body.modal-open {
         width: 185%;
         left: -44.668%;
         top: -52px;
-    }
-    .star-one {
-        left: 12%;
-        top: 30px;
-    }
-    .star-two {
-        right: 9%;
-        top: 85px;
     }
     .hero-copy {
         padding: 2px 22px 34px;
