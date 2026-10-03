@@ -85,7 +85,12 @@ internal class CliDiscovery {
             }
             Check.That(!File.Exists(calls), "Invalid inputs or metadata invoked prerequisites")
             let version = Envelope(Call(binary, []string{"--version", "--json"}, temp), "--version", "ok")
-            Check.That(Check.Text(version["data"]?["version"]) == "0.2.17", "Wrong patch version")
+            Check.That(
+                Call(binary, []string{"--version"}, temp).Output.Trim() == "tokate " + Check.Text(
+                    version["data"]?["version"]
+                ),
+                "Structured and plain versions differ"
+            )
             let workMetadata = Envelope(Call(binary, []string{"help", "work", "--json"}, temp), "help", "ok")
             for name in[]string{"seconds", "runs", "fork", "allow-network"} {
                 var listed bool
