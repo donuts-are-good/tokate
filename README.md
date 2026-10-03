@@ -47,4 +47,8 @@ tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 
 Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and AI usage stay under your control.
 
+Use `tokate work --help`, `tokate help work` or `-h` for focused command help.
+You can pass an issue URL directly, or omit `--repo` when local remotes identify
+one GitHub repository. [Shell completion and input rules](docs/reference.md#issue-urls-and-local-repository-context) cover Bash, Zsh and Fish.
+
 [Website](https://tokate.dev/) · [Releases](https://github.com/obselate/tokate/releases) · [Commands and recovery](docs/reference.md) · [Data transparency](docs/transparency.md) · [Build from source](docs/reference.md#build-from-source) · [Issues](https://github.com/obselate/tokate/issues) · [MIT license](LICENSE)

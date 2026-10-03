@@ -1,0 +1,459 @@
+package Tokate
+
+import System
+import System.Collections.Generic
+import System.ComponentModel
+import System.Diagnostics
+import System.IO
+import System.Text
+import System.Text.RegularExpressions
+
+internal class CliOption {
+    internal let Name string
+    internal let Value string
+    internal let Description string
+    internal let Choices string
+    internal init(name string, value string, description string, choices string = "") {
+        Name = name
+        Value = value
+        Description = description
+        Choices = choices
+    }
+
+    internal func Describe(command string) string -> Description.Replace(
+        "{{seconds}}",
+        command == "recover" ? "300": "min(3600, owner limit)"
+    )
+}
+
+internal class CliCommand {
+    internal let Name string
+    internal let Options string
+    internal let Required string
+    internal let Summary string
+    internal let Usage string
+    internal let Example string
+    internal init(name string, options string, required string, summary string, usage string, example string) {
+        Name = name
+        Options = options
+        Required = required
+        Summary = summary
+        Usage = usage
+        Example = example
+    }
+
+    internal func Has(name string) bool -> ("," + Options + ",help,traffic,").Contains("," + name + ",")
+
+    internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
+}
+
+internal class Cli {
+    shared {
+        internal let Options[]CliOption = []CliOption{
+            CliOption("repo", "OWNER/REPO", "GitHub repository; default: issue URL or unique local remote"),
+            CliOption("issue", "N|URL", "Positive issue number or https://github.com/OWNER/REPO/issues/N"),
+            CliOption("donor", "LOGIN", "Assigned GitHub donor; @me selects the signed-in account"),
+            CliOption("model", "MODEL", "Model name allowed by owner policy"),
+            CliOption(
+                "effort",
+                "EFFORT",
+                "Reasoning effort; must match policy",
+                "minimal low medium high xhigh max ultra"
+            ),
+            CliOption("seconds", "N", "Time budget, 1..86400 seconds; default: {{seconds}}"),
+            CliOption("fork", "LOGIN/REPO", "Writable donor fork; default: signed-in login/upstream name"),
+            CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
+            CliOption("run", "DIR", "Saved run directory"),
+            CliOption("allow-network", "", "Allow task network only when owner permits it; default: off"),
+            CliOption("path", "DIR", "Repository directory; default: current directory"),
+            CliOption("pr", "N", "Positive pull request number"),
+            CliOption("watch", "", "Wait for checks; default: off"),
+            CliOption("timeout", "N", "Check wait limit, 1..86400 seconds; default: 1200"),
+            CliOption("help", "", "Show help without tool checks, network or inference (-h)"),
+            CliOption("traffic", "", "Print numeric Tokate API counts on stderr; default: off"),
+        }
+        internal let Commands[]CliCommand = []CliCommand{
+            CliCommand("doctor", "", "", "Check tools and sandbox locally; no inference.", "", "doctor"),
+            CliCommand("update", "", "", "Download and install latest stable Tokate; no inference.", "", "update"),
+            CliCommand("uninstall", "", "", "Remove managed installation offline; keep saved runs.", "", "uninstall"),
+            CliCommand(
+                "init",
+                "path",
+                "",
+                "Create local policy and PR template; no inference or publication.",
+                "[--path DIR]",
+                "init --path ."
+            ),
+            CliCommand(
+                "policy",
+                "repo",
+                "repo",
+                "Read upstream owner policy from GitHub; no inference.",
+                "[--repo OWNER/REPO]",
+                "policy --repo owner/project"
+            ),
+            CliCommand(
+                "approve",
+                "repo,issue,donor",
+                "repo,issue,donor",
+                "Write GitHub approval, assignment and label; no inference.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
+                "approve https://github.com/owner/project/issues/42 --donor donor"
+            ),
+            CliCommand(
+                "assign",
+                "repo,issue,donor",
+                "repo,issue,donor",
+                "Replace approval and donor on an approved issue on GitHub; no inference.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
+                "assign --repo owner/project --issue 42 --donor donor"
+            ),
+            CliCommand(
+                "revoke",
+                "repo,issue",
+                "repo,issue",
+                "Remove GitHub approval; blocks publication, not active computation.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]",
+                "revoke https://github.com/owner/project/issues/42"
+            ),
+            CliCommand(
+                "claim",
+                "repo,issue,model,effort,seconds,fork,runs,allow-network",
+                "repo,issue,model,effort",
+                "Reserve a GitHub branch and save a claim locally; no inference or PR publication.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --model MODEL --effort EFFORT [options]",
+                "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
+            ),
+            CliCommand(
+                "work",
+                "repo,issue,model,effort,seconds,fork,runs,allow-network,run",
+                "repo,issue,model,effort",
+                "Spend your Codex usage on inference, verify, push and publish a draft PR.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --model MODEL --effort EFFORT [options]\n       tokate work --run DIR",
+                "work https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
+            ),
+            CliCommand(
+                "recover",
+                "run,seconds",
+                "run",
+                "Rerun verification without inference, then push and publish a draft PR.",
+                "--run DIR [--seconds N]",
+                "recover --run /path/to/run --seconds 300"
+            ),
+            CliCommand(
+                "publish",
+                "run",
+                "run",
+                "Push and publish a draft PR from a successful saved run; no inference.",
+                "--run DIR",
+                "publish --run /path/to/run"
+            ),
+            CliCommand(
+                "status",
+                "run",
+                "run",
+                "Read saved run locally; no inference or publication.",
+                "--run DIR",
+                "status --run /path/to/run"
+            ),
+            CliCommand(
+                "verify-pr",
+                "repo,pr",
+                "repo,pr",
+                "Read GitHub approval and PR receipt; no inference or publication.",
+                "[--repo OWNER/REPO] --pr N",
+                "verify-pr --repo owner/project --pr 10"
+            ),
+            CliCommand(
+                "checks",
+                "run,repo,pr,watch,timeout",
+                "repo,pr",
+                "Read GitHub PR checks; --run also saves results locally. Exit: 0 passed, 8 pending, 1 failed.",
+                "[--repo OWNER/REPO] --pr N [--watch] [--timeout N]\n       tokate checks --run DIR [--watch] [--timeout N]",
+                "checks --run /path/to/run --watch"
+            ),
+            CliCommand(
+                "completion",
+                "",
+                "",
+                "Print Bash, Zsh or Fish completion locally; no tool checks or inference.",
+                "bash|zsh|fish",
+                "completion bash"
+            ),
+            CliCommand("help", "", "", "Show global or focused command help locally.", "[COMMAND]", "help work"),
+            CliCommand("--version", "", "", "Print installed version locally.", "", "--version"),
+        }
+
+        internal func Find(name string) CliCommand {
+            for command in Commands {
+                if command.Name == name {
+                    return command
+                }
+            }
+            throw Exception("Unknown command: " + name + ". Run tokate --help")
+        }
+
+        internal func OptionFor(command string, name string) CliOption {
+            for option in Options {
+                if option.Name == name && Find(command).Has(name) {
+                    return option
+                }
+            }
+            throw Exception("Unknown option for " + command + ": --" + name)
+        }
+
+        internal func Usage(name string) string {
+            let command = Find(name)
+            return "Usage: tokate " + name + (command.Usage == "" ? "": " " + command.Usage)
+        }
+
+        internal func ErrorUsage(args[]string) string {
+            var name = args.Length == 0 ? "help": args[0]
+            if name == "help" && args.Length > 1 && !args[1].StartsWith("-") {
+                name = args[1]
+            }
+            for command in Commands {
+                if command.Name == name {
+                    return Usage(name) + "\nRun tokate " + name + " --help for options."
+                }
+            }
+            return "Usage: tokate <command> [options]\nRun tokate --help for commands."
+        }
+
+        internal func Help(name string = "") string {
+            let text = StringBuilder()
+            if name == "" {
+                text.AppendLine("Tokate " + Data.Version() + " (toh-KAH-teh)")
+                text.AppendLine("Donate AI usage to approved GitHub issues.\n\nUsage: tokate <command> [options]\n")
+                for command in Commands {
+                    text.AppendLine("  " + command.Name.PadRight(12) + command.Summary)
+                }
+                text.AppendLine("\nUse tokate <command> --help, tokate help <command>, or -h for details.")
+                text.AppendLine(
+                    "Value options accept --name=value. Issue URLs and unique local GitHub remotes supply --repo."
+                )
+                text.AppendLine(
+                    "Explicit --repo OWNER/REPO and --issue N remain available. PRs are drafts; owners review and merge."
+                )
+            } else {
+                let command = Find(name)
+                text.AppendLine(Usage(name))
+                text.AppendLine(command.Summary + "\n")
+                for option in Options {
+                    if !command.Has(option.Name) {
+                        continue
+                    }
+                    let required = command.Needs(option.Name) ? " (required)": ""
+                    text.AppendLine(
+                        "  " + ("--" + option.Name + (option.Value == "" ? "": " " + option.Value)).PadRight(24) +
+                            option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")") + required
+                    )
+                }
+                if command.Has("issue") {
+                    text.AppendLine(
+                        "\nAn issue URL may be positional or passed to --issue; matching explicit inputs are allowed."
+                    )
+                }
+                if command.Needs("repo") {
+                    text.AppendLine(
+                        "Repository required: explicit --repo, issue URL, or all local remotes identifying one GitHub repo."
+                    )
+                }
+                if name == "work" || name == "checks" {
+                    text.AppendLine(
+                        "--run is an alternative to repository/issue/model/effort or repository/pr inputs; do not combine them."
+                    )
+                }
+                text.AppendLine("\nExample: tokate " + command.Example)
+            }
+            return text.ToString().TrimEnd()
+        }
+
+        internal func Validate(args Args) {
+            let command = Find(args.Command)
+            if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
+                for key in args.Values.Keys {
+                    if key != "--run" &&
+                        key != "--help" &&
+                        key != "--traffic" &&
+                        !(args.Command == "checks" && (key == "--watch" || key == "--timeout")) {
+                        throw Exception("--run conflicts with " + key)
+                    }
+                }
+                if args.IssueUrl != "" {
+                    throw Exception("--run conflicts with an issue URL")
+                }
+            }
+            for key in[]string{"seconds", "timeout", "pr"} {
+                if args.Get(key) != "" {
+                    args.Number(key)
+                }
+            }
+            for key in[]string{"repo", "fork"} {
+                if args.Get(key) != "" {
+                    args.Values["--" + key] = RepositoryInput.Repo(args.Get(key))
+                }
+            }
+            for key in[]string{"path", "run", "runs"} {
+                if args.Get(key) != "" {
+                    Path.GetFullPath(args.Get(key))
+                }
+            }
+            if args.Get("donor") != "" && args.Get("donor") != "@me" {
+                Data.Login(args.Get("donor"))
+            }
+            if args.Get("model") != "" && !Regex.IsMatch(args.Get("model"), "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
+                throw Exception("Invalid model name: --model")
+            }
+            if args.Get("effort") != "" && Array.IndexOf(
+                OptionFor(args.Command, "effort").Choices.Split(' '),
+                args.Get("effort")
+            ) < 0 {
+                throw Exception("Invalid reasoning effort: --effort")
+            }
+            RepositoryInput.Issue(args)
+            if args.Command == "completion" &&
+                args.Subject != "bash" &&
+                args.Subject != "zsh" &&
+                args.Subject != "fish" &&
+                (args.Subject != "" || !args.Help) {
+                throw Exception("Required shell: bash, zsh or fish")
+            }
+            if args.Help {
+                return
+            }
+            if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
+                return
+            }
+            // Validate all explicit inputs before consulting local Git or checking tools.
+            for option in Options {
+                if command.Needs(option.Name) && option.Name != "repo" {
+                    args.Need(option.Name)
+                }
+            }
+            if command.Needs("repo") && args.Get("repo") == "" {
+                args.Values["--repo"] = RepositoryInput.Local()
+            }
+        }
+    }
+}
+
+internal class RepositoryInput {
+    shared {
+        private func StartLocal(info ProcessStartInfo) Process {
+            try {
+                return Process.Start(info) ?? throw Exception("Use --repo OWNER/REPO; local Git is unavailable")
+            } catch (error Win32Exception) {
+                throw Exception("Local Git is unavailable; use --repo OWNER/REPO")
+            }
+        }
+
+        internal func Repo(value string) string {
+            var normalized = value
+            if value.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) {
+                let uri = Uri(value)
+                if uri.Query != "" || uri.Fragment != "" {
+                    throw Exception("Use a GitHub repository URL without query or fragment")
+                }
+                normalized = uri.AbsolutePath.Trim('/')
+                if normalized.EndsWith(".git") {
+                    normalized = normalized.Substring(0, normalized.Length - 4)
+                }
+            }
+            return Data.Repo(normalized)
+        }
+
+        internal func ApplyIssue(args Args, value string) {
+            let uri = Uri(value)
+            let match = Regex.Match(
+                uri.AbsolutePath,
+                "^/([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)/issues/([0-9]+)/?$"
+            )
+            if uri.Scheme != "https" || !String.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
+                !uri.IsDefaultPort ||
+                uri.UserInfo != "" ||
+                !match.Success {
+                throw Exception("Use a GitHub issue URL: https://github.com/OWNER/REPO/issues/N")
+            }
+            let repo = Data.Repo(match.Groups[1].Value)
+            let number = match.Groups[2].Value
+            var parsed int32
+            if !int32.TryParse(number, out parsed) || parsed < 1 {
+                throw Exception("Invalid positive number in issue URL")
+            }
+            if args.Get("repo") != "" && !String.Equals(args.Get("repo"), repo, StringComparison.OrdinalIgnoreCase) {
+                throw Exception("Issue URL conflicts with --repo")
+            }
+            if args.Get("issue") != "" && args.Number("issue") != parsed {
+                throw Exception("Issue URL conflicts with --issue")
+            }
+            args.Values["--repo"] = repo
+            args.Values["--issue"] = number
+            args.Number("issue")
+        }
+
+        internal func Issue(args Args) {
+            let issue = args.Get("issue")
+            if issue.Contains("://") {
+                args.Values.Remove("--issue")
+                ApplyIssue(args, issue)
+            } else if issue != "" {
+                args.Number("issue")
+            }
+            if args.IssueUrl != "" {
+                ApplyIssue(args, args.IssueUrl)
+            }
+        }
+
+        internal func Local() string {
+            // Local config only: no GitHub CLI, fetch, credential helper, hooks or inference.
+            let info = ProcessStartInfo("git")
+            info.UseShellExecute = false
+            info.RedirectStandardOutput = true
+            info.RedirectStandardError = true
+            info.Environment.Clear()
+            info.Environment["PATH"] = Environment.GetEnvironmentVariable("PATH") ?? ""
+            for arg in[]string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "remote", "-v"} {
+                info.ArgumentList.Add(arg)
+            }
+            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1"
+            info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            info.Environment["GH_HOST"] = "github.com"
+            info.Environment["GH_PROMPT_DISABLED"] = "1"
+            info.Environment["GIT_TERMINAL_PROMPT"] = "0"
+            using let process = StartLocal(info)
+            let output = process.StandardOutput.ReadToEndAsync()
+            let error = process.StandardError.ReadToEndAsync()
+            if !process.WaitForExit(5000) {
+                process.Kill(true)
+                process.WaitForExit()
+                throw Exception("Local repository discovery timed out; use --repo OWNER/REPO")
+            }
+            if process.ExitCode != 0 {
+                throw Exception("Cannot determine a local repository; use --repo OWNER/REPO")
+            }
+            var repo string = ""
+            for line in output.GetAwaiter().GetResult().Split('\n', StringSplitOptions.RemoveEmptyEntries) {
+                let fields = line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)
+                let url = fields.Length >= 2 ? fields[1]: ""
+                let match = Regex.Match(
+                    url,
+                    "^(?:https://github\\.com/|git@github\\.com:|ssh://git@github\\.com/)([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*?)(?:\\.git)?/?$",
+                    RegexOptions.IgnoreCase
+                )
+                if !match.Success {
+                    throw Exception("Ambiguous or unsupported local remotes; use --repo OWNER/REPO")
+                }
+                let candidate = Data.Repo(match.Groups[1].Value)
+                if repo != "" && !String.Equals(repo, candidate, StringComparison.OrdinalIgnoreCase) {
+                    throw Exception("Ambiguous local remotes; use --repo OWNER/REPO")
+                }
+                repo = candidate
+            }
+            if repo == "" {
+                throw Exception("No GitHub remote found; use --repo OWNER/REPO")
+            }
+            return repo
+        }
+    }
+}

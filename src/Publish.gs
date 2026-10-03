@@ -254,7 +254,6 @@ internal class Publication {
         }
 
         internal func Checks(args Args) int32 {
-            args.Allow("run,repo,pr,watch,timeout")
             let directory = args.Get("run") == "" ? "": Path.GetFullPath(args.Need("run"))
             let run = directory == "" ? Verify(Data.Repo(args.Need("repo")), args.Number("pr")): Data.Load(directory)
             if run.Number("pr") == 0 {

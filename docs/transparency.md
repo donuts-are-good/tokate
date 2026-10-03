@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.10 discovers tools, handles data, and
+This document describes how Tokate 0.2.12 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -10,6 +10,11 @@ delegates authentication. Source links support the behavior described below.
 Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
 effort explicitly.
 
+- Help and shell completion use local command definitions without scanning tools,
+  inspecting remotes, accessing GitHub, or starting inference. Invalid CLI inputs
+  fail before prerequisite checks and workflow actions. When needed, repository
+  discovery reads local `git remote -v` output and requires one unambiguous
+  GitHub repository; it never fetches or calls a credential helper.
 - Startup looks for `git`, `gh`, `codex`, `setsid`, and `bwrap` in absolute directories
   listed in `PATH`. It checks file existence and executable permissions. It does
   not recursively search the home directory or open harness configuration files.
@@ -27,7 +32,8 @@ effort explicitly.
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.
 
-Source: [Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
+Source: [Cli.gs](../src/Cli.gs), [Completion.gs](../src/Completion.gs),
+[Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
 
 ## Installer access
 
@@ -75,6 +81,7 @@ infer harness defaults. Donors choose model and effort explicitly.
 | Process | Inherited requirements |
 | --- | --- |
 | Ordinary host commands, including local Git and tool version checks | `PATH`, `HOME`, `LANG` |
+| Local repository context probe (`git remote -v`) | `PATH` only |
 | Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
 | GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
