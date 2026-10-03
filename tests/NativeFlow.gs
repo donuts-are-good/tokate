@@ -8,6 +8,7 @@ import System.IO
 import System.Net
 import System.Net.Sockets
 import System.Text.Json.Nodes
+import Tokate
 
 internal class NativeFlow : IDisposable {
     internal let Temp Temp = Temp()
@@ -616,6 +617,147 @@ internal class NativeFlow : IDisposable {
                 "Publication retry changed commit"
             )
             flow.PublicContent(run)
+        }
+    }
+
+    internal func CanonicalVerification() {
+        for mode in[]string{"replacement", "graft", "index_assume", "index_skip"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode(mode)
+            let failure = flow.Call([]string{"work", "--run", run}, 1)
+            Check.Contains(
+                failure.Error,
+                mode == "replacement" ? "cannot change owner policy":
+                mode == "graft" ? "info/grafts": "Candidate index"
+            )
+            Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Unsafe candidate reached verification")
+            Check.That(File.Exists(Path.Combine(run, "checkout/result.txt")), "Blocked work was removed")
+            flow.NoPr()
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Guard retried inference")
+        }
+    }
+
+    internal func SelfOwnedFlow() {
+        Reload()
+        State["self_owned"] = JsonValue.Create(true)
+        Save()
+        Call([]string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "owner"}, owner: true)
+        let run = Claim()
+        Call([]string{"work", "--run", run})
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        Check.That(Check.Text(saved["head_repo"]) == "owner/project", "Self-owned version-1 run changed repository")
+        Check.That(Check.Text(saved["state"]) == "published", "Self-owned version-1 publication failed")
+    }
+
+    internal func CanonicalPublication() {
+        for mode in[]string{"replacement", "packed", "graft", "index_assume", "index_skip"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("push_fail")
+            flow.Call([]string{"work", "--run", run}, 1)
+            flow.Mode("")
+            let savedPath = Path.Combine(run, "run.json")
+            let saved = Check.Json(File.ReadAllText(savedPath))
+            let checkout = Path.Combine(run, "checkout")
+            let benign = Check.Text(saved["commit"])
+            let branch = Check.Text(saved["branch"])
+            let remote = Path.Combine(flow.Bin, "fork")
+            let base = Check.Text(saved["base"])
+            let template = Path.Combine(checkout, ".github/tokate-pr.md")
+            if mode == "replacement" || mode == "packed" {
+                flow.Git("-C", checkout, "checkout", "--force", "--detach", base)
+                File.WriteAllText(Path.Combine(checkout, "result.txt"), "Implemented acceptance criteria\n")
+                File.AppendAllText(template, "\nhidden protected change\n")
+                flow.Git("-C", checkout, "add", ".")
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=test@example.test",
+                    "commit",
+                    "-m",
+                    "Canonical protected change"
+                )
+                let malicious = flow.Git("-C", checkout, "rev-parse", "HEAD")
+                flow.Git("-C", checkout, "replace", malicious, benign)
+                if mode == "packed" {
+                    flow.Git("-C", checkout, "pack-refs", "--all", "--prune")
+                }
+                flow.Git("-C", checkout, "checkout", "--force", "--detach", malicious)
+                Check.That(flow.Git("-C", checkout, "status", "--porcelain") == "", "Exploit must look clean")
+                Check.That(
+                    flow.Git("-C", checkout, "diff", "--name-only", base, malicious) == "result.txt",
+                    "Replacement did not mask protected change"
+                )
+                saved["commit"] = JsonValue.Create(malicious)
+                File.WriteAllText(savedPath, saved.ToJsonString())
+                let probe = Path.Combine(flow.Temp.Root, "probe.git")
+                flow.Git("clone", "--bare", flow.Upstream, probe)
+                flow.Git("-C", checkout, "push", probe, malicious + ":refs/heads/candidate")
+                Check.Contains(
+                    flow.Git("--no-replace-objects", "-C", probe, "show", "candidate:.github/tokate-pr.md"),
+                    "hidden protected change"
+                )
+                Check.Contains(Commands.Git(checkout, "diff", "--name-only", base, malicious), ".github/tokate-pr.md")
+                let check = Verification.Run(
+                    checkout,
+                    []string{
+                        "/bin/sh",
+                        "-c",
+                        "git show HEAD:.github/tokate-pr.md | /usr/bin/grep 'hidden protected change'"
+                    },
+                    false,
+                    10
+                )
+                Check.That(check.Code == 0, check.Output + check.Error)
+                if mode == "packed" {
+                    flow.Git("--no-replace-objects", "-C", checkout, "checkout", "--force", "--detach", malicious)
+                    Check.Contains(
+                        flow.Call([]string{"publish", "--run", run}, 1).Error,
+                        "Canonical commit differs from the independently verified patch"
+                    )
+                }
+            } else if mode == "graft" {
+                Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))
+                File.WriteAllText(Path.Combine(checkout, ".git/info/grafts"), benign + "\n")
+                let ordinary = Check.Run(
+                    "/usr/bin/git",
+                    []string{"-C", checkout, "merge-base", "--is-ancestor", base, benign},
+                    flow.Temp.Env
+                )
+                Check.That(ordinary.Code == 1, "Graft did not alter ancestry")
+                Commands.Git(checkout, "merge-base", "--is-ancestor", base, benign)
+            } else {
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "update-index",
+                    mode == "index_assume" ? "--assume-unchanged": "--skip-worktree",
+                    ".github/tokate-pr.md"
+                )
+                File.AppendAllText(template, "\nhidden work file\n")
+                Check.That(flow.Git("-C", checkout, "status", "--porcelain") == "", "Index flag must hide changed file")
+            }
+            let recordBefore = File.ReadAllText(savedPath)
+            let patchBefore = File.ReadAllText(Path.Combine(run, "changes.patch"))
+            flow.Call([]string{"publish", "--run", run}, 1)
+            Check.That(flow.Git("-C", remote, "rev-parse", branch) == base, "Unsafe candidate reached publication")
+            Check.That(File.ReadAllText(savedPath) == recordBefore, "Blocked publication rewrote record")
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "changes.patch")) == patchBefore,
+                "Blocked patch was rewritten"
+            )
+            Check.That(File.Exists(Path.Combine(checkout, "result.txt")), "Blocked work was removed")
+            flow.NoPr()
         }
     }
 
@@ -1312,6 +1454,9 @@ internal class NativeFlow : IDisposable {
                 "ReadTraffic",
                 "MutationTraffic",
                 "PublicationFailures",
+                "CanonicalVerification",
+                "CanonicalPublication",
+                "SelfOwnedFlow",
                 "PublicationRevocation",
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
@@ -1420,6 +1565,15 @@ internal class NativeFlow : IDisposable {
                     }
                     case "PublicationFailures" {
                         flow.PublicationFailures()
+                    }
+                    case "CanonicalVerification" {
+                        flow.CanonicalVerification()
+                    }
+                    case "CanonicalPublication" {
+                        flow.CanonicalPublication()
+                    }
+                    case "SelfOwnedFlow" {
+                        flow.SelfOwnedFlow()
                     }
                     case "PublicationRevocation" {
                         flow.PublicationRevocation()
