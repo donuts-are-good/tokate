@@ -70,9 +70,14 @@ Extend the existing policy explicitly, for example:
 
 Use your project's actual checks. Reservations default to 24 hours, bounded
 between 300 and 604800 seconds. They are separate from the compute/verification
-budget. Every declared tool must match an allowed harness/provider pair and
-model/effort pair. Unknown model/effort values require explicit owner allowance;
-never replace a real or unknown value with an allowed model to satisfy policy.
+budget. Every declared tool must match an allowed harness/provider pair. The
+[model policy](reference.md) defaults to the existing exact model/effort whitelist;
+explicit `model_policy: "unrestricted"` permits any valid declared pair and requires
+omitted or empty `models`. External unknown model/effort values retain their legacy
+meaning and need an exact whitelist allowance when filtering is enabled. Under
+either explicit mode, external effort `"absent"` declares a known lack of an effort
+control and needs its exact pair in whitelist mode. Managed work rejects unknown
+or absent controls. Never substitute a declaration to satisfy policy.
 Expanded eligibility, pause/handoff/renewal and automated assignment/readiness
 remain #12, #14, #27 and #28.
 

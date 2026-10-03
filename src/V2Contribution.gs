@@ -38,7 +38,7 @@ internal class V2Contribution {
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             RequestData.Tools(J.Get(run.Element(), "tools"))
-            policy.ValidateTools(J.Get(run.Element(), "tools"))
+            policy.ValidateTools(J.Get(run.Element(), "tools"), run.Text("source"))
             let tools = J.Items(J.Get(run.Element(), "tools"))
             if run.Text("source") == "tokate" {
                 if tools.Count != 1 || J.Text(tools[0], "harness") != "codex" || J.Text(
@@ -80,22 +80,8 @@ internal class V2Contribution {
             let record = state.Check(repo, issue, donor)
             let tools = RequestData.FileData(args.Need("tools"), 8192)
             RequestData.Tools(tools)
-            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools)
             let source = args.Need("source")
-            if source != "external" && source != "tokate" {
-                throw Exception("source must be external or tokate")
-            }
-            if source == "tokate" &&
-                (
-                J.Items(tools).Count != 1 || J.Text(J.Items(tools)[0], "harness") != "codex" || J.Text(
-                    J.Items(tools)[0],
-                    "provider"
-                ) != "openai"
-            ) {
-                throw Exception(
-                    "Tokate-launched execution currently supports one codex/openai declaration; other harnesses use external"
-                )
-            }
+            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools, source)
             let approval = J.Get(record, "approval")
             let run = Data()
             run.Fields["version"] = 2
@@ -420,7 +406,7 @@ internal class V2Contribution {
                 J.Text(J.Get(pull, "base"), "ref") != J.Text(J.Get(record, "approval"), "base_branch") {
                 throw Exception("PR receipt lacks current exact-commit coordination authority")
             }
-            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo

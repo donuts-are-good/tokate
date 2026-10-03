@@ -148,6 +148,32 @@ update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
+Policies of either version accept an optional top-level `model_policy` with exactly
+`"whitelist"` or `"unrestricted"`. A missing field preserves the existing whitelist:
+`models` must be a nonempty map of exact model identifiers to nonempty effort arrays,
+and every chosen pair must be listed. Explicit `"whitelist"` has the same pair rules.
+Explicit `"unrestricted"` requires `models` to be omitted or `{}`; a nonempty or
+malformed map is contradictory. Null, other types/values and duplicate mode fields
+are rejected. Unrestricted choice still validates model identifiers and effort
+tokens; it does not establish model availability or choose a model automatically.
+
+Owners opt in by editing and committing their policy, then issuing fresh approval.
+Adding or changing the mode changes the policy byte digest and makes existing
+approval authority stale. Saved approvals, runs, receipts and donor preferences
+are retained without conversion. When upgrading to version 2, keep the existing
+`models` restrictions unless the owner explicitly changes them. `init` keeps its
+existing version-1 whitelist template, and managed CLI model/effort arguments remain
+required. Both modes keep supported harness/provider controls, donor consent,
+runtime limits, both network gates, independent verification and owner review.
+
+Under an explicit mode, version-2 external declarations can use the effort token
+`"absent"` for a known lack of an effort control. A whitelist must list that exact
+model/`absent` pair; unrestricted choice permits it. `"unknown"` retains its legacy
+meaning of unknown effort and is never converted to `"absent"`. Omitted/null effort
+is invalid. Tokate-managed execution rejects absent or unknown controls before
+inference and never sends these tokens as harness settings. Every declaration in
+mixed external work is validated at preparation, publication and receipt review.
+
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.

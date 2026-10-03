@@ -106,7 +106,8 @@ internal class NativeFlow : IDisposable {
         seconds string = "30",
         model string = "gpt-6.1-sol",
         code int32 = 0,
-        network bool = false
+        network bool = false,
+        effort string = "high"
     ) string {
         let args = List[string]{
             "claim",
@@ -117,7 +118,7 @@ internal class NativeFlow : IDisposable {
             "--model",
             model,
             "--effort",
-            "high",
+            effort,
             "--seconds",
             seconds,
             "--runs",
@@ -268,6 +269,135 @@ internal class NativeFlow : IDisposable {
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == "1800",
             "Saved explicit budget changed"
         )
+    }
+
+    internal func SetModelPolicy(mode string, models string = "") {
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let original = File.ReadAllText(path)
+        let policy = Check.Json(original)
+        if mode == "" {
+            policy.AsObject().Remove("model_policy")
+        } else {
+            policy["model_policy"] = JsonValue.Create(mode)
+        }
+        if models == "omit" {
+            policy.AsObject().Remove("models")
+        } else if models != "" {
+            policy["models"] = Check.Json(models)
+        }
+        if policy.ToJsonString() != original {
+            File.WriteAllText(path, policy.ToJsonString())
+            Commit("Owner selects model policy")
+        }
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func ModelPolicyModes() {
+        for mode in[]string{"", "whitelist", "unrestricted", "unrestricted-empty"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            let unrestricted = mode.StartsWith("unrestricted")
+            flow.SetModelPolicy(
+                unrestricted ? "unrestricted": mode,
+                unrestricted ? (mode.EndsWith("empty") ? "{}": "omit"):
+                "{\"gpt-6.1-sol\":[\"high\"],\"second-model\":[\"low\",\"xhigh\"]}"
+            )
+            flow.Approve()
+            if !unrestricted {
+                flow.Claim(model: "unlisted-model", code: 1)
+                flow.Claim(model: "second-model", code: 1)
+                flow.Claim(effort: "low", code: 1)
+            }
+            flow.Claim(seconds: "3601", code: 1)
+            flow.Claim(network: true, code: 1)
+            flow.Claim(effort: "unknown", code: 1)
+            flow.Claim(effort: "absent", code: 1)
+            flow.Claim(effort: "invalid", code: 1)
+            flow.NoInference()
+            let model = unrestricted ? "unlisted-model": "second-model"
+            let run = flow.Claim(model: model, effort: "low")
+            flow.Call([]string{"work", "--run", run})
+            flow.Call([]string{"publish", "--run", run})
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["requested_model"]) == model && Check.Text(
+                    flow.State["requested_effort"]
+                ) == "model_reasoning_effort=\"low\"",
+                "Harness settings differ from explicit donor selection"
+            )
+            let pulls = flow.State["pulls"]?.ToJsonString() ?? ""
+            let approval = flow.Git("-C", flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
+            flow.SetModelPolicy(
+                unrestricted ? "whitelist": "unrestricted",
+                unrestricted ?
+                "{\"gpt-6.1-sol\":[\"high\"]}": "omit"
+            )
+            Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "policy or template changed")
+            Check.Contains(
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true).Error,
+                "policy or template changed"
+            )
+            flow.Reload()
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == saved &&
+                    flow
+                    .State["pulls"]
+                    ?.ToJsonString() == pulls && flow.Git(
+                    "-C",
+                    flow.Upstream,
+                    "rev-parse",
+                    "refs/heads/tokate/approvals/1"
+                ) == approval,
+                "Model-policy edit rewrote saved authority or work"
+            )
+        }
+    }
+
+    internal func ModelPolicyMalformed() {
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let original = File.ReadAllText(path)
+        for version in[]int32{1, 2} {
+            for fields in[]string{
+                "\"model_policy\":null",
+                "\"model_policy\":true",
+                "\"model_policy\":1",
+                "\"model_policy\":[]",
+                "\"model_policy\":{}",
+                "\"model_policy\":\"other\"",
+                "\"model_policy\":\"whitelist\",\"model_policy\":\"unrestricted\"",
+                "\"model_policy\":\"unrestricted\",\"model_policy\":\"unrestricted\"",
+                "\"model_policy\":\"unrestricted\",\"models\":{\"model\":[\"high\"]}",
+                "\"model_policy\":\"unrestricted\",\"models\":null",
+                "\"model_policy\":\"unrestricted\",\"models\":[]",
+                "\"model_policy\":\"unrestricted\",\"models\":\"bad\"",
+                "\"model_policy\":\"unrestricted\",\"models\":{},\"models\":{}",
+                "\"model_policy\":\"whitelist\"",
+                "\"model_policy\":\"whitelist\",\"models\":{}",
+                "\"model_policy\":\"whitelist\",\"models\":null",
+                "\"model_policy\":\"whitelist\",\"models\":{\"bad model\":[\"high\"]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":\"high\"}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[null]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[\"high,xhigh\"]}",
+                "\"models\":{}",
+                "\"models\":null",
+                "\"models\":{\"model\":[\"absent\"]}"
+            } {
+                let policy = Check.Json(original)
+                policy["version"] = JsonValue.Create(version)
+                policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
+                policy.AsObject().Remove("models")
+                let text = policy.ToJsonString()
+                File.WriteAllText(path, text.Substring(0, text.Length - 1) + "," + fields + "}")
+                Commit("Malformed model policy fixture")
+                Call([]string{"policy", "--repo", "owner/project"}, 1)
+                Check.That(File.ReadAllText(path).Contains(fields), "Policy inspection normalized owner bytes")
+            }
+        }
+        NoInference()
+        NoPr()
     }
 
     internal func FailedReassignment() {
@@ -1428,6 +1558,8 @@ internal class NativeFlow : IDisposable {
                 "OwnerWithoutCodex",
                 "CrossAccountFlow",
                 "OwnerPolicy",
+                "ModelPolicyModes",
+                "ModelPolicyMalformed",
                 "FailedReassignment",
                 "MissingFork",
                 "DefaultBudget",
@@ -1487,6 +1619,12 @@ internal class NativeFlow : IDisposable {
                     }
                     case "OwnerPolicy" {
                         flow.OwnerPolicy()
+                    }
+                    case "ModelPolicyModes" {
+                        flow.ModelPolicyModes()
+                    }
+                    case "ModelPolicyMalformed" {
+                        flow.ModelPolicyMalformed()
                     }
                     case "FailedReassignment" {
                         flow.FailedReassignment()

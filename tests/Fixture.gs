@@ -177,6 +177,12 @@ internal class Fixture {
         Check.Contains(Console.In.ReadToEnd(), "Acceptance criteria addressed")
         let count = Check.Text(State["exec_count"])
         State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
+        State["requested_model"] = JsonValue.Create(args[Array.IndexOf(args, "--model") + 1])
+        for arg in args {
+            if arg.StartsWith("model_reasoning_effort=") {
+                State["requested_effort"] = JsonValue.Create(arg)
+            }
+        }
         Save()
         let mode = Check.Text(State["mode"])
         if mode == "temporary_isolation" {
