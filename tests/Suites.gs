@@ -94,6 +94,12 @@ internal class SuiteDriver {
                     throw Exception("Suite " + job.Name + " failed with exit " + result.Result.Code.ToString())
                 }
             } catch (error Exception) {
+                if error is CommandInterrupted interrupted {
+                    result.Result = interrupted.Result
+                }
+                if error is CommandInputInterrupted interruptedInput {
+                    result.Result = interruptedInput.Result
+                }
                 result.Failure = error
                 Stop()
             }

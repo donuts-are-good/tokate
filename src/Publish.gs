@@ -18,7 +18,10 @@ internal class Publication {
             for i in 0 ... checks.Count {
                 var code int32
                 let check = checks[i]
-                if !J.Get(check, "exit_code").TryGetInt32(out code) || code != 0 || J.Write(
+                if (J.Text(check, "state") != "" && J.Text(check, "state") != "completed") || J.Get(check, "exit_code")
+                    .ValueKind != JsonValueKind.Number ||
+                    !J
+                    .Get(check, "exit_code").TryGetInt32(out code) || code != 0 || J.Write(
                     J.Get(check, "command")
                 ) != J.Write(commands[i]) {
                     throw Exception("Owner verification did not pass")

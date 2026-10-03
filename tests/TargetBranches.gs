@@ -569,12 +569,14 @@ internal class TargetBranches {
         }
 
         internal func All(binary string, selected string = "") {
-            if selected != "" {
+            if selected != "" && selected != "Receipts" {
                 Check.That(selected == "Structured", "Unknown target test group")
                 Structured(binary)
                 return
             }
-            Structured(binary)
+            if selected != "Receipts" {
+                Structured(binary)
+            }
             for branch in[]string{"release", "release/next"} {
                 V1(binary, branch)
                 Console.WriteLine("PASS V1 selected target " + branch)
@@ -582,6 +584,9 @@ internal class TargetBranches {
             V2(binary, "release", false)
             V2(binary, "release/next", true)
             Console.WriteLine("PASS V2 managed and external selected targets")
+            if selected == "Receipts" {
+                return
+            }
             for version in[]int32{1, 2} {
                 for change in[]string{"missing", "deleted", "authority", "policy", "template"} {
                     Freshness(binary, version, change)

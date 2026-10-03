@@ -4,6 +4,7 @@ import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.IO
+import System.Text.Json
 
 internal class Verification {
     shared {
@@ -124,7 +125,7 @@ internal class Verification {
                 Directory.Delete(storage, true)
             } catch (error Exception) {
                 let original = failure?.Message ?? ""
-                throw Exception(
+                let cleanup = Exception(
                     (original != "" ? original + "\n": "") +
                         "Cannot clean verification runtime files at " +
                         storage +
@@ -132,16 +133,123 @@ internal class Verification {
                         error.Message,
                     failure ?? error
                 )
+                if failure is CommandInterrupted interrupted {
+                    throw CommandInterrupted(cleanup, interrupted.Result)
+                }
+                if failure is CommandInputInterrupted interruptedInput {
+                    throw CommandInputInterrupted(IOException(cleanup.Message, cleanup), interruptedInput.Result)
+                }
+                throw cleanup
             }
         }
 
-        internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
+        internal func Check(
+            storage string,
+            results List[Object],
+            command JsonElement,
+            directory string,
+            network bool,
+            seconds int32
+        ) CommandResult {
+            let checkout = DirectoryPath(directory)
+            let root = DirectoryPath(storage)
+            if root == checkout || root.StartsWith(checkout + "/") {
+                throw Exception("Verification evidence must be outside the checkout")
+            }
+            let attempt = Path.Combine(root, "verification-" + Guid.NewGuid().ToString("N"))
+            Directory.CreateDirectory(
+                attempt,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            let outputPath = Path.Combine(attempt, "stdout.log")
+            let errorPath = Path.Combine(attempt, "stderr.log")
+            let check = J.Map(
+                "command",
+                command,
+                "state",
+                "running",
+                "output_file",
+                Path.GetRelativePath(root, outputPath),
+                "error_file",
+                Path.GetRelativePath(root, errorPath)
+            )
+            results.Add(check)
+            let record = Path.Combine(root, "verification.json")
+            File.WriteAllText(record, J.Write(results))
+            try {
+                if seconds < 1 {
+                    throw Exception("Runtime budget exhausted before verification")
+                }
+                let words = List[string]()
+                for word in J.Items(command) {
+                    words.Add(word.GetString() ?? "")
+                }
+                let result = Run(checkout, words.ToArray(), network, seconds, outputPath, errorPath)
+                check["state"] = "completed"
+                check["exit_code"] = result.Code
+                Evidence(check, result)
+                File.WriteAllText(record, J.Write(results))
+                return result
+            } catch (error Exception) {
+                check.Remove("exit_code")
+                check["state"] = "failed"
+                check["failure"] = error.Message
+                if error is CommandInterrupted interrupted {
+                    check["state"] = "interrupted"
+                    Evidence(check, interrupted.Result)
+                }
+                if error is CommandInputInterrupted interruptedInput {
+                    check["state"] = "interrupted"
+                    Evidence(check, interruptedInput.Result)
+                }
+                File.WriteAllText(record, J.Write(results))
+                throw error
+            }
+        }
+
+        private func Evidence(check Dictionary[string, Object?], result CommandResult) {
+            check["output"] = result.Output
+            check["error"] = result.Error
+            check["output_truncated"] = result.OutputTruncated
+            check["error_truncated"] = result.ErrorTruncated
+        }
+
+        internal func Run(
+            directory string,
+            command[]string,
+            network bool,
+            seconds int32,
+            outputPath string = "",
+            errorPath string = ""
+        ) CommandResult {
             if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
                 throw Exception(
                     "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
                 )
             }
             let checkout = Validate(directory)
+            for path in[]string{outputPath, errorPath} {
+                if path != "" {
+                    let parent = DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
+                    if parent == checkout || parent.StartsWith(checkout + "/") {
+                        throw Exception("Verification evidence must be outside the checkout")
+                    }
+                    for visible in[]string{
+                        "/usr",
+                        "/bin",
+                        "/sbin",
+                        "/lib",
+                        "/lib64",
+                        "/etc/alternatives",
+                        "/proc",
+                        "/dev"
+                    } {
+                        if parent == visible || parent.StartsWith(visible + "/") {
+                            throw Exception("Verification evidence must be outside sandbox runtime mounts")
+                        }
+                    }
+                }
+            }
             let git = Path.Combine(checkout, ".git")
             let args = List[string]{
                 "--die-with-parent",
@@ -244,7 +352,9 @@ internal class Verification {
                         checkout,
                         seconds: seconds,
                         isolated: true,
-                        cancellation: cancellation
+                        cancellation: cancellation,
+                        outputPath: outputPath,
+                        errorPath: errorPath
                     )
                 } catch (error Exception) {
                     CleanupRuntime(storage.FullName, error)
@@ -252,14 +362,18 @@ internal class Verification {
                 }
                 var failure Exception? = nil
                 if result.Code != 0 {
-                    failure = Exception(
-                        "Verification command exited " + result.Code.ToString() + ": " + result.Error + result.Output
-                    )
+                    failure = Exception("Verification command exited " + result.Code.ToString())
                 }
-                CleanupRuntime(storage.FullName, failure)
+                try {
+                    CleanupRuntime(storage.FullName, failure)
+                } catch (error Exception) {
+                    result.Code = nil
+                    throw CommandInterrupted(error, result)
+                }
                 select {
                     case <- cancellation {
-                        throw Exception("Verification cancelled")
+                        result.Code = nil
+                        throw CommandInterrupted(Exception("Verification cancelled"), result)
                     }
                     default { }
                 }

@@ -286,6 +286,14 @@ internal class Fixture {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
             if mode == "timeout" {
+                let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
+                File.WriteAllText(Path.Combine(partialCheckout, "partial.txt"), "partial-edit")
+                Console.Write(
+                    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":999}}\n{\"type\":\"partial-secret"
+                )
+                Console.Out.Flush()
+                Console.Error.Write("synthetic-partial-stderr-secret")
+                Console.Error.Flush()
                 child.WaitForExit()
             }
         }
