@@ -85,6 +85,68 @@ internal class CommandCancellation {
     }
 }
 
+internal class RuntimeBudget {
+    private let Timer Stopwatch
+    private let Seconds int32
+
+    internal init(timer Stopwatch, seconds int32) {
+        Timer = timer
+        Seconds = seconds
+    }
+
+    internal func Expired() bool -> Timer.Elapsed.TotalSeconds >= Seconds
+
+    internal func Remaining() int32 {
+        let remaining = Math.Floor(Seconds * 1000.0 - Timer.Elapsed.TotalMilliseconds)
+        if remaining < 1 {
+            throw Exception("Runtime allowance exhausted")
+        }
+        return Convert.ToInt32(remaining)
+    }
+
+    internal func Git(checkout string, args ...string) string {
+        let result = Commands.GitResult(checkout, args, budget: this)
+        if result.Code != 0 {
+            throw Exception("git failed: " + result.Error + result.Output)
+        }
+        return result.Output.Trim()
+    }
+
+    shared {
+        internal func Reserve(args Args, seconds int32) int32 {
+            let reserve = args.Get("verification-reserve") == "" ? 0: args.Number("verification-reserve")
+            if reserve >= seconds {
+                throw Exception("--verification-reserve must be strictly smaller than the total budget")
+            }
+            return reserve
+        }
+
+        internal func Validate(run Data) {
+            let field = J.Get(run.Element(), "verification_reserve")
+            var reserve int32
+            if field.ValueKind != System
+                .Text
+                .Json
+                .JsonValueKind
+                .Undefined &&
+                (
+                field.ValueKind != System.Text.Json.JsonValueKind.Number || !field.TryGetInt32(out reserve) ||
+                    reserve < 1 ||
+                    reserve >= run.Number("seconds")
+            ) {
+                throw Exception("Invalid saved verification reserve")
+            }
+        }
+
+        internal func Description(run Data) string -> "total allowance " + run.Number("seconds").ToString() +
+            "s, coding allowance " +
+            (run.Number("seconds") - run.Number("verification_reserve")).ToString() +
+            "s, verification reserve " +
+            run
+            .Number("verification_reserve").ToString() + "s"
+    }
+}
+
 internal class Commands {
     shared {
         internal func Capture(path string) FileStream? {
@@ -204,7 +266,8 @@ internal class Commands {
             cancellation Chan[bool]? = nil,
             strictOutput bool = false,
             outputPath string = "",
-            errorPath string = ""
+            errorPath string = "",
+            budget RuntimeBudget? = nil
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
@@ -263,7 +326,8 @@ internal class Commands {
             }
             using let outputCapture = Capture(outputPath)
             using let errorCapture = Capture(errorPath)
-            let allowance = TimeSpan.FromMilliseconds(milliseconds > 0 ? milliseconds: seconds * 1000)
+            let requested = milliseconds > 0 ? milliseconds: seconds * 1000
+            let allowance = TimeSpan.FromMilliseconds(Math.Min(requested, budget?.Remaining() ?? requested))
             let clock = Stopwatch.StartNew()
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
             using let outputReader = strictOutput ? StreamReader(
@@ -298,7 +362,7 @@ internal class Commands {
             var terminal Exception? = nil
             try {
                 while !inputDone || !outputDone || !errorDone || !exitDone {
-                    if clock.Elapsed >= allowance {
+                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     var failure Exception? = nil
@@ -339,7 +403,7 @@ internal class Commands {
                         }
                         default { }
                     }
-                    if clock.Elapsed >= allowance {
+                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     if let error = failure {
@@ -380,7 +444,7 @@ internal class Commands {
                     }
                     default { }
                 }
-                if clock.Elapsed >= allowance {
+                if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
                     terminal = Exception("Runtime limit reached for " + exe)
                 }
             }
@@ -415,7 +479,7 @@ internal class Commands {
             return result.Output.Trim()
         }
 
-        internal func GitResult(cwd string, args[]string, raw bool = false) CommandResult {
+        internal func GitResult(cwd string, args[]string, raw bool = false, budget RuntimeBudget? = nil) CommandResult {
             let all = List[string]{
                 "--no-replace-objects",
                 "-c",
@@ -433,7 +497,8 @@ internal class Commands {
                 all.ToArray(),
                 cwd,
                 github: Array.IndexOf(args, "credential.helper=!gh auth git-credential") >= 0,
-                strictOutput: raw
+                strictOutput: raw,
+                budget: budget
             )
         }
 
@@ -445,9 +510,9 @@ internal class Commands {
             return result.Output.Trim()
         }
 
-        internal func GitRaw(cwd string, args[]string) string {
+        internal func GitRaw(cwd string, args[]string, budget RuntimeBudget? = nil) string {
             try {
-                let result = GitResult(cwd, args, true)
+                let result = GitResult(cwd, args, true, budget)
                 if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
                     result.Output
                 ) > 32 * 1024 * 1024 {

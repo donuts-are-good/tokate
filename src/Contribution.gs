@@ -14,23 +14,34 @@ internal class Contribution {
             record JsonElement,
             usage Dictionary[string, Object?],
             timer Stopwatch,
-            seconds int32
+            seconds int32,
+            reserve int32 = 0
         ) {
             run.Fields["failure_stage"] = "candidate_validation"
             run.Fields["failure_reason"] = "candidate_invalid"
-            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
-            if Commands.Git(checkout, "status", "--porcelain") == "" {
+            let coding = RuntimeBudget(timer, seconds - reserve)
+            let total = RuntimeBudget(timer, seconds)
+            coding.Remaining()
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"), coding)
+            if coding.Git(checkout, "status", "--porcelain") == "" {
                 throw Exception("No changes returned. No PR will be opened.")
             }
-            let candidate = Snapshot(checkout, run)
+            let candidate = Snapshot(checkout, run, coding)
             let candidatePath = Path.Combine(directory, "candidate.patch")
             if !File.Exists(candidatePath) {
                 File.WriteAllText(candidatePath, candidate)
             }
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                budget: coding
+            )
             if File.ReadAllText(candidatePath) != candidate {
                 throw Exception("Saved candidate patch changed")
             }
+            coding.Remaining()
             Terminal.Step("Running independent owner verification...")
             PublicOutput.FailureCode = "verification_failed"
             run.Fields["failure_stage"] = "owner_verification"
@@ -39,10 +50,7 @@ internal class Contribution {
             run.Fields["verification"] = verification
             run.Save(directory)
             for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                if remaining < 1 {
-                    throw Exception("Runtime budget exhausted before verification")
-                }
+                total.Remaining()
                 run.Fields["verification"] = verification
                 run.Save(directory)
                 let check = Verification.Check(
@@ -51,7 +59,8 @@ internal class Contribution {
                     command,
                     checkout,
                     run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                    remaining
+                    seconds,
+                    total
                 )
                 if check.Code != 0 {
                     run.Fields["failure_reason"] = "verification_failed"
@@ -65,8 +74,14 @@ internal class Contribution {
             PublicOutput.FailureCode = "invalid_state"
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
-            let patch = Snapshot(checkout, run)
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
+            let patch = Snapshot(checkout, run, total)
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                budget: total
+            )
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
             }
@@ -79,14 +94,15 @@ internal class Contribution {
             run.Save(directory)
         }
 
-        private func Snapshot(checkout string, run Data) string {
-            Verification.Candidate(checkout)
-            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+        private func Snapshot(checkout string, run Data, budget RuntimeBudget) string {
+            Verification.Candidate(checkout, budget)
+            let head = budget.Git(checkout, "rev-parse", "HEAD")
+            if head != run.Text("base") {
                 throw Exception("Agent changed Git history")
             }
-            Commands.Git(checkout, "add", "-A")
-            Commands.Git(checkout, "diff", "--cached", "--check")
-            let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
+            budget.Git(checkout, "add", "-A")
+            budget.Git(checkout, "diff", "--cached", "--check")
+            let patch = budget.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch == "" {
                 throw Exception("No changes returned. No PR will be opened.")
             }

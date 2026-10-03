@@ -276,12 +276,15 @@ internal class Fixture {
             Check.That(!File.Exists(sentinel), "Host temporary file reached the managed namespace")
             File.WriteAllText(sentinel, "private agent temporary data")
         }
-        if mode == "timeout" || mode == "background" {
+        if mode == "timeout" || mode == "completed_timeout" || mode == "background" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
-            if mode == "timeout" {
+            if mode == "timeout" || mode == "completed_timeout" {
                 let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
                 File.WriteAllText(Path.Combine(partialCheckout, "partial.txt"), "partial-edit")
+                if mode == "completed_timeout" {
+                    File.WriteAllText(args[Array.IndexOf(args, "--output-last-message") + 1], "Early successful report")
+                }
                 Console.Write(
                     "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":999}}\n{\"type\":\"partial-secret"
                 )
@@ -1048,6 +1051,13 @@ internal class Fixture {
                     command.Add(Path.Combine(Root, "fork"))
                 } else {
                     command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)
+                }
+            }
+            if Check.Text(State["mode"]) == "slow_candidate" && command.Contains("diff") && command.Contains(
+                "--binary"
+            ) {
+                select {
+                    case <- after(TimeSpan.FromSeconds(10.0)) { }
                 }
             }
             let push = command.IndexOf("push")

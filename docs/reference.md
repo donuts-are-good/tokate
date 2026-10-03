@@ -222,6 +222,9 @@ scripts remain complete. A result that cannot fit safely fails explicitly with
 output failure can occur after command effects have completed, so inspect state
 before invoking a command again. Output mode never makes command effects atomic.
 
+Managed run summaries expose `seconds` (the original total), derived
+`coding_seconds`, and `verification_reserve` (zero for omitted/legacy allocation).
+These fields use the existing JSON envelope and redirected status contracts.
 Run summaries exclude raw harness events, reports, and verification stdout/stderr,
 including arbitrary saved error text. Verification rows contain only complete
 command arguments and exit codes. Errors use safe typed summaries. `data.artifacts`
@@ -469,6 +472,22 @@ workflow/command traffic budgets. Pause/resume/handoff and the remaining lifecyc
 and traffic flows remain #14/#19.
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
+
+New managed v1 `claim`/`work` and v2 `prepare --source tokate` accept
+`--verification-reserve N`. N must be a positive integer strictly smaller than
+the resolved total `--seconds` budget. Omission and legacy runs reserve zero.
+The explicit reserve is saved locally; `work --run DIR` reuses it and rejects
+allocation overrides. External work, amendment and recovery reject this option.
+Tokate shows total, coding and reserved verification allowances in managed output
+and task context. Coding and candidate capture/validation share `total - reserve`;
+owner checks use the original remaining total, including unused coding time.
+A coding timeout stays failed and incomplete even after an early completion event
+or report: partial private evidence and checkout are preserved, descendants are
+cleaned up, and no verification, publication or second inference starts. Completed
+coding can still fail candidate validation or exhaust its preparation allowance.
+A reserve does not guarantee completed coding or successful checks, restrict
+repository commands, or provide retries, extensions or continuation.
+
 
 Startup checks warn about missing tools. Owner commands work without Codex.
 `doctor` checks all tools and probes the real managed sandbox without login or

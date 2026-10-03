@@ -126,7 +126,8 @@ internal class NativeFlow : IDisposable {
         model string = "gpt-6.1-sol",
         code int32 = 0,
         network bool = false,
-        effort string = "high"
+        effort string = "high",
+        reserve string = ""
     ) string {
         let args = List[string]{
             "claim",
@@ -142,6 +143,9 @@ internal class NativeFlow : IDisposable {
             seconds,
             "--runs",
             Path.Combine(Temp.Root, "runs")
+        }
+        if reserve != "" {
+            args.AddRange([]string{"--verification-reserve", reserve})
         }
         if network {
             args.Add("--allow-network")
@@ -2096,6 +2100,7 @@ internal class NativeFlow : IDisposable {
                 "ModelPolicyMalformed",
                 "FailedReassignment",
                 "MissingFork",
+                "VerificationReserve",
                 "DefaultBudget",
                 "HigherOwnerBudget",
                 "LowerOwnerBudget",
@@ -2184,6 +2189,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "MissingFork" {
                         flow.MissingFork()
+                    }
+                    case "VerificationReserve" {
+                        ReserveChecks.All(binary)
                     }
                     case "DefaultBudget" {
                         flow.DefaultBudget()

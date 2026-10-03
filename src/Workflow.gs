@@ -270,6 +270,7 @@ internal class Workflow {
                 "seconds",
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
+            let reserve = RuntimeBudget.Reserve(args, seconds)
             let network = args.Get("allow-network") == "true"
             policy.Validate(model, effort, seconds, network)
             Terminal.Step(
@@ -321,6 +322,9 @@ internal class Workflow {
             run.Fields["provider"] = J.Text(selection, "provider")
             run.Fields["selection"] = selection
             run.Fields["seconds"] = seconds
+            if args.Get("verification-reserve") != "" {
+                run.Fields["verification_reserve"] = reserve
+            }
             run.Fields["network"] = network
             run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
             run.Fields["state"] = "preparing"
@@ -342,6 +346,7 @@ internal class Workflow {
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
+            Terminal.Step(RuntimeBudget.Description(run))
             run.Save(directory)
             GitHub.Api(
                 "repos/" + head + "/git/refs",
