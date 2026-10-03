@@ -119,22 +119,29 @@ internal class Commands {
                     8192,
                     true
                 )
+                if writer != nil {
+                    writer.AutoFlush = true
+                }
                 let buffer = [8192]char
                 var count int32
                 while (count = reader.Read(buffer, 0, buffer.Length)) > 0 {
-                    if text.Length + count <= 32 * 1024 * 1024 {
-                        text.Append(buffer, 0, count)
+                    var retained = result.Truncated ? 0: Math.Min(count, 32 * 1024 * 1024 - text.Length)
+                    if retained > 0 && text.Length + retained == 32 * 1024 * 1024 && Char.IsHighSurrogate(
+                        buffer[retained - 1]
+                    ) {
+                        retained -= 1
+                    }
+                    result.Truncated = result.Truncated || retained < count
+                    if retained > 0 {
+                        text.Append(buffer, 0, retained)
                         if writer != nil && result.Failure == nil {
                             try {
-                                writer.Write(buffer, 0, count)
-                                writer.Flush()
+                                writer.Write(buffer, 0, retained)
                             } catch (error Exception) {
                                 result.Failure = error
                                 failed <- error
                             }
                         }
-                    } else {
-                        result.Truncated = true
                     }
                 }
             } catch (error Exception) {
@@ -435,13 +442,20 @@ internal class Commands {
         }
 
         internal func GitRaw(cwd string, args[]string) string {
-            let result = GitResult(cwd, args, true)
-            if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
-                result.Output
-            ) > 32 * 1024 * 1024 {
-                throw Exception("Cannot read complete Git path evidence: " + result.Error)
+            try {
+                let result = GitResult(cwd, args, true)
+                if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
+                    result.Output
+                ) > 32 * 1024 * 1024 {
+                    throw Exception("Cannot read complete Git path evidence: " + result.Error)
+                }
+                return result.Output
+            } catch (error CommandInterrupted) {
+                if error.Result.ReadFailed && error.InnerException is DecoderFallbackException {
+                    throw Exception("Cannot read complete Git path evidence", error)
+                }
+                throw error
             }
-            return result.Output
         }
     }
 }

@@ -15,6 +15,8 @@ internal class ProcessChecks {
             CancellationLifetime()
             Failures()
             OutputLimit()
+            CapturePrefix()
+            ScalarCapture()
             ReaderFailure()
             CaptureWriteFailure()
             CaptureSafety()
@@ -280,6 +282,101 @@ internal class ProcessChecks {
             Check.That(!result.OutputTruncated && !result.ErrorTruncated, "Partial streams were mislabelled")
             Check.That(File.ReadAllText(Path.Combine(root, "stdout.log")) == result.Output, "Stdout prefix not flushed")
             Check.That(File.ReadAllText(Path.Combine(root, "stderr.log")) == result.Error, "Stderr prefix not flushed")
+        }
+
+        private func PrefixReady(root string, completed Chan[bool]) {
+            for i in 0 ... 1000 {
+                let output = Path.Combine(root, "stdout.log")
+                let error = Path.Combine(root, "stderr.log")
+                if File.Exists(output) && File.Exists(error) && FileInfo(output).Length == 32 * 1024 * 1024 - 3 &&
+                    FileInfo(error).Length == 32 * 1024 * 1024 - 3 {
+                    File.WriteAllText(Path.Combine(root, "ack"), "ready")
+                    completed <- true
+                    return
+                }
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                }
+            }
+            completed <- false
+        }
+
+        private func CapturePrefix() {
+            using let temp = Temp()
+            File.WriteAllText(Path.Combine(temp.Root, "overflow"), "ABC" + String('x', 8192))
+            let acknowledged = Chan[bool](1)
+            go ProcessChecks.PrefixReady(temp.Root, acknowledged)
+            let result = Commands.Run(
+                "/bin/sh",
+                []string{
+                    "-c",
+                    "head -c 33554429 /dev/zero; head -c 33554429 /dev/zero >&2; while test ! -f ack; do sleep 0.01; done; cat overflow; cat overflow >&2; printf after-cap-marker; printf after-cap-marker >&2"
+                },
+                temp.Root,
+                milliseconds: 15000,
+                outputPath: Path.Combine(temp.Root, "stdout.log"),
+                errorPath: Path.Combine(temp.Root, "stderr.log")
+            )
+            Check.That(<-acknowledged && result.Code == 0, "Controlled overflow did not drain both streams")
+            for text in[]string{result.Output, result.Error} {
+                Check.That(text.Length == 32 * 1024 * 1024 && text.EndsWith("ABC"), "Capture retained a gap or tail")
+                Check.That(!text.Contains("after-cap-marker"), "Capture resumed after the cap")
+            }
+            Check.That(result.OutputTruncated && result.ErrorTruncated, "Prefix truncation was hidden")
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "stdout.log")) == result.Output,
+                "Stdout prefix differs"
+            )
+            Check.That(File.ReadAllText(Path.Combine(temp.Root, "stderr.log")) == result.Error, "Stderr prefix differs")
+            Console.WriteLine("PASS acknowledged overflow retains one prefix and drains both streams")
+        }
+
+        private func ScalarCapture() {
+            using let temp = Temp()
+            let expected = String('x', 8191) + Char.ConvertFromUtf32(0x10400) + "tail"
+            let bytes = System.Text.Encoding.UTF8.GetBytes(expected)
+            using let proof = StreamReader(MemoryStream(bytes))
+            let boundary = [8192]char
+            Check.That(
+                proof.Read(boundary, 0, boundary.Length) == boundary.Length && Char.IsHighSurrogate(boundary[8191]) &&
+                    Char.IsLowSurrogate(Convert.ToChar(proof.Read())),
+                "The real UTF-8 reader did not split the supplementary scalar"
+            )
+            using let reader = StreamReader(MemoryStream(bytes))
+            using let capture = Commands.Capture(Path.Combine(temp.Root, "split.log"))
+            let output = Chan[CommandOutput](1)
+            let failures = Chan[Exception](4)
+            Commands.Read(reader, output, failures, capture)
+            let split = <-output
+            Check.That(split.Failure == nil && split.Text == expected, "Split scalar changed retained text")
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "split.log")) == expected,
+                "Encoder corrupted split scalar"
+            )
+            let result = Commands.Run(
+                "/bin/sh",
+                []string{
+                    "-c",
+                    "head -c 33554431 /dev/zero; printf '\\360\\220\\220\\200after-cap-marker'; head -c 33554431 /dev/zero >&2; printf '\\360\\220\\220\\200after-cap-marker' >&2"
+                },
+                milliseconds: 5000,
+                outputPath: Path.Combine(temp.Root, "stdout.log"),
+                errorPath: Path.Combine(temp.Root, "stderr.log")
+            )
+            Check.That(
+                result.Code == 0 && result.OutputTruncated && result.ErrorTruncated,
+                "Scalar overflow did not drain"
+            )
+            for text in[]string{result.Output, result.Error} {
+                Check.That(text.Length == 32 * 1024 * 1024 - 1 && text[text.Length - 1] == '\0', "Cap split a scalar")
+                Check.That(!text.Contains("after-cap-marker"), "Scalar overflow retained later markers")
+            }
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "stdout.log")) == result.Output,
+                "Scalar stdout differs"
+            )
+            Check.That(File.ReadAllText(Path.Combine(temp.Root, "stderr.log")) == result.Error, "Scalar stderr differs")
+            Console.WriteLine("PASS real UTF-8 split and capped scalar captures preserve complete text prefixes")
         }
 
         private func ReaderFailure() {
