@@ -455,6 +455,8 @@ internal class CoordinationFlow : IDisposable {
         let expected = Check.Text(contribution["expected"])
         contribution["expected"] = JsonValue.Create(Check.Text(state["sha"]))
         metadata["head"] = JsonValue.Create(head)
+        let outcome = contribution["outcome"] ?? throw Exception("Missing contribution outcome")
+        outcome["head"] = JsonValue.Create(head)
         RewriteState(value)
         Flow.Reload()
         let pull = Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
