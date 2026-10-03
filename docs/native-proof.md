@@ -17,7 +17,7 @@ Linux namespace support. It does not read an account, contact inference, prove
 model availability or approve production use. Missing binaries, interfaces or
 namespace support fail clearly. Neither command installs tools, downloads
 models or starts a model runtime. The full owner verification script also runs
-the focused regressions; the donor does not repeat the full suite.
+the focused regressions.
 
 ## Measured binary and identities
 
@@ -79,8 +79,8 @@ policy or the production filesystem boundary.
 Each invocation owns a PID namespace with its command as PID 1, private `/tmp`
 and process group. Normal exit destroys its namespace; cancellation/deadline
 kill only its owned group and namespace. Detached double-fork/setsid children
-are tested on completion, deadline and cancellation, while a server created
-before those invocations remains alive. No host process enumeration or existing
+use a bounded readiness handshake before completion, deadline and cancellation,
+while a server created before those invocations remains alive. No host process enumeration or existing
 donor model-server termination is used. This supervisor is proof-only; it does
 not claim the existing production process-group cleanup handles detached
 children equivalently.
@@ -91,7 +91,9 @@ broken-stream responses each produce one request and a failed native turn,
 without substitution or harness retries. The unsupported-model test preserves
 the exact requested model even on refusal. Native invocations have ten-second
 deadlines, metadata probes ten seconds and the complete proof 180 seconds.
-No currency, token or GPU-memory cap is claimed.
+Retained stdout and stderr are capped during concurrent reads. Child overflow
+regressions verify early refusal before child completion. No currency, token
+or GPU-memory cap is claimed.
 
 ## Established results and blockers
 

@@ -46,13 +46,10 @@ def config(values):
 
 
 def quoted(value):
-    # JSON string quoting is also valid TOML basic string quoting for these paths.
     return json.dumps(str(value))
 
 
 def metadata(result):
-    """Retain only documented nonsecret fields; unfamiliar shapes fail closed."""
-    # This pinned runtime also emits workspaceRouting. Never consume its value.
     require(isinstance(result, dict) and set(result) <= {"account", "requiresOpenaiAuth", "workspaceRouting"},
             "Unknown account/read result schema; field names=" +
             repr(sorted(result) if isinstance(result, dict) else type(result).__name__))
@@ -74,13 +71,6 @@ def api_gate(account):
 
 
 class Owned:
-    """Every invocation owns a PID namespace, including setsid/double-fork children.
-
-    Killing its namespace init collects detached children without enumerating host
-    processes or killing a pre-existing server. The mount of / is NOT a filesystem
-    sandbox: native permissions restrict repository commands separately.
-    """
-
     def __init__(self, args, env, cwd, *, system=None, native=False):
         wrapper = ["/usr/bin/bwrap", "--die-with-parent", "--new-session",
                    "--bind", "/", "/", "--unshare-pid", "--as-pid-1", "--proc", "/proc",
@@ -97,7 +87,6 @@ class Owned:
         if self.closed:
             return
         self.closed = True
-        # Only the invocation's own process group and namespace are terminated.
         with contextlib.suppress(ProcessLookupError):
             os.killpg(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=5)
@@ -105,10 +94,44 @@ class Owned:
             stream.close()
 
     def run(self, data=b"", seconds=10):
+        deadline = time.monotonic() + seconds
+        buffers = {self.process.stdout: bytearray(), self.process.stderr: bytearray()}
         try:
-            out, err = self.process.communicate(data, timeout=seconds)
-            require(len(out) <= LIMIT and len(err) <= LIMIT, "Native output exceeds proof limit")
-            return self.process.returncode, out.decode(), err.decode()
+            with selectors.DefaultSelector() as selected:
+                for stream in (*buffers, self.process.stdin):
+                    os.set_blocking(stream.fileno(), False)
+                    selected.register(stream, selectors.EVENT_WRITE if stream == self.process.stdin
+                                      else selectors.EVENT_READ)
+                pending = memoryview(data)
+                while selected.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(self.process.args, seconds)
+                    for key, _ in selected.select(remaining):
+                        stream = key.fileobj
+                        if stream == self.process.stdin:
+                            if pending:
+                                try:
+                                    pending = pending[os.write(stream.fileno(), pending[:8192]):]
+                                except BrokenPipeError:
+                                    pending = pending[:0]
+                            if not pending:
+                                selected.unregister(stream)
+                                stream.close()
+                        else:
+                            chunk = os.read(stream.fileno(), 8192)
+                            if not chunk:
+                                selected.unregister(stream)
+                            else:
+                                require(len(buffers[stream]) + len(chunk) <= LIMIT,
+                                        "Native output exceeds proof limit")
+                                buffers[stream].extend(chunk)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(self.process.args, seconds)
+                self.process.wait(timeout=remaining)
+            return (self.process.returncode, buffers[self.process.stdout].decode(),
+                    buffers[self.process.stderr].decode())
         finally:
             self.close()
 
@@ -150,8 +173,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/v1/models?client_version=0.160.0", "/v1/api/codex/accounts/check"):
-            # Native background catalogue/workspace discovery is not inference.
-            # Explicit synthetic 404s keep the unsupported routing behavior visible.
             self.server.metadata_requests.append(self.path)
             self.send_response(404)
             self.send_header("Content-Length", "0")
@@ -288,8 +309,6 @@ class Proof:
         return values
 
     def provider(self, kind):
-        # 0.160.0 reserves built-in IDs; use a named Responses fixture requiring
-        # native OpenAI authentication rather than silently overriding openai.
         name = "api-fixture" if kind == "api" else "fixture"
         prefix = "model_providers." + name + "."
         values = {"model_provider": quoted(name), prefix + "name": quoted("private synthetic fixture"),
@@ -363,7 +382,7 @@ class Proof:
             send({"id": 1, "method": "initialize", "params": {
                 "clientInfo": {"name": "tokate_native_proof", "version": "1"},
                 "capabilities": {"experimentalApi": False}}})
-            receive(1)  # Discard initialization metadata, including native home/platform.
+            receive(1)
             send({"method": "initialized", "params": {}})
             send({"id": 2, "method": "account/read", "params": {"refreshToken": False}})
             return metadata(receive(2))
@@ -399,7 +418,6 @@ class Proof:
             try:
                 result = self.account(root, "local" if kind == "local" else "api")
             except Unsupported as error:
-                # Native 0.160.0 performs workspace discovery even with refreshToken:false.
                 require(kind == "chatgpt" and "workspace routing discovery failed" in str(error), str(error))
                 self.blocked("ChatGPT account/read refreshToken:false requires workspace routing discovery; "
                              "synthetic offline metadata is refused, so no production metadata gate is established")
@@ -432,7 +450,6 @@ class Proof:
     def mismatch(self):
         root = self.home("chatgpt")
         original = (root / "native/auth.json").read_bytes()
-        # This destructive native restriction is tested ONLY on our disposable home.
         result = self.account(root, extra={"forced_login_method": '"api"'})
         require(result["type"] is None, "Forced API mismatch retained ChatGPT login")
         result, requests = self.execute(root, "api", "high", {"forced_login_method": '"api"'})
@@ -542,7 +559,6 @@ class Proof:
             self.blocked("--ignore-user-config also suppresses named-profile configuration in this runtime; "
                          "authentication remains in selected CODEX_HOME")
         self.record("named profile retains native API authentication home", observed_effort=effort)
-        # Explicit model identity must survive a recorded migration mapping.
         result, requests = self.execute(root, "api", "high", {
             "notice.model_migrations": "{ " + quoted(MODEL) + ' = "synthetic-replacement" }'})
         require(result[0] == 0 and len(requests) == 1 and requests[0]["body"]["model"] == MODEL,
@@ -566,6 +582,27 @@ class Proof:
         self.blocked("No nonsecret effective endpoint/provider/model override gate has been established; "
                      "mixed and managed provider/model overrides remain unsupported without config inspection")
 
+    def capture(self):
+        root = self.home()
+        checkout = root / "checkout"
+        args = ["/usr/bin/python3", "-c",
+                "import os; os.write(1,b'out'); os.write(2,b'err')"]
+        require(Owned(args, self.env(root), checkout).run() == (0, "out", "err"),
+                "Concurrent output capture lost stdout or stderr")
+        for fd in (1, 2):
+            marker = checkout / ("overflow-finished-" + str(fd))
+            child = ("import os,pathlib; os.write(" + str(fd) + ",b'x'*" + str(4 * LIMIT) + "); "
+                     "pathlib.Path(" + repr(str(marker)) + ").write_text('finished')")
+            owned = Owned(["/usr/bin/python3", "-c", child], self.env(root), checkout)
+            try:
+                owned.run()
+            except Unsupported as error:
+                require(str(error) == "Native output exceeds proof limit", "Wrong overflow refusal")
+            else:
+                raise Unsupported("Output overflow did not fail")
+            require(not marker.exists(), "Output cap was checked only after child completion")
+        self.record("concurrent stdout/stderr capture and early retained-output overflow refusal")
+
     def cleanup(self):
         for mode in ("normal", "deadline", "cancel"):
             root = self.home()
@@ -575,31 +612,31 @@ class Proof:
             child = ("import os,socket,time; os.fork() and os._exit(0); os.setsid(); "
                      "os.fork() and os._exit(0); s=socket.socket(socket.AF_UNIX); "
                      "s.bind(" + repr(str(sock)) + "); s.listen(); "
-                     "open(" + repr(str(ready)) + ",'w').write('ready'); time.sleep(60)")
-            parent = ("import subprocess,time,pathlib; subprocess.Popen(['/usr/bin/python3','-c'," +
-                      repr(child) + "]); p=pathlib.Path(" + repr(str(ready)) + "); "
-                      "\nwhile not p.exists(): time.sleep(.01)\n" +
-                      ("time.sleep(.05)" if mode == "normal" else "time.sleep(60)"))
+                     "open(" + repr(str(ready)) + ",'w').write('ready'); "
+                     "os.write(1,b'ready\\n'); time.sleep(60)")
+            parent = ("import subprocess,sys,time; subprocess.Popen(['/usr/bin/python3','-c'," +
+                      repr(child) + "]); sys.stdin.buffer.read(1); " +
+                      ("pass" if mode == "normal" else "time.sleep(60)"))
             owned = Owned(["/usr/bin/python3", "-c", parent], self.env(root), checkout)
             clock = time.monotonic()
             try:
+                with selectors.DefaultSelector() as selected:
+                    selected.register(owned.process.stdout, selectors.EVENT_READ)
+                    require(selected.select(2), "Detached fixture readiness timed out")
+                    require(os.read(owned.process.stdout.fileno(), 8192) == b"ready\n" and ready.exists(),
+                            "Detached fixture readiness handshake failed")
                 if mode == "cancel":
-                    while not ready.exists() and time.monotonic() - clock < 2:
-                        time.sleep(.01)
-                    require(ready.exists(), "Cancellation detached fixture did not start")
                     owned.close()
                 elif mode == "deadline":
                     try:
-                        owned.run(seconds=.3)
+                        owned.run(b"go", seconds=.3)
                     except subprocess.TimeoutExpired:
                         pass
                     else:
                         raise Unsupported("Owned deadline did not fire")
                 else:
-                    require(owned.run()[0] == 0, "Owned normal completion failed")
-                require(ready.exists() and time.monotonic() - clock < 3, "Detached cleanup did not finish promptly")
-                # Namespace-init death is asynchronous after the bwrap monitor
-                # exits. Bound observation of kernel descendant teardown too.
+                    require(owned.run(b"go", seconds=1)[0] == 0, "Owned normal completion failed")
+                require(time.monotonic() - clock < 5, "Detached cleanup did not finish promptly")
                 collected = time.monotonic() + 1
                 while True:
                     probe = socket.socket(socket.AF_UNIX)
@@ -666,7 +703,7 @@ class Proof:
         (root / "protected-auth").mkdir(mode=0o700)
         auth = root / "protected-auth/auth.json"
         self.private(auth, json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": KEY}))
-        before = auth.read_bytes()  # Generated synthetic fixture only; never a selected/user home.
+        before = auth.read_bytes()
         script = """import pathlib, socket, sys
 for name in sys.argv[1:]:
     p = pathlib.Path(name)
@@ -691,7 +728,6 @@ else:
     raise SystemExit('repository networking reached fixture')
 pathlib.Path('boundary-ok').write_text('ok')
 """
-        # Port is separate from file arguments in the generated helper.
         script = script.replace("sys.argv[1:]", "sys.argv[1:-1]")
         helper = checkout / "helper.py"
         self.private(helper, script)
@@ -754,6 +790,7 @@ pathlib.Path('boundary-ok').write_text('ok')
         self.profiles()
         self.managed()
         self.boundary()
+        self.capture()
         self.cleanup()
         require(not self.fixture.failures, "Unexpected fixture requests: " + repr(self.fixture.failures))
         self.record("only Responses and synthetic refused catalogue/workspace metadata routes observed; no pull/start/login/refresh",
@@ -779,7 +816,6 @@ def main():
             proof.fixture.close()
         return
     require(sys.platform == "linux" and Path("/usr/bin/bwrap").is_file(), "Linux bubblewrap is required")
-    # Fixtures live outside /tmp, which is replaced by each native invocation.
     with tempfile.TemporaryDirectory(prefix=".native-proof-", dir=Path(__file__).resolve().parent.parent) as name:
         root = Path(name)
         root.chmod(0o700)
@@ -789,7 +825,6 @@ def main():
                    "/usr/bin/python3", str(Path(__file__).resolve()), "--codex", str(binary), "--inside", str(root)]
         if args.check:
             command.append("--check")
-        # No inherited secrets, proxy variables, login/keyring context or environment dump.
         process = subprocess.Popen(command, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
                                    start_new_session=True)
         try:
