@@ -29,7 +29,7 @@ outcomes in Git even when they leave the active window. Returning to version 1
 requires an explicit policy edit and fresh version-1 approval. It does not erase
 version-2 state or revive old authority. There is no in-place saved-run conversion.
 
-Review amendments require Tokate 0.2.14 on the donor and the v2 coordinator.
+Review amendments require Tokate 0.2.17 on the donor and the v2 coordinator.
 Existing receipts remain readable without amendments; older v2 coordinators and
 receipt readers reject the new amendment operation/fields. Owners upgrade their
 pinned coordinator explicitly. Amendments support native v1 and v2 records
