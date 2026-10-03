@@ -394,6 +394,30 @@ internal class CorrectionChecks {
         }
 
         private func ProtectedAndExact(binary string) {
+            for rename in[]bool{false, true} {
+                using let flow = NativeFlow(binary)
+                flow.Initialize()
+                flow.ProtectedPolicy()
+                flow.Approve()
+                let run = flow.Claim()
+                flow.Mode("staged_whitespace")
+                flow.Call([]string{"work", "--run", run}, 1)
+                let archive = Prepared(flow, run)
+                let checkout = Path.Combine(run, "checkout")
+                if rename {
+                    flow.Git("-C", checkout, "mv", "scripts/verify.sh", "ordinary-verifier.sh")
+                } else {
+                    File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "exit 0\n")
+                }
+                let commit = Correct(flow, run)
+                Check.Contains(Recover(flow, run, commit, 1).Error, "protected owner path")
+                Check.That(Read(run, "correction.json")["verification"] == nil, "Protected verifier executed")
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
+                    "Protected correction changed original evidence"
+                )
+                Once(flow)
+            }
             for flag in[]string{"--assume-unchanged", "--skip-worktree"} {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()

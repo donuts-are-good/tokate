@@ -46,28 +46,7 @@ internal class Correction {
             Write(Path.Combine(directory, "correction-" + correction.Text("uuid"), "record.json"), correction)
         }
 
-        internal func GitRaw(checkout string, args ...string) string {
-            let words = List[string]{
-                "--no-pager",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "protocol.file.allow=never",
-                "-c",
-                "protocol.ext.allow=never"
-            }
-            words.AddRange(args)
-            let result = Commands.Run("git", words.ToArray(), checkout)
-            if result.Code != 0 {
-                throw Exception("git failed: " + result.Error + result.Output)
-            }
-            if result.Output.Length >= 32 * 1024 * 1024 {
-                throw Exception("Candidate evidence exceeds the 32 MiB output limit")
-            }
-            return result.Output
-        }
+        internal func GitRaw(checkout string, args ...string) string -> Commands.GitRaw(checkout, args)
 
         internal func Patch(checkout string, base string, commit string) string -> GitRaw(
             checkout,
@@ -82,7 +61,7 @@ internal class Correction {
             "--"
         )
 
-        internal func Candidate(checkout string, run Data, commit string) string {
+        internal func Candidate(checkout string, run Data, commit string, policy JsonElement) string {
             Verification.Candidate(checkout)
             Data.CommitSha(commit)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit ||
@@ -91,21 +70,13 @@ internal class Correction {
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
             Commands.Git(checkout, "diff", "--no-ext-diff", "--no-textconv", "--check", run.Text("base"), commit, "--")
-            let names = GitRaw(checkout, "diff", "--no-renames", "--name-only", "-z", run.Text("base"), commit, "--")
-            if names == "" {
-                throw Exception("Correction must change the approved base")
-            }
-            for name in names.Split('\0') {
-                if name.StartsWith(".github/workflows/") || name.StartsWith(".github/tokate") {
-                    throw Exception("Correction changes protected owner policy, templates or workflows")
-                }
-            }
+            ProtectedPaths.Local(checkout, policy, run.Text("base"), commit)
             return Patch(checkout, run.Text("base"), commit)
         }
 
-        internal func Exact(directory string, run Data, correction Data) {
+        internal func Exact(directory string, run Data, correction Data, policy JsonElement) {
             let checkout = Path.Combine(directory, "checkout")
-            let patch = Candidate(checkout, run, correction.Text("commit"))
+            let patch = Candidate(checkout, run, correction.Text("commit"), policy)
             if Commands.Git(checkout, "rev-parse", "HEAD^{tree}") != correction.Text("tree") || Data.Hash(
                 patch
             ) != correction.Text("patch_sha256") || patch != File.ReadAllText(
@@ -493,7 +464,7 @@ internal class Correction {
                             "Correction verification failed or was interrupted; a new corrected commit is an explicit new attempt"
                         )
                     }
-                    Exact(directory, run, saved)
+                    Exact(directory, run, saved, J.Get(record, "policy"))
                     Activate(directory, run, saved)
                     if run.Number("version") == 1 {
                         CorrectionPublication.PublishLocked(directory, run, saved, record)
@@ -530,12 +501,12 @@ internal class Correction {
                 }
                 CorrectionPublication.Remote(run, correction, true)
                 let checkout = Path.Combine(directory, "checkout")
-                let patch = Candidate(checkout, run, commit)
+                let patch = Candidate(checkout, run, commit, J.Get(record, "policy"))
                 correction.Fields["tree"] = Commands.Git(checkout, "rev-parse", "HEAD^{tree}")
                 correction.Fields["patch_sha256"] = Data.Hash(patch)
                 File.WriteAllText(Path.Combine(attempt, "candidate.patch"), patch)
                 Save(directory, correction)
-                Exact(directory, run, correction)
+                Exact(directory, run, correction, J.Get(record, "policy"))
                 correction.Fields["state"] = "verifying"
                 correction.Fields["failure_stage"] = "owner_verification"
                 correction.Fields["failure_reason"] = "verification_failed"
@@ -578,7 +549,7 @@ internal class Correction {
                 correction.Fields["verification_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 correction.Fields["failure_stage"] = "changed_candidate"
                 correction.Fields["failure_reason"] = "candidate_changed"
-                Exact(directory, run, correction)
+                Exact(directory, run, correction, J.Get(record, "policy"))
                 if failed {
                     correction.Fields["failure_stage"] = "owner_verification"
                     correction.Fields["failure_reason"] = "verification_failed"

@@ -141,7 +141,7 @@ internal class CorrectionPublication {
             return pulls[0]
         }
 
-        private func CheckSaved(directory string, run Data, correction Data) {
+        private func CheckSaved(directory string, run Data, correction Data) JsonElement {
             let original = Correction.OriginalRun(directory, run)
             Correction.Completed(Path.Combine(directory, "original-evidence"), original)
             if correction.Text("state") != "verified" || run.Text("commit") != correction.Text("commit") ||
@@ -149,12 +149,13 @@ internal class CorrectionPublication {
                 .Same(J.Get(run.Element(), "correction"), Correction.Provenance(correction)) {
                 throw Exception("Only the saved verified exact correction can be published")
             }
-            Correction.Exact(directory, run, correction)
             let record = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
+            Correction.Exact(directory, run, correction, J.Get(record, "policy"))
             Publication.VerificationReport(run, record)
             if !Correction.Same(J.Get(run.Element(), "verification"), J.Get(correction.Element(), "verification")) {
                 throw Exception("Correction verification results changed")
             }
+            return record
         }
 
         private func Push(directory string, run Data, correction Data) {
@@ -308,7 +309,7 @@ internal class CorrectionPublication {
                     }
                 }
                 Correction.Authority(directory, run)
-                Correction.Exact(directory, run, correction)
+                Correction.Exact(directory, run, correction, J.Get(record, "policy"))
                 let raced = Existing(run, correction)
                 if raced.ValueKind != JsonValueKind.Undefined {
                     Complete(directory, run, correction, raced)
@@ -513,7 +514,7 @@ internal class CorrectionPublication {
                 throw Exception("Correction submit requires a managed version-2 contribution")
             }
             try {
-                CheckSaved(directory, run, correction)
+                let record = CheckSaved(directory, run, correction)
                 var intent = J.Get(correction.Element(), "publication")
                 if intent.ValueKind == JsonValueKind.Undefined {
                     Correction.Authority(directory, run)
@@ -569,7 +570,7 @@ internal class CorrectionPublication {
                     )
                     return
                 }
-                Correction.Exact(directory, run, correction)
+                Correction.Exact(directory, run, correction, J.Get(record, "policy"))
                 let latest = V2Authority(directory, run, correction)
                 SetStage(directory, correction, "request_pending")
                 try {
