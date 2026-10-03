@@ -11,4 +11,5 @@ dotnet restore tests/Tokate.Tests.gsproj --locked-mode --nologo
 dotnet publish tests/Tokate.Tests.gsproj -c Release --no-restore -o artifacts/tests --nologo -warnaserror
 artifacts/tests/tokate-tests
 artifacts/linux-x64/tokate --version
+python3 scripts/native-proof.py
 git diff --check
