@@ -1057,6 +1057,7 @@ internal class CorrectionChecks {
         }
 
         internal func All(binary string, selected string = "") {
+            var matched bool
             for name in[]string{
                 "CorrectedAmendmentsV1",
                 "CorrectedAmendmentsV2",
@@ -1081,6 +1082,7 @@ internal class CorrectionChecks {
                 if selected != "" && selected != name {
                     continue
                 }
+                matched = true
                 switch name {
                     case "CorrectedAmendmentsV1" {
                         CorrectedAmendmentsV1(binary)
@@ -1142,6 +1144,7 @@ internal class CorrectionChecks {
                 }
                 Console.WriteLine("PASS correction " + name)
             }
+            Check.That(matched, "Unknown correction selector: " + selected)
         }
     }
 }

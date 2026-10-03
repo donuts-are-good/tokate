@@ -1679,7 +1679,15 @@ internal class NativeFlow : IDisposable {
     }
 
     shared {
-        internal func All(binary string, selected string = "") {
+        internal let SerialGroups[]string = []string{
+            "ReadTraffic",
+            "TemporaryIsolation",
+            "TemporaryHomeRejected",
+            "VerificationBoundary"
+        }
+
+        internal func All(binary string, selected string = "", parallel bool = false) {
+            var matched bool
             for name in[]string{
                 "HelpAndArguments",
                 "MissingTools",
@@ -1733,6 +1741,10 @@ internal class NativeFlow : IDisposable {
                 if selected != "" && selected != name {
                     continue
                 }
+                if parallel && Array.IndexOf(SerialGroups, name) >= 0 {
+                    continue
+                }
+                matched = true
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
                 switch name {
@@ -1887,6 +1899,7 @@ internal class NativeFlow : IDisposable {
                 flow.AutomationAttribution()
                 Console.WriteLine("PASS " + name)
             }
+            Check.That(matched, "Unknown native selector: " + selected)
         }
     }
 }

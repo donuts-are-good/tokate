@@ -53,10 +53,22 @@ func Main(args[]string) int32 {
             ProtectedPathChecks.All()
             return 0
         }
+        if args.Length == 1 && args[0] == "--suites" {
+            SuiteChecks.All()
+            return 0
+        }
+        if (args.Length == 2 || args.Length == 3) && args[0] == "--suite-fixture" {
+            SuiteChecks.Fixture(args[1], args.Length == 3 ? args[2]: "cancel")
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 2 && args[0] == "--suite" {
+            SuiteDriver.Select(binary, args[1])
+            return 0
+        }
         if args.Length == 1 && args[0] == "--cli" {
             CliDiscovery.All(binary)
             return 0
@@ -90,21 +102,8 @@ func Main(args[]string) int32 {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
-        ProcessChecks.All()
-        ProtectedPathChecks.All()
-        CliDiscovery.All(binary)
-        DonorSelectionChecks.All(binary)
-        NativeFlow.All(binary)
-        CoordinationFlow.All(binary)
-        CorrectionChecks.All(binary)
-        AmendmentFlow.All(binary)
-        VerificationChecks.All()
-        Installer.Lifecycle(project, binary)
-        Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
-        Installer.RefuseInvalidPath(project)
-        Console.WriteLine("PASS installer rejects symlink and directory replacement")
-        Installer.RefuseUnsupportedPlatform(project, binary)
-        Console.WriteLine("PASS unsupported architecture/libc refusal preserves installations and permits removal")
+        Check.That(args.Length == 0, "Unknown test arguments: " + String.Join(" ", args))
+        SuiteDriver.All(project, binary)
         return 0
     } catch (error Exception) {
         Console.Error.WriteLine(error.ToString())
