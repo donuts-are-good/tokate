@@ -21,7 +21,7 @@ internal class V2Contribution {
                 J.Get(state.Value(), "reservation"),
                 "reservation"
             ) != run.Text("id") {
-                throw Exception("Saved run has stale coordination authority")
+                throw CliFailure("stale_approval", "Saved run has stale coordination authority")
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, run.Number("issue"), run.Text("donor"))
@@ -34,7 +34,7 @@ internal class V2Contribution {
                 approval,
                 "base_branch"
             ) {
-                throw Exception("Saved run differs from reservation and approval")
+                throw CliFailure("stale_approval", "Saved run differs from reservation and approval")
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             RequestData.Tools(J.Get(run.Element(), "tools"))
@@ -74,7 +74,7 @@ internal class V2Contribution {
             let donor = Data.Login(J.Text(viewer, "login"))
             let state = CoordinationState.Load(repo, issue)
             if state.Sha != Data.CommitSha(args.Need("state")) {
-                throw Exception("Stale coordination revision")
+                throw CliFailure("stale_approval", "Stale coordination revision")
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, issue, donor)
@@ -137,6 +137,7 @@ internal class V2Contribution {
                 )
             )
             let directory = Path.Combine(root, run.Text("id"))
+            PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
@@ -219,7 +220,10 @@ internal class V2Contribution {
                 )
                 File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(results))
                 if result.Code != 0 {
-                    throw Exception("Independent external verification failed; no publication authority granted")
+                    throw CliFailure(
+                        "verification_failed",
+                        "Independent external verification failed; no publication authority granted"
+                    )
                 }
             }
             Verification.Candidate(checkout)
@@ -401,8 +405,9 @@ internal class V2Contribution {
             if parents.Count != 1 || J.Text(parents[0], "sha") != J.Text(receipt, "expected") || J.Text(
                 contribution,
                 "expected"
-            ) != J.Text(receipt, "expected") {
-                throw Exception("Receipt does not match the authoritative contribution revision")
+            ) != J
+                .Text(receipt, "expected") {
+                throw CliFailure("stale_approval", "Receipt does not match the authoritative contribution revision")
             }
             if J.Text(receipt, "repo") != repo || J.Text(receipt, "approval") != J.Text(state.Value(), "approval_id") ||
                 J.Text(receipt, "reservation") != J.Text(J.Get(state.Value(), "reservation"), "reservation") ||
@@ -418,7 +423,7 @@ internal class V2Contribution {
                 "fork"
             ) ||
                 J.Text(J.Get(pull, "base"), "ref") != J.Text(J.Get(record, "approval"), "base_branch") {
-                throw Exception("PR receipt lacks current exact-commit coordination authority")
+                throw CliFailure("stale_approval", "PR receipt lacks current exact-commit coordination authority")
             }
             Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
             let run = Data()

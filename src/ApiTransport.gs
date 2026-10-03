@@ -215,7 +215,11 @@ internal class ApiTransport {
                     Math
                     .Ceiling(delay).ToString(CultureInfo.InvariantCulture) + " seconds)."
             }
-            return Exception(message)
+            return CliFailure(
+                status == 401 ? "authentication_required": "command_failed",
+                message,
+                status == 401 ? []string{"gh", "auth", "login"}: []string{}
+            )
         }
 
         internal suspend func Request(

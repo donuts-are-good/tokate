@@ -288,7 +288,7 @@ internal class Commands {
         ) string {
             let result = Run(exe, args, cwd, input, seconds, harness, github)
             if result.Code != 0 {
-                throw Exception(exe + " failed: " + result.Error + result.Output)
+                throw CliFailure("command_failed", exe + " failed. Inspect private artifacts when available.")
             }
             return result.Output.Trim()
         }

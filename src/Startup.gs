@@ -61,7 +61,8 @@ internal class Startup {
         internal func Show(tools List[ToolCheck], error bool = false) {
             if !Terminal.Rich(error) {
                 for tool in tools {
-                    Terminal.Message(tool.Name + ": " + tool.Status + " - " + tool.Detail, error: error)
+                    let detail = PublicOutput.Enabled ? (tool.Path == "" ? tool.Hint: tool.Path): tool.Detail
+                    Terminal.Message(tool.Name + ": " + tool.Status + " - " + detail, error: error)
                 }
                 return
             }
@@ -109,7 +110,11 @@ internal class Startup {
                 Terminal.Message("Missing tools", "yellow", true)
                 Show(missing, true)
                 if blocked {
-                    throw Exception("Install the tools needed for this command, then run tokate doctor.")
+                    PublicOutput.Tools(missing)
+                    throw CliFailure(
+                        "missing_tools",
+                        "Install the tools needed for this command, then run tokate doctor."
+                    )
                 }
             }
         }
@@ -170,6 +175,7 @@ internal class Startup {
                 }
             }
             tools.Add(sandbox)
+            PublicOutput.Tools(tools)
             Terminal.Message("Tokate environment", "bold cyan")
             Show(tools)
             Terminal.Message("No inference was run. Authentication is checked when a command needs it.", "grey")

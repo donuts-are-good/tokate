@@ -60,7 +60,7 @@ internal class CoordinationState {
         if J.Bool(state, "revoked") || !GitHub.HasLabel(task) || !GitHub.Assigned(task, assigned) ||
             (donor != "" && !String.Equals(donor, assigned, StringComparison.OrdinalIgnoreCase)) ||
             J.Text(approval, "issue_hash") != GitHub.Fingerprint(task) {
-            throw Exception("Approval revoked, task changed, or donor is no longer eligible")
+            throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
         }
         let info = GitHub.Api("repos/" + repo)
         let branch = J.Text(info, "default_branch")
@@ -70,7 +70,7 @@ internal class CoordinationState {
         if J.Number(policy.Value, "version") != 2 || policy.Digest != J.Text(approval, "policy_hash") || Data.Hash(
             template
         ) != J.Text(approval, "template_hash") || branch != J.Text(approval, "base_branch") {
-            throw Exception("Policy or template changed; fresh owner approval is required")
+            throw CliFailure("stale_approval", "Policy or template changed; fresh owner approval is required")
         }
         return J.Parse(
             J.Write(J.Map("approval", approval, "policy", policy.Value, "template", template, "issue", task))
@@ -83,7 +83,7 @@ internal class CoordinationState {
             Unix(reservation, "expires") <= DateTimeOffset
             .UtcNow
             .ToUnixTimeSeconds() {
-            throw Exception("Reservation expired or belongs to a replaced donor")
+            throw CliFailure("stale_approval", "Reservation expired or belongs to a replaced donor")
         }
     }
 

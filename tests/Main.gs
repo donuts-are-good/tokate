@@ -53,6 +53,10 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 1 && args[0] == "--json-cli" {
+            CliDiscovery.Structured(binary)
+            return 0
+        }
         if args.Length == 1 && args[0] == "--cli" {
             CliDiscovery.All(binary)
             return 0

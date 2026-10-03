@@ -9,6 +9,15 @@ import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
 
+internal class CliFailure : Exception {
+    internal let Code string
+    internal let Action[]string
+    internal init(code string, message string, action[]string = nil) : base(message) {
+        Code = code
+        Action = action ?? []string{}
+    }
+}
+
 internal class Args {
     internal let Values Dictionary[string, string] = Dictionary[string, string]()
     internal var Command string = "help"

@@ -109,12 +109,14 @@ internal class Installer {
             temp.Env["OPENAI_API_KEY"] = "fixture-secret"
             state["clean"] = JsonValue.Create(true)
             File.WriteAllText(statePath, state.ToJsonString())
-            Check.Success(Check.Run(installed, []string{"update"}, temp.Env))
+            CliDiscovery.Envelope(Check.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
             Check.That(File.ReadAllText(profile) == hook, "Update duplicated shell setup")
             for mode in[]string{"checksum-fail", "download-fail"} {
                 state["mode"] = JsonValue.Create(mode)
                 File.WriteAllText(statePath, state.ToJsonString())
-                Check.That(Check.Run(installed, []string{"update"}, temp.Env).Code != 0, "Update should fail: " + mode)
+                let failure = Check.Run(installed, []string{"update", "--json"}, temp.Env)
+                Check.That(failure.Code != 0, "Update should fail: " + mode)
+                CliDiscovery.Envelope(failure, "update", "error", "command_failed")
                 Check.That(Hash(installed) == Hash(binary), "Failed update changed binary")
             }
             Check.Success(Check.Run(installed, []string{"uninstall", "--help"}, temp.Env))
@@ -123,7 +125,7 @@ internal class Installer {
             Directory.CreateDirectory(Path.GetDirectoryName(saved) ?? "")
             File.WriteAllText(saved, "keep")
             File.Delete(Path.Combine(tools, "curl"))
-            Check.Success(Check.Run(installed, []string{"uninstall"}, temp.Env))
+            CliDiscovery.Envelope(Check.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
             Check.That(!File.Exists(installed), "Uninstall left binary")
             Check.That(File.Exists(saved), "Uninstall removed saved work")
             if fish {
@@ -232,7 +234,7 @@ internal class Installer {
                     }
                 }
             }
-            Check.Success(Check.Run(installed, []string{"uninstall"}, temp.Env))
+            CliDiscovery.Envelope(Check.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
             Check.That(!File.Exists(installed), "Unsupported libc blocked offline removal")
         }
     }

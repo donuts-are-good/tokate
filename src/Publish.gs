@@ -300,7 +300,7 @@ internal class Publication {
                 if result.Output.Trim().StartsWith("[") {
                     rows = J.Parse(result.Output)
                 } else if !result.Error.Contains("no checks reported") {
-                    throw Exception("Cannot read PR checks: " + result.Error)
+                    throw CliFailure("command_failed", "Cannot read PR checks. Inspect the PR on GitHub.")
                 }
                 var failed bool
                 var pending bool
@@ -334,6 +334,7 @@ internal class Publication {
                     }
                 }
                 let status = failed ? "failed": (pending ? "pending": "passed")
+                PublicOutput.Checks(run, rows, status)
                 if directory != "" {
                     File.WriteAllText(
                         Path.Combine(directory, "checks.json"),

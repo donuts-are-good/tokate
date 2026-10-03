@@ -96,6 +96,93 @@ GitHub; saved-run checks also write local results. `status`, help and completion
 are local. `update` downloads and replaces Tokate; `uninstall` removes it offline.
 `doctor` probes tools and the sandbox without inference.
 
+### Explicit structured output
+
+Every public command accepts `--json`, including `doctor`, `update`, `uninstall`,
+help, completion, `--version`, and version-2 commands. It selects JSON independently
+of redirection, TTY styling, or `NO_COLOR`. Parse stdout as exactly one object;
+progress, prerequisite diagnostics, installer output and `--traffic` stay on stderr.
+Invalid commands and options also return this envelope before prerequisite actions:
+
+```json
+{"schema_version":1,"command":"checks","status":"pending","exit_code":8,"data":{},"error":null,"next_actions":[],"truncated":false}
+```
+
+`schema_version` versions this public contract, independently of policy, saved-run,
+approval and receipt versions. `command` is the invoked command name (global help
+uses `help`, installed version uses `--version`). `status` is `ok`, `pending`, or
+`error`; `exit_code` matches the process. `error` is null for success and pending,
+otherwise `{code, message}`. `data` contains a command-specific public projection,
+not an internal saved record. A successful `status` can describe a failed run in
+`data.state` and `data.error` without making the status command itself fail.
+
+Stable error codes are `invalid_arguments`, `missing_tools`,
+`authentication_required`, `stale_approval`, `invalid_state`, `verification_failed`,
+`inference_failed`, and fallback `command_failed`. `output_too_large` means the
+complete safe result cannot fit the output budget. Do not match displayed messages
+for control flow. Exit meanings remain 0 for success, 1 for failure, and 8 for
+pending checks, including a watch timeout. Pending is not success.
+
+`next_actions` is an array of complete executable argument arrays, for example
+`["tokate","recover","--run","/absolute/run","--json"]`. Suggestions require an
+explicit separate invocation and appropriate authorization; they never execute,
+retry, prompt, change owner checks, or spend inference. Actions may be omitted when
+state is unknown. Recovery suggestions still require completed-turn/report,
+current-approval, protected-file and exact-candidate validation when invoked.
+Authentication actions such as `gh auth login` are explicit interactive setup
+commands; the original Tokate invocation does not run them.
+
+```sh
+tokate help --json
+tokate help work --json
+tokate status --run DIR --json
+tokate checks --run DIR --json
+tokate completion bash --json
+tokate --version --json
+```
+
+Help metadata reuses the command/option definitions: `arguments` lists names,
+values, descriptions and choices; `required_inputs` lists alternative required
+input sets. `repository_inputs` explains explicit input, issue-URL and local-remote
+alternatives, and `exclusive_run_inputs` identifies conflicting saved-run inputs.
+`positional_arguments`, local/GitHub read/write `effects`, `inference`, and
+`noninteractive` describe command behavior. Effects are potential effects (for
+example checks writes locally only with `--run`); only `work` starts inference.
+Completion returns the full script in `data.script`, suitable for decoding and
+saving. Installed version is `data.version`. Diagnostics returns tool name,
+status, path and setup hint without raw tool logs.
+
+Structured stdout is at most 64 KiB including the newline. Display prose is at
+most 2048 characters; summary lists have at most 64 entries with total counts such
+as `verification_count` and `check_count`. `truncated` reports omitted summary
+entries or shortened prose. Hashes, paths, identities, executable arguments and
+scripts remain complete. A result that cannot fit safely fails explicitly with
+`output_too_large` and exit 1; it never silently shortens a script or action. This
+output failure can occur after command effects have completed, so inspect state
+before invoking a command again. Output mode never makes command effects atomic.
+
+Run summaries exclude raw harness events, reports, and verification stdout/stderr,
+including arbitrary saved error text. Verification rows contain only complete
+command arguments and exit codes. Errors use safe typed summaries. `data.artifacts`
+provides absolute private artifact paths for explicit detail access with local file
+tools. No additional detail retrieval or logging service is introduced. Keep these
+artifacts private; raw files can contain credentials or repository secrets.
+
+Compatibility: without `--json`, redirected `policy` still emits the original raw
+policy object. Redirected `status` remains a top-level run summary without the
+public envelope, but intentionally removes raw verification logs and arbitrary
+saved error strings; it includes safe error summaries, bounded verification rows,
+counts and truncation. Consumers relying on raw logs must read private artifacts
+explicitly. New integrations should use `--json` and `schema_version`. Terminal
+output remains readable, and ordinary help keeps its spacious layout.
+
+New version-1 verification failures save `failure_reason: verification_failed`.
+Recovery uses that reason independently of displayed wording. Old version-1 failed
+runs without a reason retain an explicit compatibility path for the former exact
+verification-failure sentence. Both paths preserve all recovery checks and perform
+no additional inference. No approval/run/receipt version or original execution
+provenance is migrated or reinterpreted.
+
 ### Issue URLs and local repository context
 
 For commands accepting `--issue`, a GitHub issue URL can supply both repository

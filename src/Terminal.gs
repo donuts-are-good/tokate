@@ -18,9 +18,8 @@ internal class Terminal {
             return text.ToString()
         }
 
-        internal func Rich(error bool = false) bool -> !(
-            error ? Console.IsErrorRedirected: Console.IsOutputRedirected
-        ) &&
+        internal func Rich(error bool = false) bool -> !PublicOutput.Enabled &&
+            !(error ? Console.IsErrorRedirected: Console.IsOutputRedirected) &&
             Environment.GetEnvironmentVariable("TERM") != "dumb"
 
         internal func Output(error bool = false) IAnsiConsole -> AnsiConsole.Create(
@@ -34,10 +33,11 @@ internal class Terminal {
         )
 
         internal func Message(text string, color string = "green", error bool = false) {
-            let value = Clean(text)
-            if Rich(error) {
-                Output(error).MarkupLine("[" + color + "]" + Markup.Escape(value) + "[/]")
-            } else if error {
+            let stderr = error || PublicOutput.Enabled
+            let value = PublicOutput.Prose(Clean(text))
+            if Rich(stderr) {
+                Output(stderr).MarkupLine("[" + color + "]" + Markup.Escape(value) + "[/]")
+            } else if stderr {
                 Console.Error.WriteLine(value)
             } else {
                 Console.WriteLine(value)
@@ -58,6 +58,10 @@ internal class Terminal {
         }
 
         internal func Json(value JsonElement, title string) {
+            if PublicOutput.Enabled {
+                PublicOutput.ResultData = PublicOutput.Select(value, "reservation,donor,actor,expires,pr,url,head")
+                return
+            }
             if !Rich() {
                 Console.WriteLine(J.Write(value))
                 return
