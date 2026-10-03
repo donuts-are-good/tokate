@@ -14,9 +14,11 @@ internal class V2Contribution {
             let viewer = GitHub.Api("user")
             let repo = Data.Repo(run.Text("repo"))
             let state = CoordinationState.Load(repo, run.Number("issue"))
-            if J.Get(viewer, "id").ToString() != J.Get(run.Element(), "donor_id").ToString() || state.Sha != run.Text(
-                "state_sha"
-            ) ||
+            if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) || J.Get(
+                viewer,
+                "id"
+            )
+                .ToString() != J.Get(run.Element(), "donor_id").ToString() || state.Sha != run.Text("state_sha") ||
                 J.Text(state.Value(), "approval_id") != run.Text("approval") || J.Text(
                 J.Get(state.Value(), "reservation"),
                 "reservation"
@@ -299,6 +301,10 @@ internal class V2Contribution {
 
         internal func Submit(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
+            if File.Exists(Path.Combine(directory, "correction.json")) {
+                CorrectionPublication.Submit(directory)
+                return
+            }
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),
                 FileMode.OpenOrCreate,
@@ -380,7 +386,7 @@ internal class V2Contribution {
         }
 
         internal func VerifyReceipt(repo string, number int32, pull JsonElement, receipt JsonElement) Data {
-            RequestData.Keys(receipt, "version,repo,issue,approval,expected,reservation,donor,head")
+            RequestData.Keys(receipt, "version,repo,issue,approval,expected,reservation,donor,head,correction")
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let contribution = J.Get(state.Value(), "contribution")
             let metadata = J.Get(contribution, "metadata")
@@ -412,6 +418,13 @@ internal class V2Contribution {
                 throw Exception("PR receipt lacks current exact-commit coordination authority")
             }
             Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+            let correction = J.Get(receipt, "correction")
+            if !Tokate.Correction.Same(correction, J.Get(metadata, "correction")) {
+                throw Exception("Correction receipt differs from authoritative publication metadata")
+            }
+            if correction.ValueKind != JsonValueKind.Undefined {
+                RequestData.Correction(correction, J.Text(metadata, "head"), J.Get(record, "policy"))
+            }
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo

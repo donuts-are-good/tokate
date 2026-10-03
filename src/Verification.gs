@@ -7,7 +7,7 @@ import System.IO
 
 internal class Verification {
     shared {
-        private func DirectoryPath(path string) string {
+        internal func DirectoryPath(path string) string {
             let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))
             var current = Path.GetPathRoot(absolute) ?? "/"
             for part in absolute.Substring(current.Length).Split(Path.DirectorySeparatorChar) {

@@ -69,6 +69,7 @@ internal class Cli {
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
             CliOption("commit", "SHA", "Exact external fork commit to verify"),
+            CliOption("prepare", "", "Archive original completed work before correction; no checks or publication"),
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
             CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
         }
@@ -190,10 +191,10 @@ internal class Cli {
             ),
             CliCommand(
                 "recover",
-                "run,seconds",
+                "run,seconds,prepare,commit,tools",
                 "run",
-                "Rerun v1 verification without inference, then push and publish a draft PR.",
-                "--run DIR [--seconds N]",
+                "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
+                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE]",
                 "recover --run /path/to/run --seconds 300"
             ),
             CliCommand(
@@ -336,6 +337,18 @@ internal class Cli {
 
         internal func Validate(args Args) {
             let command = Find(args.Command)
+            if args.Command == "recover" {
+                if args.Get("prepare") == "true" &&
+                    (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {
+                    throw Exception("--prepare excludes --commit, --seconds and --tools")
+                }
+                if args.Get("commit") != "" && !args.Help {
+                    args.Need("seconds")
+                }
+                if args.Get("tools") != "" && args.Get("commit") == "" {
+                    throw Exception("--tools requires an explicit corrected --commit")
+                }
+            }
             if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
                 for key in args.Values.Keys {
                     if key != "--run" &&

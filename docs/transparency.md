@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.13 discovers tools, handles data, and
+This document describes how Tokate 0.2.15 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -174,6 +174,17 @@ These files persist for inspection and recovery. There is no automatic expiry or
 general secret scrubber. Raw tool output can contain sensitive content if a tool
 prints it. Command errors can also appear in terminal output.
 
+Explicit pre-publication correction additionally retains `original-evidence/`,
+including missing-file and link metadata, and separate `correction.json` and
+`correction-UUID/` records. Capture-time checkout evidence has unproven original
+model provenance. These archives, raw turn/report and check outputs stay private.
+New receipts and v2 publication metadata may contain bounded correction UUID,
+exact head/tree, patch digest, separate verification budget, declared correction
+tools (or manual/unknown editing), and local exact-commit verification provenance.
+Original execution/model/usage declarations describe only original work; unknown
+runtime remains unknown. The coordinator treats local verification as donor
+reported and still requires exact-commit CI and owner review.
+
 - GitHub receives coordination records, branch commits, and the draft PR.
   The PR title comes from the approved public issue title, and its body comes
   from the approved public repository template with generated substitutions.
@@ -201,8 +212,9 @@ prints it. Command errors can also appear in terminal output.
   `changes.patch` and the checkout; they also remain available after a publication
   failure. Version-1 `work` publishes automatically without another approval
   prompt. Version-2 `work` saves a verified commit for `submit`. `publish --run DIR` regenerates content and retries publication
-  without inference; editing these saved previews does not change the generated
-  request. Repository changes or an approved public template can nevertheless
+  without inference. Explicit corrections instead retain an exact publication
+  intent and inspect physical remote state before resuming; their previews must
+  match that intent. Editing previews cannot change the request. Repository changes or an approved public template can nevertheless
   contain or reproduce sensitive content. There is no general secret scrubber.
 - Agent command network access requires both owner policy and donor opt-in.
   Harness inference connectivity is separate. With command network access enabled,

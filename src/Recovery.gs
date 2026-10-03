@@ -19,16 +19,24 @@ internal class Recovery {
                     "Version-1 recovery does not reinterpret version-2 contributions; request fresh owner approval"
                 )
             }
-            if run.Text("state") != "failed" || run.Text(
-                "error"
-            ) != "Owner verification failed. See verification.json. No PR will be opened." {
+            if File.Exists(Path.Combine(directory, "correction.json")) {
+                throw Exception("Explicit corrections use recover --commit with their saved budget and provenance")
+            }
+            if run.Text("state") != "failed" ||
+                (
+                run.Text("failure_reason") != "verification_failed" &&
+                    !(
+                    run.Text("failure_reason") == "" && run.Text("error") ==
+                    "Owner verification failed. See verification.json. No PR will be opened."
+                )
+            ) {
                 throw Exception("Recovery requires a completed agent turn with failed owner verification")
             }
             let record = Workflow.Recheck(run)
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
                 throw Exception("Recovery budget exceeds owner limit")
             }
-            let usage = Worker.CompletedUsage(directory, File.ReadAllText(Path.Combine(directory, "events.jsonl")))
+            let usage = Correction.Completed(directory, run)
             let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
             let archive = Path.Combine(directory, "recovery-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(archive)

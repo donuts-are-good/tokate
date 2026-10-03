@@ -70,8 +70,12 @@ func Main(args[]string) int32 {
             }
         } else if options.Command == "recover" {
             let directory = Path.GetFullPath(options.Need("run"))
-            Recovery.Run(directory, options.Number("seconds", "300"))
-            Publication.Publish(directory)
+            if options.Get("prepare") == "true" || options.Get("commit") != "" {
+                Correction.Recover(options)
+            } else {
+                Recovery.Run(directory, options.Number("seconds", "300"))
+                Publication.Publish(directory)
+            }
         } else if options.Command == "publish" {
             Publication.Publish(Path.GetFullPath(options.Need("run")))
         } else if options.Command == "checks" {

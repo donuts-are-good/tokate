@@ -122,6 +122,10 @@ internal class Coordinator {
                 }
                 let metadata = J.Get(request, "metadata")
                 Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+                let correction = J.Get(metadata, "correction")
+                if correction.ValueKind != JsonValueKind.Undefined {
+                    RequestData.Correction(correction, J.Text(metadata, "head"), J.Get(record, "policy"))
+                }
                 ValidateFork(repo, donor, metadata, actor)
                 ValidateDiff(repo, record, metadata)
                 let reservation = J.Text(J.Get(state.Value(), "reservation"), "reservation")
@@ -147,6 +151,9 @@ internal class Coordinator {
                     "head",
                     J.Text(metadata, "head")
                 )
+                if correction.ValueKind != JsonValueKind.Undefined {
+                    receipt["correction"] = correction
+                }
                 let pulls = J.Items(
                     GitHub.Api(
                         "repos/" + repo + "/pulls?state=all&head=" + Uri.EscapeDataString(
@@ -309,6 +316,20 @@ internal class Coordinator {
             values["issue"] = J.Number(J.Get(record, "issue"), "number").ToString()
             values["report"] = "Donor-declared contribution source: " + J.Text(metadata, "source") +
                 ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                values["report"] += " Explicit correction " + J.Text(correction, "uuid") +
+                    ": " +
+                    (
+                    J.Items(J.Get(correction, "tools"))
+                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
+                        J.Write(J.Get(correction, "tools"))
+                ) +
+                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
+                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
+                    J
+                    .Number(correction, "seconds").ToString() + " seconds."
+            }
             values["donor"] = donor
             values["model"] = "donor-reported tools: " + J.Write(J.Get(metadata, "tools"))
             values["effort"] = "per-tool declaration; not independently attested"

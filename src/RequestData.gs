@@ -134,6 +134,41 @@ internal class RequestData {
             }
         }
 
+        internal func Correction(value JsonElement, head string, policy JsonElement) {
+            Keys(value, "uuid,head,tree,patch_sha256,seconds,tools,verification")
+            if System.Text.Encoding.UTF8.GetByteCount(Canonical(value)) > 6144 {
+                throw Exception("Correction provenance exceeds its byte limit")
+            }
+            var uuid Guid
+            if !Guid.TryParseExact(J.Text(value, "uuid"), "D", out uuid) || uuid.ToString("D") != J.Text(
+                value,
+                "uuid"
+            ) ||
+                J.Text(value, "head") != head || !Regex.IsMatch(J.Text(value, "patch_sha256"), "^[0-9a-f]{64}$") ||
+                J.Number(value, "seconds") < 1 || J.Number(value, "seconds") > 86400 || J.Text(
+                value,
+                "verification"
+            ) != "tokate-observed-locally-exact-commit" {
+                throw Exception("Invalid bounded correction provenance")
+            }
+            Data.CommitSha(head)
+            Data.CommitSha(J.Text(value, "tree"))
+            let tools = J.Get(value, "tools")
+            if tools.ValueKind != JsonValueKind.Array {
+                throw Exception("Correction tools must be an array; [] declares manual editing")
+            }
+            if J.Items(tools).Count > 0 {
+                Tools(tools)
+            }
+            if policy.ValueKind != JsonValueKind.Undefined {
+                if J.Number(value, "seconds") > J.Number(policy, "max_seconds") {
+                    throw Exception("Correction budget exceeds original owner policy")
+                }
+                // Apply exactly the same policy rules as the donor command.
+                Tokate.Correction.ToolsFromValue(tools, policy)
+            }
+        }
+
         internal func Request(value JsonElement) {
             Keys(value, "uuid,expected,approval,action,metadata")
             var uuid Guid
@@ -150,7 +185,7 @@ internal class RequestData {
             if J.Text(value, "action") == "claim" {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
-                Keys(metadata, "fork,branch,head,source,tools,verification")
+                Keys(metadata, "fork,branch,head,source,tools,verification,correction")
                 Data.Repo(J.Text(metadata, "fork"))
                 Data.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
@@ -159,6 +194,13 @@ internal class RequestData {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
+                let correction = J.Get(metadata, "correction")
+                if correction.ValueKind != JsonValueKind.Undefined {
+                    if J.Text(metadata, "source") != "tokate" {
+                        throw Exception("Correction provenance requires managed original work")
+                    }
+                    Correction(correction, J.Text(metadata, "head"), JsonElement{})
+                }
             } else {
                 throw Exception("Only claim and publish are donor request operations")
             }

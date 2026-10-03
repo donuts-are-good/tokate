@@ -218,6 +218,9 @@ internal class Fixture {
         } else if mode != "empty" {
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Implemented acceptance criteria\n")
         }
+        if mode == "staged_whitespace" {
+            File.WriteAllText(Path.Combine(checkout, "result.txt"), "Copied license with trailing whitespace \t\n")
+        }
         if mode == "workflow" {
             Directory.CreateDirectory(Path.Combine(checkout, ".github/workflows"))
             File.WriteAllText(Path.Combine(checkout, ".github/workflows/verify.yml"), "tampered")
@@ -234,11 +237,19 @@ internal class Fixture {
         )
         Console.Error.WriteLine("synthetic-raw-stderr-secret " + Root)
         Console.WriteLine("{\"type\":\"fixture.output\",\"text\":\"synthetic-raw-event-secret\"}")
-        Console.WriteLine(
-            "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
-        )
+        if mode != "incomplete_turn" {
+            Console.WriteLine(
+                "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
+            )
+        }
+        if mode == "failed_turn" {
+            Console.WriteLine("{\"type\":\"turn.failed\"}")
+        }
+        if mode == "incomplete_tail" {
+            Console.WriteLine("{\"type\":\"turn.started\"}")
+        }
         File.SetUnixFileMode(Path.Combine(Root, "codex-impl"), UnixFileMode.UserRead | UnixFileMode.UserWrite)
-        return 0
+        return mode == "inference_exit_failure" ? 1: 0
     }
 
     internal func GitHub(args[]string) int32 {
@@ -331,7 +342,14 @@ internal class Fixture {
         }
         let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
         if path == "user" {
-            return Answer(Check.Map("login", actor, "id", 123))
+            return Answer(
+                Check.Map(
+                    "login",
+                    State["viewer_login"] ?? JsonValue.Create(actor) as JsonNode,
+                    "id",
+                    State["viewer_id"] ?? JsonValue.Create(123) as JsonNode
+                )
+            )
         }
         if path.StartsWith("repos/obselate/tokate/releases/tags/") {
             if let release = State["release"] {
@@ -400,9 +418,39 @@ internal class Fixture {
         }
         if tail.StartsWith("issues/") {
             let issue = State["issue"] ?? throw Exception("Missing issue")
+            if tail.Contains("/comments?") && method == "GET" {
+                let comments = JsonArray()
+                if let saved = State["comments"] {
+                    for comment in saved.AsObject() {
+                        comments.Add(comment.Value?.DeepClone())
+                    }
+                }
+                return Answer(comments)
+            }
             if tail.EndsWith("/comments") && method == "POST" {
+                if Check.Text(State["mode"]) == "request_fail_before_write" {
+                    return Response(500)
+                }
                 State["posted_request"] = body.DeepClone()
-                return Answer(Check.Map("id", 100, "body", Check.Text(body["body"])))
+                let count = State["request_count"] == nil ? 1: Int32.Parse(Check.Text(State["request_count"])) + 1
+                State["request_count"] = JsonValue.Create(count)
+                let comment = Check.Map(
+                    "id",
+                    100 + count,
+                    "body",
+                    Check.Text(body["body"]),
+                    "user",
+                    Check.Map("login", actor, "id", 123),
+                    "issue_url",
+                    "https://api.github.com/repos/owner/project/issues/1"
+                )
+                let comments = State["comments"] ?? JsonObject()
+                comments[(100 + count).ToString()] = comment.DeepClone()
+                State["comments"] = comments
+                if Check.Text(State["mode"]) == "request_fail_after_write" {
+                    return Response(500)
+                }
+                return Answer(comment)
             }
             if method != "GET" {
                 if tail.EndsWith("/assignees") {
@@ -535,6 +583,8 @@ internal class Fixture {
             return Answer(State["pulls"]?[0] ?? throw Exception("Missing PR"))
         }
         if tail == "pulls" {
+            let count = State["pr_create_count"] == nil ? 1: Int32.Parse(Check.Text(State["pr_create_count"])) + 1
+            State["pr_create_count"] = JsonValue.Create(count)
             if Check.Text(State["mode"]) == "pr_fail" {
                 return Response(500)
             }
@@ -542,7 +592,7 @@ internal class Fixture {
             body["number"] = JsonValue.Create(10)
             body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/10")
             body["state"] = JsonValue.Create("open")
-            body["user"] = Check.Map("login", actor)
+            body["user"] = Check.Map("login", actor, "id", 123)
             body["head"] = Check.Map(
                 "sha",
                 Git("fork", []string{"rev-parse", branch}),
@@ -618,6 +668,48 @@ internal class Fixture {
                 }
             }
             let push = command.IndexOf("push")
+            let correctionPath = Path.Combine(
+                Path.GetDirectoryName(Directory.GetCurrentDirectory()) ?? "",
+                "correction.json"
+            )
+            if Check.Text(State["mode"]).StartsWith("change_checked_") && command.Contains("rev-parse") &&
+                command.Contains("HEAD") && File.Exists(correctionPath) {
+                let correction = Check.Json(File.ReadAllText(correctionPath))
+                if Check.Text(correction["state"]) == "verifying" &&
+                    (correction["verification"]?.AsArray().Count ?? 0) > 0 {
+                    let mode = Check.Text(State["mode"])
+                    if mode == "change_checked_head" {
+                        Check.Success(
+                            Check.Run(
+                                "/usr/bin/git",
+                                []string{
+                                    "-c",
+                                    "core.hooksPath=/dev/null",
+                                    "commit",
+                                    "--allow-empty",
+                                    "-m",
+                                    "Concurrent head change"
+                                },
+                                Env
+                            )
+                        )
+                    } else if mode == "change_checked_tree" {
+                        File.AppendAllText("result.txt", "Concurrent tree change\n")
+                        Check.Success(Check.Run("/usr/bin/git", []string{"add", "result.txt"}, Env))
+                    } else {
+                        File.AppendAllText(
+                            Path.Combine(
+                                Path.GetDirectoryName(correctionPath) ?? "",
+                                "correction-" + Check.Text(correction["uuid"]),
+                                "candidate.patch"
+                            ),
+                            "Changed complete patch\n"
+                        )
+                    }
+                    State["mode"] = JsonValue.Create("")
+                    Save()
+                }
+            }
             if push >= 0 {
                 Check.That(
                     File.Exists(
@@ -664,6 +756,10 @@ internal class Fixture {
                 }
             }
             let result = Check.Run("/usr/bin/git", command.ToArray(), Env)
+            if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "push_fail_after_write" {
+                Console.Error.WriteLine("Synthetic lost push response")
+                return 1
+            }
             if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_after_push" {
                 let latest = Check.Json(File.ReadAllText(StatePath))
                 let issue = latest["issue"] ?? throw Exception("Missing issue")

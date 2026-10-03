@@ -14,7 +14,11 @@ the external exact-commit path; their launch integrations remain separate work.
 Version-1 approvals, saved runs and receipts keep their original meanings and
 commands. Nothing automatically converts them into reservations or interprets
 their reported model usage as attested usage. Version-1 recovery remains a
-version-1 operation. Existing default templates remain usable for version 2.
+version-1 operation. Explicit `recover --prepare` followed by
+`recover --commit SHA --seconds N` also supports completed managed v2 turns before
+first publication. It retains original source/tools and adds separate correction
+provenance; `submit` still uses the original unexpired reservation and coordinator.
+External v2 work is excluded. Existing default templates remain usable for version 2.
 
 Opt-in requires an owner to commit policy version 2 and install the generated
 workflow, then issue fresh approval. Changing policy, task, template or assignment

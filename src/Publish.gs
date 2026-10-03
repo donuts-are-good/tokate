@@ -57,6 +57,10 @@ internal class Publication {
         }
 
         internal func Publish(directory string) {
+            if File.Exists(Path.Combine(directory, "correction.json")) {
+                CorrectionPublication.Publish(directory)
+                return
+            }
             if Data.Load(directory).Number("version") == 2 {
                 throw Exception("Version-2 runs use submit and the owner-installed coordinator")
             }
@@ -251,6 +255,10 @@ internal class Publication {
                 J.Number(receipt, "seconds"),
                 J.Bool(receipt, "network")
             )
+            let correction = J.Get(receipt, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                RequestData.Correction(correction, J.Text(receipt, "head"), J.Get(record, "policy"))
+            }
             let run = Data()
             run.Fields["repo"] = repo
             run.Fields["pr"] = number
