@@ -18,6 +18,7 @@ internal class Fixture {
     internal var Include bool
     internal var Verb string = ""
     internal var Conditional string = ""
+    internal var ApiPath string = ""
 
     internal init(root string) {
         Root = root
@@ -37,7 +38,23 @@ internal class Fixture {
     internal func Answer(value JsonNode) int32 {
         if Include {
             let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
-            let unchanged = Verb == "GET" && Conditional == "If-None-Match: " + etag
+            let initial = State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
+            Check.Text(State["etag_initial"])
+            let returned = State["etag_returned"] == nil ? Check.Text(State["etag_returned_prefix"]) + etag:
+            Check.Text(State["etag_returned"])
+            let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic records")
+            var reads int32
+            for call in calls {
+                if Check.Text(call["method"]) == "GET" && Check.Text(call["path"]) == ApiPath {
+                    reads++
+                }
+            }
+            let unchanged = Verb == "GET" &&
+                (
+                Conditional == "If-None-Match: " +
+                    initial ||
+                    (Check.Text(State["etag_force_304"]) == "true" && reads > 1)
+            )
             if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
                 let issue = State["issue"] ?? throw Exception("Missing issue")
                 if Check.Text(State["mode"]) == "after_304_edit" {
@@ -47,7 +64,14 @@ internal class Fixture {
                 }
                 State["mode"] = JsonValue.Create("")
             }
-            return Response(unchanged ? 304: 200, unchanged ? nil: value, "ETag: " + etag + "\r\n")
+            let validator = unchanged ? returned: initial
+            let current = calls[calls.Count - 1] ?? throw Exception("Missing traffic entry")
+            current["etag"] = JsonValue.Create(validator)
+            return Response(
+                unchanged ? 304: 200,
+                unchanged ? nil: value,
+                validator == "" ? "": "ETag: " + validator + "\r\n"
+            )
         }
         Save()
         Console.WriteLine(value.ToJsonString())
@@ -269,11 +293,12 @@ internal class Fixture {
         Check.That(Include, "API must include response status and headers")
         let method = args[Array.IndexOf(args, "--method") + 1]
         let path = args[Array.IndexOf(args, "--method") + 2]
+        ApiPath = path
         Verb = method
         let header = Array.IndexOf(args, "-H")
         Conditional = header >= 0 ? args[header + 1]: ""
         let calls = State["api_calls"]?.AsArray() ?? JsonArray()
-        let call = Check.Map("method", method, "conditional", Conditional != "")
+        let call = Check.Map("method", method, "path", path, "conditional", Conditional != "", "validator", Conditional)
         call["start"] = JsonValue.Create(Stopwatch.GetTimestamp())
         calls.Add(call)
         State["api_calls"] = calls

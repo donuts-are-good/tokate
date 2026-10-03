@@ -737,26 +737,203 @@ internal class NativeFlow : IDisposable {
         )
     }
 
-    internal func ConditionalApproval() {
-        for mode in[]string{"after_304_edit", "after_304_revoke"} {
+    internal func ETags(mode string) {
+        Reload()
+        State["etag_initial_prefix"] = JsonValue.Create(mode == "weak" || mode == "weak-to-strong" ? "W/": "")
+        State["etag_returned_prefix"] = JsonValue.Create(mode == "weak" || mode == "strong-to-weak" ? "W/": "")
+        State["etag_initial"] = nil
+        State["etag_returned"] = mode == "missing" ? JsonValue.Create(""): nil
+        State["etag_force_304"] = JsonValue.Create(false)
+        Save()
+    }
+
+    internal func ApproveSelf() -> Call(
+        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "owner"},
+        owner: true
+    )
+
+    internal func SameRepositoryClaim(code int32 = 0) Result -> Call(
+        []string{
+            "claim",
+            "--repo",
+            "owner/project",
+            "--issue",
+            "1",
+            "--fork",
+            "owner/project",
+            "--model",
+            "gpt-6.1-sol",
+            "--effort",
+            "high",
+            "--seconds",
+            "30",
+            "--runs",
+            Path.Combine(Temp.Root, "runs")
+        },
+        code,
+        owner: true,
+        traffic: true
+    )
+
+    internal func ConditionalClaim() {
+        for mode in[]string{
+            "strong",
+            "weak",
+            "weak-to-strong",
+            "strong-to-weak",
+            "missing",
+            "empty",
+            "bound",
+            "weak-bound",
+            "backslash"
+        } {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.ApproveSelf()
+            flow.ETags(mode)
+            if mode == "empty" || mode == "bound" || mode == "weak-bound" || mode == "backslash" {
+                let opaque = mode == "empty" ? "": (
+                    mode == "backslash" ? "a\\b!": String('x', mode == "bound" ? 1022: 1020)
+                )
+                let tag = "\"" + opaque + "\""
+                flow.State["etag_initial"] = JsonValue.Create(mode == "backslash" || mode == "bound" ? tag: "W/" + tag)
+                flow.State["etag_returned"] = JsonValue.Create(mode == "backslash" ? "W/" + tag: tag)
+                flow.Save()
+            }
+            flow.ResetTraffic()
+            let claimed = flow.SameRepositoryClaim()
+            flow.Traffic(9, 1, 1, 0, claimed)
+            let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(Check.Text(saved["state"]) == "claimed", "Equivalent ETags blocked claim: " + mode)
+            Check.That(Check.Text(saved["head_repo"]) == "owner/project", "Claim did not reuse upstream repository")
+            flow.NoInference()
+            flow.NoPr()
+        }
+    }
+
+    internal func ConditionalValidators() {
+        ApproveSelf()
+        for initial in[]bool{false, true} {
+            for tag in[]string{
+                "opaque",
+                "w/\"opaque\"",
+                "W /\"opaque\"",
+                "W/W/\"opaque\"",
+                "W/\"",
+                "\"opaque",
+                "\"opaque\"suffix",
+                "\"opa\"que\"",
+                "\"opa que\"",
+                "\"opa\tque\"",
+                "\"opa\u0001que\"",
+                "\"opa\u007fque\"",
+                "\"opa\\\"que\"",
+                "\"" + String('x', 1023) + "\"",
+                "W/\"" + String('x', 1021) + "\""
+            } {
+                ETags("")
+                if initial {
+                    State["etag_initial"] = JsonValue.Create(tag)
+                    State["etag_force_304"] = JsonValue.Create(true)
+                }
+                State["etag_returned"] = JsonValue.Create(tag)
+                Save()
+                ResetTraffic()
+                let failed = SameRepositoryClaim(1)
+                Check.Contains(failed.Error, "HTTP 304 without a matching in-memory body")
+                Traffic(9, 0, 1, 0, failed)
+                let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
+                Check.That(
+                    Check.Text(calls[calls.Count - 1]?["conditional"]) == (initial ? "false": "true"),
+                    "Malformed initial tag was cached"
+                )
+                Check.That(!Directory.Exists(Path.Combine(Temp.Root, "runs")), "Rejected 304 created a run")
+                NoInference()
+                NoPr()
+            }
+        }
+        for mode in[]string{"mismatch", "case", "missing-entry"} {
+            ETags("")
+            if mode == "missing-entry" {
+                State["etag_initial"] = JsonValue.Create("")
+                State["etag_returned"] = JsonValue.Create("")
+                State["etag_force_304"] = JsonValue.Create(true)
+            } else {
+                State["etag_returned"] = JsonValue.Create(mode == "mismatch" ? "W/\"unrelated\"": "\"opaque\"")
+                if mode == "case" {
+                    State["etag_initial"] = JsonValue.Create("W/\"Opaque\"")
+                }
+            }
+            Save()
+            ResetTraffic()
+            let failed = SameRepositoryClaim(1)
+            Check.Contains(failed.Error, "HTTP 304 without a matching in-memory body")
+            Traffic(9, 0, 1, 0, failed)
+            Check.That(!Directory.Exists(Path.Combine(Temp.Root, "runs")), "Unmatched 304 created a run")
+            NoInference()
+            NoPr()
+        }
+    }
+
+    internal func ConditionalPublication() {
+        for mode in[]string{"strong", "weak", "weak-to-strong", "strong-to-weak", "missing"} {
             using let flow = NativeFlow(Binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
-            flow.Mode(mode)
+            flow.ETags(mode)
+            flow.Mode("push_fail")
             flow.ResetTraffic()
-            flow.Call([]string{"work", "--run", run}, 1)
+            let worked = flow.Call([]string{"work", "--run", run}, 1, traffic: true)
+            flow.Traffic(18, 0, 8, 0, worked)
+            flow.NoPr()
+            flow.Mode("")
+            flow.ResetTraffic()
+            let published = flow.Call([]string{"publish", "--run", run}, traffic: true)
+            flow.Traffic(18, 1, 8, 0, published)
+            flow.ResetTraffic()
+            let repeated = flow.Call([]string{"publish", "--run", run}, traffic: true)
+            flow.Traffic(9, 0, 0, 0, repeated)
             flow.Reload()
-            var live bool
-            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                if Check.Text(call["status"]) == "304" {
-                    Check.That(Check.Text(call["conditional"]) == "true", "304 lacked a conditional request")
-                    live = true
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Equivalent ETags repeated inference")
+            Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Equivalent ETags duplicated publication")
+            Check.That(Check.Text(flow.State["pulls"]?[0]?["draft"]) == "true", "Publication must remain draft")
+        }
+    }
+
+    internal func ConditionalApproval() {
+        for tags in[]string{"strong", "weak-to-strong", "strong-to-weak"} {
+            for mode in[]string{"after_304_edit", "after_304_revoke"} {
+                for publication in[]bool{false, true} {
+                    using let flow = NativeFlow(Binary)
+                    flow.Initialize()
+                    flow.Approve()
+                    let run = flow.Claim()
+                    flow.ETags(tags)
+                    if publication {
+                        flow.Mode("push_fail")
+                        flow.Call([]string{"work", "--run", run}, 1)
+                    }
+                    flow.Mode(mode)
+                    flow.ResetTraffic()
+                    let failed = flow.Call([]string{publication ? "publish": "work", "--run", run}, 1, traffic: true)
+                    let edited = mode == "after_304_edit"
+                    Check.Contains(failed.Error, edited ? "The owner must approve again": "Issue needs Tokate approval")
+                    flow.Traffic((publication ? 12: 10) + (edited ? 2: 0), 0, edited ? 3: 1, 0, failed)
+                    flow.Reload()
+                    var live bool
+                    for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                        if Check.Text(call["status"]) == "304" {
+                            Check.That(Check.Text(call["conditional"]) == "true", "304 lacked a conditional request")
+                            live = true
+                        }
+                    }
+                    Check.That(live, "No live 304 preceded approval change")
+                    flow.NoPr()
+                    Check.That(Check.Text(flow.State["exec_count"]) == "1", "Approval change repeated inference")
                 }
             }
-            Check.That(live, "No live 304 preceded approval change")
-            flow.NoPr()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Approval change repeated inference")
         }
     }
 
@@ -1124,6 +1301,9 @@ internal class NativeFlow : IDisposable {
                 "OutputBoundary",
                 "ToolAuthentication",
                 "TrafficBudgets",
+                "ConditionalClaim",
+                "ConditionalValidators",
+                "ConditionalPublication",
                 "ConditionalApproval",
                 "ReadTraffic",
                 "MutationTraffic",
@@ -1215,6 +1395,15 @@ internal class NativeFlow : IDisposable {
                     }
                     case "TrafficBudgets" {
                         flow.TrafficBudgets()
+                    }
+                    case "ConditionalClaim" {
+                        flow.ConditionalClaim()
+                    }
+                    case "ConditionalValidators" {
+                        flow.ConditionalValidators()
+                    }
+                    case "ConditionalPublication" {
+                        flow.ConditionalPublication()
                     }
                     case "ConditionalApproval" {
                         flow.ConditionalApproval()
