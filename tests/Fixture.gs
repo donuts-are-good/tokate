@@ -227,6 +227,7 @@ internal class Fixture {
             throw Exception("Only the unchanged managed preflight may use the fixture sandbox")
         }
         Check.That(args[0] == "exec", "Expected exec")
+        State["exec_start"] = JsonValue.Create(Stopwatch.GetTimestamp())
         Check.That(Environment.GetEnvironmentVariable("GH_TOKEN") == nil, "GitHub credential reached agent")
         Check.That(Environment.GetEnvironmentVariable("OPENAI_API_KEY") == nil, "API credential reached agent")
         for required in[]string{

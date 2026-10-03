@@ -43,7 +43,7 @@ internal class ReserveChecks {
             using let flow = NativeFlow(binary)
             flow.Initialize()
             flow.Approve()
-            for reserve in[]string{"0", "-1", "1.5", "bad", "2147483648", "30", "31", "+1", " 1"} {
+            for reserve in[]string{"0", "-1", "1.5", "bad", "2147483648", "30", "31", "+1", " 1", "1\n"} {
                 flow.Claim(reserve: reserve, code: 1)
             }
             flow.Claim(seconds: "3601", reserve: "1", code: 1)
@@ -61,9 +61,15 @@ internal class ReserveChecks {
             )
             flow.NoInference()
             for command in[]string{"external", "amend", "recover"} {
-                flow.Call([]string{command, "--run", flow.Temp.Root, "--verification-reserve", "1"}, 1)
+                Check.Contains(
+                    flow.Call([]string{command, "--run", flow.Temp.Root, "--verification-reserve", "1"}, 1).Error,
+                    "Unknown option for " + command + ": --verification-reserve"
+                )
             }
-            flow.Call([]string{"work", "--run", flow.Temp.Root, "--verification-reserve", "1"}, 1)
+            Check.Contains(
+                flow.Call([]string{"work", "--run", flow.Temp.Root, "--verification-reserve", "1"}, 1).Error,
+                "--run conflicts with --verification-reserve"
+            )
             using let v2 = CoordinationFlow(binary)
             v2.Initialize()
             v2.Claim()
@@ -106,11 +112,11 @@ internal class ReserveChecks {
                 "Allocation not saved"
             )
             flow.Mode(mode == "success" ? "": mode)
-            let clock = Stopwatch.StartNew()
             let result = flow.Call([]string{"work", "--run", run}, mode == "success" ? 0: 1)
+            flow.Reload()
+            let elapsed = Stopwatch.GetElapsedTime(Int64.Parse(Check.Text(flow.State["exec_start"])))
             Check.Contains(result.Output, "total allowance 8s, coding allowance 6s, verification reserve 2s")
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
-            flow.Reload()
             Check.Contains(
                 Check.Text(flow.State["prompts"]?[0]),
                 "total allowance 8s, coding allowance 6s, verification reserve 2s"
@@ -118,7 +124,7 @@ internal class ReserveChecks {
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Reserve launched more than one inference")
             if mode == "success" {
                 Check.That((saved["verification"]?.AsArray().Count ?? 0) == 2, "Original checks did not all run")
-                Check.That(clock.Elapsed.TotalSeconds >= 4.0, "Unused coding time was not available to verification")
+                Check.That(elapsed.TotalSeconds >= 4.0, "Unused coding time was not available to verification")
                 return
             }
             Check.That(Check.Text(saved["state"]) == "failed", "Failure became success")
@@ -128,10 +134,7 @@ internal class ReserveChecks {
             )
             flow.NoPr()
             if mode == "timeout" || mode == "completed_timeout" {
-                Check.That(
-                    clock.Elapsed.TotalSeconds >= 5.5 && clock.Elapsed.TotalSeconds < 8.0,
-                    "Coding exceeded its allocation"
-                )
+                Check.That(elapsed.TotalSeconds >= 5.5 && elapsed.TotalSeconds < 7.0, "Coding exceeded its allocation")
                 Check.That(
                     saved["turn_completed"] == nil && saved["usage"] == nil && saved["inference_exit_code"] == nil,
                     "Timeout fabricated completion"
@@ -144,10 +147,15 @@ internal class ReserveChecks {
                 Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-partial-stderr-secret")
                 let pid = File.ReadAllText(Path.Combine(flow.Bin, "child.pid"))
                 let status = "/proc/" + pid + "/stat"
-                Check.That(
-                    !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
-                    "Timeout descendant survived"
-                )
+                try {
+                    Check.That(File.ReadAllText(status).Split(' ')[2] == "Z", "Timeout descendant survived")
+                } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
+                    error IOException
+                ) {
+                    if error.HResult != 3 {
+                        rethrow
+                    }
+                }
                 flow.Call([]string{"recover", "--run", run}, 1)
                 flow.Call([]string{"publish", "--run", run}, 1)
             } else {
@@ -159,7 +167,7 @@ internal class ReserveChecks {
                 )
                 if mode == "slow_candidate" {
                     Check.That(
-                        clock.Elapsed.TotalSeconds >= 5.5 && clock.Elapsed.TotalSeconds < 8.0,
+                        elapsed.TotalSeconds >= 5.5 && elapsed.TotalSeconds < 7.0,
                         "Candidate overhead consumed reserve"
                     )
                 }

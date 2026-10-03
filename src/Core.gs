@@ -107,7 +107,10 @@ internal class Args {
     internal func Number(key string, fallback string = "") int32 {
         let value = Get(key, fallback)
         var number int32
-        if (key == "verification-reserve" && !Regex.IsMatch(value, "^[0-9]+$")) || !Int32.TryParse(value, out number) ||
+        if (key == "verification-reserve" && !Regex.IsMatch(value, "^[0-9]+\\z")) || !Int32.TryParse(
+            value,
+            out number
+        ) ||
             number < 1 ||
             ((key == "seconds" || key == "timeout") && number > 86400) {
             throw Exception("Invalid positive number: --" + key)
