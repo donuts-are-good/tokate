@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.14 discovers tools, handles data, and
+This document describes how Tokate 0.2.16 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -68,8 +68,6 @@ signature and grants no authority. Write permission, canonical comment actor
 and numeric identity, reservation ownership, scope approval, and receipt checks
 remain authoritative. Donor attribution and receipt/provenance meanings are
 unchanged; existing commits and records remain valid under their current rules.
-After acceptance, inspect the next routine automated commit using only author
-and committer noreply booleans, without printing contact values.
 
 The API boundary invokes sanitized `gh api --include` commands. It reads response
 status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
@@ -95,7 +93,7 @@ infer harness defaults. Donors choose model and effort explicitly.
 | Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
 | GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
-| Independent verification wrapper and owner commands | No inherited values; fixed system `PATH`, command scratch `HOME`/`TMPDIR`, and `LANG=C.UTF-8` |
+| Independent verification wrapper and owner commands | No inherited values; fixed system `PATH`, command scratch `HOME`/`TMPDIR`, `LANG=C.UTF-8`, `GIT_NO_REPLACE_OBJECTS=1`, and `GIT_GRAFT_FILE=/dev/null` |
 
 `PATH` selects installed trusted tools, `HOME` locates tool-owned authentication,
 and `LANG` supplies locale. `CODEX_HOME` preserves an explicitly selected native
@@ -106,12 +104,20 @@ GitHub credential helper can authenticate. They do not reach local Git or Codex.
 Codex API-key variables are not passed; Tokate requires its ChatGPT login.
 
 All host commands also receive fixed Git/GitHub controls: `GH_HOST=github.com`,
-`GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`, and
-`GIT_CONFIG_GLOBAL=/dev/null`. Other caller values, including inherited `GIT_*`
+`GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`,
+`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, and
+`GIT_GRAFT_FILE=/dev/null`. Other caller values, including inherited `GIT_*`
 configuration, proxy settings, debug flags, and loader variables, are omitted.
 Custom proxy, certificate, or home-directory toolchain setups may consequently
 need a supported system installation; Tokate does not discover additional
 requirements from private configuration or provide arbitrary passthrough.
+
+Git orchestration and independent verification use canonical objects with
+replacement lookup disabled. Candidate gates reject legacy `.git/info/grafts`
+metadata and assume-unchanged or skip-worktree index flags before staging,
+verification, or publication. Blocked files, flags, and saved records remain for
+inspection. Version-1 publication also compares the canonical committed diff
+with the saved verified patch; pushes name the saved commit SHA explicitly.
 
 The trusted tool processes can still access their own host files and
 configuration. Narrow environments do not isolate the complete harness or
