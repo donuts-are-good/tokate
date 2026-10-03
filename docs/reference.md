@@ -98,6 +98,8 @@ Owner approval commands write to GitHub. `policy`, `verify-pr` and `checks` read
 GitHub; saved-run checks also write local results. `status`, help and completion
 are local. `update` downloads and replaces Tokate; `uninstall` removes it offline.
 `doctor` probes tools and the sandbox without inference.
+The separate [native API/local synthetic proof](native-proof.md) records measured
+execution boundaries and unsupported production controls; it adds no adapter.
 
 ### Explicit donor defaults and selection
 
