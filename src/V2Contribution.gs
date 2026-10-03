@@ -40,20 +40,9 @@ internal class V2Contribution {
             RequestData.Tools(J.Get(run.Element(), "tools"))
             policy.ValidateTools(J.Get(run.Element(), "tools"), run.Text("source"))
             let tools = J.Items(J.Get(run.Element(), "tools"))
-            if run.Text("source") == "tokate" {
-                if tools.Count != 1 || J.Text(tools[0], "harness") != "codex" || J.Text(
-                    tools[0],
-                    "provider"
-                ) != "openai" ||
-                    run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(
-                    tools[0],
-                    "effort"
-                ) ||
-                    run.Text("model") == "unknown" || run.Text("effort") == "unknown" {
-                    throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
-                }
-            } else if run.Text("source") != "external" {
-                throw Exception("Invalid contribution source")
+            if run.Text("source") == "tokate" &&
+                (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
+                throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
             let fork = Data.Repo(run.Text("head_repo"))
             if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
