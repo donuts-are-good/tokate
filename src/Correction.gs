@@ -76,7 +76,7 @@ internal class Correction {
             "--no-textconv",
             "--binary",
             "--full-index",
-            "--no-renames",
+            "--find-renames=100%",
             base,
             commit,
             "--"
@@ -329,7 +329,7 @@ internal class Correction {
                         "--no-textconv",
                         "--binary",
                         "--full-index",
-                        "--no-renames",
+                        "--find-renames=100%",
                         run.Text("base"),
                         "--"
                     )
@@ -343,7 +343,7 @@ internal class Correction {
                         "--no-textconv",
                         "--binary",
                         "--full-index",
-                        "--no-renames",
+                        "--find-renames=100%",
                         "--"
                     )
                 )

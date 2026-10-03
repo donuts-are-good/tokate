@@ -153,6 +153,72 @@ internal class CorrectionChecks {
             Once(flow, 1)
         }
 
+        private func Reconstruct(flow NativeFlow, run string, patch string, tree string, name string) {
+            let replay = Path.Combine(flow.Temp.Root, name)
+            flow.Git("clone", "--no-local", Path.Combine(run, "checkout"), replay)
+            flow.Git("-C", replay, "checkout", "--detach", Check.Text(Read(run)["base"]))
+            flow.Git("-C", replay, "apply", "--index", "--binary", patch)
+            Check.That(flow.Git("-C", replay, "write-tree") == tree, "Binary patch did not reconstruct the exact tree")
+        }
+
+        private func BinaryRename(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            let asset = [14 * 1024 * 1024]byte
+            Random(91).NextBytes(asset)
+            File.WriteAllBytes(Path.Combine(flow.Upstream, "artwork.bin"), asset)
+            flow.Commit("Retained binary artwork")
+            flow.Git("-C", flow.Upstream, "push", Path.Combine(flow.Bin, "fork"), "main")
+            flow.Approve()
+            let run = flow.Claim("120")
+            flow.Mode("staged_whitespace")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let checkout = Path.Combine(run, "checkout")
+            Directory.CreateDirectory(Path.Combine(checkout, "branding"))
+            flow.Git("-C", checkout, "mv", "artwork.bin", "branding/artwork.bin")
+            let originalTree = flow.Git("-C", checkout, "write-tree")
+            Check.That(
+                flow.Git("-C", checkout, "diff", "--cached", "--binary", "--full-index", "--no-renames").Length >
+                32 * 1024 * 1024,
+                "Binary move fixture did not exceed the former capture limit"
+            )
+            flow.Git("-C", checkout, "config", "diff.renames", "false")
+            Prepared(flow, run)
+            let archivedPatch = Path.Combine(run, "original-evidence/staged.patch")
+            Check.Contains(File.ReadAllText(archivedPatch), "similarity index 100%")
+            Reconstruct(flow, run, archivedPatch, originalTree, "original-replay")
+            flow.Git("-C", checkout, "config", "diff.renames", "true")
+            Check.That(
+                flow.Git("-C", checkout, "diff", "--cached", "--binary", "--full-index", "--find-renames=100%") ==
+                File.ReadAllText(archivedPatch).Trim(),
+                "Original binary evidence depends on rename configuration"
+            )
+            let commit = Correct(flow, run)
+            let tree = flow.Git("-C", checkout, "rev-parse", "HEAD^{tree}")
+            Recover(flow, run, commit, seconds: "120")
+            let correction = Read(run, "correction.json")
+            let patch = Path.Combine(run, "correction-" + Check.Text(correction["uuid"]), "candidate.patch")
+            Reconstruct(flow, run, patch, tree, "corrected-replay")
+            Check.That(Check.Text(correction["tree"]) == tree, "Correction bound another binary tree")
+            flow.Git("-C", checkout, "config", "diff.renames", "false")
+            Check.That(
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "diff",
+                    "--binary",
+                    "--full-index",
+                    "--find-renames=100%",
+                    Check.Text(Read(run)["base"]),
+                    commit
+                ) == File
+                    .ReadAllText(patch).Trim(),
+                "Corrected binary evidence depends on rename configuration"
+            )
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            Once(flow, 1)
+        }
+
         private func FirstVerification(binary string) {
             using let flow = NativeFlow(binary)
             flow.Initialize()
@@ -837,6 +903,7 @@ internal class CorrectionChecks {
         internal func All(binary string, selected string = "") {
             for name in[]string{
                 "Whitespace",
+                "BinaryRename",
                 "FirstVerification",
                 "OriginalTimeout",
                 "WrongTarget",
@@ -859,6 +926,9 @@ internal class CorrectionChecks {
                 switch name {
                     case "Whitespace" {
                         Whitespace(binary)
+                    }
+                    case "BinaryRename" {
+                        BinaryRename(binary)
                     }
                     case "FirstVerification" {
                         FirstVerification(binary)
