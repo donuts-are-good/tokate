@@ -36,7 +36,9 @@ internal class ProtectedPathChecks {
                 Git(temp, checkout, "add", "-A")
                 Git(temp, checkout, "commit", "--quiet", "-m", "Base")
                 let base = Git(temp, checkout, "rev-parse", "HEAD")
-                let policy = J.Parse(J.Write(J.Map("protected_paths", []string{path.Contains('\n') ? "scripts/checks/": path})))
+                let policy = J.Parse(
+                    J.Write(J.Map("protected_paths", []string{path.Contains('\n') ? "scripts/checks/": path}))
+                )
                 File.AppendAllText(file, "changed\n")
                 Git(temp, checkout, "add", "-A")
                 Refused(checkout, policy, base)

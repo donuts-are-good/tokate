@@ -19,6 +19,48 @@ internal class CommandResult {
 @DllImport("libc", EntryPoint: "kill")
 func KillGroup(pid int32, signal int32) int32;
 
+internal class CommandCancellation {
+    private let Process Process
+    private let Signal Chan[bool]?
+    private let Lifetime Chan[bool] = Chan[bool](1)
+
+    internal init(process Process, signal Chan[bool]?) {
+        Process = process
+        Signal = signal
+        Lifetime <- true
+    }
+
+    internal func Cancel() {
+        let active = <-Lifetime
+        try {
+            if !active {
+                return
+            }
+            if let signal = Signal {
+                select {
+                    case signal <- true { }
+                    default { }
+                }
+            }
+            KillGroup(-Process.Id, 9)
+        } finally {
+            Lifetime <- active
+        }
+    }
+
+    internal func OnCancel(sender Object?, event ConsoleCancelEventArgs) {
+        if Signal != nil {
+            event.Cancel = true
+        }
+        Cancel()
+    }
+
+    internal func Stop() {
+        <-Lifetime
+        Lifetime <- false
+    }
+}
+
 internal class Commands {
     shared {
         internal func Read(reader StreamReader, output Chan[string], result CommandResult) {
@@ -128,6 +170,8 @@ internal class Commands {
             info.Environment["GIT_TERMINAL_PROMPT"] = "0"
             info.Environment["GIT_CONFIG_NOSYSTEM"] = "1"
             info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+            info.Environment["GIT_GRAFT_FILE"] = "/dev/null"
             if let signal = cancellation {
                 select {
                     case <- signal {
@@ -157,18 +201,8 @@ internal class Commands {
             go Commands.Read(outputReader, stdout, result)
             go Commands.Read(process.StandardError, stderr, result)
             go Commands.Wait(process, exited)
-            let onCancel = ConsoleCancelEventHandler(
-                (sender Object?, event ConsoleCancelEventArgs) -> {
-                    if let signal = cancellation {
-                        event.Cancel = true
-                        select {
-                            case signal <- true { }
-                            default { }
-                        }
-                    }
-                    KillGroup(-process.Id, 9)
-                }
-            )
+            let callback = CommandCancellation(process, cancellation)
+            let onCancel = ConsoleCancelEventHandler(callback.OnCancel)
             Console.CancelKeyPress += onCancel
             var inputDone bool
             var outputDone bool
@@ -221,6 +255,7 @@ internal class Commands {
                 result.Code = process.ExitCode
             } finally {
                 Console.CancelKeyPress -= onCancel
+                callback.Stop()
                 KillGroup(-process.Id, 9)
                 if !process.HasExited {
                     try {
@@ -271,6 +306,7 @@ internal class Commands {
 
         internal func GitResult(cwd string, args[]string, raw bool = false) CommandResult {
             let all = List[string]{
+                "--no-replace-objects",
                 "-c",
                 "core.hooksPath=/dev/null",
                 "-c",

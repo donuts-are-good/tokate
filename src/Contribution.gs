@@ -16,7 +16,7 @@ internal class Contribution {
             timer Stopwatch,
             seconds int32
         ) {
-            let checkout = Path.Combine(directory, "checkout")
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if Commands.Git(checkout, "status", "--porcelain") == "" {
                 throw Exception("No changes returned. No PR will be opened.")
             }
@@ -68,6 +68,7 @@ internal class Contribution {
         }
 
         private func Snapshot(checkout string, run Data) string {
+            Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
                 throw Exception("Agent changed Git history")
             }

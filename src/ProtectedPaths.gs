@@ -104,9 +104,10 @@ internal class ProtectedPaths {
             if J.Text(comparison, "status") != "ahead" || J.Get(comparison, "behind_by")
                 .ValueKind != JsonValueKind.Number ||
                 J.Number(comparison, "behind_by") != 0 || J.Text(J.Get(comparison, "base_commit"), "sha") != base ||
-                J.Text(J.Get(comparison, "merge_base_commit"), "sha") != base ||
-                commits.Count == 0 ||
-                J.Text(commits[commits.Count - 1], "sha") != head ||
+                J.Text(J.Get(comparison, "merge_base_commit"), "sha") != base || commits.Count == 0 || J.Text(
+                commits[commits.Count - 1],
+                "sha"
+            ) != head ||
                 files.ValueKind != JsonValueKind.Array ||
                 files.GetArrayLength() == 0 || files.GetArrayLength() >= 300 {
                 throw Exception("Missing, truncated or mismatched approved-base-to-head diff evidence")
