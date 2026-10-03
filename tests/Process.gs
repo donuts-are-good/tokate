@@ -30,7 +30,13 @@ internal class ProcessChecks {
                 let status = "/proc/" + File.ReadAllText(path).Trim() + "/stat"
                 try {
                     Check.That(File.ReadAllText(status).Split(' ')[2] == "Z", "Process survived cleanup: " + name)
-                } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { }
+                } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
+                    error IOException
+                ) {
+                    if error.HResult != 3 {
+                        rethrow
+                    }
+                }
             }
         }
 
