@@ -16,5 +16,8 @@
       "bash",
       "scripts/verify.sh"
     ]
+  ],
+  "protected_paths": [
+    "scripts/verify.sh"
   ]
 }
