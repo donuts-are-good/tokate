@@ -239,7 +239,7 @@ internal class Publication {
                 "policy"
             ) ||
                 J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
-                throw Exception("PR approval or policy no longer matches")
+                throw CliFailure("stale_approval", "PR approval or policy no longer matches")
             }
             let expectedBranch = "tokate/issue-" + J.Number(receipt, "issue").ToString() + "-" + J.Text(record, "sha")
                 .Substring(0, 12)

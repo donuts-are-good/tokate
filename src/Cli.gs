@@ -54,6 +54,12 @@ internal class CliCommand {
     internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,").Contains("," + name + ",")
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
+
+    internal func ConflictsWithRun(name string) bool -> name != "run" &&
+        name != "help" &&
+        name != "traffic" &&
+        name != "json" &&
+        (Name == "work" || (Name == "checks" && name != "watch" && name != "timeout"))
 }
 
 internal class Cli {
@@ -361,6 +367,12 @@ internal class Cli {
                     }
                 }
                 let inputs = List[Object]()
+                let conflicts = List[Object]()
+                for option in command.Options.Split(',', StringSplitOptions.RemoveEmptyEntries) {
+                    if command.ConflictsWithRun(option) {
+                        conflicts.Add(option)
+                    }
+                }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
                 if command.Name == "work" || command.Name == "checks" {
                     inputs.Add([]string{"run"})
@@ -394,9 +406,7 @@ internal class Cli {
                             }
                         ): []string{},
                         "exclusive_run_inputs",
-                        command.Name == "work" ? command.Required.Split(','): (
-                            command.Name == "checks" ? []string{"repo", "pr"}: []string{}
-                        ),
+                        conflicts,
                         "effects",
                         effects,
                         "inference",
@@ -484,11 +494,7 @@ internal class Cli {
             let command = Find(args.Command)
             if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
                 for key in args.Values.Keys {
-                    if key != "--run" &&
-                        key != "--help" &&
-                        key != "--traffic" &&
-                        key != "--json" &&
-                        !(args.Command == "checks" && (key == "--watch" || key == "--timeout")) {
+                    if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
                     }
                 }

@@ -85,7 +85,41 @@ internal class CliDiscovery {
             }
             Check.That(!File.Exists(calls), "Invalid inputs or metadata invoked prerequisites")
             let version = Envelope(Call(binary, []string{"--version", "--json"}, temp), "--version", "ok")
-            Check.That(Check.Text(version["data"]?["version"]) == "0.2.16", "Wrong patch version")
+            Check.That(Check.Text(version["data"]?["version"]) == "0.2.17", "Wrong patch version")
+            let workMetadata = Envelope(Call(binary, []string{"help", "work", "--json"}, temp), "help", "ok")
+            for name in[]string{"seconds", "runs", "fork", "allow-network"} {
+                var listed bool
+                for input in workMetadata["data"]?["commands"]?[0]?["exclusive_run_inputs"]?.AsArray() ?? JsonArray() {
+                    listed = listed || Check.Text(input) == name
+                }
+                Check.That(listed, "Metadata omitted --run conflict: " + name)
+                let argv = name == "allow-network" ? []string{
+                    "work",
+                    "--run",
+                    "saved",
+                    "--allow-network",
+                    "--json"
+                }: []string{"work", "--run", "saved", "--" + name, "1", "--json"}
+                let rejected = Envelope(Call(binary, argv, temp, 1), "work", "error", "invalid_arguments")
+                Check.Contains(Check.Text(rejected["error"]?["message"]), "--run conflicts with --" + name)
+            }
+            Envelope(
+                Call(binary, []string{"checks", "--run", "saved", "--watch", "--timeout", "1", "--json"}, temp, 1),
+                "checks",
+                "error",
+                "invalid_state"
+            )
+            var longPath = "/tmp"
+            for i in 0 ... 27 {
+                longPath += "/synthetic-" + String('x', 80)
+            }
+            Check.Contains(Call(binary, []string{"status", "--run", longPath}, temp, 1).Error, longPath)
+            Envelope(
+                Call(binary, []string{"status", "--run", longPath, "--json"}, temp, 1),
+                "status",
+                "error",
+                "invalid_state"
+            )
             for shell in[]string{"bash", "zsh", "fish"} {
                 let script = Envelope(Call(binary, []string{"completion", shell, "--json"}, temp), "completion", "ok")
                 Check.That(

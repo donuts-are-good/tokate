@@ -312,6 +312,18 @@ internal class NativeFlow : IDisposable {
         CliDiscovery.Envelope(Call([]string{"work", "--run", run, "--json"}, 1), "work", "error", "invalid_state")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "JSON or suggestions spent extra inference")
+        Approve()
+        Reload()
+        let originalPulls = State["pulls"]?.ToJsonString() ?? ""
+        CliDiscovery.Envelope(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, 1, owner: true),
+            "verify-pr",
+            "error",
+            "stale_approval"
+        )
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Receipt rejection spent inference")
+        Check.That((State["pulls"]?.ToJsonString() ?? "") == originalPulls, "Receipt rejection changed the PR")
         Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
         CliDiscovery.Envelope(
             Call([]string{"publish", "--run", run, "--json"}, 1),

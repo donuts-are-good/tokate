@@ -34,7 +34,7 @@ internal class Terminal {
 
         internal func Message(text string, color string = "green", error bool = false) {
             let stderr = error || PublicOutput.Enabled
-            let value = PublicOutput.Prose(Clean(text))
+            let value = Clean(PublicOutput.Enabled ? PublicOutput.Prose(text): text)
             if Rich(stderr) {
                 Output(stderr).MarkupLine("[" + color + "]" + Markup.Escape(value) + "[/]")
             } else if stderr {
