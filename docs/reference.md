@@ -99,6 +99,59 @@ GitHub; saved-run checks also write local results. `status`, help and completion
 are local. `update` downloads and replaces Tokate; `uninstall` removes it offline.
 `doctor` probes tools and the sandbox without inference.
 
+### Explicit donor defaults and selection
+
+```sh
+tokate defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high
+tokate defaults read
+tokate defaults remove
+tokate select --repo OWNER/REPO --non-interactive
+tokate select --repo OWNER/REPO --model gpt-6.1-sol --effort xhigh --non-interactive
+tokate work --repo OWNER/REPO --issue 42 --non-interactive
+```
+
+Defaults contain only the four donor-entered choices in
+`~/.local/state/tokate/donor-defaults.json`. These local operations require no
+harness or GitHub tools. Tokate refuses symlinks and mixed settings; it never
+imports harness defaults or credentials. Only `set` and `remove` change this file.
+
+New `claim` and `work` commands use a compatible, eligible saved default; explicit
+model or effort arguments override the corresponding saved choice. `select`
+reads current upstream policy and explains a choice without reserving work or
+starting inference. Managed selection currently supports only `codex/openai`.
+Version 1 retains its exact model/effort restrictions; version 2 also requires
+the exact harness/provider pair. No owner policy is changed.
+
+Selection verifies explicit CLI controls with `codex exec --help` and exact
+model/effort controls with `codex debug models --bundled`, using an empty temporary
+home without credentials or user configuration. A missing catalog entry means
+compatibility is unknown, so it cannot be selected for new managed work. This
+offline catalog is capability evidence, never proof of account availability.
+Older CLIs lacking these narrow interfaces require an update for new selection;
+legacy saved runs keep their existing behavior.
+
+Availability is `unknown` by default. Optional `--availability available|unavailable`
+is explicitly donor-reported for the candidate model. An unavailable model is
+excluded for this invocation; choosing another pair resets availability to unknown.
+PATH, login and catalog presence never prove availability. Tokate does not rank
+models or claim inference speed, quality or subscription cost.
+
+Missing, rejected, incompatible or unavailable defaults require an explicit
+eligible pair or a numbered choice in a terminal. Blank input cancels. Redirected
+input/output and `--non-interactive` never prompt or pick an alternative, including
+when only one pair is eligible. An eligible explicit pair or saved default needs
+no repeated confirmation. A terminal choice requires affirmative confirmation
+before inference. `--yes` confirms that choice; it cannot select a replacement.
+
+Runs record the selected harness/provider/model/effort and evidence. New selections
+are revalidated against owner approval and current installed capabilities before
+execution. `work --run DIR` uses its original pair without reading preferences;
+selection flags conflict with `--run`. Model failure stops without retries or
+fallback. Existing runs from before this feature retain their pair and confirmation
+behavior. Version-2 `prepare --source tokate` can use the same defaults/arguments
+when `--tools` is omitted; an explicit tool declaration must match selection.
+External and mixed-tool declarations still validate every tool against owner policy.
+
 ### Issue URLs and local repository context
 
 For commands accepting `--issue`, a GitHub issue URL can supply both repository

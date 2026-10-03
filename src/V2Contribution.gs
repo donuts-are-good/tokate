@@ -80,14 +80,18 @@ internal class V2Contribution {
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, issue, donor)
-            let tools = RequestData.FileData(args.Need("tools"), 8192)
-            RequestData.Tools(tools)
-            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools)
             let source = args.Need("source")
             if source != "external" && source != "tokate" {
                 throw Exception("source must be external or tokate")
             }
+            var tools = args.Get("tools") == "" ? JsonElement{}: RequestData.FileData(args.Need("tools"), 8192)
+            var selection = JsonElement{}
+            if tools.ValueKind != JsonValueKind.Undefined {
+                RequestData.Tools(tools)
+                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools)
+            }
             if source == "tokate" &&
+                tools.ValueKind != JsonValueKind.Undefined &&
                 (
                 J.Items(tools).Count != 1 || J.Text(J.Items(tools)[0], "harness") != "codex" || J.Text(
                     J.Items(tools)[0],
@@ -99,6 +103,40 @@ internal class V2Contribution {
                 )
             }
             let approval = J.Get(record, "approval")
+            if source == "tokate" {
+                if tools.ValueKind != JsonValueKind.Undefined {
+                    let declared = J.Items(tools)[0]
+                    for key in[]string{"harness", "provider", "model", "effort"} {
+                        if args.Get(key) != "" && args.Get(key) != J.Text(declared, key) {
+                            throw Exception(
+                                "Explicit selection conflicts with declared tool; no model substitution is allowed"
+                            )
+                        }
+                        args.Values["--" + key] = J.Text(declared, key)
+                    }
+                }
+                let policy = Policy(J.Write(J.Get(record, "policy")))
+                policy.Digest = J.Text(approval, "policy_hash")
+                selection = DonorSelection.Resolve(args, policy)
+                if tools.ValueKind == JsonValueKind.Undefined {
+                    tools = J.Parse(
+                        J.Write(
+                            []Object{
+                                J.Map(
+                                    "harness",
+                                    J.Text(selection, "harness"),
+                                    "provider",
+                                    J.Text(selection, "provider"),
+                                    "model",
+                                    J.Text(selection, "model"),
+                                    "effort",
+                                    J.Text(selection, "effort")
+                                )
+                            }
+                        )
+                    )
+                }
+            }
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["id"] = J.Text(J.Get(state.Value(), "reservation"), "reservation")
@@ -124,6 +162,9 @@ internal class V2Contribution {
             if source == "tokate" {
                 run.Fields["model"] = J.Text(J.Items(tools)[0], "model")
                 run.Fields["effort"] = J.Text(J.Items(tools)[0], "effort")
+                run.Fields["harness"] = J.Text(selection, "harness")
+                run.Fields["provider"] = J.Text(selection, "provider")
+                run.Fields["selection"] = selection
             }
             Recheck(run)
             let root = Path.GetFullPath(

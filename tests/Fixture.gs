@@ -111,6 +111,44 @@ internal class Fixture {
     }
 
     internal func Codex(args[]string) int32 {
+        if (args.Length == 2 && args[0] == "exec" && args[1] == "--help") ||
+            (args.Length == 3 && args[0] == "debug" && args[1] == "models" && args[2] == "--bundled") {
+            let home = Environment.GetEnvironmentVariable("HOME") ?? ""
+            Check.That(Path.GetFileName(home).StartsWith("tokate-models-"), "Discovery did not use an empty home")
+            Check.That(Environment.GetEnvironmentVariable("CODEX_HOME") == home, "Discovery harness home leaked")
+            Check.That(Directory.GetFileSystemEntries(home).Length == 0, "Discovery read a populated home")
+            for key in[]string{
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+                "GH_CONFIG_DIR",
+                "OPENAI_API_KEY",
+                "XDG_CONFIG_HOME",
+                "DBUS_SESSION_BUS_ADDRESS"
+            } {
+                Check.That(Environment.GetEnvironmentVariable(key) == nil, "Credential reached model discovery")
+            }
+            State["discovery_count"] = JsonValue.Create(
+                State["discovery_count"] == nil ? 1: Int32.Parse(Check.Text(State["discovery_count"])) + 1
+            )
+            Save()
+            if Check.Text(State["mode"]) == "missing_controls" {
+                Console.WriteLine("--model --config")
+                return 0
+            }
+            if args[0] == "exec" {
+                Console.WriteLine("--model --config --ignore-user-config --strict-config")
+            } else {
+                let efforts = Check.Text(
+                    State["mode"]
+                ) == "capability_changed" ? "[{\"effort\":\"low\"}]": "[{\"effort\":\"high\"},{\"effort\":\"xhigh\"}]"
+                Console.WriteLine(
+                    "{\"models\":[{\"slug\":\"gpt-6.1-sol\",\"supported_reasoning_levels\":" +
+                        efforts +
+                        "},{\"slug\":\"gpt-6-sol\",\"supported_reasoning_levels\":[{\"effort\":\"high\"}]}]}"
+                )
+            }
+            return 0
+        }
         Check.That(
             Environment.GetEnvironmentVariable("CODEX_HOME") == Path.Combine(
                 Path.GetDirectoryName(Root) ?? "",
@@ -133,6 +171,10 @@ internal class Fixture {
             return 0
         }
         if args[0] == "login" {
+            State["login_count"] = JsonValue.Create(
+                State["login_count"] == nil ? 1: Int32.Parse(Check.Text(State["login_count"])) + 1
+            )
+            Save()
             Check.That(args.Length == 2 && args[1] == "status", "Unexpected login operation")
             Check.Contains(
                 File.ReadAllText(Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME") ?? "", "identity")),
@@ -185,8 +227,18 @@ internal class Fixture {
         Check.Contains(Console.In.ReadToEnd(), "Acceptance criteria addressed")
         let count = Check.Text(State["exec_count"])
         State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
+        let requested = JsonArray()
+        for arg in args {
+            let value JsonNode = JsonValue.Create(arg) ?? throw Exception("Missing argument")
+            requested.Add(value)
+        }
+        State["exec_args"] = requested
         Save()
         let mode = Check.Text(State["mode"])
+        if mode == "model_failure" {
+            Console.Error.WriteLine("Synthetic model unavailable")
+            return 1
+        }
         if mode == "temporary_isolation" {
             let sentinel = Check.Text(State["temporary_sentinel"])
             Check.That(!File.Exists(sentinel), "Host temporary file reached the managed namespace")

@@ -34,7 +34,7 @@ internal class Args {
                 continue
             }
             if !word.StartsWith("-") {
-                if (Command == "help" || Command == "completion") && Subject == "" {
+                if (Command == "help" || Command == "completion" || Command == "defaults") && Subject == "" {
                     Subject = word
                 } else if Cli.Find(Command).Has("issue") && IssueUrl == "" && word.StartsWith("https://") {
                     IssueUrl = word

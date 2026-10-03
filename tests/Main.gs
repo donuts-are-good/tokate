@@ -61,6 +61,10 @@ func Main(args[]string) int32 {
             CliDiscovery.All(binary)
             return 0
         }
+        if args.Length == 1 && args[0] == "--selection" {
+            DonorSelectionChecks.All(binary)
+            return 0
+        }
         if args.Length == 2 && args[0] == "--cli-shell" {
             CliDiscovery.All(binary, args[1])
             return 0
@@ -89,6 +93,7 @@ func Main(args[]string) int32 {
         ProcessChecks.All()
         ProtectedPathChecks.All()
         CliDiscovery.All(binary)
+        DonorSelectionChecks.All(binary)
         NativeFlow.All(binary)
         CoordinationFlow.All(binary)
         CorrectionChecks.All(binary)
