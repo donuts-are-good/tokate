@@ -433,10 +433,16 @@ internal class V2Contribution {
             )
         }
 
-        internal func VerifyReceipt(repo string, number int32, pull JsonElement, receipt JsonElement) Data {
+        internal func VerifyReceipt(
+            repo string,
+            number int32,
+            pull JsonElement,
+            receipt JsonElement,
+            ready bool = true
+        ) Data {
             RequestData.Keys(
                 receipt,
-                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment"
+                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations"
             )
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let contribution = J.Get(state.Value(), "contribution")
@@ -496,6 +502,11 @@ internal class V2Contribution {
             } else if amendment.ValueKind != JsonValueKind.Undefined {
                 throw Exception("Receipt claims an amendment without coordination authority")
             }
+            let history = Synchronization.History(receipt)
+            if J.Text(amendment, "sync") != J.Text(current, "sync") || RequestData.Canonical(history) != RequestData
+                .Canonical(Synchronization.History(current)) {
+                throw Exception("Synchronization receipt differs from authoritative coordination history")
+            }
             let correction = J.Get(receipt, "correction")
             if !Tokate.Correction.Same(correction, J.Get(metadata, "correction")) {
                 throw Exception("Correction receipt differs from authoritative publication metadata")
@@ -503,13 +514,54 @@ internal class V2Contribution {
             if correction.ValueKind != JsonValueKind.Undefined {
                 RequestData.Correction(correction, J.Text(metadata, "head"), J.Get(record, "policy"))
             }
-            ProtectedPaths.Remote(
+            Synchronization.Live(
                 repo,
-                J.Get(record, "policy"),
-                J.Text(J.Get(record, "approval"), "base"),
+                number,
+                record,
+                J.Text(state.Value(), "approval_id"),
+                history,
                 J.Text(metadata, "fork"),
-                exactHead
+                J.Text(metadata, "branch"),
+                exactHead,
+                ready: ready
             )
+            if history.GetArrayLength() > 0 {
+                Synchronization.Remote(
+                    repo,
+                    policy.Value,
+                    J.Text(J.Get(record, "approval"), "base"),
+                    history,
+                    J.Text(metadata, "fork"),
+                    exactHead
+                )
+            } else {
+                ProtectedPaths.Remote(
+                    repo,
+                    J.Get(record, "policy"),
+                    J.Text(J.Get(record, "approval"), "base"),
+                    J.Text(metadata, "fork"),
+                    exactHead
+                )
+            }
+            if history.GetArrayLength() > 0 {
+                let live = CoordinationState.Load(repo, J.Number(receipt, "issue"))
+                if live.Sha != state.Sha {
+                    throw Exception("Coordination authority changed during receipt validation")
+                }
+                live.Check(repo, J.Number(receipt, "issue"), donor)
+                live.Reservation(J.Get(contribution, "actor"))
+                Synchronization.Live(
+                    repo,
+                    number,
+                    record,
+                    J.Text(state.Value(), "approval_id"),
+                    history,
+                    J.Text(metadata, "fork"),
+                    J.Text(metadata, "branch"),
+                    exactHead,
+                    ready: ready
+                )
+            }
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo

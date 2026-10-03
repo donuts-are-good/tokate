@@ -219,7 +219,7 @@ internal class Publication {
             Terminal.Message("Draft PR: " + run.Text("pr_url"))
         }
 
-        internal func Verify(repo string, number int32) Data {
+        internal func Verify(repo string, number int32, ready bool = true) Data {
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
             let body = J.Text(pull, "body")
             let prefix = "<!-- tokate-receipt:"
@@ -233,7 +233,7 @@ internal class Publication {
             }
             let receipt = J.Parse(body.Substring(start + prefix.Length, end - start - prefix.Length))
             if J.Number(receipt, "version") == 2 {
-                return V2Contribution.VerifyReceipt(repo, number, pull, receipt)
+                return V2Contribution.VerifyReceipt(repo, number, pull, receipt, ready)
             }
             if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
                 J.Get(pull, "user"),
@@ -278,17 +278,56 @@ internal class Publication {
                     J.Get(record, "policy")
                 )
             }
-            ProtectedPaths.Remote(
-                repo,
-                J.Get(record, "policy"),
-                J.Text(approval, "base"),
-                Data.Repo(J.Text(J.Get(head, "repo"), "full_name")),
-                J.Text(head, "sha")
-            )
+            let history = Synchronization.History(receipt)
+            let fork = Data.Repo(J.Text(J.Get(head, "repo"), "full_name"))
+            if history.GetArrayLength() > 0 {
+                Synchronization.Live(
+                    repo,
+                    number,
+                    record,
+                    J.Text(record, "sha"),
+                    history,
+                    fork,
+                    J.Text(head, "ref"),
+                    J.Text(head, "sha"),
+                    ready: ready
+                )
+                Synchronization.Remote(
+                    repo,
+                    J.Get(record, "policy"),
+                    J.Text(approval, "base"),
+                    history,
+                    fork,
+                    J.Text(head, "sha")
+                )
+            } else {
+                ProtectedPaths.Remote(
+                    repo,
+                    J.Get(record, "policy"),
+                    J.Text(approval, "base"),
+                    Data.Repo(J.Text(J.Get(head, "repo"), "full_name")),
+                    J.Text(head, "sha")
+                )
+            }
             let amendment = J.Get(receipt, "amendment")
             if amendment.ValueKind != JsonValueKind.Undefined {
                 Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))))
                 Data.CommitSha(J.Text(receipt, "original_head"))
+                if J.Text(amendment, "sync") != "" {
+                    Synchronization.Live(
+                        repo,
+                        number,
+                        record,
+                        J.Text(record, "sha"),
+                        history,
+                        fork,
+                        J.Text(head, "ref"),
+                        J.Text(head, "sha"),
+                        J.Text(amendment, "sync"),
+                        previous: J.Text(amendment, "previous"),
+                        ready: ready
+                    )
+                }
                 let report = Amendment.Summary(
                     J.Text(amendment, "previous"),
                     J.Text(receipt, "head"),
@@ -298,6 +337,25 @@ internal class Publication {
                 if Amendment.ReportText(body, report) != report {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }
+            }
+            if history.GetArrayLength() > 0 {
+                if J.Text(
+                    Workflow.Approved(repo, J.Number(receipt, "issue"), J.Text(receipt, "donor")),
+                    "sha"
+                ) != J.Text(record, "sha") {
+                    throw Exception("Approval changed during receipt validation")
+                }
+                Synchronization.Live(
+                    repo,
+                    number,
+                    record,
+                    J.Text(record, "sha"),
+                    history,
+                    fork,
+                    J.Text(head, "ref"),
+                    J.Text(head, "sha"),
+                    ready: ready
+                )
             }
             let run = Data()
             run.Fields["repo"] = repo
@@ -370,7 +428,7 @@ internal class Publication {
                 if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
                     throw Exception("PR changed while reading checks")
                 }
-                if run.Number("version") == 2 {
+                {
                     let live = Verify(run.Text("repo"), run.Number("pr"))
                     if live.Text("commit") != run.Text("commit") {
                         throw Exception("Version-2 authority changed while reading checks")

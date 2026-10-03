@@ -86,6 +86,10 @@ func Main(args[]string) int32 {
             CorrectionChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--synchronizations" {
+            SynchronizationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--amendments" {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0
@@ -98,6 +102,7 @@ func Main(args[]string) int32 {
         CoordinationFlow.All(binary)
         CorrectionChecks.All(binary)
         AmendmentFlow.All(binary)
+        SynchronizationChecks.All(binary)
         VerificationChecks.All()
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")

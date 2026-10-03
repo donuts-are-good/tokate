@@ -488,7 +488,9 @@ internal class Fixture {
         if tail.StartsWith("compare/") {
             let comparison = tail.Substring(8).Split("...")
             let sha = comparison[1].Split(':')[1]
-            Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
+            if comparison[1].Split(':')[0] != "owner" {
+                Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
+            }
             let names = GitRaw("upstream", []string{"diff", "--name-status", "-z", "-M", comparison[0], sha}).Split(
                 '\0'
             )
@@ -523,7 +525,7 @@ internal class Fixture {
             }
             let value = Check.Map(
                 "status",
-                "ahead",
+                comparison[0] == sha ? "identical": "ahead",
                 "files",
                 files,
                 "commits",
@@ -671,7 +673,7 @@ internal class Fixture {
             } catch (error Exception) {
                 return Response(404)
             }
-            return Answer(Check.Map("object", Check.Map("sha", sha)))
+            return Answer(Check.Map("object", Check.Map("sha", sha, "type", "commit")))
         }
         if tail.StartsWith("git/commits/") {
             let parents = JsonArray()
@@ -681,12 +683,46 @@ internal class Fixture {
             }
             return Answer(
                 Check.Map(
+                    "sha",
+                    tail.Substring(12),
                     "tree",
                     Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(12) + "^{tree}"})),
                     "parents",
                     parents
                 )
             )
+        }
+        if tail.StartsWith("git/trees/") {
+            let sha = tail.Substring(10).Split('?')[0]
+            let entries = JsonArray()
+            for line in GitRaw(folder, []string{"ls-tree", "-r", "-t", "-z", sha}).Split('\0') {
+                if line == "" {
+                    continue
+                }
+                let tab = line.IndexOf('\t')
+                let fields = line.Substring(0, tab).Split(' ')
+                entries.Add(
+                    Check.Map("path", line.Substring(tab + 1), "mode", fields[0], "type", fields[1], "sha", fields[2])
+                )
+            }
+            let result = Check.Map("sha", sha, "truncated", false, "tree", entries)
+            let fault = Check.Text(State["tree_fault"])
+            if fault == "truncated" {
+                result["truncated"] = JsonValue.Create(true)
+            } else if fault == "missing" {
+                result.AsObject().Remove("tree")
+            } else if fault == "identity" {
+                result["sha"] = JsonValue.Create(String('a', 40))
+            } else if fault == "ancestor" {
+                for i in 0 ... entries.Count {
+                    if Check.Text(entries[i]?["path"]) == ".github" {
+                        entries.RemoveAt(i)
+                        break
+                    }
+                }
+                result["tree"] = entries.DeepClone()
+            }
+            return Answer(result)
         }
         if tail == "git/trees" {
             Env["GIT_INDEX_FILE"] = Path.Combine(Root, "tree.index")
@@ -1041,6 +1077,21 @@ internal class Fixture {
                 File.WriteAllText(StatePath, latest.ToJsonString())
                 Console.Error.WriteLine("Synthetic lost push response")
                 return 1
+            }
+            if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_sync_after_push" {
+                let reference = Git(
+                    "upstream",
+                    []string{"for-each-ref", "--format=%(refname)", "refs/heads/tokate/synchronizations"}
+                ).Split('\n')[0]
+                let grant = Git("upstream", []string{"rev-parse", reference})
+                let tree = Git("upstream", []string{"rev-parse", grant + "^{tree}"})
+                let revoked = Git(
+                    "upstream",
+                    []string{"commit-tree", tree, "-p", grant, "-m", "Revoked during publication"}
+                )
+                Git("upstream", []string{"update-ref", reference, revoked, grant})
+                State["mode"] = JsonValue.Create("")
+                Save()
             }
             if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_after_push" {
                 let latest = Check.Json(File.ReadAllText(StatePath))

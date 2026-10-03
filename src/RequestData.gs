@@ -201,10 +201,13 @@ internal class RequestData {
                     Correction(correction, J.Text(metadata, "head"), JsonElement{})
                 }
             } else if J.Text(value, "action") == "amend" {
-                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification")
+                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync")
                 Data.Repo(J.Text(metadata, "fork"))
                 Data.CommitSha(J.Text(metadata, "head"))
                 Data.CommitSha(J.Text(metadata, "previous"))
+                if J.Get(metadata, "sync").ValueKind != JsonValueKind.Undefined {
+                    Data.CommitSha(J.Text(metadata, "sync"))
+                }
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") || J.Number(
                     metadata,
                     "pr"

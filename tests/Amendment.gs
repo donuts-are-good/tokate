@@ -59,8 +59,16 @@ internal class AmendmentFlow {
             flow.Save()
         }
 
-        private func Original(flow NativeFlow, owner bool = false, mutating bool = false) string {
+        internal func Original(
+            flow NativeFlow,
+            owner bool = false,
+            mutating bool = false,
+            synchronization bool = false
+        ) string {
             flow.Initialize()
+            if synchronization {
+                SynchronizationChecks.SetupOwner(flow)
+            }
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["verification"] = Check.Json(
@@ -327,8 +335,12 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2Original(flow CoordinationFlow, native bool = false) string {
+        internal func V2Original(flow CoordinationFlow, native bool = false, synchronization bool = false) string {
             flow.Initialize()
+            if synchronization {
+                SynchronizationChecks.SetupOwner(flow.Flow)
+                flow.Flow.Approve()
+            }
             let claim = flow.Claim()
             if native {
                 File.WriteAllText(
