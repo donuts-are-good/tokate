@@ -393,38 +393,65 @@ internal class V2Contribution {
         }
 
         internal func VerifyReceipt(repo string, number int32, pull JsonElement, receipt JsonElement) Data {
-            RequestData.Keys(receipt, "version,repo,issue,approval,expected,reservation,donor,head,correction")
+            RequestData.Keys(receipt, "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment")
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let contribution = J.Get(state.Value(), "contribution")
             let metadata = J.Get(contribution, "metadata")
+            let current = Amendment.Current(state.Value())
+            let exactHead = Amendment.Head(state.Value())
             let donor = Data.Login(J.Text(receipt, "donor"))
             let record = state.Check(repo, J.Number(receipt, "issue"), donor)
             state.Reservation(J.Get(contribution, "actor"))
             let stateCommit = GitHub.Api("repos/" + repo + "/git/commits/" + state.Sha)
             let parents = J.Items(J.Get(stateCommit, "parents"))
             if parents.Count != 1 || J.Text(parents[0], "sha") != J.Text(receipt, "expected") || J.Text(
-                contribution,
+                current,
                 "expected"
             ) != J.Text(receipt, "expected") {
                 throw Exception("Receipt does not match the authoritative contribution revision")
             }
             if J.Text(receipt, "repo") != repo || J.Text(receipt, "approval") != J.Text(state.Value(), "approval_id") ||
                 J.Text(receipt, "reservation") != J.Text(J.Get(state.Value(), "reservation"), "reservation") ||
-                J.Number(J.Get(contribution, "outcome"), "pr") != number || J.Text(receipt, "head") != J.Text(
-                metadata,
-                "head"
-            ) ||
-                J.Text(J.Get(pull, "head"), "sha") != J.Text(metadata, "head") || J.Text(
+                J.Number(J.Get(current, "outcome"), "pr") != number || J.Text(receipt, "head") != exactHead || J.Text(
                 J.Get(pull, "head"),
-                "ref"
-            ) != J.Text(metadata, "branch") || J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name") != J.Text(
-                metadata,
-                "fork"
-            ) ||
-                J.Text(J.Get(pull, "base"), "ref") != J.Text(J.Get(record, "approval"), "base_branch") {
+                "sha"
+            ) != exactHead ||
+                J.Text(J.Get(pull, "head"), "ref") != J.Text(metadata, "branch") || J.Text(
+                J.Get(J.Get(pull, "head"), "repo"),
+                "full_name"
+            ) != J.Text(metadata, "fork") || J.Text(J.Get(pull, "base"), "ref") != J.Text(
+                J.Get(record, "approval"),
+                "base_branch"
+            ) {
                 throw Exception("PR receipt lacks current exact-commit coordination authority")
             }
-            Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            policy.ValidateTools(J.Get(metadata, "tools"))
+            let amendment = J.Get(receipt, "amendment")
+            if current.GetRawText() != contribution.GetRawText() {
+                Amendment.ValidateReceipt(amendment, policy)
+                let report = Amendment.Summary(
+                    J.Text(amendment, "previous"),
+                    exactHead,
+                    J.Number(amendment, "seconds"),
+                    J.Get(amendment, "tools")
+                )
+                if Amendment.ReportText(J.Text(pull, "body"), report) != report {
+                    throw Exception("PR amendment report differs from coordination authority")
+                }
+                if J.Text(amendment, "id") != J.Text(current, "request") || J.Text(amendment, "previous") != J.Text(
+                    current,
+                    "previous"
+                ) ||
+                    J.Number(amendment, "seconds") != J.Number(current, "seconds") || RequestData.Canonical(
+                    J.Get(amendment, "tools")
+                ) != RequestData
+                    .Canonical(J.Get(current, "tools")) {
+                    throw Exception("Amendment receipt differs from current coordination record")
+                }
+            } else if amendment.ValueKind != JsonValueKind.Undefined {
+                throw Exception("Receipt claims an amendment without coordination authority")
+            }
             let correction = J.Get(receipt, "correction")
             if !Tokate.Correction.Same(correction, J.Get(metadata, "correction")) {
                 throw Exception("Correction receipt differs from authoritative publication metadata")
@@ -443,7 +470,7 @@ internal class V2Contribution {
             run.Fields["version"] = 2
             run.Fields["repo"] = repo
             run.Fields["pr"] = number
-            run.Fields["commit"] = J.Text(metadata, "head")
+            run.Fields["commit"] = exactHead
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             return run
         }

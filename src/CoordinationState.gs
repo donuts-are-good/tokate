@@ -123,6 +123,7 @@ internal class CoordinationState {
             state.Fields["revoked"] = false
             state.Fields["reservation"] = nil
             state.Fields["contribution"] = nil
+            state.Fields["amendments"] = []Object{}
             if !state.Fields.ContainsKey("outcomes") {
                 state.Fields["outcomes"] = []Object{}
             }

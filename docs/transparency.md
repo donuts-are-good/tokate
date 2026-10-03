@@ -169,7 +169,7 @@ Nested sandbox probes remain permitted. This verifies a checkout; it makes no
 claim that coding work performed outside the managed path was sandboxed.
 
 Source: [Process.gs](../src/Process.gs), [Worker.gs](../src/Worker.gs),
-[Verification.gs](../src/Verification.gs), [Publish.gs](../src/Publish.gs).
+[Verification.gs](../src/Verification.gs), [Publish.gs](../src/Publish.gs), [Amendment.gs](../src/Amendment.gs).
 
 ## Files, logs, and network destinations
 
@@ -213,7 +213,17 @@ reported and still requires exact-commit CI and owner review.
   Usage and model selection remain donor-reported, not independently attested.
   The receipt contains only version, repository, issue, donor, approval revision,
   head commit, model, effort, time budget, network choice, and policy digest for
-  current approval/head validation. A separate run-ID marker supports publication
+  current approval/head validation. Amendment receipts add an original head
+  (v1) and separate amendment UUID, previous head, verification budget and
+  donor-declared editing tools. Original model/time/usage cover original work only.
+  Report and receipt markers identify Tokate-owned body regions; owner edits
+  outside them are retained. Amendment candidates, detailed check output,
+  archived originals and saved publication intent stay local. V2 amendment
+  requests and coordination history expose bounded tool declarations and exact
+  previous/new heads, with verification explicitly donor-reported to the coordinator.
+  `amend` runs no inference and reads current approval, PR and fork before
+  independent verification and publication; interrupted writes are resumed only
+  from saved previous/candidate states. A separate run-ID marker supports publication
   recovery. No local filesystem paths are generated into the PR text.
   Branch names, Git commit contents, the approved issue title as commit message,
   and donor noreply commit identity are also public. Changes to tracked content
@@ -243,7 +253,7 @@ This document is not a claim about their retention practices.
 
 Source: [Core.gs](../src/Core.gs), [Workflow.gs](../src/Workflow.gs),
 [Worker.gs](../src/Worker.gs), [Contribution.gs](../src/Contribution.gs),
-[Publish.gs](../src/Publish.gs).
+[Publish.gs](../src/Publish.gs), [Amendment.gs](../src/Amendment.gs).
 
 ## Bounded public-content audit
 

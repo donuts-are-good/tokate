@@ -115,6 +115,9 @@ internal class Coordinator {
                 )
                 state.Fields["reservation"] = outcome
                 state.Fields["contribution"] = nil
+                state.Fields["amendments"] = []Object{}
+            } else if J.Text(request, "action") == "amend" {
+                outcome = Amend(repo, number, state, record, request, actor, donor)
             } else {
                 state.Reservation(actor)
                 if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
@@ -239,13 +242,206 @@ internal class Coordinator {
             }
             retained.Add(J.Map("uuid", J.Text(request, "uuid"), "binding", binding, "outcome", outcome))
             state.Fields["outcomes"] = retained
-            state.Write(
-                repo,
-                number,
-                J.Text(request, "expected"),
-                CoordinationState.Unix(J.Get(state.Value(), "reservation"), "expires")
-            )
+            try {
+                state.Write(
+                    repo,
+                    number,
+                    J.Text(request, "expected"),
+                    CoordinationState.Unix(J.Get(state.Value(), "reservation"), "expires")
+                )
+            } catch (error Exception) {
+                throw Exception(
+                    error.Message +
+                        "\nPR and coordination writes are not atomic. A physical PR may lack valid authority; inspect verify-pr and redeliver the same saved UUID request only after reading current state.",
+                    error
+                )
+            }
             Terminal.Json(J.Parse(J.Write(outcome)), "Request outcome")
+        }
+
+        internal func OriginalReport(metadata JsonElement) string -> "Donor-declared contribution source: " + J.Text(
+            metadata,
+            "source"
+        ) +
+            ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+
+        private func Amend(
+            repo string,
+            number int32,
+            state CoordinationState,
+            record JsonElement,
+            request JsonElement,
+            actor JsonElement,
+            donor string
+        ) Object {
+            state.Reservation(actor)
+            let value = state.Value()
+            let original = J.Get(value, "contribution")
+            let current = Amendment.Current(value)
+            let metadata = J.Get(request, "metadata")
+            let old = J.Get(original, "metadata")
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            Amendment.Tools(policy, J.Get(metadata, "tools"))
+            if J.Number(metadata, "seconds") > J.Number(policy.Value, "max_seconds") || J.Get(original, "actor")
+                .ToString() != actor.ToString() || J.Text(metadata, "previous") != Amendment.Head(value) || J.Number(
+                metadata,
+                "pr"
+            ) != J.Number(J.Get(current, "outcome"), "pr") || J.Text(metadata, "fork") != J.Text(old, "fork") || J.Text(
+                metadata,
+                "branch"
+            ) != J.Text(old, "branch") || J.Text(metadata, "branch") != "tokate/v2-" + J.Text(
+                J.Get(value, "reservation"),
+                "reservation"
+            ) {
+                throw Exception("Amendment differs from current published contribution authority")
+            }
+            ValidateFork(repo, donor, metadata, actor)
+            ValidateDiff(repo, record, metadata)
+            let comparison = GitHub.Api(
+                "repos/" + repo + "/compare/" + J.Text(metadata, "previous") + "..." + donor + ":" + J.Text(
+                    metadata,
+                    "head"
+                )
+            )
+            if J.Text(comparison, "status") != "ahead" || J.Items(J.Get(comparison, "files")).Count == 0 || J.Items(
+                J.Get(comparison, "files")
+            )
+                .Count >= 300 {
+                throw Exception("Amendment must descend from the previous published head with a bounded nonempty diff")
+            }
+            for file in J.Items(J.Get(comparison, "files")) {
+                for name in[]string{J.Text(file, "filename"), J.Text(file, "previous_filename")} {
+                    if name.StartsWith(".github/workflows/") || name.StartsWith(".github/tokate") {
+                        throw Exception("Amendment changes protected owner configuration")
+                    }
+                }
+            }
+            let run = Data()
+            run.Fields["version"] = 2
+            run.Fields["repo"] = repo
+            run.Fields["id"] = J.Text(J.Get(value, "reservation"), "reservation")
+            run.Fields["head_repo"] = J.Text(metadata, "fork")
+            run.Fields["branch"] = J.Text(metadata, "branch")
+            run.Fields["base_branch"] = J.Text(J.Get(record, "approval"), "base_branch")
+            let amendment = Data()
+            amendment.Fields["id"] = J.Text(request, "uuid")
+            amendment.Fields["previous"] = J.Text(metadata, "previous")
+            amendment.Fields["seconds"] = J.Number(metadata, "seconds")
+            amendment.Fields["tools"] = J.Get(metadata, "tools")
+            let receipt = J.Parse(
+                J.Write(
+                    J.Map(
+                        "version",
+                        2,
+                        "repo",
+                        repo,
+                        "issue",
+                        number,
+                        "approval",
+                        J.Text(value, "approval_id"),
+                        "expected",
+                        J.Text(request, "expected"),
+                        "reservation",
+                        run.Text("id"),
+                        "donor",
+                        donor,
+                        "head",
+                        J.Text(metadata, "head"),
+                        "amendment",
+                        Amendment.PublicRecord(amendment)
+                    )
+                )
+            )
+            let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
+            let body = J.Text(pull, "body")
+            let oldReceipt = Amendment.Receipt(body)
+            let report = Amendment.Summary(
+                J.Text(metadata, "previous"),
+                J.Text(metadata, "head"),
+                J.Number(metadata, "seconds"),
+                J.Get(metadata, "tools")
+            )
+            if RequestData.Canonical(oldReceipt) == RequestData.Canonical(receipt) && Amendment.ReportText(
+                body,
+                OriginalReport(old)
+            ) != report {
+                throw Exception("Candidate PR report differs from saved amendment intent")
+            }
+            if RequestData.Canonical(oldReceipt) != RequestData.Canonical(receipt) {
+                if RequestData.Canonical(oldReceipt) != RequestData.Canonical(Amendment.StateReceipt(value)) {
+                    throw Exception("PR receipt differs from saved previous or candidate state")
+                }
+                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? OriginalReport(old):
+                Amendment.Summary(
+                    J.Text(current, "previous"),
+                    J.Text(current, "head"),
+                    J.Number(current, "seconds"),
+                    J.Get(current, "tools")
+                )
+                if Amendment.ReportText(body, OriginalReport(old)) != previousReport {
+                    throw Exception("Previous PR report differs from current contribution")
+                }
+                let updated = Amendment.ReplaceBody(body, OriginalReport(old), report, receipt)
+                Revalidate(repo, number, state, actor, donor)
+                ValidateFork(repo, donor, metadata, actor)
+                let fresh = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
+                if J.Text(fresh, "body") != body {
+                    throw Exception("PR body changed before amendment write")
+                }
+                GitHub.Api(
+                    "repos/" + repo + "/pulls/" + J.Number(metadata, "pr").ToString(),
+                    J.Map("body", updated),
+                    "PATCH",
+                    expires: CoordinationState.Unix(J.Get(value, "reservation"), "expires")
+                )
+            }
+            Revalidate(repo, number, state, actor, donor)
+            ValidateFork(repo, donor, metadata, actor)
+            let latest = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
+            if RequestData.Canonical(Amendment.Receipt(J.Text(latest, "body"))) != RequestData.Canonical(receipt) ||
+                Amendment.ReportText(J.Text(latest, "body"), OriginalReport(old)) != report {
+                throw Exception("Physical PR receipt changed; amendment has no coordination authority")
+            }
+            let outcome = J.Map(
+                "pr",
+                J.Number(metadata, "pr"),
+                "url",
+                J.Text(latest, "html_url"),
+                "head",
+                J.Text(metadata, "head"),
+                "reservation",
+                run.Text("id")
+            )
+            let history = List[Object]()
+            for prior in J.Items(J.Get(value, "amendments")) {
+                history.Add(prior)
+            }
+            history.Add(
+                J.Map(
+                    "request",
+                    J.Text(request, "uuid"),
+                    "expected",
+                    J.Text(request, "expected"),
+                    "previous",
+                    J.Text(metadata, "previous"),
+                    "head",
+                    J.Text(metadata, "head"),
+                    "seconds",
+                    J.Number(metadata, "seconds"),
+                    "tools",
+                    J.Get(metadata, "tools"),
+                    "actor",
+                    actor,
+                    "donor",
+                    donor,
+                    "outcome",
+                    outcome,
+                    "verification_provenance",
+                    "donor-reported; exact-commit owner CI required"
+                )
+            )
+            state.Fields["amendments"] = history
+            return outcome
         }
 
         private func PositiveId(value JsonElement) int64 {

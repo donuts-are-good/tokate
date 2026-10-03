@@ -18,7 +18,8 @@ internal class CliOption {
         Choices = choices
     }
 
-    internal func Describe(command string) string -> Description.Replace(
+    internal func Describe(command string) string -> command == "amend" && Name == "seconds" ?
+    "Separate positive verification budget; required, at most the owner limit": Description.Replace(
         "{{seconds}}",
         command == "recover" ? "300": "min(3600, owner limit)"
     )
@@ -68,7 +69,7 @@ internal class Cli {
             CliOption("file", "FILE", "Strict claim or publication request JSON"),
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
-            CliOption("commit", "SHA", "Exact external fork commit to verify"),
+            CliOption("commit", "SHA", "Exact candidate commit to verify"),
             CliOption("prepare", "", "Archive original completed work before correction; no checks or publication"),
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
             CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
@@ -124,6 +125,14 @@ internal class Cli {
                 "Fetch and verify an exact external commit in isolation; no inference or publication.",
                 "--run DIR --commit SHA",
                 "external --run /path/to/run --commit SHA"
+            ),
+            CliCommand(
+                "amend",
+                "run,commit,seconds,tools",
+                "run,commit,seconds",
+                "Verify and publish a same-donor review correction; no inference.",
+                "--run DIR --commit SHA --seconds N [--tools FILE]",
+                "amend --run /path/to/run --commit SHA --seconds 300"
             ),
             CliCommand(
                 "submit",
