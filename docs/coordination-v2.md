@@ -25,6 +25,19 @@ outcomes in Git even when they leave the active window. Returning to version 1
 requires an explicit policy edit and fresh version-1 approval. It does not erase
 version-2 state or revive old authority. There is no in-place saved-run conversion.
 
+Review amendments require Tokate 0.2.14 on the donor and the v2 coordinator.
+Existing receipts remain readable without amendments; older v2 coordinators and
+receipt readers reject the new amendment operation/fields. Owners upgrade their
+pinned coordinator explicitly. Amendments support native v1 and v2 records
+without migrating approvals or changing original execution, model, effort, time or usage meanings. Original
+observations cover original execution only. Amendment tools, coding time and
+usage are separately donor-reported; omitted tools mean manual editing with
+unknown coding time and usage. V1 permits declared Codex/OpenAI tools with its
+existing model/effort policy; v2 applies every allowed tool and model pair.
+Amendments retain original evidence and exact previous/new heads locally. V2
+retains the original contribution and adds UUID-bound amendment history under
+the current published coordination revision.
+
 ## Owner installation after a release
 
 Run the released binary with repository write access:
@@ -194,6 +207,24 @@ to pass on that commit and rechecks the head. Receipt validation is read-only an
 never executes donor code. Acceptance and merging remain owner actions. An expired
 reservation invalidates a receipt even when a physical PR remains; renewal is not
 implemented in this initial core.
+
+## Review amendments
+
+After review, commit corrections in the saved checkout and run
+`tokate amend --run DIR --commit SHA --seconds N [--tools FILE]`.
+Manual editing omits tools or uses `[]`. Every declared tool must satisfy policy.
+The command reruns every original check in isolation, pushes without force and
+posts a stable `amend` UUID against current published state. Its metadata contains
+`fork`, `branch`, `previous`, `head`, `pr`, `seconds`, `tools` and
+`verification: "donor-reported-pass"`; it grants no inference authority.
+The coordinator reuses the open PR, replaces only owned report/receipt regions,
+and appends amendment history while retaining the original contribution.
+After the coordinator completes, repeat the identical command to record the new
+head locally. Interrupted push/body/state responses are resolved by reading saved
+previous/candidate state; applied writes are skipped. Changed authority, expired
+reservations and ambiguous physical states require inspection, not a new attempt.
+Exact-head CI and owner acceptance remain required. See [amendment recovery and
+local evidence](reference.md#commands-and-recovery).
 
 ## Traffic and validation
 

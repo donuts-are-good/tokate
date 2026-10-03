@@ -147,7 +147,7 @@ internal class Publication {
             )
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            values["report"] = VerificationReport(run, record)
+            values["report"] = Amendment.Report(VerificationReport(run, record))
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
@@ -256,6 +256,20 @@ internal class Publication {
                 J.Number(receipt, "seconds"),
                 J.Bool(receipt, "network")
             )
+            let amendment = J.Get(receipt, "amendment")
+            if amendment.ValueKind != JsonValueKind.Undefined {
+                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))))
+                Data.CommitSha(J.Text(receipt, "original_head"))
+                let report = Amendment.Summary(
+                    J.Text(amendment, "previous"),
+                    J.Text(receipt, "head"),
+                    J.Number(amendment, "seconds"),
+                    J.Get(amendment, "tools")
+                )
+                if Amendment.ReportText(body, report) != report {
+                    throw Exception("PR amendment report differs from its exact-head receipt")
+                }
+            }
             let run = Data()
             run.Fields["repo"] = repo
             run.Fields["pr"] = number
