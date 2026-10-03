@@ -54,14 +54,19 @@ internal class SuiteChecks {
                 "while [ ! -f peer-ready ]; do sleep 0.01; done\nprintf first-output\nprintf first-error >&2\n":
             Nested("first") +
                 "while [ ! -f peer-ready ]; do sleep 0.01; done\n" +
-                (mode == "failure" ? "printf synthetic-suite-failure >&2; exit 23\n": "sleep 120\n")
+                (
+                mode == "failure" ? "printf synthetic-suite-failure >&2; exit 23\n":
+                "printf first-before-stop; printf first-error-before-stop >&2; sleep 120\n"
+            )
             let peer = mode == "success" ?
             "test ! -e /tmp/suite-private; touch /tmp/suite-private\n" +
                 "test ! -e /var/tmp/suite-private; touch /var/tmp/suite-private\n" +
                 "readlink /proc/self/ns/pid > peer-namespace\n" +
                 Nested("peer") +
                 "while [ ! -f first-ready ]; do sleep 0.01; done\nprintf peer-output\n":
-            Nested("peer") + "while [ ! -f first-ready ]; do sleep 0.01; done\nsleep 120\n"
+            Nested("peer") +
+                "while [ ! -f first-ready ]; do sleep 0.01; done\n" +
+                "printf peer-before-stop; printf peer-error-before-stop >&2; sleep 120\n"
             let jobs = mode == "success" ? []SuiteJob{Job("first", first, 10), Job("peer", peer, 10)}:
             []SuiteJob{
                 Job("first", first, mode == "timeout" ? 1: 10),
@@ -129,6 +134,12 @@ internal class SuiteChecks {
                     Check.Contains(result.Error, "exit 23")
                 }
                 Check.Contains(result.Error, "Runtime limit reached")
+                Check.Contains(result.Output, "peer-before-stop")
+                Check.Contains(result.Error, "peer-error-before-stop")
+                if mode == "timeout" {
+                    Check.Contains(result.Output, "first-before-stop")
+                    Check.Contains(result.Error, "first-error-before-stop")
+                }
                 Check.That(
                     clock.ElapsedMilliseconds >= 3000 && clock.ElapsedMilliseconds < 7000,
                     "Failure did not drain its peer under the explicit three-second bound"
