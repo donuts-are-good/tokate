@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.8 discovers tools, handles data, and
+This document describes how Tokate 0.2.10 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -127,7 +127,10 @@ the canonical checkout is writable, its actual `.git` directory is read-only,
 and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
 `/etc/alternatives` are read-only when present.
 Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
-are mounted; host `/`, `/etc`, `/home`, `/run`, and `/var` are never mounted
+are copied into private invocation storage (at most 4 MiB each) and mounted
+read-only. Copies stay linked until process cleanup finishes and are then removed,
+even on failure; source replacement cannot invalidate nested mounts.
+Host `/`, `/etc`, `/home`, `/run`, and `/var` are never mounted
 wholesale. Checkout/Git path symlinks, Git symlinks, alternate object stores,
 worktree Git files are refused before repository
 code runs. The verifier does not inspect credentials or configuration to infer

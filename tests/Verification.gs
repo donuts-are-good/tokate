@@ -2,11 +2,291 @@ package TokateTests
 
 import Gsharp.Concurrency
 import System
+import System.Collections.Generic
+import System.Diagnostics
 import System.IO
 import Tokate
 
 internal class VerificationChecks {
     shared {
+        internal func All() {
+            RuntimeFiles()
+            RuntimeCancellation()
+            Alternatives()
+            Layouts()
+            FailClosed()
+            Cleanup()
+        }
+
+        internal func RuntimeFiles() {
+            for mode in[]string{"replace", "unlink", "oversize", "inside", "alias"} {
+                using let temp = Temp()
+                let checkout = Path.Combine(temp.Root, "checkout")
+                let storage = Path.Combine(mode == "inside" || mode == "alias" ? checkout: temp.Root, "runtime-tmp")
+                Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+                Directory.CreateDirectory(Path.Combine(checkout, "scripts"))
+                Directory.CreateDirectory(storage)
+                let temporary = mode == "alias" ? Directory.CreateSymbolicLink(
+                    Path.Combine(temp.Root, "runtime-alias"),
+                    storage
+                )
+                    .FullName: storage
+                let source = Path.Combine(checkout, "dns-source")
+                if mode == "oversize" {
+                    File.WriteAllBytes(source, [4 * 1024 * 1024 + 1]byte)
+                } else {
+                    File.WriteAllText(source, "synthetic-runtime-dns\n")
+                }
+                let binary = Path.Combine(checkout, "runtime-tests")
+                File.Copy(Environment.ProcessPath ?? throw Exception("Missing test executable"), binary)
+                File.SetUnixFileMode(binary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+                File.WriteAllText(
+                    Path.Combine(checkout, "scripts/verify.sh"),
+                    "set -eu\n" +
+                        "test \"$$(cat /etc/resolv.conf)\" = synthetic-runtime-dns\n" +
+                        "test \"$$(stat -c '%a %h' /etc/resolv.conf)\" = '600 1'\n" +
+                        "if printf tampered >> /etc/resolv.conf; then exit 1; fi\n" +
+                        "bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --ro-bind /etc/resolv.conf /etc/resolv.conf -- /bin/sh -c 'test \"$$(cat /etc/resolv.conf)\" = synthetic-runtime-dns'\n" +
+                        "touch nested-verified\n"
+                )
+                let args = List[string]{"--die-with-parent", "--unshare-user", "--unshare-pid"}
+                for path in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives"} {
+                    if Directory.Exists(path) {
+                        args.AddRange([]string{"--ro-bind", path, path})
+                    }
+                }
+                if File.Exists("/etc/ld.so.cache") {
+                    args.AddRange([]string{"--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache"})
+                }
+                args.AddRange(
+                    []string{
+                        "--proc",
+                        "/proc",
+                        "--dev",
+                        "/dev",
+                        "--tmpfs",
+                        "/tmp",
+                        "--bind",
+                        temp.Root,
+                        temp.Root,
+                        "--ro-bind",
+                        source,
+                        "/etc/resolv.conf",
+                        "--setenv",
+                        "TMPDIR",
+                        temporary,
+                        "--",
+                        binary,
+                        "--runtime-files-parent",
+                        checkout,
+                        mode
+                    }
+                )
+                let result = Check.Run("/usr/bin/bwrap", args.ToArray(), temp.Env)
+                Check.Success(result)
+                Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked from parent")
+            }
+            Console.WriteLine(
+                "PASS runtime copies survive source replacement/unlink, nested mounts, failure and timeout; oversized input and writable aliases fail closed"
+            )
+        }
+
+        internal func RuntimeFilesParent(checkout string, mode string) {
+            let storage = Environment.GetEnvironmentVariable("TMPDIR") ?? throw Exception("Missing runtime storage")
+            let source = Path.Combine(checkout, "dns-source")
+            if mode == "inside" || mode == "alias" {
+                var refused bool
+                try {
+                    Verification.Run(checkout, []string{"/bin/sh", "-c", "touch runtime-code-ran"}, false, 5)
+                } catch (error Exception) {
+                    Check.Contains(
+                        error.Message,
+                        mode == "inside" ? "runtime storage must be outside the checkout": "directories without checkout/Git symlinks"
+                    )
+                    refused = true
+                }
+                Check.That(refused, "Writable runtime-file alias was accepted")
+                Check.That(
+                    !File.Exists(Path.Combine(checkout, "runtime-code-ran")),
+                    "Code ran with writable runtime storage"
+                )
+            } else if mode == "oversize" {
+                var refused bool
+                try {
+                    Verification.Run(checkout, []string{"/bin/sh", "-c", "touch runtime-code-ran"}, false, 5)
+                } catch (error Exception) {
+                    Check.Contains(error.Message, "Cannot prepare verification runtime file /etc/resolv.conf")
+                    Check.Contains(error.Message, "4 MiB runtime-file limit")
+                    refused = true
+                }
+                Check.That(refused, "Oversized runtime file was accepted")
+                Check.That(!File.Exists(Path.Combine(checkout, "runtime-code-ran")), "Code ran with oversized input")
+            } else {
+                Check.That(
+                    Commands.Checked("/usr/bin/stat", []string{"-c", "%h", "/etc/resolv.conf"}) == "1",
+                    "Synthetic DNS source was not linked"
+                )
+                if mode == "replace" {
+                    File.WriteAllText(source + "-next", "synthetic-replacement-dns\n")
+                    File.Move(source + "-next", source, true)
+                    Check.That(File.ReadAllText(source) == "synthetic-replacement-dns\n", "DNS replacement failed")
+                } else {
+                    File.Delete(source)
+                }
+                Check.That(File.ReadAllText("/etc/resolv.conf") == "synthetic-runtime-dns\n", "Parent DNS changed")
+                Check.That(
+                    Commands.Checked("/usr/bin/stat", []string{"-c", "%h", "/etc/resolv.conf"}) == "0",
+                    "Synthetic DNS mount did not become unlinked"
+                )
+                let broken = Commands.Run(
+                    "/usr/bin/bwrap",
+                    []string{
+                        "--ro-bind",
+                        "/",
+                        "/",
+                        "--ro-bind",
+                        "/etc/resolv.conf",
+                        "/etc/resolv.conf",
+                        "--",
+                        "/bin/true"
+                    }
+                )
+                Check.That(broken.Code != 0, "Direct bind unexpectedly accepted an unlinked source")
+                Check.Contains(broken.Error, "Can't bind mount")
+                Check.Contains(broken.Error, "/etc/resolv.conf")
+                Check.Contains(broken.Error, "No such file or directory")
+                for outcome in[]string{"success", "failure", "timeout"} {
+                    File.Delete(Path.Combine(checkout, "nested-verified"))
+                    File.Delete(Path.Combine(checkout, "heartbeat"))
+                    let script = "set -eu\n" +
+                        "test \"$$(cat /etc/resolv.conf)\" = synthetic-runtime-dns\n" +
+                        "test \"$$(stat -c '%a %h' /etc/resolv.conf)\" = '600 1'\n" +
+                        "printf synthetic-later-dns > dns-source-next && mv dns-source-next dns-source && rm dns-source\n" +
+                        "./runtime-tests --verify-checkout \"$$PWD\"\n" +
+                        "test -f nested-verified\n" +
+                        "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; sleep 0.05; done' </dev/null >/dev/null 2>&1 &\n" +
+                        "while [ ! -s heartbeat ]; do sleep 0.01; done\n" +
+                        (
+                        outcome == "timeout" ? "sleep 120\n":
+                        (outcome == "failure" ? "printf synthetic-verifier-failure >&2; exit 23\n": "exit 0\n")
+                    )
+                    var timedOut bool
+                    try {
+                        let result = Verification.Run(
+                            checkout,
+                            []string{"/bin/sh", "-c", script},
+                            false,
+                            outcome == "timeout" ? 3: 15
+                        )
+                        Check.That(outcome != "timeout", "Verification did not time out")
+                        Check.That(result.Code == (outcome == "failure" ? 23: 0), result.Output + result.Error)
+                        if outcome == "failure" {
+                            Check.Contains(result.Error, "synthetic-verifier-failure")
+                        }
+                    } catch (error Exception) {
+                        Check.That(outcome == "timeout", mode + "/" + outcome + ": " + error.Message)
+                        Check.Contains(error.Message, "Runtime limit reached")
+                        Check.That(!error.Message.Contains("Cannot clean verification runtime files"), error.Message)
+                        timedOut = true
+                    }
+                    Check.That(timedOut == (outcome == "timeout"), "Incorrect runtime timeout result")
+                    Check.That(
+                        File.Exists(Path.Combine(checkout, "nested-verified")),
+                        "Nested verification did not run"
+                    )
+                    Check.That(
+                        Directory.GetFileSystemEntries(storage).Length == 0,
+                        "Runtime copies leaked: " + mode + "/" + outcome + ": " + String.Join(
+                            ", ",
+                            Directory.GetFileSystemEntries(storage)
+                        )
+                    )
+                    let heartbeat = Path.Combine(checkout, "heartbeat")
+                    let length = FileInfo(heartbeat).Length
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(200.0)) { }
+                    }
+                    Check.That(FileInfo(heartbeat).Length == length, "Runtime descendant survived: " + outcome)
+                }
+            }
+            Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked after preparation")
+        }
+
+        internal func RuntimeCancellation() {
+            using let temp = Temp()
+            let checkout = Path.Combine(temp.Root, "checkout")
+            let storage = Path.Combine(temp.Root, "runtime-tmp")
+            Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+            Directory.CreateDirectory(Path.Combine(checkout, "scripts"))
+            Directory.CreateDirectory(storage)
+            temp.Env["TMPDIR"] = storage
+            File.Copy(
+                Environment.ProcessPath ?? throw Exception("Missing test executable"),
+                Path.Combine(temp.Root, "runtime-tests")
+            )
+            File.WriteAllText(
+                Path.Combine(checkout, "scripts/verify.sh"),
+                "set -eu\n" +
+                    "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; sleep 0.05; done' </dev/null >/dev/null 2>&1 &\n" +
+                    "while [ ! -s heartbeat ]; do sleep 0.01; done\n" +
+                    "touch ready\n" +
+                    "sleep 120\n"
+            )
+            let info = ProcessStartInfo("/usr/bin/script")
+            info.WorkingDirectory = temp.Root
+            info.UseShellExecute = false
+            info.RedirectStandardInput = true
+            info.RedirectStandardOutput = true
+            info.RedirectStandardError = true
+            info.Environment.Clear()
+            for entry in temp.Env {
+                info.Environment[entry.Key] = entry.Value
+            }
+            for arg in[]string{
+                "-q",
+                "-e",
+                "-c",
+                "test -t 0; echo $$$$ > verifier.pid; exec ./runtime-tests --verify-checkout checkout",
+                "/dev/null"
+            } {
+                info.ArgumentList.Add(arg)
+            }
+            using let terminal = Process.Start(info) ?? throw Exception("Cannot start verification terminal")
+            try {
+                terminal.StandardInput.Close()
+                let ready = Path.Combine(checkout, "ready")
+                for i in 0 ... 1000 {
+                    if File.Exists(ready) {
+                        break
+                    }
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                    }
+                }
+                Check.That(File.Exists(ready), "Foreground verifier did not become ready")
+                Check.That(Directory.GetFileSystemEntries(storage).Length > 0, "Runtime copies were not created")
+                let pid = int32.Parse(File.ReadAllText(Path.Combine(temp.Root, "verifier.pid")).Trim())
+                Check.Success(Check.Run("/usr/bin/kill", []string{"-INT", pid.ToString()}, temp.Env))
+                Check.That(terminal.WaitForExit(5000), "Verification cancellation did not stop the terminal")
+                let output = terminal.StandardOutput.ReadToEnd() + terminal.StandardError.ReadToEnd()
+                Check.That(terminal.ExitCode != 0, output)
+                Check.Contains(output, "cancelled")
+                Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked on cancellation")
+                let heartbeat = Path.Combine(checkout, "heartbeat")
+                let length = FileInfo(heartbeat).Length
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(200.0)) { }
+                }
+                Check.That(FileInfo(heartbeat).Length == length, "Runtime descendant survived cancellation")
+            } finally {
+                if !terminal.HasExited {
+                    terminal.Kill(true)
+                    terminal.WaitForExit()
+                }
+            }
+            Console.WriteLine("PASS foreground verification cancellation removes runtime copies and stops descendants")
+        }
+
         internal func Alternatives() {
             using let temp = Temp()
             let checkout = Path.Combine(temp.Root, "checkout")
@@ -33,6 +313,8 @@ internal class VerificationChecks {
                     "/",
                     "--proc",
                     "/proc",
+                    "--tmpfs",
+                    "/tmp",
                     "--bind",
                     checkout,
                     checkout,
@@ -174,6 +456,9 @@ internal class VerificationChecks {
             Directory.CreateDirectory(Path.Combine(checkout, ".git"))
             Directory.CreateDirectory(Path.Combine(checkout, "scripts"))
             Directory.CreateDirectory(Path.Combine(temp.Root, "empty"))
+            let storage = Path.Combine(temp.Root, "runtime-tmp")
+            Directory.CreateDirectory(storage)
+            temp.Env["TMPDIR"] = storage
             File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "touch repository-code-ran\n")
             let binary = Environment.ProcessPath ?? throw Exception("Missing test executable")
             for missing in[]bool{true, false} {
@@ -192,6 +477,9 @@ internal class VerificationChecks {
                         "--bind",
                         checkout,
                         checkout,
+                        "--bind",
+                        storage,
+                        storage,
                         "--",
                         binary,
                         "--verify-checkout",
@@ -208,6 +496,10 @@ internal class VerificationChecks {
                 Check.That(
                     !File.Exists(Path.Combine(checkout, "repository-code-ran")),
                     "Verification fell back to host execution"
+                )
+                Check.That(
+                    Directory.GetFileSystemEntries(storage).Length == 0,
+                    "Runtime copies leaked on launch failure"
                 )
             }
             Console.WriteLine("PASS verification fails closed with missing or unusable bubblewrap")

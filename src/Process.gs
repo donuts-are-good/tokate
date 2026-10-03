@@ -44,7 +44,8 @@ internal class Commands {
             harness bool = false,
             github bool = false,
             isolated bool = false,
-            milliseconds int32 = 0
+            milliseconds int32 = 0,
+            cancellation Chan[bool]? = nil
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
@@ -91,6 +92,14 @@ internal class Commands {
             info.Environment["GIT_TERMINAL_PROMPT"] = "0"
             info.Environment["GIT_CONFIG_NOSYSTEM"] = "1"
             info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            if let signal = cancellation {
+                select {
+                    case <- signal {
+                        throw Exception("Command cancelled: " + exe)
+                    }
+                    default { }
+                }
+            }
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
             let stdout = Chan[string](1)
             let stderr = Chan[string](1)
@@ -98,11 +107,26 @@ internal class Commands {
             go Commands.Read(process.StandardError, stderr)
             let onCancel = ConsoleCancelEventHandler(
                 (sender Object?, event ConsoleCancelEventArgs) -> {
+                    if let signal = cancellation {
+                        event.Cancel = true
+                        select {
+                            case signal <- true { }
+                            default { }
+                        }
+                    }
                     KillGroup(-process.Id, 9)
                 }
             )
             Console.CancelKeyPress += onCancel
             try {
+                if let signal = cancellation {
+                    select {
+                        case <- signal {
+                            throw Exception("Command cancelled: " + exe)
+                        }
+                        default { }
+                    }
+                }
                 if input != nil {
                     process.StandardInput.Write(input)
                 }
@@ -113,12 +137,28 @@ internal class Commands {
                     throw Exception("Runtime limit reached for " + exe)
                 }
                 KillGroup(-process.Id, 9)
+                if let signal = cancellation {
+                    select {
+                        case <- signal {
+                            throw Exception("Command cancelled: " + exe)
+                        }
+                        default { }
+                    }
+                }
                 let output = <-stdout
                 let error = <-stderr
                 return CommandResult{Code: process.ExitCode, Output: output, Error: error}
             } finally {
                 Console.CancelKeyPress -= onCancel
                 KillGroup(-process.Id, 9)
+                if cancellation != nil {
+                    if !process.HasExited {
+                        try {
+                            process.Kill(true)
+                        } catch (error InvalidOperationException) { }
+                    }
+                    process.WaitForExit()
+                }
             }
         }
 
