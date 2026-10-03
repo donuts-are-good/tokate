@@ -20,18 +20,19 @@ internal class Verification {
             return absolute
         }
 
-        private func GitDirectory(path string) {
+        private func GitDirectory(path string, budget RuntimeBudget? = nil) {
             for entry in Directory.EnumerateFileSystemEntries(path) {
+                budget?.Remaining()
                 if FileInfo(entry).LinkTarget != nil {
                     throw Exception("Verification refuses Git symlinks: " + entry)
                 }
                 if Directory.Exists(entry) {
-                    GitDirectory(entry)
+                    GitDirectory(entry, budget)
                 }
             }
         }
 
-        internal func Validate(directory string) string {
+        internal func Validate(directory string, budget RuntimeBudget? = nil) string {
             let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory))
             if absolute == "/tmp/tokate-home" || absolute.StartsWith("/tmp/tokate-home/") {
                 throw Exception("Unsupported verification checkout layout: " + absolute)
@@ -48,7 +49,7 @@ internal class Verification {
                 }
             }
             let git = DirectoryPath(Path.Combine(checkout, ".git"))
-            GitDirectory(git)
+            GitDirectory(git, budget)
             for file in[]string{"commondir", "objects/info/alternates", "objects/info/http-alternates", "info/grafts"} {
                 if File.Exists(Path.Combine(git, file)) || Directory.Exists(Path.Combine(git, file)) {
                     throw Exception("Verification requires self-contained Git metadata: " + file)
@@ -57,9 +58,15 @@ internal class Verification {
             return checkout
         }
 
-        internal func Candidate(directory string) string {
-            let checkout = Validate(directory)
-            for entry in Commands.Git(checkout, "ls-files", "-v", "-z").Split('\0') {
+        internal func Candidate(directory string, budget RuntimeBudget? = nil) string {
+            let checkout = Validate(directory, budget)
+            let evidence = budget?.Git(checkout, "ls-files", "-v", "-z") ?? Commands.Git(
+                checkout,
+                "ls-files",
+                "-v",
+                "-z"
+            )
+            for entry in evidence.Split('\0') {
                 if entry != "" && (Char.IsLower(entry[0]) || entry[0] == 'S') {
                     throw Exception(
                         "Candidate index contains assume-unchanged or skip-worktree flags; inspect before continuing"
@@ -149,7 +156,8 @@ internal class Verification {
             command JsonElement,
             directory string,
             network bool,
-            seconds int32
+            seconds int32,
+            budget RuntimeBudget? = nil
         ) CommandResult {
             let checkout = DirectoryPath(directory)
             let root = DirectoryPath(storage)
@@ -184,7 +192,7 @@ internal class Verification {
                 for word in J.Items(command) {
                     words.Add(word.GetString() ?? "")
                 }
-                let result = Run(checkout, words.ToArray(), network, seconds, outputPath, errorPath)
+                let result = Run(checkout, words.ToArray(), network, seconds, outputPath, errorPath, budget)
                 check["state"] = "completed"
                 check["exit_code"] = result.Code
                 Evidence(check, result)
@@ -220,14 +228,15 @@ internal class Verification {
             network bool,
             seconds int32,
             outputPath string = "",
-            errorPath string = ""
+            errorPath string = "",
+            budget RuntimeBudget? = nil
         ) CommandResult {
             if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
                 throw Exception(
                     "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
                 )
             }
-            let checkout = Validate(directory)
+            let checkout = Validate(directory, budget)
             for path in[]string{outputPath, errorPath} {
                 if path != "" {
                     let parent = DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
@@ -354,7 +363,8 @@ internal class Verification {
                         isolated: true,
                         cancellation: cancellation,
                         outputPath: outputPath,
-                        errorPath: errorPath
+                        errorPath: errorPath,
+                        budget: budget
                     )
                 } catch (error Exception) {
                     CleanupRuntime(storage.FullName, error)

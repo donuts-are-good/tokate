@@ -49,7 +49,8 @@ internal class Worker {
             args[]string,
             input string? = nil,
             seconds int32 = 60,
-            capture bool = false
+            capture bool = false,
+            budget RuntimeBudget? = nil
         ) CommandResult {
             for path in[]string{
                 directory,
@@ -92,7 +93,8 @@ internal class Worker {
                 true,
                 cancellation: cancellation,
                 outputPath: capture ? Path.Combine(directory, "events.jsonl"): "",
-                errorPath: capture ? Path.Combine(directory, "stderr.log"): ""
+                errorPath: capture ? Path.Combine(directory, "stderr.log"): "",
+                budget: budget
             )
         }
 
@@ -195,6 +197,7 @@ internal class Worker {
                 policy.Digest = run.Text("policy_hash")
                 DonorSelection.Revalidate(run, policy)
             }
+            RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
             let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
@@ -298,13 +301,14 @@ internal class Worker {
             run.Fields["codex_version"] = version
             run.Save(directory)
             Terminal.Step(
-                "Running " + run.Text("model") + " / " + run.Text("effort") + " with a " + run.Number("seconds")
-                    .ToString() + "s budget..."
+                "Running " + run.Text("model") + " / " + run.Text("effort") + ": " + RuntimeBudget.Description(run) +
+                    "..."
             )
             let timer = Stopwatch.StartNew()
             try {
                 PublicOutput.FailureCode = "inference_failed"
-                let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true)
+                let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
+                let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true, coding)
                 run.Fields["output_truncated"] = result.OutputTruncated
                 run.Fields["error_truncated"] = result.ErrorTruncated
                 run.Fields["inference_exit_code"] = result.Code
@@ -324,7 +328,15 @@ internal class Worker {
                 run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 run.Save(directory)
                 PublicOutput.FailureCode = "invalid_state"
-                Contribution.Finish(directory, run, record, usage, timer, run.Number("seconds"))
+                Contribution.Finish(
+                    directory,
+                    run,
+                    record,
+                    usage,
+                    timer,
+                    run.Number("seconds"),
+                    run.Number("verification_reserve")
+                )
             } catch (error Exception) {
                 if run.Text("failure_stage") == "inference" {
                     if error is CommandInterrupted interrupted {

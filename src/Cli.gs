@@ -90,6 +90,11 @@ internal class Cli {
             CliOption("non-interactive", "", "Never prompt; require an eligible default or explicit choice"),
             CliOption("yes", "", "Confirm inference with the selected pair; never accept a substitute"),
             CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
+            CliOption(
+                "verification-reserve",
+                "N",
+                "Managed verification reserve in seconds; positive and smaller than total; default: 0"
+            ),
             CliOption("fork", "LOGIN/REPO", "Donor fork; default: your login/upstream name"),
             CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
             CliOption("run", "DIR", "Saved run directory"),
@@ -201,7 +206,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,allow-network,runs",
+                "repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
                 "repo,issue,state,source",
                 "Save a v2 run for an existing reservation; no inference or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]",
@@ -308,7 +313,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,harness,provider,model,effort,availability,non-interactive,seconds,fork,runs,allow-network",
+                "repo,issue,harness,provider,model,effort,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network",
                 "repo,issue",
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]",
@@ -318,7 +323,7 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,harness,provider,model,effort,availability,non-interactive,yes,seconds,fork,runs,allow-network,run",
+                "repo,issue,harness,provider,model,effort,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run",
                 "repo,issue",
                 "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
@@ -610,7 +615,10 @@ internal class Cli {
                     throw Exception("--run conflicts with an issue URL")
                 }
             }
-            for key in[]string{"seconds", "timeout", "pr"} {
+            if args.Get("verification-reserve") != "" && args.Command == "prepare" && args.Get("source") != "tokate" {
+                throw Exception("--verification-reserve requires --source tokate")
+            }
+            for key in[]string{"seconds", "verification-reserve", "timeout", "pr"} {
                 if args.Get(key) != "" {
                     args.Number(key)
                 }

@@ -198,6 +198,9 @@ For Tokate-launched execution, prepare with `--source tokate` and exactly one
 `codex`/`openai` tool declaration, then `work --run RUN_DIR` and `submit --run
 RUN_DIR`. Omitting `--tools` uses explicit selection arguments or an eligible
 Tokate-owned donor default; see [donor selection](reference.md#explicit-donor-defaults-and-selection).
+Optional `--verification-reserve N` allocates a positive part of the unchanged
+total budget to independent verification; see [the command reference](reference.md).
+The saved allocation is reused by `work --run` and cannot be overridden there.
 An explicit declaration must match invocation choices. Tokate records its observed invocation/requested model and effort and
 tool-reported usage locally. This still does not cryptographically attest model
 identity or billing. `work` saves the verified commit; version-2 publication goes

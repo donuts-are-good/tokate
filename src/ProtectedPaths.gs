@@ -226,7 +226,14 @@ internal class ProtectedPaths {
             }
         }
 
-        internal func Local(checkout string, policy JsonElement, approval JsonElement, base string, head string = "") {
+        internal func Local(
+            checkout string,
+            policy JsonElement,
+            approval JsonElement,
+            base string,
+            head string = "",
+            budget RuntimeBudget? = nil
+        ) {
             let args = List[string]{
                 "diff",
                 "--no-ext-diff",
@@ -244,7 +251,7 @@ internal class ProtectedPaths {
                 args.Add(Data.CommitSha(head))
             }
             args.Add("--")
-            let output = Commands.GitRaw(checkout, args.ToArray())
+            let output = Commands.GitRaw(checkout, args.ToArray(), budget)
             if output == "" || !output.EndsWith("\0", StringComparison.Ordinal) {
                 throw Exception("Contribution needs complete nonempty Git path evidence")
             }

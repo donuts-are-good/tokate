@@ -134,6 +134,9 @@ internal class V2Contribution {
                 "seconds",
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
+            if args.Get("verification-reserve") != "" {
+                run.Fields["verification_reserve"] = RuntimeBudget.Reserve(args, run.Number("seconds"))
+            }
             run.Fields["network"] = args.Get("allow-network") == "true"
             run.Fields["state"] = "claimed"
             if source == "tokate" {
@@ -165,6 +168,9 @@ internal class V2Contribution {
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
+            if source == "tokate" {
+                Terminal.Step(RuntimeBudget.Description(run))
+            }
             run.Save(directory)
             Terminal.Message("Prepared contribution. Run: " + directory)
         }

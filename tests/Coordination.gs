@@ -311,7 +311,8 @@ internal class CoordinationFlow : IDisposable {
         source string = "external",
         code int32 = 0,
         seconds string = "30",
-        network bool = false
+        network bool = false,
+        reserve string = ""
     ) string {
         let state = State()
         let args = List[string]{
@@ -330,6 +331,9 @@ internal class CoordinationFlow : IDisposable {
             seconds,
             "--runs",
             Path.Combine(Flow.Temp.Root, "runs")
+        }
+        if reserve != "" {
+            args.AddRange([]string{"--verification-reserve", reserve})
         }
         if network {
             args.Add("--allow-network")
