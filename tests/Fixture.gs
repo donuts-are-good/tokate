@@ -328,6 +328,15 @@ internal class Fixture {
                     FileInfo("/proc/self/ns/" + name).LinkTarget ?? throw Exception("Missing namespace")
                 )
             }
+            File.WriteAllText(Path.Combine(Root, "namespace-ready"), Environment.ProcessId.ToString())
+            let release = Path.Combine(Root, "namespace-release")
+            let clock = System.Diagnostics.Stopwatch.StartNew()
+            while !File.Exists(release) && clock.Elapsed.TotalSeconds < 5 {
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                }
+            }
+            Check.That(File.Exists(release), "Namespace acknowledgment timed out")
         }
         if mode == "verification_fail" {
             File.WriteAllText(Path.Combine(checkout, "other.txt"), "False success")
