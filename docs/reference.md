@@ -127,10 +127,11 @@ POST, PATCH, PUT and DELETE are never automatically retried. After a failure,
 remote state may have changed even if the response was lost. Inspect that state
 before retrying; for publication use the saved run's `publish` command, which
 looks for an existing PR and reuses it without inference or another PR write.
-These transport bounds do not implement atomic coordination (#11),
-pause/resume/handoff or coordinator workflow traffic accounting (#19), or the
-remaining contribution lifecycle criteria (#14); those issues remain open for
-their integrated flows.
+Version 1 retains its original branch-claim semantics. Explicitly opted-in
+[version-2 coordination](coordination-v2.md) adds authoritative single-parent
+state updates, expiring reservations, replay recovery, external work and measured
+workflow/command traffic budgets. Pause/resume/handoff and the remaining lifecycle
+and traffic flows remain #14/#19.
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 

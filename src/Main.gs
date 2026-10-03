@@ -33,6 +33,25 @@ func Main(args[]string) int32 {
             return Startup.Doctor()
         } else if options.Command == "init" {
             Workflow.Init(options)
+        } else if options.Command == "coordinator-setup" {
+            CoordinatorSetup.Run(options)
+        } else if options.Command == "coordinate" {
+            Coordinator.Run(options)
+        } else if options.Command == "coordination" {
+            options.Allow("repo,issue")
+            let state = CoordinationState.Load(Data.Repo(options.Need("repo")), options.Number("issue"))
+            Terminal.Json(
+                J.Parse(J.Write(J.Map("sha", state.Sha, "state", state.Value()))),
+                "Contribution coordination"
+            )
+        } else if options.Command == "request" {
+            V2Contribution.Request(options)
+        } else if options.Command == "prepare" {
+            V2Contribution.Prepare(options)
+        } else if options.Command == "external" {
+            V2Contribution.External(options)
+        } else if options.Command == "submit" {
+            V2Contribution.Submit(options)
         } else if options.Command == "approve" || options.Command == "assign" {
             Workflow.Approve(options)
         } else if options.Command == "revoke" {
@@ -47,7 +66,11 @@ func Main(args[]string) int32 {
             }
             let directory = options.Get("run") == "" ? Workflow.Claim(options): Path.GetFullPath(options.Need("run"))
             Worker.Execute(directory)
-            Publication.Publish(directory)
+            if Data.Load(directory).Number("version") == 2 {
+                V2Contribution.Commit(directory)
+            } else {
+                Publication.Publish(directory)
+            }
         } else if options.Command == "recover" {
             options.Allow("run,seconds")
             let directory = Path.GetFullPath(options.Need("run"))

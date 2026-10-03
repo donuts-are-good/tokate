@@ -156,6 +156,9 @@ internal class Worker {
                 FileShare.None
             )
             let run = Data.Load(directory)
+            if run.Number("version") == 2 && run.Text("source") != "tokate" {
+                throw Exception("External work uses external --run; inference is never launched")
+            }
             if run.Text("state") != "claimed" {
                 throw Exception(
                     "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
