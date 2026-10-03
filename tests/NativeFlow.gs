@@ -698,7 +698,6 @@ internal class NativeFlow : IDisposable {
                     flow.Git("-C", checkout, "diff", "--name-only", base, malicious) == "result.txt",
                     "Replacement did not mask protected change"
                 )
-                // Model a record produced by the vulnerable verifier without changing its saved patch.
                 saved["commit"] = JsonValue.Create(malicious)
                 File.WriteAllText(savedPath, saved.ToJsonString())
                 let probe = Path.Combine(flow.Temp.Root, "probe.git")
@@ -709,7 +708,6 @@ internal class NativeFlow : IDisposable {
                     "hidden protected change"
                 )
                 Check.Contains(Commands.Git(checkout, "diff", "--name-only", base, malicious), ".github/tokate-pr.md")
-                // Independent verification commands see the same canonical object as a remote.
                 let check = Verification.Run(
                     checkout,
                     []string{
