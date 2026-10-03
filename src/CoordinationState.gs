@@ -57,7 +57,7 @@ internal class CoordinationState {
         if J.Bool(state, "revoked") || !GitHub.HasLabel(task) || !GitHub.Assigned(task, assigned) ||
             (donor != "" && !String.Equals(donor, assigned, StringComparison.OrdinalIgnoreCase)) ||
             J.Text(approval, "issue_hash") != GitHub.Fingerprint(task) {
-            throw Exception("Approval revoked, task changed, or donor is no longer eligible")
+            throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
         }
         let configuration = ApprovalBase.Check(repo, approval, 2)
         return J.Parse(
@@ -82,7 +82,7 @@ internal class CoordinationState {
             Unix(reservation, "expires") <= DateTimeOffset
             .UtcNow
             .ToUnixTimeSeconds() {
-            throw Exception("Reservation expired or belongs to a replaced donor")
+            throw CliFailure("stale_approval", "Reservation expired or belongs to a replaced donor")
         }
     }
 

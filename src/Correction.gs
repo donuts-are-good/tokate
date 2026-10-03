@@ -142,7 +142,7 @@ internal class Correction {
                 let pinned = J.Parse(File.ReadAllText(Path.Combine(archive, "approval.json")))
                 for key in[]string{"approval", "policy", "template"} {
                     if RequestData.Canonical(J.Get(pinned, key)) != RequestData.Canonical(J.Get(record, key)) {
-                        throw Exception("Original approval, policy or template changed")
+                        throw CliFailure("stale_approval", "Original approval, policy or template changed")
                     }
                 }
             }
@@ -497,7 +497,7 @@ internal class Correction {
                 for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
                     let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
                     if remaining < 1 {
-                        throw Exception("Correction verification budget exhausted")
+                        throw CliFailure("verification_failed", "Correction verification budget exhausted")
                     }
                     let words = List[string]()
                     for word in J.Items(command) {
@@ -533,7 +533,10 @@ internal class Correction {
                 if failed {
                     correction.Fields["failure_stage"] = "owner_verification"
                     correction.Fields["failure_reason"] = "verification_failed"
-                    throw Exception("Owner verification failed for the explicit correction; all results are preserved")
+                    throw CliFailure(
+                        "verification_failed",
+                        "Owner verification failed for the explicit correction; all results are preserved"
+                    )
                 }
                 Authority(directory, run)
                 correction.Fields["state"] = "verified"
@@ -545,7 +548,11 @@ internal class Correction {
                 correction.Fields["state"] = "failed"
                 correction.Fields["error"] = error.Message
                 Save(directory, correction)
-                throw Exception(
+                let code = error is CliFailure failure ? failure.Code:
+                (correction.Text("failure_reason") == "verification_failed" ? "verification_failed": "invalid_state")
+                throw CliFailure(
+                    code,
+                    PublicOutput.Enabled ? PublicOutput.Message(code):
                     correction.Text("failure_reason") + " (" + correction.Text("failure_stage") + "): " + error.Message
                 )
             }

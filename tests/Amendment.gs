@@ -439,6 +439,15 @@ internal class AmendmentFlow {
                 flow.Coordinate(flow.Event(nextRequest))
                 Amend(flow.Flow, run, second)
                 AssertPublished(flow.Flow, run, second)
+                let current = CliDiscovery.Envelope(
+                    flow.Flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}),
+                    "coordination",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(current["data"]?["contribution"]?["head"]) == second,
+                    "Structured coordination omitted current amended head"
+                )
                 Check.That(
                     flow.State()["state"]?["amendments"]?.AsArray().Count == 2,
                     "V2 continuation lost prior amendment"
@@ -517,8 +526,51 @@ internal class AmendmentFlow {
             }
         }
 
+        private func Structured(binary string) {
+            using let flow = NativeFlow(binary)
+            let run = Original(flow)
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let failedCommit = Edit(flow, run, "")
+            let failed = CliDiscovery.Envelope(
+                flow.Call([]string{"amend", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
+                "amend",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(failed["data"]?["amendment"]?["state"]) == "failed" && Check.Text(
+                    failed["data"]?["amendment"]?["commit"]
+                ) == failedCommit,
+                "JSON amendment lost failed attempt"
+            )
+            let commit = Edit(flow, run)
+            let published = CliDiscovery.Envelope(
+                flow.Call([]string{"amend", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
+                "amend",
+                "ok"
+            )
+            Check.That(
+                Check.Text(published["data"]?["amendment"]?["state"]) == "published" && Check.Text(
+                    published["data"]?["commit"]
+                ) == commit,
+                "JSON amendment lost published head"
+            )
+            AssertOriginal(run, original)
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["exec_count"]) == "1" && flow.State["pulls"]?.AsArray().Count == 1,
+                "JSON amendment repeated inference or PR"
+            )
+            CliDiscovery.Envelope(
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
+                "verify-pr",
+                "ok"
+            )
+        }
+
         internal func All(binary string, only string = "") {
             for name in[]string{
+                "Structured",
                 "V1",
                 "V1Owner",
                 "V1Push",
@@ -538,6 +590,9 @@ internal class AmendmentFlow {
                     continue
                 }
                 switch name {
+                    case "Structured" {
+                        Structured(binary)
+                    }
                     case "V1" {
                         V1(binary)
                     }

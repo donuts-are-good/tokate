@@ -47,6 +47,9 @@ tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 
 Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and AI usage stay under your control.
 
+For assistants, every command accepts explicit `--json`; `tokate help --json` lists
+arguments and effects. See the [versioned output contract](docs/reference.md#explicit-structured-output).
+
 Use `tokate work --help`, `tokate help work` or `-h` for focused command help.
 You can pass an issue URL directly, or omit `--repo` when local remotes identify
 one GitHub repository. [Shell completion and input rules](docs/reference.md#issue-urls-and-local-repository-context) cover Bash, Zsh and Fish.

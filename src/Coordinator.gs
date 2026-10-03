@@ -85,7 +85,7 @@ internal class Coordinator {
                 request,
                 "approval"
             ) {
-                throw Exception("Stale state or approval; evicted requests cannot repeat effects")
+                throw CliFailure("stale_approval", "Stale state or approval; evicted requests cannot repeat effects")
             }
             let record = state.Check(repo, number, donor)
             var outcome Object = J.Map()
@@ -462,7 +462,7 @@ internal class Coordinator {
         private func Revalidate(repo string, issue int32, state CoordinationState, actor JsonElement, donor string) {
             let live = CoordinationState.Load(repo, issue)
             if live.Sha != state.Sha {
-                throw Exception("Coordination revision changed during publication")
+                throw CliFailure("stale_approval", "Coordination revision changed during publication")
             }
             live.Check(repo, issue, donor)
             live.Reservation(actor)

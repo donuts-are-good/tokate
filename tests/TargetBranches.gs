@@ -453,7 +453,128 @@ internal class TargetBranches {
             )
         }
 
-        internal func All(binary string) {
+        private func Structured(binary string) {
+            for version in[]int32{1, 2} {
+                using let test = DecreeFlow(binary, version)
+                test.Initialize()
+                let flow = test.Flow
+                test.Text("synthetic-private-owner-instruction-marker\n")
+                let base = Target(flow, "release")
+                flow.Call(
+                    []string{
+                        "approve",
+                        "--repo",
+                        "owner/project",
+                        "--issue",
+                        "1",
+                        "--donor",
+                        "donor",
+                        "--base-branch",
+                        "release",
+                        "--json"
+                    },
+                    owner: true
+                )
+                if version == 2 {
+                    let result = flow.Call(
+                        []string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}
+                    )
+                    let approval = CliDiscovery.Envelope(result, "coordination", "ok")["data"]?["approval"]
+                    Check.That(
+                        Check.Text(approval?["base_branch"]) == "release" && Check.Text(approval?["base"]) == base &&
+                            Check.Text(approval?["authority_branch"]) == "main",
+                        "JSON merged target and authority"
+                    )
+                    Check.That(
+                        Check.Text(approval?["decree"]?["present"]) == "true" && Check.Text(
+                            approval?["decree"]?["sha256"]
+                        ) == Data.Hash("synthetic-private-owner-instruction-marker\n"),
+                        "JSON lost instruction presence/hash"
+                    )
+                    Check.That(
+                        !result.Output.Contains("synthetic-private-owner-instruction-marker") &&
+                            approval?["decree"]?["text"] == nil,
+                        "Generic JSON exposed instruction text"
+                    )
+                    test.Legacy()
+                    let legacy = CliDiscovery.Envelope(
+                        flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}),
+                        "coordination",
+                        "ok"
+                    )
+                    Check.That(
+                        legacy["data"]?["approval"]?["decree"] == nil,
+                        "JSON fabricated legacy snapshot tracking"
+                    )
+                }
+                flow.Temp.Env["GH_TOKEN"] = "fixture-owner"
+                File.WriteAllText(Path.Combine(flow.Temp.Env["GH_CONFIG_DIR"], "identity"), "owner")
+                for command in[]string{"approve", "assign"} {
+                    let shell = "stty -echo; '" +
+                        binary +
+                        "' " +
+                        command +
+                        " --repo owner/project --issue 1 --donor donor --json 2> '" +
+                        Path.Combine(flow.Temp.Root, "diagnostics") + "'"
+                    let result = Check.Run(
+                        "/usr/bin/script",
+                        []string{"-q", "-e", "-c", shell, "/dev/null"},
+                        flow.Temp.Env,
+                        ""
+                    )
+                    CliDiscovery.Envelope(result, command, "ok")
+                    Check.That(!result.Output.Contains("Target branch"), "JSON terminal approval prompted")
+                    Check.That(Check.Text(test.Approval()["base_branch"]) == "main", "JSON default target changed")
+                    let metadata = CliDiscovery.Envelope(flow.Call([]string{"help", command, "--json"}), "help", "ok")
+                    Check.That(
+                        metadata["data"]?["commands"]?[0]?["arguments"]?.ToJsonString().Contains("base-branch") == true,
+                        "JSON metadata lost target option"
+                    )
+                }
+                flow.NoInference()
+            }
+            using let policyFlow = NativeFlow(binary)
+            policyFlow.Initialize()
+            let path = Path.Combine(policyFlow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(path))
+            policy["protected_paths"] = Check.Json("[\"scripts/check.sh\",\" literal name\"]")
+            for mode in[]string{"whitelist", "unrestricted"} {
+                if mode == "unrestricted" {
+                    policy["model_policy"] = JsonValue.Create(mode)
+                    policy.AsObject().Remove("models")
+                }
+                File.WriteAllText(path, policy.ToJsonString())
+                policyFlow.Commit("Projected owner model and path policy")
+                let projected = CliDiscovery.Envelope(
+                    policyFlow.Call([]string{"policy", "--repo", "owner/project", "--json"}),
+                    "policy",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(projected["data"]?["policy"]?["model_policy"]) == mode,
+                    "JSON lost effective model mode"
+                )
+                Check.That(
+                    JsonNode.DeepEquals(projected["data"]?["policy"]?["protected_paths"], policy["protected_paths"]) &&
+                        Check.Text(projected["data"]?["policy"]?["protected_paths_count"]) == "2" && Check.Text(
+                        projected["truncated"]
+                    ) == "false",
+                    "JSON lost protected path values/count"
+                )
+            }
+            policyFlow.NoInference()
+            Console.WriteLine(
+                "PASS target JSON authority, instruction summaries, model/path policies and terminal approval without prompts"
+            )
+        }
+
+        internal func All(binary string, selected string = "") {
+            if selected != "" {
+                Check.That(selected == "Structured", "Unknown target test group")
+                Structured(binary)
+                return
+            }
+            Structured(binary)
             for branch in[]string{"release", "release/next"} {
                 V1(binary, branch)
                 Console.WriteLine("PASS V1 selected target " + branch)

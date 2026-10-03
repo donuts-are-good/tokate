@@ -161,7 +161,8 @@ internal class Worker {
                 throw Exception("External work uses external --run; inference is never launched")
             }
             if run.Text("state") != "claimed" {
-                throw Exception(
+                throw CliFailure(
+                    "invalid_state",
                     "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
                 )
             }
@@ -179,7 +180,11 @@ internal class Worker {
             let prompt = TaskContext.Build(run, record)
             let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
-                throw Exception("Run codex login with your ChatGPT subscription first")
+                throw CliFailure(
+                    "authentication_required",
+                    "Run codex login with your ChatGPT subscription first",
+                    []string{"codex", "login"}
+                )
             }
             let version = Commands.Checked("codex", []string{"--version"}, harness: true)
             if !version.StartsWith("codex-cli 0.") {
@@ -278,6 +283,7 @@ internal class Worker {
             )
             let timer = Stopwatch.StartNew()
             try {
+                PublicOutput.FailureCode = "inference_failed"
                 let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"))
                 File.WriteAllText(Path.Combine(directory, "events.jsonl"), result.Output)
                 File.WriteAllText(Path.Combine(directory, "stderr.log"), result.Error)
@@ -285,7 +291,7 @@ internal class Worker {
                 if result.Code != 0 {
                     run.Fields["failure_reason"] = "inference_failed"
                     run.Fields["failure_stage"] = "inference"
-                    throw Exception("Codex failed. See stderr.log in " + directory)
+                    throw CliFailure("inference_failed", "Codex failed. Inspect the private stderr.log artifact.")
                 }
                 run.Fields["failure_reason"] = "incomplete_turn"
                 run.Fields["failure_stage"] = "inference"
@@ -294,10 +300,14 @@ internal class Worker {
                 run.Fields["usage"] = usage
                 run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 run.Save(directory)
+                PublicOutput.FailureCode = "invalid_state"
                 Contribution.Finish(directory, run, record, usage, timer, run.Number("seconds"))
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
                 run.Fields["error"] = error.Message
+                if !run.Fields.ContainsKey("failure_reason") {
+                    run.Fields["failure_reason"] = PublicOutput.FailureCode
+                }
                 run.Save(directory)
                 throw error
             }
@@ -316,7 +326,7 @@ internal class Worker {
                     completed = false
                 }
                 if J.Text(item, "type") == "turn.failed" {
-                    throw Exception("Codex reported a failed turn")
+                    throw CliFailure("inference_failed", "Codex reported a failed turn")
                 }
                 if J.Text(item, "type") == "turn.completed" {
                     completed = true
@@ -328,7 +338,7 @@ internal class Worker {
             }
             let report = File.ReadAllText(Path.Combine(directory, "report.md"))
             if !completed || completions != 1 || String.IsNullOrWhiteSpace(report) {
-                throw Exception("Codex did not produce a completed turn and report")
+                throw CliFailure("inference_failed", "Codex did not produce a completed turn and report")
             }
             return usage
         }

@@ -9,6 +9,17 @@ import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
 
+internal class CliFailure : Exception {
+    internal let Code string
+    internal let Action[]string
+    internal let Summary string
+    internal init(code string, message string, action[]string = nil, summary string = "") : base(message) {
+        Code = code
+        Action = action ?? []string{}
+        Summary = summary == "" ? message: summary
+    }
+}
+
 internal class Args {
     internal let Values Dictionary[string, string] = Dictionary[string, string]()
     internal var Command string = "help"
@@ -149,7 +160,7 @@ internal class Data {
         }
 
         internal func CommitSha(value string) string {
-            if !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
+            if value.Length != 40 || !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
                 throw Exception("Expected an exact 40-character Git commit SHA")
             }
             return value

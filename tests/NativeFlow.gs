@@ -246,6 +246,140 @@ internal class NativeFlow : IDisposable {
         NoInference()
     }
 
+    internal func StructuredContract() {
+        let approval = Call(
+            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor", "--json"},
+            owner: true
+        )
+        CliDiscovery.Envelope(approval, "approve", "ok")
+        let policy = Call([]string{"policy", "--repo", "owner/project", "--json"})
+        let value = CliDiscovery.Envelope(policy, "policy", "ok")
+        Check.That(Check.Text(value["data"]?["policy"]?["version"]) == "1", "Missing projected policy")
+        let legacy = Check.Json(Call([]string{"policy", "--repo", "owner/project"}).Output)
+        Check.That(
+            legacy["schema_version"] == nil && Check.Text(legacy["version"]) == "1",
+            "Legacy piped policy changed"
+        )
+        let claim = CliDiscovery.Envelope(
+            Call(
+                []string{
+                    "claim",
+                    "--repo",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "high",
+                    "--seconds",
+                    "30",
+                    "--runs",
+                    Path.Combine(Temp.Root, "runs"),
+                    "--json"
+                }
+            ),
+            "claim",
+            "ok"
+        )
+        let run = Check.Text(claim["data"]?["run"])
+        Check.That(Path.IsPathFullyQualified(run), "Claim omitted executable run path")
+        NoInference()
+        let work = Call([]string{"work", "--run", run, "--json", "--traffic"})
+        CliDiscovery.Envelope(work, "work", "ok")
+        Check.Contains(work.Error, "Running gpt-6.1-sol")
+        Check.Contains(work.Error, "Tokate API traffic:")
+        Check.That(
+            !work.Output.Contains("synthetic-raw") && !work.Output.Contains("synthetic-usage-secret"),
+            "Inference output leaked"
+        )
+        CliDiscovery.Envelope(Call([]string{"publish", "--run", run, "--json"}), "publish", "ok")
+        CliDiscovery.Envelope(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
+            "verify-pr",
+            "ok"
+        )
+        CliDiscovery.Envelope(Call([]string{"checks", "--run", run, "--json"}, 8), "checks", "pending")
+        CliDiscovery.Envelope(
+            Call([]string{"checks", "--run", run, "--watch", "--timeout", "1", "--json"}, 8),
+            "checks",
+            "pending"
+        )
+        for outcome in[]string{"fail", "pass"} {
+            Reload()
+            State["checks"] = Check.Json(
+                "[{\"name\":\"verify\",\"bucket\":\"" + outcome + "\",\"output\":\"synthetic-check-log-marker\"}]"
+            )
+            Save()
+            let result = Call(
+                []string{"checks", "--repo", "owner/project", "--pr", "10", "--json"},
+                outcome == "pass" ? 0: 1
+            )
+            let check = CliDiscovery.Envelope(
+                result,
+                "checks",
+                outcome == "pass" ? "ok": "error",
+                outcome == "pass" ? "": "verification_failed"
+            )
+            Check.That(check["data"]?["checks"]?.AsArray().Count == 1, "Missing check summary")
+            Check.That(!result.Output.Contains("synthetic-check-log-marker"), "Raw check data leaked")
+        }
+        File.SetUnixFileMode(
+            Path.Combine(Bin, "codex-impl"),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        )
+        CliDiscovery.Envelope(Call([]string{"work", "--run", run, "--json"}, 1), "work", "error", "invalid_state")
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "JSON or suggestions spent extra inference")
+        Approve()
+        Reload()
+        let originalPulls = State["pulls"]?.ToJsonString() ?? ""
+        CliDiscovery.Envelope(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, 1, owner: true),
+            "verify-pr",
+            "error",
+            "stale_approval"
+        )
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Receipt rejection spent inference")
+        Check.That((State["pulls"]?.ToJsonString() ?? "") == originalPulls, "Receipt rejection changed the PR")
+        Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
+        CliDiscovery.Envelope(
+            Call([]string{"publish", "--run", run, "--json"}, 1),
+            "publish",
+            "error",
+            "stale_approval"
+        )
+    }
+
+    internal func StructuredFailures() {
+        for scenario in[]string{"authentication", "inference"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim(seconds: "1")
+            if scenario == "authentication" {
+                File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
+                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+                let value = CliDiscovery.Envelope(failure, "work", "error", "authentication_required")
+                Check.That(
+                    Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
+                        value["next_actions"]?[0]?[1]
+                    ) == "login",
+                    "Missing complete authentication action"
+                )
+                flow.NoInference()
+            } else {
+                flow.Mode("timeout")
+                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+                CliDiscovery.Envelope(failure, "work", "error", "inference_failed")
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Inference failure retried")
+            }
+            flow.NoPr()
+        }
+    }
+
     internal func CrossAccountFlow() {
         Approve()
         let run = Claim()
@@ -1712,12 +1846,24 @@ internal class NativeFlow : IDisposable {
         }
     }
 
-    internal func VerificationRecovery() {
+    internal func VerificationRecovery(legacy bool = false) {
         VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
         Approve()
         let run = Claim()
         Mode("verification_recovery")
-        Call([]string{"work", "--run", run}, 1)
+        let failure = Call([]string{"work", "--run", run, "--json"}, 1)
+        CliDiscovery.Envelope(failure, "work", "error", "verification_failed")
+        let runPath = Path.Combine(run, "run.json")
+        let failed = Check.Json(File.ReadAllText(runPath))
+        Check.That(Check.Text(failed["failure_reason"]) == "verification_failed", "New failure omitted stable reason")
+        failed["error"] = JsonValue.Create("Changed displayed wording: synthetic-saved-error-marker")
+        if legacy {
+            failed.AsObject().Remove("failure_reason")
+            failed["error"] = JsonValue.Create(
+                "Owner verification failed. See verification.json. No PR will be opened."
+            )
+        }
+        File.WriteAllText(runPath, failed.ToJsonString())
         NoPr()
         let original = File.ReadAllText(Path.Combine(run, "verification.json"))
         Check.That(Check.Json(original).AsArray().Count == 2, "Original checks were not all run")
@@ -1764,7 +1910,23 @@ internal class NativeFlow : IDisposable {
         Check.That(Check.Text(State["exec_count"]) == "1", "Incomplete turn recovery spent inference")
         NoPr()
         File.WriteAllText(events, savedEvents)
-        Call([]string{"recover", "--run", run})
+        let protectedPath = Path.Combine(run, "checkout/.github/tokate.json")
+        let protectedText = File.ReadAllText(protectedPath)
+        File.AppendAllText(protectedPath, "\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "cannot change owner policy")
+        File.WriteAllText(protectedPath, protectedText)
+        File.WriteAllText(runPath, savedRun)
+        let resultPath = Path.Combine(run, "checkout/result.txt")
+        let candidateText = File.ReadAllText(resultPath)
+        File.AppendAllText(resultPath, "changed candidate\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Saved candidate patch changed")
+        File.WriteAllText(resultPath, candidateText)
+        File.WriteAllText(runPath, savedRun)
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "verification.json")) == original,
+            "Rejected recovery reran verification"
+        )
+        CliDiscovery.Envelope(Call([]string{"recover", "--run", run, "--json"}), "recover", "ok")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")
         Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "verification-only recovery")
@@ -1815,6 +1977,8 @@ internal class NativeFlow : IDisposable {
                 "MissingTools",
                 "DoctorToolchain",
                 "OwnerWithoutCodex",
+                "StructuredContract",
+                "StructuredFailures",
                 "CrossAccountFlow",
                 "OwnerPolicy",
                 "ModelPolicyModes",
@@ -1860,7 +2024,8 @@ internal class NativeFlow : IDisposable {
                 "UnsupportedSandbox",
                 "VerificationBoundary",
                 "VerificationNetwork",
-                "VerificationRecovery"
+                "VerificationRecovery",
+                "LegacyVerificationRecovery"
             } {
                 if selected != "" && selected != name {
                     continue
@@ -1879,6 +2044,12 @@ internal class NativeFlow : IDisposable {
                     }
                     case "OwnerWithoutCodex" {
                         flow.OwnerWithoutCodex()
+                    }
+                    case "StructuredFailures" {
+                        flow.StructuredFailures()
+                    }
+                    case "StructuredContract" {
+                        flow.StructuredContract()
                     }
                     case "CrossAccountFlow" {
                         flow.CrossAccountFlow()
@@ -2014,6 +2185,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "VerificationRecovery" {
                         flow.VerificationRecovery()
+                    }
+                    case "LegacyVerificationRecovery" {
+                        flow.VerificationRecovery(true)
                     }
                     case "VerificationNetwork" {
                         flow.VerificationNetwork()

@@ -9,7 +9,7 @@ internal class ApprovalBase {
             if args.Get("base-branch") != "" {
                 return Data.Branch(args.Get("base-branch"))
             }
-            if !Console.IsInputRedirected && !Console.IsOutputRedirected {
+            if !PublicOutput.Enabled && !Console.IsInputRedirected && !Console.IsOutputRedirected {
                 Console.Write("Target branch [" + Terminal.Clean(fallback) + "]: ")
                 let answer = Console.ReadLine() ?? throw Exception("Target branch selection cancelled")
                 if answer != "" {
@@ -24,7 +24,7 @@ internal class ApprovalBase {
             let selected = J.Get(approval, "authority_branch").ValueKind != JsonValueKind.Undefined
             let authority = selected ? J.Text(approval, "authority_branch"): J.Text(approval, "base_branch")
             if branch != authority {
-                throw Exception("Repository authority branch changed. The owner must approve again.")
+                throw CliFailure("stale_approval", "Repository authority branch changed. The owner must approve again.")
             }
             let current = selected ? GitHub.Branch(repo, branch): J.Text(
                 GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(branch)),
@@ -37,7 +37,10 @@ internal class ApprovalBase {
                 "policy_hash"
             ) ||
                 Data.Hash(template) != J.Text(approval, "template_hash") {
-                throw Exception("Repository policy or template changed. The owner must approve again.")
+                throw CliFailure(
+                    "stale_approval",
+                    "Repository policy or template changed. The owner must approve again."
+                )
             }
             var target = current
             if selected {
