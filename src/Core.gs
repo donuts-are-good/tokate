@@ -100,9 +100,8 @@ internal class Data {
             .ToLowerInvariant()
 
         internal func Resource(name string) string {
-            using let stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(
-                "Tokate.templates." + name
-            ) ?? throw Exception("Missing embedded template " + name)
+            using let stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Tokate.templates." + name) ??
+                throw Exception("Missing embedded template " + name)
             using let reader = StreamReader(stream)
             return reader.ReadToEnd()
         }
