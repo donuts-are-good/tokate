@@ -74,6 +74,7 @@ tokate doctor
 tokate init [--path DIR]
 tokate policy --repo OWNER/REPO
 tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN
+tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN --base-branch release/next
 tokate assign --repo OWNER/REPO --issue 42 --donor LOGIN
 tokate revoke --repo OWNER/REPO --issue 42
 tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
@@ -147,6 +148,25 @@ save Fish output as `~/.config/fish/completions/tokate.fish`. Regenerate after a
 update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
+
+Fresh `approve` and `assign` accept `--base-branch BRANCH`. On a terminal, omitting
+it prompts for a target with the upstream default branch as the default; redirected
+commands use that default directly. Passing the option selects the same target
+without a prompt. The approval pins `base_branch` and its exact `base` commit,
+and records the repository default branch as `authority_branch`. Policy and PR
+template always come from that authority branch, even when the target contains
+different Tokate configuration. New approvals also pin the optional root
+`DECREE.md` from the selected base; changing, adding or removing it on the target
+requires fresh approval.
+
+Revalidation requires the selected target to exist, the default/authority branch
+to remain unchanged, and current authority policy/template hashes to match.
+Ordinary target movement preserves approval: Tokate displays the current target
+and approved revisions when they differ and prepares the exact approved base.
+Publication and receipt/check validation use the selected target. There is no
+automatic rebase, reconciliation or readiness change. Records without
+`authority_branch` retain their existing default-branch/base-branch and freshness
+rules and are never migrated automatically.
 
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
 

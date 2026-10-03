@@ -155,6 +155,19 @@ internal class Data {
             return value
         }
 
+        internal func Branch(value string) string {
+            if value == "" || value == "@" || value.StartsWith("-") || value.EndsWith(".") || value.Contains("..") ||
+                value.Contains("@{") || Regex.IsMatch(value, "[\\x00-\\x20\\x7f~^:?*\\\\\\[]") {
+                throw Exception("Expected a Git branch name")
+            }
+            for part in value.Split('/') {
+                if part == "" || part.StartsWith(".") || part.EndsWith(".lock") {
+                    throw Exception("Expected a Git branch name")
+                }
+            }
+            return value
+        }
+
         internal func Login(value string) string {
             if !Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9-]*$") {
                 throw Exception("Invalid GitHub username")
@@ -176,11 +189,30 @@ internal class GitHub {
 
         internal func FileAt(repo string, path string, revision string) string {
             let result = Api("repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision))
+            return FileContent(result)
+        }
+
+        internal func OptionalFileAt(repo string, path string, revision string) string? {
+            let result = Api(
+                "repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision),
+                missing: true
+            )
+            return result.ValueKind == JsonValueKind.Undefined ? nil: FileContent(result)
+        }
+
+        private func FileContent(result JsonElement) string {
             if J.Text(result, "encoding") != "base64" {
                 throw Exception("Expected a small repository configuration file")
             }
             return Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(result, "content")))
         }
+
+        internal func Branch(repo string, branch string) string -> Data.CommitSha(
+            J.Text(
+                J.Get(Api("repos/" + repo + "/git/ref/heads/" + Uri.EscapeDataString(Data.Branch(branch))), "object"),
+                "sha"
+            )
+        )
 
         internal func Issue(repo string, number int32) JsonElement {
             let issue = Api("repos/" + repo + "/issues/" + number.ToString())

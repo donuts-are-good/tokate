@@ -427,6 +427,7 @@ internal class V2Contribution {
             run.Fields["pr"] = number
             run.Fields["commit"] = J.Text(metadata, "head")
             run.Fields["pr_url"] = J.Text(pull, "html_url")
+            run.Fields["policy"] = J.Get(record, "policy")
             return run
         }
     }
