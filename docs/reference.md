@@ -513,7 +513,7 @@ Run `doctor` after setup. Tokate does not change system security settings.
 
 ### Synchronize an already-published contribution
 
-Tokate 0.2.18 supports native v1/v2 contributions with an open, unmerged PR.
+Tokate 0.2.21 supports native v1/v2 contributions with an open, unmerged PR.
 Prepare and commit a merge locally, preserving the original donor head H and
 merging the exact current upstream target U. Resolve nonprotected textual
 conflicts explicitly with the owner; unresolved or ambiguous operations stop.
