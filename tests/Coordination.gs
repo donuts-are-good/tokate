@@ -108,7 +108,7 @@ internal class CoordinationFlow : IDisposable {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(10, 3, 1, 0, result)
+        Flow.Traffic(9, 3, 1, 0, result)
         return request
     }
 
@@ -301,7 +301,7 @@ internal class CoordinationFlow : IDisposable {
         Flow.Mode("")
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(34, 3, 19, 0, result)
+        Flow.Traffic(31, 3, 19, 0, result)
         Flow.Reload()
         Check.That(Flow.State["pulls"]?.AsArray().Count == 1, "Interrupted publication duplicated PR")
         Check.That(
@@ -636,7 +636,7 @@ internal class CoordinationFlow : IDisposable {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(34, 4, 19, 0, result)
+        Flow.Traffic(31, 4, 19, 0, result)
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.Reload()
         Check.That(Check.Text(Flow.State["exec_count"]) == "1", "Tokate path did not execute exactly once")

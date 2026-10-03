@@ -3,8 +3,6 @@ package Tokate
 import System
 import System.Text.Json
 
-// Owner authority stays on the default branch. Legacy approvals deliberately
-// retain their original branch and freshness rules; no records are migrated.
 internal class ApprovalBase {
     shared {
         internal func Select(args Args, fallback string) string {
@@ -41,20 +39,11 @@ internal class ApprovalBase {
                 Data.Hash(template) != J.Text(approval, "template_hash") {
                 throw Exception("Repository policy or template changed. The owner must approve again.")
             }
-            var decree string? = nil
             if selected {
                 let baseBranch = Data.Branch(J.Text(approval, "base_branch"))
                 let approved = Data.CommitSha(J.Text(approval, "base"))
                 let target = baseBranch == branch ? current: GitHub.Branch(repo, baseBranch)
-                decree = GitHub.OptionalFileAt(repo, "DECREE.md", target)
-                if Data.Hash(J.Write(decree)) != J.Text(approval, "decree_hash") {
-                    throw Exception("Target DECREE.md changed. The owner must approve again.")
-                }
                 if target != approved {
-                    decree = GitHub.OptionalFileAt(repo, "DECREE.md", approved)
-                    if Data.Hash(J.Write(decree)) != J.Text(approval, "decree_hash") {
-                        throw Exception("Approved DECREE.md differs from its pinned hash")
-                    }
                     Terminal.Message(
                         "Target " + baseBranch + " is now " + target + "; approved base remains " + approved,
                         "cyan",
@@ -62,7 +51,7 @@ internal class ApprovalBase {
                     )
                 }
             }
-            return J.Parse(J.Write(J.Map("policy", policy.Value, "template", template, "decree", decree)))
+            return J.Parse(J.Write(J.Map("policy", policy.Value, "template", template)))
         }
     }
 }

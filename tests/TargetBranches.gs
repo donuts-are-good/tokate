@@ -8,19 +8,14 @@ import Tokate
 internal class TargetBranches {
     shared {
         private func Target(flow NativeFlow, branch string) string {
-            File.WriteAllText(Path.Combine(flow.Upstream, "DECREE.md"), "Authority-only instructions\n")
-            flow.Commit("Authority instructions")
             flow.Git("-C", flow.Upstream, "checkout", "-b", branch)
             File.WriteAllText(Path.Combine(flow.Upstream, ".github/tokate.json"), "{\"version\":999}")
             File.WriteAllText(Path.Combine(flow.Upstream, ".github/tokate-pr.md"), "Untrusted target template")
-            File.WriteAllText(Path.Combine(flow.Upstream, "DECREE.md"), "Selected target instructions\n")
+            File.WriteAllText(Path.Combine(flow.Upstream, "target.txt"), "Selected target code\n")
             flow.Commit("Different target configuration")
             let base = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, branch)
             flow.Git("-C", flow.Upstream, "checkout", "main")
-            flow.Reload()
-            flow.State["expected_decree"] = JsonValue.Create("Selected target instructions")
-            flow.Save()
             return base
         }
 
@@ -46,12 +41,12 @@ internal class TargetBranches {
         private func Move(flow NativeFlow, branch string) string {
             if branch == "release/next" {
                 flow.Git("-C", flow.Upstream, "checkout", "--orphan", "replacement-target")
-                File.WriteAllText(Path.Combine(flow.Upstream, "DECREE.md"), "Selected target instructions\n")
+                File.WriteAllText(Path.Combine(flow.Upstream, "target.txt"), "Later target code\n")
             } else {
                 flow.Git("-C", flow.Upstream, "checkout", branch)
             }
             File.WriteAllText(Path.Combine(flow.Upstream, "moved.txt"), "Later target revision\n")
-            flow.Commit("Advance target without changing instructions")
+            flow.Commit("Advance selected target")
             let moved = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             flow.Git("-C", flow.Upstream, "checkout", "main")
             if branch == "release/next" {
@@ -226,15 +221,7 @@ internal class TargetBranches {
                 flow.Initialize()
             }
             let branch = "release/freshness"
-            var base = Target(flow, branch)
-            if change == "decree-added" {
-                flow.Git("-C", flow.Upstream, "checkout", branch)
-                File.Delete(Path.Combine(flow.Upstream, "DECREE.md"))
-                flow.Commit("Target without DECREE")
-                base = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
-                flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, branch)
-                flow.Git("-C", flow.Upstream, "checkout", "main")
-            }
+            let base = Target(flow, branch)
             if change == "missing" {
                 flow.Git("-C", flow.Upstream, "branch", "-D", branch)
                 flow.Call(
@@ -284,14 +271,7 @@ internal class TargetBranches {
                 flow.State["default_branch"] = JsonValue.Create(branch)
                 flow.Save()
             } else {
-                if change.StartsWith("decree") {
-                    flow.Git("-C", flow.Upstream, "checkout", branch)
-                    if change == "decree-removed" {
-                        File.Delete(Path.Combine(flow.Upstream, "DECREE.md"))
-                    } else {
-                        File.WriteAllText(Path.Combine(flow.Upstream, "DECREE.md"), "Changed target instructions\n")
-                    }
-                } else if change == "policy" {
+                if change == "policy" {
                     let path = Path.Combine(flow.Upstream, ".github/tokate.json")
                     let policy = Check.Json(File.ReadAllText(path))
                     policy["max_seconds"] = JsonValue.Create(3599)
@@ -328,7 +308,6 @@ internal class TargetBranches {
                 let state = test.State()["state"] ?? throw Exception("Missing state")
                 let approval = state["approval"]?.AsObject() ?? throw Exception("Missing approval")
                 approval.Remove("authority_branch")
-                approval.Remove("decree_hash")
                 state["approval_id"] = JsonValue.Create(
                     Data.Hash(RequestData.Canonical(RequestData.Parse(approval.ToJsonString())))
                 )
@@ -345,7 +324,6 @@ internal class TargetBranches {
                 let path = Path.Combine(flow.Upstream, ".github/tokate-approval.json")
                 let approval = Check.Json(File.ReadAllText(path)).AsObject()
                 approval.Remove("authority_branch")
-                approval.Remove("decree_hash")
                 File.WriteAllText(path, approval.ToJsonString())
                 flow.Commit("Legacy approval without new fields")
                 flow.Git("-C", flow.Upstream, "checkout", "main")
@@ -354,10 +332,10 @@ internal class TargetBranches {
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(saved["authority_branch"] == nil, "Legacy run was migrated")
             File.WriteAllText(
-                Path.Combine(flow.Upstream, "DECREE.md"),
-                "New instructions do not reinterpret legacy approval\n"
+                Path.Combine(flow.Upstream, "later.txt"),
+                "Later code does not rewrite the legacy approved base\n"
             )
-            flow.Commit("Move default branch and add DECREE")
+            flow.Commit("Move default branch")
             flow.Call([]string{"work", "--run", run})
             if version == 2 {
                 flow.Call([]string{"submit", "--run", run})
@@ -380,16 +358,7 @@ internal class TargetBranches {
             V2(binary, "release/next", true)
             Console.WriteLine("PASS V2 managed and external selected targets")
             for version in[]int32{1, 2} {
-                for change in[]string{
-                    "missing",
-                    "deleted",
-                    "authority",
-                    "policy",
-                    "template",
-                    "decree-changed",
-                    "decree-removed",
-                    "decree-added"
-                } {
+                for change in[]string{"missing", "deleted", "authority", "policy", "template"} {
                     Freshness(binary, version, change)
                     Console.WriteLine("PASS V" + version.ToString() + " target freshness: " + change)
                 }

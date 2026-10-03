@@ -155,9 +155,7 @@ commands use that default directly. Passing the option selects the same target
 without a prompt. The approval pins `base_branch` and its exact `base` commit,
 and records the repository default branch as `authority_branch`. Policy and PR
 template always come from that authority branch, even when the target contains
-different Tokate configuration. New approvals also pin the optional root
-`DECREE.md` from the selected base; changing, adding or removing it on the target
-requires fresh approval.
+different Tokate configuration.
 
 Revalidation requires the selected target to exist, the default/authority branch
 to remain unchanged, and current authority policy/template hashes to match.

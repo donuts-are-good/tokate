@@ -72,8 +72,6 @@ internal class CoordinationState {
                     J.Get(configuration, "policy"),
                     "template",
                     J.Text(configuration, "template"),
-                    "decree",
-                    J.Get(configuration, "decree"),
                     "issue",
                     task
                 )

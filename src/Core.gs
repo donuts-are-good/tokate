@@ -189,18 +189,6 @@ internal class GitHub {
 
         internal func FileAt(repo string, path string, revision string) string {
             let result = Api("repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision))
-            return FileContent(result)
-        }
-
-        internal func OptionalFileAt(repo string, path string, revision string) string? {
-            let result = Api(
-                "repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision),
-                missing: true
-            )
-            return result.ValueKind == JsonValueKind.Undefined ? nil: FileContent(result)
-        }
-
-        private func FileContent(result JsonElement) string {
             if J.Text(result, "encoding") != "base64" {
                 throw Exception("Expected a small repository configuration file")
             }

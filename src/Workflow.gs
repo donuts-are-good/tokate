@@ -50,7 +50,6 @@ internal class Workflow {
             let policy = Policy.Load(repo, authorityBase)
             let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
             ValidateTemplate(template)
-            let decree = GitHub.OptionalFileAt(repo, "DECREE.md", revision)
             Terminal.Step(
                 "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
             )
@@ -112,8 +111,6 @@ internal class Workflow {
                 branch,
                 "authority_branch",
                 authority,
-                "decree_hash",
-                Data.Hash(J.Write(decree)),
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
@@ -248,9 +245,7 @@ internal class Workflow {
                         "policy",
                         J.Get(configuration, "policy"),
                         "template",
-                        J.Text(configuration, "template"),
-                        "decree",
-                        J.Get(configuration, "decree")
+                        J.Text(configuration, "template")
                     )
                 )
             )
