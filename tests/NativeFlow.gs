@@ -2013,7 +2013,10 @@ internal class NativeFlow : IDisposable {
         let protectedPath = Path.Combine(run, "checkout/.github/tokate.json")
         let protectedText = File.ReadAllText(protectedPath)
         File.AppendAllText(protectedPath, "\n")
-        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "cannot change owner policy")
+        Check.Contains(
+            Call([]string{"recover", "--run", run}, 1).Error,
+            "Contribution changes protected owner configuration: \".github/tokate.json\""
+        )
         File.WriteAllText(protectedPath, protectedText)
         File.WriteAllText(runPath, savedRun)
         let resultPath = Path.Combine(run, "checkout/result.txt")
