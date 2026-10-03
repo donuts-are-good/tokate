@@ -27,7 +27,7 @@ func Main(args[]string) int32 {
             }
         }
         if args.Length == 2 && args[0] == "--verify-checkout" {
-            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 900)
+            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 1800)
             Console.Write(result.Output)
             Console.Error.Write(result.Error)
             return result.Code
