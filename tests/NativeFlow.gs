@@ -459,12 +459,12 @@ internal class NativeFlow : IDisposable {
             flow.SetModelPolicy(
                 unrestricted ? "unrestricted": mode,
                 unrestricted ? (mode.EndsWith("empty") ? "{}": "omit"):
-                "{\"gpt-6.1-sol\":[\"high\"],\"second-model\":[\"low\",\"xhigh\"]}"
+                "{\"gpt-6.1-sol\":[\"high\"],\"gpt-6-sol\":[\"high\"]}"
             )
             flow.Approve()
             if !unrestricted {
                 flow.Claim(model: "unlisted-model", code: 1)
-                flow.Claim(model: "second-model", code: 1)
+                flow.Claim(model: "gpt-6-sol", effort: "xhigh", code: 1)
                 flow.Claim(effort: "low", code: 1)
             }
             flow.Claim(seconds: "3601", code: 1)
@@ -473,8 +473,8 @@ internal class NativeFlow : IDisposable {
             flow.Claim(effort: "absent", code: 1)
             flow.Claim(effort: "invalid", code: 1)
             flow.NoInference()
-            let model = unrestricted ? "unlisted-model": "second-model"
-            let run = flow.Claim(model: model, effort: "low")
+            let model = "gpt-6-sol"
+            let run = flow.Claim(model: model, effort: "high")
             flow.Call([]string{"work", "--run", run})
             flow.Call([]string{"publish", "--run", run})
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
@@ -483,7 +483,7 @@ internal class NativeFlow : IDisposable {
             Check.That(
                 Check.Text(flow.State["requested_model"]) == model && Check.Text(
                     flow.State["requested_effort"]
-                ) == "model_reasoning_effort=\"low\"",
+                ) == "model_reasoning_effort=\"high\"",
                 "Harness settings differ from explicit donor selection"
             )
             let pulls = flow.State["pulls"]?.ToJsonString() ?? ""

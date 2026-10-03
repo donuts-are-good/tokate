@@ -1092,7 +1092,7 @@ internal class CoordinationFlow : IDisposable {
         Check.Contains(Flow.Call([]string{"submit", "--run", run}, 1).Error, "stale coordination authority")
         Check.Contains(
             Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true).Error,
-            "fresh owner approval"
+            "Repository policy or template changed. The owner must approve again."
         )
         Check.That(
             Check.Text(State()["sha"]) == Check.Text(published["sha"]),
@@ -1211,12 +1211,12 @@ internal class CoordinationFlow : IDisposable {
             test.Flow.SetModelPolicy(
                 mode,
                 mode == "unrestricted" ? "{}":
-                "{\"chosen-model\":[\"low\",\"unknown\",\"absent\"]}"
+                "{\"gpt-6-sol\":[\"high\",\"unknown\",\"absent\"]}"
             )
             test.Flow.Approve()
             test.Claim()
             let tools = Check.Json(
-                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"chosen-model\",\"effort\":\"absent\"}]"
+                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6-sol\",\"effort\":\"absent\"}]"
             )
             let declaration = tools[0] ?? throw Exception("Missing tool")
             File.WriteAllText(test.Tools, tools.ToJsonString())
@@ -1224,7 +1224,7 @@ internal class CoordinationFlow : IDisposable {
             declaration["effort"] = JsonValue.Create("unknown")
             File.WriteAllText(test.Tools, tools.ToJsonString())
             test.Prepare("tokate", 1)
-            declaration["effort"] = JsonValue.Create("low")
+            declaration["effort"] = JsonValue.Create("high")
             File.WriteAllText(test.Tools, tools.ToJsonString())
             let run = test.Prepare("tokate")
             let path = Path.Combine(run, "run.json")
@@ -1244,15 +1244,15 @@ internal class CoordinationFlow : IDisposable {
             requestedTool["effort"] = JsonValue.Create("absent")
             test.Coordinate(test.Event(request), 1)
             test.Flow.NoPr()
-            requestedTool["effort"] = JsonValue.Create("low")
+            requestedTool["effort"] = JsonValue.Create("high")
             test.Coordinate(test.Event(request))
             test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             test.ReceiptRefusal(0, "effort", "absent")
             test.Flow.Reload()
             Check.That(
-                Check.Text(test.Flow.State["requested_model"]) == "chosen-model" && Check.Text(
+                Check.Text(test.Flow.State["requested_model"]) == "gpt-6-sol" && Check.Text(
                     test.Flow.State["requested_effort"]
-                ) == "model_reasoning_effort=\"low\"",
+                ) == "model_reasoning_effort=\"high\"",
                 "Managed declaration silently changed"
             )
         }
@@ -1270,7 +1270,7 @@ internal class CoordinationFlow : IDisposable {
             test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")
             Check.Contains(
                 test.Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1).Error,
-                "fresh owner approval"
+                "Repository policy or template changed. The owner must approve again."
             )
             Check.That(
                 Check.Text(test.State()["sha"]) == Check.Text(original["sha"]),
