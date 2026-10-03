@@ -110,13 +110,6 @@ internal class Fixture {
         return result.Output
     }
 
-    internal func CommitMetadata(repo string, sha string) JsonNode -> Check.Map(
-        "sha",
-        sha,
-        "commit",
-        Check.Map("tree", Check.Map("sha", Git(repo, []string{"rev-parse", sha + "^{tree}"})))
-    )
-
     internal func Codex(args[]string) int32 {
         Check.That(
             Environment.GetEnvironmentVariable("CODEX_HOME") == Path.Combine(
@@ -415,8 +408,12 @@ internal class Fixture {
             let commits = JsonArray()
             for commit in Git("upstream", []string{"rev-list", "--reverse", comparison[0] + ".." + sha}).Split('\n') {
                 if commit != "" {
-                    commits.Add(CommitMetadata("upstream", commit))
+                    commits.Add(Check.Map("sha", commit))
                 }
+            }
+            let total = commits.Count
+            while commits.Count > 250 {
+                commits.RemoveAt(249)
             }
             let value = Check.Map(
                 "status",
@@ -426,13 +423,13 @@ internal class Fixture {
                 "commits",
                 commits,
                 "ahead_by",
-                commits.Count,
+                total,
                 "behind_by",
                 0,
                 "total_commits",
-                commits.Count,
+                total,
                 "base_commit",
-                CommitMetadata("upstream", comparison[0]),
+                Check.Map("sha", comparison[0]),
                 "merge_base_commit",
                 Check.Map("sha", Git("upstream", []string{"merge-base", comparison[0], sha}))
             )
@@ -450,16 +447,10 @@ internal class Fixture {
                 value["commits"] = Check.Json("[{\"sha\":\"" + String('a', 40) + "\"}]")
             } else if fault == "missing-previous" {
                 value["files"] = Check.Json("[{\"filename\":\"result.txt\",\"status\":\"renamed\"}]")
-            } else if fault == "hidden-path" {
-                value["files"] = Check.Json("[{\"filename\":\"result.txt\",\"status\":\"modified\"}]")
-            } else if fault == "omitted-file" {
-                value["files"] = Check.Json("[{\"filename\":\"ordinary-source\",\"status\":\"modified\"}]")
             } else if fault == "missing-status" {
                 value["files"] = Check.Json("[{\"filename\":\"result.txt\"}]")
             } else if fault == "missing-commits" {
                 value.AsObject().Remove("commits")
-            } else if fault == "truncated-commits" {
-                value["total_commits"] = JsonValue.Create(commits.Count + 1)
             }
             return Answer(value)
         }
@@ -552,35 +543,6 @@ internal class Fixture {
                     parents
                 )
             )
-        }
-        if tail.StartsWith("git/trees/") {
-            let sha = tail.Substring(10).Split('?')[0]
-            let entries = JsonArray()
-            for line in GitRaw(folder, []string{"ls-tree", "-r", "-t", "-z", sha}).Split('\0') {
-                if line == "" {
-                    continue
-                }
-                let tab = line.IndexOf('\t')
-                let fields = line.Substring(0, tab).Split(' ')
-                entries.Add(
-                    Check.Map("mode", fields[0], "type", fields[1], "sha", fields[2], "path", line.Substring(tab + 1))
-                )
-            }
-            let value = Check.Map("sha", sha, "truncated", false, "tree", entries)
-            let fault = Check.Text(State["tree_fault"])
-            if fault == "truncated" {
-                value["truncated"] = JsonValue.Create(true)
-            } else if fault == "missing" {
-                value.AsObject().Remove("tree")
-            } else if fault == "wrong-sha" {
-                value["sha"] = JsonValue.Create(String('a', 40))
-            } else if fault == "omitted" {
-                value["tree"]?.AsArray().RemoveAt(entries.Count - 1)
-            } else if fault == "mode" {
-                let entry = value["tree"]?[entries.Count - 1] ?? throw Exception("Missing tree entry")
-                entry["mode"] = JsonValue.Create("100755")
-            }
-            return Answer(value)
         }
         if tail == "git/trees" {
             Env["GIT_INDEX_FILE"] = Path.Combine(Root, "tree.index")

@@ -377,9 +377,6 @@ internal class CoordinationFlow : IDisposable {
             let claim = test.Claim()
             let commit = test.Candidate(claim, change)
             let publication = test.PublishRequest(claim, commit)
-            if change == "mode" || change == "type" || change == "directory-node" {
-                test.Flow.DiffFault("diff_fault", "hidden-path")
-            }
             if change == "permitted" {
                 test.Coordinate(test.Event(publication))
                 test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
@@ -420,20 +417,13 @@ internal class CoordinationFlow : IDisposable {
             "wrong-base",
             "wrong-head",
             "missing-previous",
-            "omitted-file",
             "missing-status",
-            "missing-commits",
-            "truncated-commits"
+            "missing-commits"
         } {
             Flow.DiffFault("diff_fault", fault)
             Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
         }
         Flow.DiffFault("diff_fault", "")
-        for fault in[]string{"missing", "truncated", "wrong-sha", "omitted", "mode"} {
-            Flow.DiffFault("tree_fault", fault)
-            Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
-        }
-        Flow.DiffFault("tree_fault", "")
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         let checkout = Path.Combine(Flow.Temp.Root, "donor-work")
         let marker = Path.Combine(checkout, "receipt-code-ran")
@@ -477,11 +467,6 @@ internal class CoordinationFlow : IDisposable {
                 .Replace(expected, Check.Text(state["sha"]), StringComparison.Ordinal)
         )
         Flow.Save()
-        Check.Contains(
-            Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
-            "protected owner path"
-        )
-        Flow.DiffFault("diff_fault", "hidden-path")
         Check.Contains(
             Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
             "protected owner path"

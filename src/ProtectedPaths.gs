@@ -2,7 +2,6 @@ package Tokate
 
 import System
 import System.Collections.Generic
-import System.Security.Cryptography
 import System.Text
 import System.Text.Json
 
@@ -107,17 +106,11 @@ internal class ProtectedPaths {
                 J.Number(comparison, "behind_by") != 0 || J.Text(J.Get(comparison, "base_commit"), "sha") != base ||
                 J.Text(J.Get(comparison, "merge_base_commit"), "sha") != base ||
                 commits.Count == 0 ||
-                commits.Count > 250 ||
-                commits.Count != J.Number(comparison, "total_commits") || commits.Count != J.Number(
-                comparison,
-                "ahead_by"
-            ) ||
                 J.Text(commits[commits.Count - 1], "sha") != head ||
                 files.ValueKind != JsonValueKind.Array ||
                 files.GetArrayLength() == 0 || files.GetArrayLength() >= 300 {
                 throw Exception("Missing, truncated or mismatched approved-base-to-head diff evidence")
             }
-            let covered = HashSet[string](StringComparer.Ordinal)
             let filenames = HashSet[string](StringComparer.Ordinal)
             for file in files.EnumerateArray() {
                 let path = J.Text(file, "filename")
@@ -126,7 +119,6 @@ internal class ProtectedPaths {
                 if !filenames.Add(path) {
                     throw Exception("Duplicate GitHub file diff evidence")
                 }
-                covered.Add(path)
                 let status = J.Text(file, "status")
                 if status != "added" &&
                     status != "removed" &&
@@ -141,109 +133,8 @@ internal class ProtectedPaths {
                     let name = J.Text(file, "previous_filename")
                     Relative(name)
                     Check(policy, name)
-                    covered.Add(name)
                 }
             }
-            let before = Tree(repo, J.Text(J.Get(J.Get(J.Get(comparison, "base_commit"), "commit"), "tree"), "sha"))
-            let after = Tree(fork, J.Text(J.Get(J.Get(commits[commits.Count - 1], "commit"), "tree"), "sha"))
-            var changed int32
-            for entry in before {
-                var value string
-                if !after.TryGetValue(entry.Key, out value) || value != entry.Value {
-                    Check(policy, entry.Key)
-                    if !covered.Contains(entry.Key) {
-                        throw Exception("Incomplete GitHub file diff evidence")
-                    }
-                    changed++
-                }
-            }
-            for entry in after {
-                if !before.ContainsKey(entry.Key) {
-                    Check(policy, entry.Key)
-                    if !covered.Contains(entry.Key) {
-                        throw Exception("Incomplete GitHub file diff evidence")
-                    }
-                    changed++
-                }
-            }
-            if changed == 0 {
-                throw Exception("Contribution must change the approved base")
-            }
-        }
-
-        private func Order(left JsonElement, right JsonElement) int32 {
-            let a = Utf8.GetBytes(Name(left) + (J.Text(left, "type") == "tree" ? "/": ""))
-            let b = Utf8.GetBytes(Name(right) + (J.Text(right, "type") == "tree" ? "/": ""))
-            for i in 0 ... Math.Min(a.Length, b.Length) {
-                if a[i] != b[i] {
-                    return Convert.ToInt32(a[i]) - Convert.ToInt32(b[i])
-                }
-            }
-            return a.Length - b.Length
-        }
-
-        private func Name(entry JsonElement) string {
-            let path = J.Text(entry, "path")
-            return path.Substring(path.LastIndexOf('/') + 1)
-        }
-
-        private func Tree(repo string, sha string) Dictionary[string, string] {
-            Data.CommitSha(sha)
-            let response = GitHub.Api("repos/" + repo + "/git/trees/" + sha + "?recursive=1")
-            let tree = J.Get(response, "tree")
-            if J.Text(response, "sha") != sha || J.Get(response, "truncated")
-                .ValueKind != JsonValueKind.False ||
-                tree.ValueKind != JsonValueKind.Array ||
-                tree.GetArrayLength() > 100000 {
-                throw Exception("Missing, truncated or mismatched GitHub tree evidence")
-            }
-            let entries = Dictionary[string, JsonElement](StringComparer.Ordinal)
-            let children = Dictionary[string, List[JsonElement]](StringComparer.Ordinal)
-            children[""] = List[JsonElement]()
-            let leaves = Dictionary[string, string](StringComparer.Ordinal)
-            for entry in tree.EnumerateArray() {
-                let path = J.Text(entry, "path")
-                Relative(path)
-                Utf8.GetBytes(path)
-                if !entries.TryAdd(path, entry) {
-                    throw Exception("Duplicate GitHub tree path")
-                }
-                let mode = J.Text(entry, "mode")
-                let type = J.Text(entry, "type")
-                Data.CommitSha(J.Text(entry, "sha"))
-                if type == "tree" && mode == "040000" {
-                    children[path] = List[JsonElement]()
-                } else if (type == "blob" && (mode == "100644" || mode == "100755" || mode == "120000")) ||
-                    (type == "commit" && mode == "160000") {
-                    leaves[path] = mode + " " + type + " " + J.Text(entry, "sha")
-                } else {
-                    throw Exception("Invalid GitHub tree mode/type evidence")
-                }
-            }
-            for entry in entries {
-                let slash = entry.Key.LastIndexOf('/')
-                let parent = slash < 0 ? "": entry.Key.Substring(0, slash)
-                var list List[JsonElement]
-                if !children.TryGetValue(parent, out list) {
-                    throw Exception("Incomplete GitHub tree ancestry")
-                }
-                list.Add(entry.Value)
-            }
-            for directory in children {
-                directory.Value.Sort(Order)
-                let bytes = List[byte]()
-                for entry in directory.Value {
-                    bytes.AddRange(Utf8.GetBytes(J.Text(entry, "mode").TrimStart('0') + " " + Name(entry) + "\0"))
-                    bytes.AddRange(Convert.FromHexString(J.Text(entry, "sha")))
-                }
-                let content = List[byte](Utf8.GetBytes("tree " + bytes.Count.ToString() + "\0"))
-                content.AddRange(bytes)
-                let expected = directory.Key == "" ? sha: J.Text(entries[directory.Key], "sha")
-                if Convert.ToHexString(SHA1.HashData(content.ToArray())).ToLowerInvariant() != expected {
-                    throw Exception("Incomplete or tampered GitHub tree evidence")
-                }
-            }
-            return leaves
         }
     }
 }

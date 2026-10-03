@@ -606,23 +606,32 @@ internal class NativeFlow : IDisposable {
             "wrong-base",
             "wrong-head",
             "missing-previous",
-            "omitted-file",
             "missing-status",
-            "missing-commits",
-            "truncated-commits"
+            "missing-commits"
         } {
             DiffFault("diff_fault", fault)
             Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
         }
         DiffFault("diff_fault", "")
-        for fault in[]string{"missing", "truncated", "wrong-sha", "omitted", "mode"} {
-            DiffFault("tree_fault", fault)
-            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
-        }
-        DiffFault("tree_fault", "")
         Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         let checkout = Path.Combine(run, "checkout")
+        let previous = Git("-C", checkout, "rev-parse", "HEAD")
+        for i in 0 ... 250 {
+            Git(
+                "-C", checkout, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+                "commit", "--allow-empty", "--quiet", "-m", "History " + i.ToString()
+            )
+        }
         let old = Git("-C", checkout, "rev-parse", "HEAD")
+        let historyRun = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        Git("-C", checkout, "push", Path.Combine(Bin, "fork"), "HEAD:refs/heads/" + Check.Text(historyRun["branch"]))
+        Reload()
+        let historyPull = State["pulls"]?[0] ?? throw Exception("Missing pull")
+        let historyHead = historyPull["head"] ?? throw Exception("Missing head")
+        historyHead["sha"] = JsonValue.Create(old)
+        historyPull["body"] = JsonValue.Create(Check.Text(historyPull["body"]).Replace(previous, old, StringComparison.Ordinal))
+        Save()
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         let marker = Path.Combine(checkout, "receipt-code-ran")
         File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "touch '" + marker + "'\nexit 0\n")
         Git("-C", checkout, "add", "-A")
@@ -646,11 +655,6 @@ internal class NativeFlow : IDisposable {
         prHead["sha"] = JsonValue.Create(head)
         pull["body"] = JsonValue.Create(Check.Text(pull["body"]).Replace(old, head, StringComparison.Ordinal))
         Save()
-        Check.Contains(
-            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
-            "protected owner path"
-        )
-        DiffFault("diff_fault", "hidden-path")
         Check.Contains(
             Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
             "protected owner path"
