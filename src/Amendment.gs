@@ -141,7 +141,7 @@ internal class Amendment {
                 start = Unique(body, oldReport)
                 length = oldReport.Length
             }
-            var updated = body.Remove(start, length).Insert(start, Report(report))
+            let updated = body.Remove(start, length).Insert(start, Report(report))
             start = Unique(updated, "<!-- tokate-receipt:")
             let end = updated.IndexOf(" -->", start, StringComparison.Ordinal)
             if end < 0 {
