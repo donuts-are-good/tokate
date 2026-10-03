@@ -181,12 +181,21 @@ internal class Commands {
             completed <- failure
         }
 
-        private func Wait(process Process, completed Chan[Exception?]) {
+        private func Wait(info ProcessStartInfo, started Chan[Process?], completed Chan[Exception?]) {
+            var process Process? = nil
             var failure Exception? = nil
             try {
-                process.WaitForExit()
+                process = Process.Start(info) ?? throw Exception("Cannot start " + info.ArgumentList[0])
             } catch (error Exception) {
                 failure = error
+            }
+            started <- process
+            if let child = process {
+                try {
+                    child.WaitForExit()
+                } catch (error Exception) {
+                    failure = error
+                }
             }
             completed <- failure
         }
@@ -264,30 +273,30 @@ internal class Commands {
             using let outputCapture = Capture(outputPath)
             using let errorCapture = Capture(errorPath)
             let allowance = TimeSpan.FromMilliseconds(milliseconds > 0 ? milliseconds: seconds * 1000)
-            let clock = Stopwatch.StartNew()
-            using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
-            using let outputReader = strictOutput ? StreamReader(
-                process.StandardOutput.BaseStream,
-                UTF8Encoding(false, true),
-                false
-            ): process.StandardOutput
-            using let deadline = after(
-                TimeSpan.FromMilliseconds(Math.Max(0.0, (allowance - clock.Elapsed).TotalMilliseconds))
-            )
+            let started = Chan[Process?](1)
+            let exited = Chan[Exception?](1)
             let stdin = Chan[Exception?](1)
             let stdout = Chan[CommandOutput](1)
             let stderr = Chan[CommandOutput](1)
-            let exited = Chan[Exception?](1)
             let cancelled = cancellation ?? Chan[bool](1)
-            go Commands.Write(process.StandardInput, input, stdin)
             let result = CommandResult()
             let failed = Chan[Exception](4)
-            go Commands.Read(outputReader, stdout, failed, outputCapture)
-            go Commands.Read(process.StandardError, stderr, failed, errorCapture)
-            go Commands.Wait(process, exited)
-            let callback = CommandCancellation(process, cancellation)
-            let onCancel = ConsoleCancelEventHandler(callback.OnCancel)
-            Console.CancelKeyPress += onCancel
+            let clock = Stopwatch.StartNew()
+            using let deadline = after(allowance)
+            go Commands.Wait(info, started, exited)
+            let launched = <-started
+            if launched == nil {
+                let failure = <-exited
+                throw failure ?? Exception("Cannot start " + exe)
+            }
+            using let process = launched
+            var outputReader StreamReader? = nil
+            var callback CommandCancellation? = nil
+            var onCancel ConsoleCancelEventHandler? = nil
+            var inputStarted bool
+            var outputStarted bool
+            var errorStarted bool
+            var ready bool
             var inputDone bool
             var outputDone bool
             var errorDone bool
@@ -297,6 +306,24 @@ internal class Commands {
             var stderrOutput = CommandOutput()
             var terminal Exception? = nil
             try {
+                let reader = strictOutput ? StreamReader(
+                    process.StandardOutput.BaseStream,
+                    UTF8Encoding(false, true),
+                    false
+                ): process.StandardOutput
+                outputReader = reader
+                let active = CommandCancellation(process, cancellation)
+                callback = active
+                let handler = ConsoleCancelEventHandler(active.OnCancel)
+                Console.CancelKeyPress += handler
+                onCancel = handler
+                go Commands.Write(process.StandardInput, input, stdin)
+                inputStarted = true
+                go Commands.Read(reader, stdout, failed, outputCapture)
+                outputStarted = true
+                go Commands.Read(process.StandardError, stderr, failed, errorCapture)
+                errorStarted = true
+                ready = true
                 while !inputDone || !outputDone || !errorDone || !exitDone {
                     if clock.Elapsed >= allowance {
                         throw Exception("Runtime limit reached for " + exe)
@@ -350,8 +377,12 @@ internal class Commands {
             } catch (error Exception) {
                 terminal = error
             } finally {
-                Console.CancelKeyPress -= onCancel
-                callback.Stop()
+                if let handler = onCancel {
+                    Console.CancelKeyPress -= handler
+                }
+                if let active = callback {
+                    active.Stop()
+                }
                 KillGroup(-process.Id, 9)
                 if !process.HasExited {
                     try {
@@ -362,15 +393,16 @@ internal class Commands {
                 if !exitDone {
                     <-exited
                 }
-                if !inputDone {
+                if inputStarted && !inputDone {
                     <-stdin
                 }
-                if !outputDone {
+                if outputStarted && !outputDone {
                     output = <-stdout
                 }
-                if !errorDone {
+                if errorStarted && !errorDone {
                     stderrOutput = <-stderr
                 }
+                outputReader?.Dispose()
             }
             Collect(result, output, stderrOutput)
             if terminal == nil {
@@ -387,6 +419,9 @@ internal class Commands {
             terminal = terminal ?? output.Failure ?? stderrOutput.Failure
             if let error = terminal {
                 result.Code = nil
+                if !ready {
+                    throw error
+                }
                 if error is IOException io && inputFailed {
                     throw CommandInputInterrupted(io, result)
                 }
