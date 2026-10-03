@@ -396,7 +396,10 @@ internal class CorrectionPublication {
                 "id"
             )
                 .ToString() != J.Get(run.Element(), "donor_id").ToString() {
-                throw Exception("Use the original authenticated donor account and numeric identity")
+                throw CliFailure(
+                    "authentication_required",
+                    "Use the original authenticated donor account and numeric identity"
+                )
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(J.Get(viewer, "id"))
@@ -404,14 +407,14 @@ internal class CorrectionPublication {
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
                 if !Correction.Same(J.Get(record, key), J.Get(pinned, key)) {
-                    throw Exception("Original pinned approval, policy or template changed")
+                    throw CliFailure("stale_approval", "Original pinned approval, policy or template changed")
                 }
             }
             if J.Text(state.Value(), "approval_id") != run.Text("approval") || J.Text(
                 J.Get(state.Value(), "reservation"),
                 "reservation"
             ) != run.Text("id") {
-                throw Exception("Original reservation or approval changed")
+                throw CliFailure("stale_approval", "Original reservation or approval changed")
             }
             Correction.Fork(run)
             if state.Sha == run.Text("state_sha") {
@@ -457,7 +460,10 @@ internal class CorrectionPublication {
                 "expected"
             ) != run.Text("state_sha") || J.Get(contribution, "actor").ToString() != J.Get(viewer, "id").ToString() ||
                 !Correction.Same(J.Get(contribution, "metadata"), J.Get(request, "metadata")) || !outcome {
-                throw Exception("Stale coordination revision; only the exact saved publication transition can resume")
+                throw CliFailure(
+                    "stale_approval",
+                    "Stale coordination revision; only the exact saved publication transition can resume"
+                )
             }
             return state
         }

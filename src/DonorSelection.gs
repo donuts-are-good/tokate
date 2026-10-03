@@ -10,7 +10,10 @@ internal class DonorSelection {
         internal func Capabilities() Dictionary[string, HashSet[string]] {
             let executable = Startup.Find("codex")
             if executable == "" {
-                throw Exception("Install native Codex to verify model/effort capability; availability is unknown")
+                throw CliFailure(
+                    "missing_tools",
+                    "Install native Codex to verify model/effort capability; availability is unknown"
+                )
             }
             let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
@@ -68,7 +71,7 @@ internal class DonorSelection {
             return false
         }
 
-        internal func Interactive(args Args) bool -> args.Get("non-interactive") != "true" &&
+        internal func Interactive(args Args) bool -> !PublicOutput.Enabled && args.Get("non-interactive") != "true" &&
             !Console.IsInputRedirected &&
             !Console.IsOutputRedirected &&
             !Console.IsErrorRedirected

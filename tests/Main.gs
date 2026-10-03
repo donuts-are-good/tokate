@@ -57,12 +57,12 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
-        if args.Length == 1 && args[0] == "--cli" {
-            CliDiscovery.All(binary)
+        if args.Length == 1 && args[0] == "--json-cli" {
+            CliDiscovery.Structured(binary)
             return 0
         }
-        if args.Length == 1 && args[0] == "--selection" {
-            DonorSelectionChecks.All(binary)
+        if args.Length == 1 && args[0] == "--cli" {
+            CliDiscovery.All(binary)
             return 0
         }
         if args.Length == 2 && args[0] == "--cli-shell" {
@@ -88,6 +88,10 @@ func Main(args[]string) int32 {
         }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--amendments" {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--selection" {
+            DonorSelectionChecks.All(binary)
             return 0
         }
         ProcessChecks.All()

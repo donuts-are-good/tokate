@@ -208,7 +208,7 @@ internal class Amendment {
                 "id"
             )
                 .ToString() != J.Get(run.Element(), "donor_id").ToString() {
-                throw Exception("Use the same donor account and numeric identity")
+                throw CliFailure("authentication_required", "Use the same donor account and numeric identity")
             }
             if run.Number("version") == 1 {
                 let record = Workflow.Recheck(run)
@@ -255,7 +255,7 @@ internal class Amendment {
                 "base_branch"
             ) ||
                 run.Text("policy_hash") != J.Text(approval, "policy_hash") {
-                throw Exception("Published contribution authority changed")
+                throw CliFailure("stale_approval", "Published contribution authority changed")
             }
             if amendment != nil && state.Sha != amendment.Text("expected") {
                 let current = Current(value)
@@ -269,10 +269,9 @@ internal class Amendment {
                     J.Text(current, "previous") != amendment.Text("previous") || J.Number(
                     current,
                     "seconds"
-                ) != amendment.Number("seconds") || RequestData.Canonical(
-                    J.Get(current, "tools")
-                ) != RequestData.Canonical(J.Get(amendment.Element(), "tools")) {
-                    throw Exception("Amendment has stale coordination revision")
+                ) != amendment.Number("seconds") || RequestData.Canonical(J.Get(current, "tools")) != RequestData
+                    .Canonical(J.Get(amendment.Element(), "tools")) {
+                    throw CliFailure("stale_approval", "Amendment has stale coordination revision")
                 }
                 let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
                 let parents = J.Items(J.Get(commit, "parents"))
@@ -403,7 +402,7 @@ internal class Amendment {
                     for command in J.Items(J.Get(policy.Value, "verification")) {
                         let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
                         if remaining < 1 {
-                            throw Exception("Amendment verification budget exhausted")
+                            throw CliFailure("verification_failed", "Amendment verification budget exhausted")
                         }
                         let words = List[string]()
                         for word in J.Items(command) {
@@ -429,7 +428,10 @@ internal class Amendment {
                         )
                         File.WriteAllText(Path.Combine(location, "verification.json"), J.Write(results))
                         if result.Code != 0 {
-                            throw Exception("Amendment owner verification failed; saved progress retained")
+                            throw CliFailure(
+                                "verification_failed",
+                                "Amendment owner verification failed; saved progress retained"
+                            )
                         }
                     }
                     if Snapshot(checkout, run, commit, amendment.Text("previous"), policy.Value) != snapshot {
@@ -442,12 +444,14 @@ internal class Amendment {
                 } catch (error Exception) {
                     amendment.Fields["state"] = "failed"
                     amendment.Fields["error"] = error.Message
+                    amendment.Fields["failure_reason"] = error is CliFailure failure ? failure.Code: "invalid_state"
                     amendment.Save(location)
                     throw error
                 }
             }
             if amendment.Text("state") == "failed" || amendment.Text("state") == "verifying" {
-                throw Exception(
+                throw CliFailure(
+                    "verification_failed",
                     "Amendment verification failed or interrupted; inspect saved progress and declare a corrected commit"
                 )
             }
@@ -455,7 +459,14 @@ internal class Amendment {
                 Publish(directory, location, run, amendment)
             } catch (error Exception) {
                 amendment.Fields["error"] = error.Message
+                amendment.Fields[
+                    "failure_reason"
+                ] = error is CliFailure failure ? failure.Code: "publication_interrupted"
                 amendment.Save(location)
+                if error is CliFailure {
+                    throw error
+                }
+                PublicOutput.FailureCode = "command_failed"
                 throw Exception(
                     error.Message +
                         "\nSaved amendment: " +
@@ -765,6 +776,7 @@ internal class Amendment {
         private func Complete(directory string, location string, run Data, amendment Data, pull JsonElement) {
             amendment.Fields["state"] = "published"
             amendment.Fields.Remove("error")
+            amendment.Fields.Remove("failure_reason")
             amendment.Save(location)
             let history = List[Object]()
             var found bool

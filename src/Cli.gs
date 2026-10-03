@@ -1,6 +1,7 @@
 package Tokate
 
 import System
+import System.Collections.Generic
 import System.ComponentModel
 import System.IO
 import System.Text
@@ -32,18 +33,37 @@ internal class CliCommand {
     internal let Summary string
     internal let Usage string
     internal let Example string
-    internal init(name string, options string, required string, summary string, usage string, example string) {
+    internal let Effects string
+    internal init(
+        name string,
+        options string,
+        required string,
+        summary string,
+        usage string,
+        example string,
+        effects string = "local_read"
+    ) {
         Name = name
         Options = options
         Required = required
         Summary = summary
         Usage = usage
         Example = example
+        Effects = effects
     }
 
-    internal func Has(name string) bool -> ("," + Options + ",help,traffic,").Contains("," + name + ",")
+    internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,").Contains("," + name + ",")
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
+
+    internal func ConflictsWithRun(name string) bool -> name != "run" &&
+        name != "help" &&
+        name != "traffic" &&
+        name != "json" &&
+        (
+        (Name == "work" && name != "yes" && name != "non-interactive") ||
+            (Name == "checks" && name != "watch" && name != "timeout")
+    )
 }
 
 internal class Cli {
@@ -83,18 +103,44 @@ internal class Cli {
             CliOption("prepare", "", "Archive original completed work before correction; no checks or publication"),
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
             CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
+            CliOption("json", "", "Emit one schema-version-1 result on stdout; diagnostics on stderr"),
         }
         internal let Commands[]CliCommand = []CliCommand{
-            CliCommand("doctor", "", "", "Check tools and sandbox locally; no inference.", "", "doctor"),
-            CliCommand("update", "", "", "Download and install latest stable Tokate; no inference.", "", "update"),
-            CliCommand("uninstall", "", "", "Remove managed installation offline; keep saved runs.", "", "uninstall"),
+            CliCommand(
+                "doctor",
+                "",
+                "",
+                "Check tools and sandbox locally; no inference.",
+                "",
+                "doctor",
+                effects: "local_read local_write"
+            ),
+            CliCommand(
+                "update",
+                "",
+                "",
+                "Download and install latest stable Tokate; no inference.",
+                "",
+                "update",
+                effects: "local_read local_write github_read"
+            ),
+            CliCommand(
+                "uninstall",
+                "",
+                "",
+                "Remove managed installation offline; keep saved runs.",
+                "",
+                "uninstall",
+                effects: "local_read local_write"
+            ),
             CliCommand(
                 "defaults",
                 "harness,provider,model,effort",
                 "",
                 "Set, read or remove donor-entered Tokate defaults locally; no discovery or inference.",
                 "set --harness HARNESS --provider PROVIDER --model MODEL --effort EFFORT\n       tokate defaults read|remove",
-                "defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high"
+                "defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high",
+                effects: "local_read local_write"
             ),
             CliCommand(
                 "select",
@@ -102,7 +148,8 @@ internal class Cli {
                 "repo",
                 "Select under current owner policy and offline harness capabilities; no inference or reservation.",
                 "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
-                "select --repo owner/project --non-interactive"
+                "select --repo owner/project --non-interactive",
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "init",
@@ -111,6 +158,8 @@ internal class Cli {
                 "Create local policy and PR template; no inference or publication.",
                 "[--path DIR]",
                 "init --path ."
+                ,
+                effects: "local_read local_write"
             ),
             CliCommand(
                 "coordinator-setup",
@@ -119,6 +168,8 @@ internal class Cli {
                 "Download verified release assets and write a v2 workflow; no inference.",
                 "[--repo OWNER/REPO] --output FILE",
                 "coordinator-setup --repo owner/project --output coordinator.yml"
+                ,
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "coordination",
@@ -127,6 +178,8 @@ internal class Cli {
                 "Read authoritative v2 issue state from GitHub; no inference or publication.",
                 "[--repo OWNER/REPO] --issue N|URL",
                 "coordination https://github.com/owner/project/issues/42"
+                ,
+                effects: "local_read github_read"
             ),
             CliCommand(
                 "request",
@@ -135,6 +188,8 @@ internal class Cli {
                 "Post a v2 claim or publication request to GitHub; no inference.",
                 "[--repo OWNER/REPO] --issue N|URL --file FILE",
                 "request --repo owner/project --issue 42 --file request.json"
+                ,
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "prepare",
@@ -143,6 +198,8 @@ internal class Cli {
                 "Save a v2 run for an existing reservation; no inference or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]",
                 "prepare --issue 42 --state SHA --source external --tools tools.json"
+                ,
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "external",
@@ -151,6 +208,8 @@ internal class Cli {
                 "Fetch and verify an exact external commit in isolation; no inference or publication.",
                 "--run DIR --commit SHA",
                 "external --run /path/to/run --commit SHA"
+                ,
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "amend",
@@ -158,7 +217,8 @@ internal class Cli {
                 "run,commit,seconds",
                 "Verify and publish a same-donor review correction; no inference.",
                 "--run DIR --commit SHA --seconds N [--tools FILE]",
-                "amend --run /path/to/run --commit SHA --seconds 300"
+                "amend --run /path/to/run --commit SHA --seconds 300",
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "submit",
@@ -167,6 +227,8 @@ internal class Cli {
                 "Push Tokate-coded work and request a coordinated v2 draft PR; no inference.",
                 "--run DIR",
                 "submit --run /path/to/run"
+                ,
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "coordinate",
@@ -175,6 +237,8 @@ internal class Cli {
                 "Trusted owner workflow: update v2 state and publish approved requests; no inference.",
                 "--repo OWNER/REPO --event FILE",
                 "coordinate --repo owner/project --event event.json"
+                ,
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "policy",
@@ -183,6 +247,8 @@ internal class Cli {
                 "Read upstream owner policy from GitHub; no inference.",
                 "[--repo OWNER/REPO]",
                 "policy --repo owner/project"
+                ,
+                effects: "local_read github_read"
             ),
             CliCommand(
                 "approve",
@@ -191,6 +257,8 @@ internal class Cli {
                 "Write GitHub approval, assignment and label; no inference.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
                 "approve https://github.com/owner/project/issues/42 --donor donor"
+                ,
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "assign",
@@ -199,6 +267,8 @@ internal class Cli {
                 "Replace approval and donor on an approved issue on GitHub; no inference.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
                 "assign --repo owner/project --issue 42 --donor donor"
+                ,
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "revoke",
@@ -207,6 +277,8 @@ internal class Cli {
                 "Remove GitHub approval; blocks publication, not active computation.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]",
                 "revoke https://github.com/owner/project/issues/42"
+                ,
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "claim",
@@ -215,6 +287,8 @@ internal class Cli {
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
+                ,
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "work",
@@ -223,6 +297,8 @@ internal class Cli {
                 "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
+                ,
+                effects: "local_read local_write github_read github_write inference"
             ),
             CliCommand(
                 "recover",
@@ -231,6 +307,8 @@ internal class Cli {
                 "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
                 "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE]",
                 "recover --run /path/to/run --seconds 300"
+                ,
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "publish",
@@ -239,6 +317,8 @@ internal class Cli {
                 "Push and publish a v1 draft PR from a successful run; no inference.",
                 "--run DIR",
                 "publish --run /path/to/run"
+                ,
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "status",
@@ -247,6 +327,8 @@ internal class Cli {
                 "Read saved run locally; no inference or publication.",
                 "--run DIR",
                 "status --run /path/to/run"
+                ,
+                effects: "local_read"
             ),
             CliCommand(
                 "verify-pr",
@@ -255,6 +337,8 @@ internal class Cli {
                 "Read GitHub approval and PR receipt; no inference or publication.",
                 "[--repo OWNER/REPO] --pr N",
                 "verify-pr --repo owner/project --pr 10"
+                ,
+                effects: "local_read github_read"
             ),
             CliCommand(
                 "checks",
@@ -263,6 +347,8 @@ internal class Cli {
                 "Read GitHub PR checks; --run also saves results locally. Exit: 0 passed, 8 pending, 1 failed.",
                 "[--repo OWNER/REPO] --pr N [--watch] [--timeout N]\n       tokate checks --run DIR [--watch] [--timeout N]",
                 "checks --run /path/to/run --watch"
+                ,
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "completion",
@@ -297,6 +383,110 @@ internal class Cli {
         internal func Usage(name string) string {
             let command = Find(name)
             return "Usage: tokate " + name + (command.Usage == "" ? "": " " + command.Usage)
+        }
+
+        internal func Metadata(name string = "") Object {
+            let commands = List[Object]()
+            for command in Commands {
+                if name != "" && command.Name != name {
+                    continue
+                }
+                let options = List[Object]()
+                for option in Options {
+                    if command.Has(option.Name) {
+                        options.Add(
+                            J.Map(
+                                "name",
+                                "--" + option.Name,
+                                "value",
+                                option.Value,
+                                "description",
+                                option.Describe(command.Name),
+                                "choices",
+                                option.Choices == "" ? []string{}: option.Choices.Split(' ')
+                            )
+                        )
+                    }
+                }
+                let inputs = List[Object]()
+                let conflicts = List[Object]()
+                for option in command.Options.Split(',', StringSplitOptions.RemoveEmptyEntries) {
+                    if command.ConflictsWithRun(option) {
+                        conflicts.Add(option)
+                    }
+                }
+                inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
+                if command.Name == "work" || command.Name == "checks" {
+                    inputs.Add([]string{"run"})
+                }
+                let effects = J.Map()
+                for effect in[]string{"local_read", "local_write", "github_read", "github_write"} {
+                    effects[effect] = Array.IndexOf(command.Effects.Split(' '), effect) >= 0
+                }
+                let modes = List[Object]()
+                if command.Name == "defaults" {
+                    for mode in[]string{"set", "read", "remove"} {
+                        modes.Add(
+                            J.Map(
+                                "name",
+                                mode,
+                                "required_inputs",
+                                mode == "set" ? []string{"harness", "provider", "model", "effort"}: []string{},
+                                "effects",
+                                J.Map(
+                                    "local_read",
+                                    true,
+                                    "local_write",
+                                    mode != "read",
+                                    "github_read",
+                                    false,
+                                    "github_write",
+                                    false
+                                )
+                            )
+                        )
+                    }
+                }
+                let positional = command.Name == "defaults" ? []string{"set|read|remove"}: (
+                    command.Name == "help" ? []string{"COMMAND"}:
+                    (
+                        command.Name == "completion" ? []string{"bash|zsh|fish"}:
+                        (command.Has("issue") ? []string{"ISSUE_URL"}: []string{})
+                    )
+                )
+                commands.Add(
+                    J.Map(
+                        "command",
+                        command.Name,
+                        "summary",
+                        command.Summary,
+                        "arguments",
+                        options,
+                        "positional_arguments",
+                        positional,
+                        "operations",
+                        modes,
+                        "required_inputs",
+                        inputs,
+                        "repository_inputs",
+                        command.Has("repo") ? (
+                            command.Has("issue") ? []string{"repo", "issue_url", "local_github_remote"}: []string{
+                                "repo",
+                                "local_github_remote"
+                            }
+                        ): []string{},
+                        "exclusive_run_inputs",
+                        conflicts,
+                        "effects",
+                        effects,
+                        "inference",
+                        command.Effects.Contains("inference"),
+                        "noninteractive",
+                        true
+                    )
+                )
+            }
+            return J.Map("version", Data.Version(), "subject", name, "commands", commands)
         }
 
         internal func ErrorUsage(args[]string) string {
@@ -386,11 +576,7 @@ internal class Cli {
             }
             if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
                 for key in args.Values.Keys {
-                    if key != "--run" &&
-                        key != "--help" &&
-                        key != "--traffic" &&
-                        !(args.Command == "work" && (key == "--yes" || key == "--non-interactive")) &&
-                        !(args.Command == "checks" && (key == "--watch" || key == "--timeout")) {
+                    if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
                     }
                 }

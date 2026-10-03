@@ -37,21 +37,16 @@ internal class DonorDefaults {
             return value
         }
 
-        internal func Run(args Args) {
+        internal func Run(args Args) JsonElement {
             if args.Subject == "read" {
                 let saved = Read()
-                Terminal.Json(
-                    J.Parse(J.Write(J.Map("default", saved.ValueKind == JsonValueKind.Undefined ? nil: saved))),
-                    "Donor defaults"
-                )
-                return
+                return J.Parse(J.Write(J.Map("default", saved.ValueKind == JsonValueKind.Undefined ? nil: saved)))
             }
             let path = Location()
             if args.Subject == "remove" {
                 let existed = File.Exists(path)
                 File.Delete(path)
-                Terminal.Json(J.Parse(J.Write(J.Map("removed", existed))), "Donor defaults")
-                return
+                return J.Parse(J.Write(J.Map("removed", existed)))
             }
             let choice = J.Map()
             for key in[]string{"harness", "provider", "model", "effort"} {
@@ -80,7 +75,7 @@ internal class DonorDefaults {
             } finally {
                 File.Delete(temporary)
             }
-            Terminal.Json(J.Parse(J.Write(J.Map("default", choice))), "Donor defaults")
+            return J.Parse(J.Write(J.Map("default", choice)))
         }
     }
 }

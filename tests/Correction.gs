@@ -1056,8 +1056,64 @@ internal class CorrectionChecks {
             AmendCorrected(flow.Flow, run, archive, flow)
         }
 
+        private func Structured(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]")
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Commit("Correction JSON checks")
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("staged_whitespace")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "trailing whitespace")
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let prepared = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--prepare", "--json"}),
+                "recover",
+                "ok"
+            )
+            Check.That(
+                Check.Text(prepared["data"]?["artifacts"]?["original_evidence"]) == Path.Combine(
+                    run,
+                    "original-evidence"
+                ),
+                "Prepared JSON lost original artifact"
+            )
+            let failedCommit = Correct(flow, run, "")
+            let failed = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
+                "recover",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(failed["data"]?["run_state"]?["correction"]?["state"]) == "failed",
+                "JSON correction lost failed attempt"
+            )
+            let commit = Correct(flow, run)
+            let published = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
+                "recover",
+                "ok"
+            )
+            Check.That(
+                Check.Text(published["data"]?["commit"]) == commit && Check.Text(
+                    published["data"]?["correction"]?["commit"]
+                ) == commit,
+                "JSON correction lost exact head"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
+                "JSON correction changed original"
+            )
+            Once(flow, 1)
+        }
+
         internal func All(binary string, selected string = "") {
             for name in[]string{
+                "Structured",
                 "CorrectedAmendmentsV1",
                 "CorrectedAmendmentsV2",
                 "Whitespace",
@@ -1082,6 +1138,9 @@ internal class CorrectionChecks {
                     continue
                 }
                 switch name {
+                    case "Structured" {
+                        Structured(binary)
+                    }
                     case "CorrectedAmendmentsV1" {
                         CorrectedAmendmentsV1(binary)
                     }

@@ -55,7 +55,11 @@ internal class Contribution {
                 )
                 File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
                 if check.Code != 0 {
-                    throw Exception("Owner verification failed. See verification.json. No PR will be opened.")
+                    run.Fields["failure_reason"] = "verification_failed"
+                    throw CliFailure(
+                        "verification_failed",
+                        "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+                    )
                 }
             }
             run.Fields["verification"] = verification
