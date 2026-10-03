@@ -553,7 +553,9 @@ internal class Fixture {
         if tail.StartsWith("compare/") {
             let comparison = tail.Substring(8).Split("...")
             let sha = comparison[1].Split(':')[1]
-            Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
+            if comparison[1].Split(':')[0] != "owner" {
+                Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
+            }
             let names = GitRaw("upstream", []string{"diff", "--name-status", "-z", "-M", comparison[0], sha}).Split(
                 '\0'
             )
@@ -588,7 +590,7 @@ internal class Fixture {
             }
             let value = Check.Map(
                 "status",
-                "ahead",
+                comparison[0] == sha ? "identical": "ahead",
                 "files",
                 files,
                 "commits",
@@ -811,7 +813,7 @@ internal class Fixture {
             } catch (error Exception) {
                 return Response(404)
             }
-            return Answer(Check.Map("object", Check.Map("sha", sha)))
+            return Answer(Check.Map("object", Check.Map("sha", sha, "type", "commit")))
         }
         if tail.StartsWith("git/commits/") {
             let parents = JsonArray()
@@ -821,6 +823,8 @@ internal class Fixture {
             }
             return Answer(
                 Check.Map(
+                    "sha",
+                    tail.Substring(12),
                     "tree",
                     Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(12) + "^{tree}"})),
                     "parents",
@@ -829,23 +833,47 @@ internal class Fixture {
             )
         }
         if tail.StartsWith("git/trees/") {
-            let sha = tail.Substring(10)
-            let tree = JsonArray()
-            for line in Git(folder, []string{"ls-tree", sha}).Split('\n') {
+            let sha = tail.Substring(10).Split('?')[0]
+            let recursive = tail.EndsWith("?recursive=1", StringComparison.Ordinal)
+            let entries = JsonArray()
+            let args = recursive ? []string{"ls-tree", "-r", "-t", "-z", sha}: []string{"ls-tree", "-z", sha}
+            for line in GitRaw(folder, args).Split('\0') {
                 if line == "" {
                     continue
                 }
-                let fields = line.Split('\t')
-                let object = fields[0].Split(' ')
-                let entry = Check.Map("path", fields[1], "mode", object[0], "type", object[1], "sha", object[2])
-                if object[1] == "blob" {
-                    entry["size"] = JsonValue.Create(Int32.Parse(Git(folder, []string{"cat-file", "-s", object[2]})))
+                let tab = line.IndexOf('\t')
+                let fields = line.Substring(0, tab).Split(' ')
+                let entry = Check.Map(
+                    "path",
+                    line.Substring(tab + 1),
+                    "mode",
+                    fields[0],
+                    "type",
+                    fields[1],
+                    "sha",
+                    fields[2]
+                )
+                if !recursive && fields[1] == "blob" {
+                    entry["size"] = JsonValue.Create(Int32.Parse(Git(folder, []string{"cat-file", "-s", fields[2]})))
                 }
-                tree.Add(entry)
+                entries.Add(entry)
             }
-            return Answer(
-                Check.Map("sha", sha, "tree", tree, "truncated", Check.Text(State["decree_tree_fault"]) == "truncated")
-            )
+            let fault = Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
+            let result = Check.Map("sha", sha, "truncated", fault == "truncated", "tree", entries)
+            if recursive && fault == "missing" {
+                result.AsObject().Remove("tree")
+            } else if recursive && fault == "identity" {
+                result["sha"] = JsonValue.Create(String('a', 40))
+            } else if recursive && fault == "ancestor" {
+                for i in 0 ... entries.Count {
+                    if Check.Text(entries[i]?["path"]) == ".github" {
+                        entries.RemoveAt(i)
+                        break
+                    }
+                }
+                result["tree"] = entries.DeepClone()
+            }
+            return Answer(result)
         }
         if tail.StartsWith("git/blobs/") {
             let fault = Check.Text(State["decree_blob_fault"])
@@ -1273,6 +1301,21 @@ internal class Fixture {
                 File.WriteAllText(StatePath, latest.ToJsonString())
                 Console.Error.WriteLine("Synthetic lost push response")
                 return 1
+            }
+            if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_sync_after_push" {
+                let reference = Git(
+                    "upstream",
+                    []string{"for-each-ref", "--format=%(refname)", "refs/heads/tokate/synchronizations"}
+                ).Split('\n')[0]
+                let grant = Git("upstream", []string{"rev-parse", reference})
+                let tree = Git("upstream", []string{"rev-parse", grant + "^{tree}"})
+                let revoked = Git(
+                    "upstream",
+                    []string{"commit-tree", tree, "-p", grant, "-m", "Revoked during publication"}
+                )
+                Git("upstream", []string{"update-ref", reference, revoked, grant})
+                State["mode"] = JsonValue.Create("")
+                Save()
             }
             if result.Code == 0 && command.Contains("checkout") && State["decree_checkout_replacement"] != nil {
                 File.WriteAllText(

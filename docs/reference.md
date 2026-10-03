@@ -84,7 +84,7 @@ tokate recover --run DIR [--seconds 300]
 tokate recover --run DIR --prepare
 tokate recover --run DIR --commit SHA --seconds N [--tools FILE]
 tokate publish --run DIR
-tokate amend --run DIR --commit SHA --seconds N [--tools FILE]
+tokate amend --run DIR --commit SHA --seconds N [--tools FILE] [--sync G]
 tokate status --run DIR
 tokate verify-pr --repo OWNER/REPO --pr 10
 tokate checks --repo OWNER/REPO --pr 10 [--watch] [--timeout 1200]
@@ -489,6 +489,73 @@ The operating system must permit bubblewrap to create user namespaces. On
 Ubuntu 24.04, an administrator may need to enable an AppArmor profile for
 bubblewrap as described in the [Ubuntu release notes](https://discourse.ubuntu.com/t/ubuntu-24-04-lts-noble-numbat-release-notes/39890).
 Run `doctor` after setup. Tokate does not change system security settings.
+
+### Synchronize an already-published contribution
+
+Tokate 0.2.18 supports native v1/v2 contributions with an open, unmerged PR.
+Prepare and commit a merge locally, preserving the original donor head H and
+merging the exact current upstream target U. Resolve nonprotected textual
+conflicts explicitly with the owner; unresolved or ambiguous operations stop.
+Tokate supplies no conflict resolver and launches no inference through `amend`.
+Any further coding inference needs a separate donor-authorized budget.
+
+The owner supplies the exact candidate C, which may still be private:
+
+```sh
+tokate authorize-sync --repo OWNER/REPO --pr P --commit C --upstream U
+# Donor, using the printed grant SHA G and a clean checkout at C:
+tokate amend --run DIR --commit C --sync G --seconds N [--tools FILE]
+# Owner, to invalidate G while retaining it for inspection:
+tokate revoke-sync --repo OWNER/REPO --grant G
+```
+
+Authorization requires authenticated upstream write permission. Its dedicated
+`tokate/synchronizations/ISSUE/UUID` ref binds numeric repository identity, PR,
+issue, original approval/version, selected target, U, published H, exact C and
+v2 coordination revision S. Creation validates the existing canonical PR/receipt,
+fresh approval and current U; it never fetches/inspects private C, stages candidate
+transport, attests verification or grants final acceptance. Commit author names,
+donor refs/requests and local files confer no authority. The v2 grant does not
+advance state, extend expiry or reset the reservation; amendment uses the existing
+publication CAS with exactly S.
+
+Before any owner checks or push, Tokate proves approved-base ancestry of H/U
+and C's descent from both, then compares complete protected trees at C with
+**authenticated U**. Blob identities, modes/types, ancestor paths, presence,
+absence and both rename endpoints must agree. The originally approved protected
+set stays in force. All unchanged owner commands run again on exact C with the
+explicit bounded verification budget and existing network limits; old checks
+cover earlier work only. After a normal nonforce push, canonical remote content
+must pass the same proof before PR updates. The v2 coordinator repeats these
+proofs before PR/state writes and its CAS; it never executes donor code.
+
+Approvals, original base/snapshots, source/model/usage observations and prior
+receipts remain unchanged. Separate synchronization history records G/C/U,
+while amendment archives retain previous bodies, candidate patches, merge-parent
+and combined conflict evidence and verification results. Later ordinary amendment
+D retains historical G/C/U and can change only nonprotected content against U.
+A further protected synchronization requires a new exact owner grant.
+
+Revocation nonforce advances the ref to a commit whose sole parent is G. The
+original G remains inspectable. Revocation, deletion or unexpected movement of
+any historical grant blocks publication and receipt/check validation. Movement
+of the selected target stales readiness without rewriting historical approval or
+receipts; authorize a new exact synchronization after preparing a new candidate.
+Changed issue, assignment, policy or template still requires fresh approval.
+An approved DECREE.md snapshot remains binding during synchronization.
+
+Grant/PR/state writes are separate effects. A race can leave a physical push, PR
+body or state update with invalid authority. Tokate rechecks around effects and
+after publication and reports failure; it neither fabricates success nor retries
+automatically. Preserve evidence and inspect `verify-pr` before taking any further
+explicit action. Legacy records require no migration.
+
+Final acceptance remains with the owner: review exact C (including conflict
+resolutions), require fresh required CI on exact C, then recheck live grant,
+approval and the current target with `verify-pr` and `checks` immediately before
+acceptance. A clean merge still needs full verification. These read-only commands
+neither certify human review nor merge the PR. Force pushes, protected-branch
+donor pushes, admin bypasses and automatic merge queues are not provided.
 
 ## Linux compatibility
 

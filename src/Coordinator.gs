@@ -60,6 +60,9 @@ internal class Coordinator {
                     if J.Text(old, "binding") != binding {
                         throw Exception("UUID replay changed actor or request contents")
                     }
+                    if J.Text(request, "action") == "amend" {
+                        Publication.Verify(repo, J.Number(J.Get(old, "outcome"), "pr"))
+                    }
                     Terminal.Json(J.Get(old, "outcome"), "Recorded request outcome")
                     return
                 }
@@ -228,6 +231,10 @@ internal class Coordinator {
             }
             retained.Add(J.Map("uuid", J.Text(request, "uuid"), "binding", binding, "outcome", outcome))
             state.Fields["outcomes"] = retained
+            if J.Text(request, "action") == "amend" {
+                Revalidate(repo, number, state, actor, donor)
+                SyncProof(repo, record, state.Value(), J.Get(request, "metadata"), J.Text(request, "expected"))
+            }
             try {
                 state.Write(
                     repo,
@@ -241,6 +248,9 @@ internal class Coordinator {
                         "\nPR and coordination writes are not atomic. A physical PR may lack valid authority; inspect verify-pr and redeliver the same saved UUID request only after reading current state.",
                     error
                 )
+            }
+            if J.Text(request, "action") == "amend" {
+                Publication.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
             }
             Terminal.Json(J.Parse(J.Write(outcome)), "Request outcome")
         }
@@ -296,15 +306,8 @@ internal class Coordinator {
                 throw Exception("Amendment differs from current published contribution authority")
             }
             ValidateFork(repo, donor, metadata, actor)
-            ValidateDiff(repo, record, metadata)
-            ProtectedPaths.Remote(
-                repo,
-                policy.Value,
-                J.Get(record, "approval"),
-                J.Text(metadata, "previous"),
-                J.Text(metadata, "fork"),
-                J.Text(metadata, "head")
-            )
+            let history = Synchronization.Append(repo, Synchronization.History(current), J.Text(metadata, "sync"))
+            SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo
@@ -317,6 +320,10 @@ internal class Coordinator {
             amendment.Fields["previous"] = J.Text(metadata, "previous")
             amendment.Fields["seconds"] = J.Number(metadata, "seconds")
             amendment.Fields["tools"] = J.Get(metadata, "tools")
+            if J.Text(metadata, "sync") != "" {
+                amendment.Fields["sync"] = J.Text(metadata, "sync")
+            }
+            Synchronization.Keep(amendment.Fields, history)
             let fields = J.Map(
                 "version",
                 2,
@@ -341,6 +348,7 @@ internal class Coordinator {
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
             }
+            Synchronization.Keep(fields, history)
             let receipt = J.Parse(J.Write(fields))
             let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             let body = J.Text(pull, "body")
@@ -373,6 +381,7 @@ internal class Coordinator {
                 }
                 let updated = Amendment.ReplaceBody(body, OriginalReport(old), report, receipt)
                 Revalidate(repo, number, state, actor, donor)
+                SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
                 ValidateFork(repo, donor, metadata, actor)
                 let fresh = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
                 if J.Text(fresh, "body") != body {
@@ -386,6 +395,7 @@ internal class Coordinator {
                 )
             }
             Revalidate(repo, number, state, actor, donor)
+            SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
             ValidateFork(repo, donor, metadata, actor)
             let latest = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             if RequestData.Canonical(Amendment.Receipt(J.Text(latest, "body"))) != RequestData.Canonical(receipt) ||
@@ -402,36 +412,106 @@ internal class Coordinator {
                 "reservation",
                 run.Text("id")
             )
-            let history = List[Object]()
+            let retainedHistory = List[Object]()
             for prior in J.Items(J.Get(value, "amendments")) {
-                history.Add(prior)
+                retainedHistory.Add(prior)
             }
-            history.Add(
-                J.Map(
-                    "request",
-                    J.Text(request, "uuid"),
-                    "expected",
-                    J.Text(request, "expected"),
-                    "previous",
-                    J.Text(metadata, "previous"),
-                    "head",
-                    J.Text(metadata, "head"),
-                    "seconds",
-                    J.Number(metadata, "seconds"),
-                    "tools",
-                    J.Get(metadata, "tools"),
-                    "actor",
-                    actor,
-                    "donor",
-                    donor,
-                    "outcome",
-                    outcome,
-                    "verification_provenance",
-                    "donor-reported; exact-commit owner CI required"
-                )
+            let entry = J.Map(
+                "request",
+                J.Text(request, "uuid"),
+                "expected",
+                J.Text(request, "expected"),
+                "previous",
+                J.Text(metadata, "previous"),
+                "head",
+                J.Text(metadata, "head"),
+                "seconds",
+                J.Number(metadata, "seconds"),
+                "tools",
+                J.Get(metadata, "tools"),
+                "actor",
+                actor,
+                "donor",
+                donor,
+                "outcome",
+                outcome,
+                "verification_provenance",
+                "donor-reported; exact-commit owner CI required"
             )
-            state.Fields["amendments"] = history
+            if J.Text(metadata, "sync") != "" {
+                entry["sync"] = J.Text(metadata, "sync")
+            }
+            Synchronization.Keep(entry, history)
+            retainedHistory.Add(entry)
+            state.Fields["amendments"] = retainedHistory
             return outcome
+        }
+
+        private func SyncProof(
+            repo string,
+            record JsonElement,
+            state JsonElement,
+            metadata JsonElement,
+            expected string
+        ) {
+            SyncProofHistory(repo, record, state, metadata, expected, Synchronization.History(Amendment.Current(state)))
+        }
+
+        private func SyncProofHistory(
+            repo string,
+            record JsonElement,
+            state JsonElement,
+            metadata JsonElement,
+            expected string,
+            history JsonElement
+        ) {
+            Synchronization.Live(
+                repo,
+                J.Number(metadata, "pr"),
+                record,
+                J.Text(state, "approval_id"),
+                history,
+                J.Text(metadata, "fork"),
+                J.Text(metadata, "branch"),
+                J.Text(metadata, "head"),
+                J.Text(metadata, "sync"),
+                expected,
+                J.Text(metadata, "previous")
+            )
+            if history.GetArrayLength() > 0 {
+                Synchronization.Remote(
+                    repo,
+                    J.Get(record, "policy"),
+                    J.Get(record, "approval"),
+                    J.Text(J.Get(record, "approval"), "base"),
+                    history,
+                    J.Text(metadata, "fork"),
+                    J.Text(metadata, "head")
+                )
+            } else {
+                ValidateDiff(repo, record, metadata)
+                ProtectedPaths.Remote(
+                    repo,
+                    J.Get(record, "policy"),
+                    J.Get(record, "approval"),
+                    J.Text(metadata, "previous"),
+                    J.Text(metadata, "fork"),
+                    J.Text(metadata, "head")
+                )
+            }
+            Synchronization.Live(
+                repo,
+                J.Number(metadata, "pr"),
+                record,
+                J.Text(state, "approval_id"),
+                history,
+                J.Text(metadata, "fork"),
+                J.Text(metadata, "branch"),
+                J.Text(metadata, "head"),
+                J.Text(metadata, "sync"),
+                expected,
+                J.Text(metadata, "previous")
+            )
         }
 
         private func PositiveId(value JsonElement) int64 {

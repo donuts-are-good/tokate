@@ -64,6 +64,168 @@ internal class ProtectedPaths {
             }
         }
 
+        private func Relation(policy JsonElement, approval JsonElement, path string) int32 {
+            if Decree.Protected(path, approval) || Matches(".github/workflows/", path) || path.StartsWith(
+                ".github/tokate",
+                StringComparison.Ordinal
+            ) {
+                return 2
+            }
+            var ancestor = path == ".github"
+            for entry in J.Items(J.Get(policy, "protected_paths")) {
+                let name = entry.GetString() ?? ""
+                if Matches(name, path) {
+                    return 2
+                }
+                if name.StartsWith(path + "/", StringComparison.Ordinal) {
+                    ancestor = true
+                }
+            }
+            return ancestor ? 1: 0
+        }
+
+        private func AddTree(entries Dictionary[string, string], path string, mode string, type string, sha string) {
+            Relative(path)
+            Data.CommitSha(sha)
+            if !(
+                (mode == "040000" && type == "tree") ||
+                    ((mode == "100644" || mode == "100755" || mode == "120000") && type == "blob") ||
+                    (mode == "160000" && type == "commit")
+            ) ||
+                !entries.TryAdd(path, mode + " " + type + " " + sha) {
+                throw Exception("Incomplete, duplicate or invalid protected tree evidence")
+            }
+        }
+
+        private func CompleteTree(entries Dictionary[string, string]) {
+            if entries.Count > 100000 {
+                throw Exception("Protected tree exceeds bounded evidence")
+            }
+            for entry in entries {
+                var path = entry.Key
+                var slash = path.LastIndexOf('/')
+                while slash >= 0 {
+                    path = path.Substring(0, slash)
+                    var value string
+                    if !entries.TryGetValue(path, out value) || !value.StartsWith(
+                        "040000 tree ",
+                        StringComparison.Ordinal
+                    ) {
+                        throw Exception("Missing protected tree ancestor evidence")
+                    }
+                    slash = path.LastIndexOf('/')
+                }
+            }
+        }
+
+        internal func LocalTree(checkout string, head string) Dictionary[string, string] {
+            let output = Commands.GitRaw(
+                checkout,
+                []string{"ls-tree", "-r", "-t", "-z", "--full-tree", Data.CommitSha(head)}
+            )
+            let entries = Dictionary[string, string](StringComparer.Ordinal)
+            if output != "" && !output.EndsWith("\0", StringComparison.Ordinal) {
+                throw Exception("Truncated protected tree evidence")
+            }
+            for line in output.Split('\0') {
+                if line == "" {
+                    continue
+                }
+                let tab = line.IndexOf('\t')
+                let fields = (tab < 0 ? "": line.Substring(0, tab)).Split(' ')
+                if fields.Length != 3 {
+                    throw Exception("Invalid protected tree evidence")
+                }
+                AddTree(entries, line.Substring(tab + 1), fields[0], fields[1], fields[2])
+            }
+            CompleteTree(entries)
+            return entries
+        }
+
+        internal func RemoteTree(repo string, head string) Dictionary[string, string] {
+            let commit = GitHub.Api("repos/" + Data.Repo(repo) + "/git/commits/" + Data.CommitSha(head))
+            if J.Text(commit, "sha") != head {
+                throw Exception("Mismatched protected commit evidence")
+            }
+            let sha = Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
+            let value = GitHub.Api("repos/" + repo + "/git/trees/" + sha + "?recursive=1")
+            if J.Text(value, "sha") != sha || J.Get(value, "truncated").ValueKind != JsonValueKind.False || J.Get(
+                value,
+                "tree"
+            )
+                .ValueKind != JsonValueKind.Array {
+                throw Exception("Missing, truncated or mismatched protected tree evidence")
+            }
+            let entries = Dictionary[string, string](StringComparer.Ordinal)
+            for entry in J.Items(J.Get(value, "tree")) {
+                AddTree(
+                    entries,
+                    J.Text(entry, "path"),
+                    J.Text(entry, "mode"),
+                    J.Text(entry, "type"),
+                    J.Text(entry, "sha")
+                )
+            }
+            CompleteTree(entries)
+            return entries
+        }
+
+        internal func EqualTrees(
+            policy JsonElement,
+            approval JsonElement,
+            trusted Dictionary[string, string],
+            candidate Dictionary[string, string]
+        ) {
+            let paths = HashSet[string](trusted.Keys, StringComparer.Ordinal)
+            paths.UnionWith(candidate.Keys)
+            for path in paths {
+                let relation = Relation(policy, approval, path)
+                if relation == 0 {
+                    continue
+                }
+                var left string
+                var right string
+                let hasLeft = trusted.TryGetValue(path, out left)
+                let hasRight = candidate.TryGetValue(path, out right)
+                if relation == 1 &&
+                    (!hasLeft || left.StartsWith("040000 tree ", StringComparison.Ordinal)) &&
+                    (!hasRight || right.StartsWith("040000 tree ", StringComparison.Ordinal)) {
+                    continue
+                }
+                if relation == 1 && hasLeft && hasRight {
+                    left = left.Substring(0, left.LastIndexOf(' '))
+                    right = right.Substring(0, right.LastIndexOf(' '))
+                }
+                if hasLeft != hasRight || left != right {
+                    throw Exception("Synchronization changes protected owner content: " + J.Write(path))
+                }
+            }
+        }
+
+        internal func Ancestor(repo string, base string, fork string, head string) {
+            Data.Repo(repo)
+            Data.Repo(fork)
+            Data.CommitSha(base)
+            Data.CommitSha(head)
+            let value = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
+            let commits = J.Items(J.Get(value, "commits"))
+            if J.Text(J.Get(value, "base_commit"), "sha") != base || J.Text(
+                J.Get(value, "merge_base_commit"),
+                "sha"
+            ) != base ||
+                J
+                .Get(value, "behind_by").ValueKind != JsonValueKind.Number || J.Number(value, "behind_by") != 0 ||
+                (
+                base == head ? J.Text(value, "status") != "identical":
+                J.Text(value, "status") != "ahead" || commits.Count == 0 || J.Text(
+                    commits[commits.Count - 1],
+                    "sha"
+                ) != head
+            ) {
+                throw Exception("Missing or mismatched synchronization ancestry evidence")
+            }
+        }
+
         internal func Local(checkout string, policy JsonElement, approval JsonElement, base string, head string = "") {
             let args = List[string]{
                 "diff",

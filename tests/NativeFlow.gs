@@ -98,10 +98,13 @@ internal class NativeFlow : IDisposable {
         return result
     }
 
-    internal func Approve() -> Call(
-        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-        owner: true
-    )
+    internal func Approve(baseBranch string = "") {
+        let args = List[string]{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}
+        if baseBranch != "" {
+            args.AddRange([]string{"--base-branch", baseBranch})
+        }
+        Call(args.ToArray(), owner: true)
+    }
 
     internal func CommitIdentity(folder string, sha string, name string, email string) {
         let identity = Git("-C", folder, "show", "-s", "--format=%an%n%ae%n%cn%n%ce", sha).Split('\n')

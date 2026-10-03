@@ -59,13 +59,18 @@ internal class AmendmentFlow {
             flow.Save()
         }
 
-        private func Original(
+        internal func Original(
             flow NativeFlow,
             owner bool = false,
             mutating bool = false,
-            interruptible bool = false
+            interruptible bool = false,
+            synchronization bool = false,
+            baseBranch string = ""
         ) string {
             flow.Initialize()
+            if synchronization {
+                SynchronizationChecks.SetupOwner(flow)
+            }
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["verification"] = Check.Json(
@@ -84,10 +89,20 @@ internal class AmendmentFlow {
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Owner checks")
             flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, "main")
-            flow.Call(
-                []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", owner ? "owner": "donor"},
-                owner: true
-            )
+            let approve = List[string]{
+                "approve",
+                "--repo",
+                "owner/project",
+                "--issue",
+                "1",
+                "--donor",
+                owner ? "owner": "donor"
+            }
+            if baseBranch != "" {
+                flow.Git("-C", flow.Upstream, "branch", baseBranch)
+                approve.AddRange([]string{"--base-branch", baseBranch})
+            }
+            flow.Call(approve.ToArray(), owner: true)
             let claim = flow.Call(
                 []string{
                     "claim",
@@ -379,8 +394,21 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2Original(flow CoordinationFlow, native bool = false, modelPolicy string = "") string {
+        internal func V2Original(
+            flow CoordinationFlow,
+            native bool = false,
+            modelPolicy string = "",
+            synchronization bool = false,
+            baseBranch string = ""
+        ) string {
             flow.Initialize()
+            if synchronization {
+                SynchronizationChecks.SetupOwner(flow.Flow)
+                if baseBranch != "" {
+                    flow.Flow.Git("-C", flow.Flow.Upstream, "branch", baseBranch)
+                }
+                flow.Flow.Approve(baseBranch)
+            }
             if modelPolicy != "" {
                 let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
                 let policy = Check.Json(File.ReadAllText(path))
@@ -396,7 +424,7 @@ internal class AmendmentFlow {
                 flow.Flow.Commit("External amendment effort policy")
                 flow.Flow.Approve()
             }
-            let claim = flow.Claim()
+            let claim = flow.Claim(baseBranch != "")
             if native {
                 File.WriteAllText(
                     flow.Tools,

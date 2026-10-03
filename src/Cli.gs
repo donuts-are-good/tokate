@@ -104,6 +104,9 @@ internal class Cli {
             CliOption("file", "FILE", "Strict claim or publication request JSON"),
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
+            CliOption("sync", "SHA", "Exact live owner synchronization grant"),
+            CliOption("grant", "SHA", "Synchronization grant to revoke"),
+            CliOption("upstream", "SHA", "Exact current trusted target revision"),
             CliOption("commit", "SHA", "Exact candidate commit to verify"),
             CliOption("prepare", "", "Archive original completed work before correction; no checks or publication"),
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
@@ -217,11 +220,29 @@ internal class Cli {
                 effects: "local_read local_write github_read"
             ),
             CliCommand(
+                "authorize-sync",
+                "repo,pr,commit,upstream",
+                "repo,pr,commit,upstream",
+                "Owner: grant an exact candidate synchronization; no candidate inspection or acceptance.",
+                "--repo OWNER/REPO --pr N --commit SHA --upstream SHA",
+                "authorize-sync --repo owner/project --pr 10 --commit C --upstream U",
+                effects: "local_read github_read github_write"
+            ),
+            CliCommand(
+                "revoke-sync",
+                "repo,grant",
+                "repo,grant",
+                "Owner: preserve and revoke a synchronization grant by nonforce ref advance.",
+                "--repo OWNER/REPO --grant SHA",
+                "revoke-sync --repo owner/project --grant G",
+                effects: "local_read github_read github_write"
+            ),
+            CliCommand(
                 "amend",
-                "run,commit,seconds,tools",
+                "run,commit,seconds,tools,sync",
                 "run,commit,seconds",
                 "Verify and publish a same-donor review correction; no inference.",
-                "--run DIR --commit SHA --seconds N [--tools FILE]",
+                "--run DIR --commit SHA --seconds N [--tools FILE] [--sync GRANT]",
                 "amend --run /path/to/run --commit SHA --seconds 300",
                 effects: "local_read local_write github_read github_write"
             ),
@@ -626,7 +647,7 @@ internal class Cli {
                     throw Exception("Invalid value for --" + key)
                 }
             }
-            for key in[]string{"state", "commit"} {
+            for key in[]string{"state", "commit", "grant", "upstream", "sync"} {
                 if args.Get(key) != "" {
                     Data.CommitSha(args.Get(key))
                 }

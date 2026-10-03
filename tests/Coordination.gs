@@ -104,12 +104,12 @@ internal class CoordinationFlow : IDisposable {
         traffic: traffic
     )
 
-    internal func Claim() JsonNode {
+    internal func Claim(selected bool = false) JsonNode {
         let request = ClaimRequest()
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(9, 3, 1, 0, result)
+        Flow.Traffic(selected ? 10: 9, 3, 1, 0, result)
         return request
     }
 

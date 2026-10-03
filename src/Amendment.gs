@@ -29,7 +29,7 @@ internal class Amendment {
         }
 
         internal func ValidateReceipt(value JsonElement, policy Policy) {
-            RequestData.Keys(value, "id,previous,seconds,tools")
+            RequestData.Keys(value, "id,previous,seconds,tools,sync")
             var id Guid
             if !Guid.TryParseExact(J.Text(value, "id"), "D", out id) || J.Number(value, "seconds") < 1 || J.Number(
                 value,
@@ -39,6 +39,9 @@ internal class Amendment {
             }
             Data.CommitSha(J.Text(value, "previous"))
             Tools(policy, J.Get(value, "tools"))
+            if J.Get(value, "sync").ValueKind != JsonValueKind.Undefined {
+                Data.CommitSha(J.Text(value, "sync"))
+            }
         }
 
         internal func Current(state JsonElement) JsonElement {
@@ -74,7 +77,7 @@ internal class Amendment {
                 fields["correction"] = correction
             }
             if J.Items(J.Get(state, "amendments")).Count > 0 {
-                fields["amendment"] = J.Map(
+                let amended = J.Map(
                     "id",
                     J.Text(current, "request"),
                     "previous",
@@ -84,7 +87,12 @@ internal class Amendment {
                     "tools",
                     J.Get(current, "tools")
                 )
+                if J.Text(current, "sync") != "" {
+                    amended["sync"] = J.Text(current, "sync")
+                }
+                fields["amendment"] = amended
             }
+            Synchronization.Keep(fields, Synchronization.History(current))
             return J.Parse(J.Write(fields))
         }
 
@@ -229,6 +237,7 @@ internal class Amendment {
                 ) {
                     throw Exception("Donor fork ownership or upstream changed")
                 }
+                SyncAuthority(run, amendment, record)
                 return record
             }
             if run.Number("version") != 2 {
@@ -273,6 +282,12 @@ internal class Amendment {
                     .Canonical(J.Get(amendment.Element(), "tools")) {
                     throw CliFailure("stale_approval", "Amendment has stale coordination revision")
                 }
+                if J.Text(current, "sync") != amendment.Text("sync") || RequestData.Canonical(
+                    Synchronization.History(current)
+                ) != RequestData
+                    .Canonical(Synchronization.History(amendment.Element())) {
+                    throw Exception("Amendment synchronization differs from coordination authority")
+                }
                 let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
                 let parents = J.Items(J.Get(commit, "parents"))
                 if parents.Count != 1 || J.Text(parents[0], "sha") != amendment.Text("expected") {
@@ -294,10 +309,38 @@ internal class Amendment {
                 ),
                 J.Get(viewer, "id")
             )
+            SyncAuthority(run, amendment, record)
             return J.Parse(J.Write(J.Map("record", record, "state", value, "sha", state.Sha)))
         }
 
-        private func Snapshot(checkout string, run Data, commit string, previous string, record JsonElement) string {
+        private func SyncAuthority(run Data, amendment Data?, record JsonElement) {
+            if amendment != nil {
+                Synchronization.Live(
+                    run.Text("repo"),
+                    amendment.Number("pr"),
+                    record,
+                    run.Text("approval"),
+                    Synchronization.History(amendment.Element()),
+                    run.Text("head_repo"),
+                    run.Text("branch"),
+                    amendment.Text("commit"),
+                    amendment.Text("sync"),
+                    amendment.Text("expected"),
+                    amendment.Text("previous")
+                )
+            }
+        }
+
+        private func Snapshot(
+            checkout string,
+            run Data,
+            commit string,
+            previous string,
+            record JsonElement,
+            history JsonElement
+        ) string {
+            let policy = J.Get(record, "policy")
+            let approval = J.Get(record, "approval")
             Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.Git(
                 checkout,
@@ -311,8 +354,19 @@ internal class Amendment {
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
             Commands.Git(checkout, "merge-base", "--is-ancestor", previous, commit)
             Commands.Git(checkout, "diff", "--no-ext-diff", "--no-textconv", "--check", run.Text("base"), commit)
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"), commit)
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), previous, commit)
+            for name in[]string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"} {
+                if File.Exists(Path.Combine(checkout, ".git", name)) {
+                    throw Exception(
+                        "Unresolved or ambiguous conflict operation; preserve evidence and commit an owner-reviewed resolution"
+                    )
+                }
+            }
+            if history.GetArrayLength() > 0 {
+                Synchronization.Local(checkout, run.Text("repo"), policy, approval, run.Text("base"), history, commit)
+            } else {
+                ProtectedPaths.Local(checkout, policy, approval, run.Text("base"), commit)
+                ProtectedPaths.Local(checkout, policy, approval, previous, commit)
+            }
             return Commands.Git(checkout, "rev-parse", "HEAD^{tree}") + "\n" + Commands.Git(
                 checkout,
                 "diff",
@@ -350,12 +404,13 @@ internal class Amendment {
             let run = Data.Load(directory)
             let commit = Data.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
+            let sync = args.Get("sync") == "" ? "": Data.CommitSha(args.Need("sync"))
             let tools = args.Get("tools") == "" ? J.Parse("[]"): RequestData.FileData(args.Need("tools"), 8192)
             let location = Path.Combine(directory, "amendments", commit)
             var amendment Data
             if Directory.Exists(location) {
                 amendment = Data.Load(location)
-                if amendment.Number("seconds") != seconds || RequestData.Canonical(
+                if amendment.Text("sync") != sync || amendment.Number("seconds") != seconds || RequestData.Canonical(
                     J.Get(amendment.Element(), "tools")
                 ) != RequestData.Canonical(tools) {
                     throw Exception("Saved amendment budget or editing provenance changed")
@@ -373,10 +428,29 @@ internal class Amendment {
                     "pr"
                 ): run.Number("pr")
                 let pull = Pull(run, number, run.Text("commit"), "")
-                Publication.Verify(run.Text("repo"), number)
+                Publication.Verify(run.Text("repo"), number, sync == "")
                 Remote(run, run.Text("commit"), "")
                 let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
-                let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record)
+                let history = Synchronization.Append(
+                    run.Text("repo"),
+                    Synchronization.History(Receipt(J.Text(pull, "body"))),
+                    sync
+                )
+                let expected = run.Number("version") == 2 ? J.Text(authority, "sha"): ""
+                Synchronization.Live(
+                    run.Text("repo"),
+                    number,
+                    record,
+                    run.Text("approval"),
+                    history,
+                    run.Text("head_repo"),
+                    run.Text("branch"),
+                    commit,
+                    sync,
+                    expected,
+                    run.Text("commit")
+                )
+                let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
                 Archive(directory)
                 Directory.CreateDirectory(location)
                 amendment = Data()
@@ -387,6 +461,11 @@ internal class Amendment {
                 amendment.Fields["tools"] = tools
                 amendment.Fields["pr"] = number
                 amendment.Fields["expected"] = run.Number("version") == 2 ? J.Text(authority, "sha"): ""
+                if sync != "" {
+                    amendment.Fields["sync"] = sync
+                    amendment.Fields["synchronization_grant"] = Synchronization.Load(run.Text("repo"), sync)
+                }
+                Synchronization.Keep(amendment.Fields, history)
                 amendment.Fields["state"] = "verifying"
                 amendment.Fields["previous_body"] = J.Text(pull, "body")
                 amendment.Fields["snapshot"] = Data.Hash(snapshot)
@@ -395,6 +474,10 @@ internal class Amendment {
                 ] = "Editing tools, coding time and usage are manual/unknown or donor-reported; original observations cover original execution only"
                 amendment.Save(location)
                 File.WriteAllText(Path.Combine(location, "candidate.patch"), snapshot)
+                File.WriteAllText(
+                    Path.Combine(location, "conflict-evidence.txt"),
+                    Commands.Git(checkout, "show", "--format=raw", "--cc", "--no-ext-diff", "--no-textconv", commit)
+                )
                 let timer = Stopwatch.StartNew()
                 let results = List[Object]()
                 try {
@@ -427,7 +510,14 @@ internal class Amendment {
                     PublicOutput.FailureCode = "invalid_state"
                     amendment.Fields["failure_stage"] = "changed_candidate"
                     amendment.Fields["failure_reason"] = "candidate_changed"
-                    if Snapshot(checkout, run, commit, amendment.Text("previous"), record) != snapshot {
+                    if Snapshot(
+                        checkout,
+                        run,
+                        commit,
+                        amendment.Text("previous"),
+                        record,
+                        Synchronization.History(amendment.Element())
+                    ) != snapshot {
                         throw Exception("Verification changed the exact amendment candidate")
                     }
                     amendment.Fields["verification"] = results
@@ -496,7 +586,14 @@ internal class Amendment {
             }
             Publication.VerificationReport(amendment, record)
             let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
-            let snapshot = Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous"), record)
+            let snapshot = Snapshot(
+                checkout,
+                run,
+                amendment.Text("commit"),
+                amendment.Text("previous"),
+                record,
+                Synchronization.History(amendment.Element())
+            )
             if Data.Hash(snapshot) != amendment.Text("snapshot") || snapshot != File.ReadAllText(
                 Path.Combine(location, "candidate.patch")
             ) {
@@ -536,6 +633,7 @@ internal class Amendment {
                         updated["original_head"] = amendment.Text("previous")
                     }
                     updated["amendment"] = PublicRecord(amendment)
+                    Synchronization.Keep(updated, Synchronization.History(amendment.Element()))
                     let report = Summary(
                         amendment.Text("previous"),
                         amendment.Text("commit"),
@@ -557,6 +655,7 @@ internal class Amendment {
                     updated["head"] = amendment.Text("commit")
                     updated["expected"] = amendment.Text("expected")
                     updated["amendment"] = PublicRecord(amendment)
+                    Synchronization.Keep(updated, Synchronization.History(amendment.Element()))
                     let original = J.Get(J.Get(authority, "state"), "contribution")
                     amendment.Fields["body"] = ReplaceBody(
                         J.Text(pull, "body"),
@@ -599,6 +698,20 @@ internal class Amendment {
                         )
                     )
                 }
+                if run.Number("version") == 2 && amendment.Text("sync") != "" {
+                    let request = J.Get(amendment.Element(), "request")
+                    let metadata = Dictionary[string, Object?]()
+                    for field in J.Get(request, "metadata").EnumerateObject() {
+                        metadata[field.Name] = field.Value
+                    }
+                    metadata["sync"] = amendment.Text("sync")
+                    let updated = Dictionary[string, Object?]()
+                    for field in request.EnumerateObject() {
+                        updated[field.Name] = field.Value
+                    }
+                    updated["metadata"] = metadata
+                    amendment.Fields["request"] = updated
+                }
                 amendment.Fields["state"] = "publishing"
                 amendment.Save(location)
                 File.WriteAllText(Path.Combine(location, "publication.json"), J.Write(amendment.Element()) + "\n")
@@ -618,7 +731,14 @@ internal class Amendment {
                 Authority(run, amendment)
                 Pull(run, amendment.Number("pr"), amendment.Text("previous"), "")
                 Remote(run, amendment.Text("previous"), "")
-                if Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous"), record) != snapshot {
+                if Snapshot(
+                    checkout,
+                    run,
+                    amendment.Text("commit"),
+                    amendment.Text("previous"),
+                    record,
+                    Synchronization.History(amendment.Element())
+                ) != snapshot {
                     throw Exception("Amendment checkout changed before push")
                 }
                 Commands.Git(
@@ -635,6 +755,28 @@ internal class Amendment {
             Authority(run, amendment)
             Remote(run, amendment.Text("commit"), "")
             let latest = Pull(run, amendment.Number("pr"), amendment.Text("commit"), "")
+            let history = Synchronization.History(amendment.Element())
+            if history.GetArrayLength() > 0 {
+                Synchronization.Remote(
+                    run.Text("repo"),
+                    policy.Value,
+                    J.Get(record, "approval"),
+                    run.Text("base"),
+                    history,
+                    run.Text("head_repo"),
+                    amendment.Text("commit")
+                )
+            } else {
+                ProtectedPaths.Remote(
+                    run.Text("repo"),
+                    policy.Value,
+                    J.Get(record, "approval"),
+                    run.Text("base"),
+                    run.Text("head_repo"),
+                    amendment.Text("commit")
+                )
+            }
+            Authority(run, amendment)
             if run.Number("version") == 1 {
                 let body = J.Text(latest, "body")
                 let candidateOwned = Owned(amendment.Text("body"), legacyReport)
@@ -662,7 +804,8 @@ internal class Amendment {
                         run,
                         amendment.Text("commit"),
                         amendment.Text("previous"),
-                        record
+                        record,
+                        Synchronization.History(amendment.Element())
                     ) != snapshot {
                         throw Exception("PR body or amendment checkout changed before body write")
                     }
@@ -703,6 +846,7 @@ internal class Amendment {
                             }
                         )
                     )
+                    Authority(run, amendment)
                     amendment.Fields["state"] = "requested"
                     amendment.Save(location)
                 }
@@ -717,16 +861,22 @@ internal class Amendment {
             }
         }
 
-        internal func PublicRecord(amendment Data) Object -> J.Map(
-            "id",
-            amendment.Text("id"),
-            "previous",
-            amendment.Text("previous"),
-            "seconds",
-            amendment.Number("seconds"),
-            "tools",
-            J.Get(amendment.Element(), "tools")
-        )
+        internal func PublicRecord(amendment Data) Object {
+            let fields = J.Map(
+                "id",
+                amendment.Text("id"),
+                "previous",
+                amendment.Text("previous"),
+                "seconds",
+                amendment.Number("seconds"),
+                "tools",
+                J.Get(amendment.Element(), "tools")
+            )
+            if amendment.Text("sync") != "" {
+                fields["sync"] = amendment.Text("sync")
+            }
+            return fields
+        }
 
         private func Complete(directory string, location string, run Data, amendment Data, pull JsonElement) {
             amendment.Fields["state"] = "published"
@@ -754,6 +904,7 @@ internal class Amendment {
                 )
             }
             run.Fields["amendments"] = history
+            Synchronization.Keep(run.Fields, Synchronization.History(amendment.Element()))
             run.Fields["commit"] = amendment.Text("commit")
             Publication.SavePr(directory, run, pull)
             Terminal.Message(

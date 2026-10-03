@@ -42,6 +42,16 @@ Amendments retain original evidence and exact previous/new heads locally. V2
 retains the original contribution and adds UUID-bound amendment history under
 the current published coordination revision.
 
+Synchronization amendments additionally require Tokate **0.2.18** on both donor
+and coordinator. [The synchronization commands](reference.md#synchronize-an-already-published-contribution)
+use a separate live owner ref, bound to exact candidate C, upstream U, previous
+published H and current coordination state S. They keep the original approval,
+reservation and contribution intact. The coordinator authenticates the grant,
+repeats complete protected-tree/ancestry proofs and uses its existing nonforce
+CAS. Historical synchronization records stay separate from later ordinary
+amendments; revocation or target movement invalidates readiness, including after
+physical PR/state effects. Upgrade the owner-pinned coordinator explicitly.
+
 ## Owner installation after a release
 
 Run the released binary with repository write access:

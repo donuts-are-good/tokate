@@ -165,6 +165,10 @@ func Dispatch(options Args) int32 {
         V2Contribution.Prepare(options)
     } else if options.Command == "external" {
         V2Contribution.External(options)
+    } else if options.Command == "authorize-sync" {
+        Synchronization.Authorize(options)
+    } else if options.Command == "revoke-sync" {
+        Synchronization.Revoke(options)
     } else if options.Command == "amend" {
         Amendment.Run(options)
     } else if options.Command == "submit" {
