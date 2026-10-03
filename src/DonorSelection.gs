@@ -237,7 +237,6 @@ internal class DonorSelection {
             let selected = J.Get(run.Element(), "selection")
             if selected.ValueKind == JsonValueKind.Undefined {
                 return
-
             }
             if J.Text(selected, "model") != run.Text("model") || J.Text(selected, "effort") != run.Text("effort") ||
                 J.Text(selected, "harness") != run.Text("harness") || J.Text(selected, "provider") != run.Text(
