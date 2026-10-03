@@ -57,8 +57,6 @@ internal class DonorSelectionChecks {
             )
             File.WriteAllText(path, policy.ToJsonString())
             flow.Commit("Selection fixture policy")
-            // GitHub's fork network shares upstream objects; this local bare
-            // fork needs an explicit fetch after the fixture policy commit.
             flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, "main")
         }
 
@@ -164,14 +162,12 @@ internal class DonorSelectionChecks {
             flow.NoPr()
         }
 
-        private func ConfirmationAndRuns(binary string) {
-            using let flow = NativeFlow(binary)
-            flow.Initialize()
-            flow.Approve()
-            Set(flow)
-            let noConsent = Check.Run(
-                binary,
-                []string{
+        private func AuthorizedChoices(binary string) {
+            for source in[]string{"explicit invocation", "saved donor default"} {
+                using let flow = NativeFlow(binary)
+                flow.Initialize()
+                flow.Approve()
+                let args = List[string]{
                     "work",
                     "--repo",
                     "owner/project",
@@ -180,13 +176,28 @@ internal class DonorSelectionChecks {
                     "--runs",
                     Path.Combine(flow.Temp.Root, "runs"),
                     "--non-interactive"
-                },
-                flow.Temp.Env
-            )
-            Check.That(noConsent.Code == 1, "Work accepted missing confirmation")
-            Check.Contains(noConsent.Error, "confirmation required")
-            flow.NoInference()
-            Check.That(!Directory.Exists(Path.Combine(flow.Temp.Root, "runs")), "Outstanding consent reserved work")
+                }
+                if source == "saved donor default" {
+                    Set(flow)
+                } else {
+                    args.AddRange([]string{"--model", "gpt-6.1-sol", "--effort", "high"})
+                }
+                flow.Mode("model_failure")
+                let result = Check.Run(binary, args.ToArray(), flow.Temp.Env)
+                Check.That(result.Code == 1, "Synthetic model failure succeeded")
+                Check.Contains(result.Error, "Codex failed")
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Authorized choice required extra consent")
+                Check.That(!result.Error.Contains("confirmation required"), "Authorized choice added a barrier")
+                flow.NoPr()
+            }
+        }
+
+        private func ConfirmationAndRuns(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            flow.Approve()
+            Set(flow)
             let claimed = flow.Call(
                 []string{
                     "claim",
@@ -202,13 +213,10 @@ internal class DonorSelectionChecks {
             let path = Path.Combine(run, "run.json")
             let original = File.ReadAllText(path)
             Set(flow, effort: "xhigh")
-            let pending = Check.Run(binary, []string{"work", "--run", run, "--non-interactive"}, flow.Temp.Env)
-            Check.That(pending.Code == 1, "Saved work accepted missing confirmation")
-            flow.NoInference()
-            Check.That(File.ReadAllText(path) == original, "Confirmation changed saved work")
             flow.Mode("capability_changed")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "no longer compatible")
             flow.NoInference()
+            Check.That(File.ReadAllText(path) == original, "Capability rejection changed saved work")
             flow.Mode("model_failure")
             flow.Call([]string{"work", "--run", run}, 1)
             flow.Reload()
@@ -274,7 +282,6 @@ internal class DonorSelectionChecks {
             )
             Check.That(refused.Code == 1, "Blank input accepted the first eligible pair")
             Check.Contains(refused.Output, "No inference started")
-            // --non-interactive wins even when a terminal is attached.
             let noninteractive = Check.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command + " --non-interactive", "/dev/null"},
@@ -286,7 +293,6 @@ internal class DonorSelectionChecks {
                 "Noninteractive selection hid a prompt"
             )
             flow.Approve()
-            Set(flow)
             let work = "'" + binary + "' work --repo owner/project --issue 1 --runs '" + Path.Combine(
                 flow.Temp.Root,
                 "runs"
@@ -296,7 +302,7 @@ internal class DonorSelectionChecks {
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
                 flow.Temp.Env,
-                "n\n"
+                "1\nn\n"
             )
             Check.That(declined.Code == 1, "Declined confirmation launched work")
             Check.Contains(declined.Output, "[y/N]")
@@ -307,7 +313,7 @@ internal class DonorSelectionChecks {
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
                 flow.Temp.Env,
-                "y\n"
+                "1\ny\n"
             )
             Check.That(confirmed.Code == 1, "Synthetic model failure succeeded")
             Check.Contains(confirmed.Output, "Codex failed")
@@ -355,9 +361,12 @@ internal class DonorSelectionChecks {
                 "V2 preparation did not use default"
             )
             Check.That(saved["tools"]?.AsArray().Count == 1, "V2 default invented tool declarations")
-            let pending = Check.Run(binary, []string{"work", "--run", run, "--non-interactive"}, flow.Temp.Env)
-            Check.That(pending.Code == 1, "V2 work accepted missing confirmation")
-            flow.NoInference()
+            flow.Mode("model_failure")
+            let result = Check.Run(binary, []string{"work", "--run", run, "--non-interactive"}, flow.Temp.Env)
+            Check.That(result.Code == 1, "Synthetic model failure succeeded")
+            Check.Contains(result.Error, "Codex failed")
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "V2 saved default required extra consent")
             flow.NoPr()
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
@@ -368,7 +377,8 @@ internal class DonorSelectionChecks {
                 flow.Call([]string{"select", "--repo", "owner/project", "--non-interactive"}, 1).Error,
                 "exact owner tool restrictions"
             )
-            flow.NoInference()
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Rejected tool policy spent extra inference")
         }
 
         internal func All(binary string) {
@@ -376,14 +386,16 @@ internal class DonorSelectionChecks {
             Console.WriteLine("PASS donor defaults set/read/remove and nonsecret storage")
             Choices(binary)
             Console.WriteLine("PASS default/override/refusal, capabilities and availability; zero inference")
+            AuthorizedChoices(binary)
+            Console.WriteLine("PASS explicit and saved default work without repeated confirmation")
             ConfirmationAndRuns(binary)
-            Console.WriteLine("PASS confirmation, pinned runs, capability revalidation and no model fallback")
+            Console.WriteLine("PASS pinned runs, capability revalidation and no model fallback")
             LegacyRun(binary)
             Console.WriteLine("PASS legacy saved-run pair and behavior")
             InteractiveChoices(binary)
             Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
             VersionTwo(binary)
-            Console.WriteLine("PASS V2 defaults, exact tool policy and declaration conflicts; zero inference")
+            Console.WriteLine("PASS V2 authorized defaults, exact tool policy and declaration conflicts")
         }
     }
 }

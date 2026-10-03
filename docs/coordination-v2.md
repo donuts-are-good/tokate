@@ -159,7 +159,7 @@ Tokate cannot attest external identity or time. `max_seconds` bounds local
 verification, not independently unobservable external coding time.
 
 For Tokate-launched execution, prepare with `--source tokate` and exactly one
-`codex`/`openai` tool declaration, then `work --run RUN_DIR --yes` and `submit --run
+`codex`/`openai` tool declaration, then `work --run RUN_DIR` and `submit --run
 RUN_DIR`. Omitting `--tools` uses explicit selection arguments or an eligible
 Tokate-owned donor default; see [donor selection](reference.md#explicit-donor-defaults-and-selection).
 An explicit declaration must match invocation choices. Tokate records its observed invocation/requested model and effort and

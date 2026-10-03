@@ -76,9 +76,9 @@ tokate policy --repo OWNER/REPO
 tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN
 tokate assign --repo OWNER/REPO --issue 42 --donor LOGIN
 tokate revoke --repo OWNER/REPO --issue 42
-tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT --yes
+tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 tokate claim --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
-tokate work --run DIR --yes
+tokate work --run DIR
 tokate recover --run DIR [--seconds 300]
 tokate publish --run DIR
 tokate status --run DIR
@@ -104,7 +104,7 @@ tokate defaults read
 tokate defaults remove
 tokate select --repo OWNER/REPO --non-interactive
 tokate select --repo OWNER/REPO --model gpt-6.1-sol --effort xhigh --non-interactive
-tokate work --repo OWNER/REPO --issue 42 --non-interactive --yes
+tokate work --repo OWNER/REPO --issue 42 --non-interactive
 ```
 
 Defaults contain only the four donor-entered choices in
@@ -136,9 +136,9 @@ models or claim inference speed, quality or subscription cost.
 Missing, rejected, incompatible or unavailable defaults require an explicit
 eligible pair or a numbered choice in a terminal. Blank input cancels. Redirected
 input/output and `--non-interactive` never prompt or pick an alternative, including
-when only one pair is eligible. `--yes` confirms inference with the selected pair;
-it cannot select a replacement. New work needs this flag in automation or an
-affirmative terminal confirmation. A claim does not authorize inference.
+when only one pair is eligible. An eligible explicit pair or saved default needs
+no repeated confirmation. A terminal choice requires affirmative confirmation
+before inference. `--yes` confirms that choice; it cannot select a replacement.
 
 Runs record the selected harness/provider/model/effort and evidence. New selections
 are revalidated against owner approval and current installed capabilities before
@@ -155,10 +155,10 @@ For commands accepting `--issue`, a GitHub issue URL can supply both repository
 and issue. Pass it positionally or as an option:
 
 ```sh
-tokate work https://github.com/OWNER/REPO/issues/42 --model MODEL --effort EFFORT --yes
+tokate work https://github.com/OWNER/REPO/issues/42 --model MODEL --effort EFFORT
 tokate approve --issue=https://github.com/OWNER/REPO/issues/42 --donor LOGIN
 # From a repository with one unambiguous GitHub remote:
-tokate work --issue=42 --model MODEL --effort EFFORT --yes
+tokate work --issue=42 --model MODEL --effort EFFORT
 tokate policy
 ```
 

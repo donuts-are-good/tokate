@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.16 discovers tools, handles data, and
+This document describes how Tokate 0.2.17 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -39,8 +39,9 @@ effort explicitly or explicitly save Tokate-owned defaults.
   donor-reported. Selection never starts inference or changes saved preferences.
 - Model and effort are checked against repository
   policy. New runs record selection evidence and revalidate capabilities before
-  execution; saved runs never consult new defaults. New work requires explicit
-  confirmation, and model failure never retries or falls back.
+  execution; saved runs never consult new defaults. Interactive choices require
+  confirmation. Eligible explicit pairs and saved defaults need no repeated
+  confirmation. Model failure never retries or falls back.
   The agent invocation ignores user configuration and rules and supplies
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.

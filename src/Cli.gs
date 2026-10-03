@@ -212,7 +212,7 @@ internal class Cli {
                 "repo,issue",
                 "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
-                "work --repo owner/project --issue 42 --model MODEL --effort high --yes"
+                "work --repo owner/project --issue 42 --model MODEL --effort high"
             ),
             CliCommand(
                 "recover",

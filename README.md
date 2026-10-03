@@ -42,7 +42,7 @@ Review the resulting PR and [required checks](docs/reference.md#quality-and-revi
 3. Choose an allowed model/effort pair and start:
 
 ```sh
-tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT --yes
+tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 ```
 
 Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and AI usage stay under your control.

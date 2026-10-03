@@ -4,7 +4,6 @@ import System
 import System.IO
 import System.Text.Json
 
-// This file contains only four donor-entered tokens, never imported harness data.
 internal class DonorDefaults {
     shared {
         internal func Location() string {

@@ -7,8 +7,6 @@ import System.Text.Json
 
 internal class DonorSelection {
     shared {
-        // Help and the bundled catalog are offline interfaces. An empty home
-        // prevents discovery from loading donor configuration or credentials.
         internal func Capabilities() Dictionary[string, HashSet[string]] {
             let executable = Startup.Find("codex")
             if executable == "" {
@@ -91,7 +89,6 @@ internal class DonorSelection {
             let capabilities = Capabilities()
             var saved = JsonElement{}
             var reason = "No saved default."
-            // A complete explicit pair needs no settings read at all.
             if args.Get("model") == "" || args.Get("effort") == "" {
                 try {
                     saved = DonorDefaults.Read()
@@ -208,7 +205,8 @@ internal class DonorSelection {
         }
 
         internal func Confirm(args Args, selection JsonElement) {
-            if args.Get("yes") == "true" {
+            let source = J.Text(selection, "source")
+            if args.Get("yes") == "true" || source == "explicit invocation" || source == "saved donor default" {
                 return
             }
             if !Interactive(args) {
@@ -238,7 +236,7 @@ internal class DonorSelection {
         internal func Revalidate(run Data, policy Policy) {
             let selected = J.Get(run.Element(), "selection")
             if selected.ValueKind == JsonValueKind.Undefined {
-                return // Legacy runs keep their original execution behavior.
+                return
 
             }
             if J.Text(selected, "model") != run.Text("model") || J.Text(selected, "effort") != run.Text("effort") ||
