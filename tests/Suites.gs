@@ -152,6 +152,12 @@ internal class SuiteDriver {
     shared {
         internal func Select(binary string, name string) {
             switch name {
+                case "SynchronizationV2" {
+                    SynchronizationChecks.All(binary, "v2")
+                }
+                case "SynchronizationV1" {
+                    SynchronizationChecks.All(binary, "v1")
+                }
                 case "Native" {
                     NativeFlow.All(binary, parallel: true)
                 }
@@ -205,6 +211,8 @@ internal class SuiteDriver {
                 )
                 File.Copy(Path.Combine(project, "global.json"), Path.Combine(published, "global.json"))
                 let jobs = []SuiteJob{
+                    Job("SynchronizationV2"),
+                    Job("SynchronizationV1"),
                     Job("Native"),
                     Job("Coordination"),
                     Job("Correction"),
