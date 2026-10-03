@@ -487,29 +487,19 @@ internal class Amendment {
                         if remaining < 1 {
                             throw CliFailure("verification_failed", "Amendment verification budget exhausted")
                         }
-                        let words = List[string]()
-                        for word in J.Items(command) {
-                            words.Add(word.GetString() ?? "")
-                        }
-                        let result = Verification.Run(
+                        amendment.Fields["verification"] = results
+                        PublicOutput.FailureCode = "verification_failed"
+                        amendment.Fields["failure_stage"] = "owner_verification"
+                        amendment.Fields["failure_reason"] = "verification_failed"
+                        amendment.Save(location)
+                        let result = Verification.Check(
+                            location,
+                            results,
+                            command,
                             checkout,
-                            words.ToArray(),
                             run.Flag("network") && J.Bool(policy.Value, "allow_network"),
                             remaining
                         )
-                        results.Add(
-                            J.Map(
-                                "command",
-                                command,
-                                "exit_code",
-                                result.Code,
-                                "output",
-                                result.Output,
-                                "error",
-                                result.Error
-                            )
-                        )
-                        File.WriteAllText(Path.Combine(location, "verification.json"), J.Write(results))
                         if result.Code != 0 {
                             throw CliFailure(
                                 "verification_failed",
@@ -517,6 +507,9 @@ internal class Amendment {
                             )
                         }
                     }
+                    PublicOutput.FailureCode = "invalid_state"
+                    amendment.Fields["failure_stage"] = "changed_candidate"
+                    amendment.Fields["failure_reason"] = "candidate_changed"
                     if Snapshot(
                         checkout,
                         run,
@@ -530,11 +523,17 @@ internal class Amendment {
                     amendment.Fields["verification"] = results
                     amendment.Fields["elapsed_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                     amendment.Fields["state"] = "verified"
+                    amendment.Fields.Remove("failure_stage")
+                    amendment.Fields.Remove("failure_reason")
                     amendment.Save(location)
                 } catch (error Exception) {
                     amendment.Fields["state"] = "failed"
                     amendment.Fields["error"] = error.Message
-                    amendment.Fields["failure_reason"] = error is CliFailure failure ? failure.Code: "invalid_state"
+                    if error is CliFailure failure {
+                        amendment.Fields["failure_reason"] = failure.Code
+                    } else if !amendment.Fields.ContainsKey("failure_reason") {
+                        amendment.Fields["failure_reason"] = "invalid_state"
+                    }
                     amendment.Save(location)
                     throw error
                 }
