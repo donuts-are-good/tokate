@@ -213,17 +213,17 @@ automatically retried. Operators redeliver the same request only after inspectin
 state. There is no background polling or per-token update stream.
 
 Measured deterministic actual-command budgets (successful GETs, no rate limits,
-new approvals with an absent `DECREE.md` snapshot):
+unchanged approved target commit):
 
 | Path | Reads | Mutations | Live 304s |
 | --- | ---: | ---: | ---: |
-| Claim | 11 | 3 | 1 |
+| Claim | 9 | 3 | 1 |
 | Identical replay | 4 | 0 | 0 |
-| New draft publication | 37 | 4 | 23 |
-| Publication recovery with existing exact PR | 37 | 3 | 23 |
+| New draft publication | 31 | 4 | 19 |
+| Publication recovery with existing exact PR | 31 | 3 | 19 |
 
-Present instructions add one blob read per freshness check. Legacy approvals
-retain the original claim/publication counts (9/31 reads and 1/19 live 304s).
+When the target advances, each snapshot freshness check adds two reads for absent
+instructions or three for present instructions. Legacy freshness is unchanged.
 
 Each state transition creates a tree, a single-parent commit, and a non-forced ref
 update. Pacing/retry bounds and `--traffic` numeric diagnostics reuse the existing
