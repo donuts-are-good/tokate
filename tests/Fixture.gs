@@ -23,7 +23,7 @@ internal class Fixture {
     internal init(root string) {
         Root = root
         StatePath = Path.Combine(root, "state.json")
-        State = Check.Json(File.ReadAllText(StatePath))
+        State = JsonObject()
         Env["PATH"] = root + ":/usr/bin:/bin"
         Env["HOME"] = Path.Combine(Path.GetDirectoryName(root) ?? "", "home")
         Env["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -398,6 +398,8 @@ internal class Fixture {
             Console.WriteLine("gh version fixture")
             return 0
         }
+        let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
+        ClaimRendezvous(args, body)
         using let lease = ApiLease()
         State = Check.Json(File.ReadAllText(StatePath))
         let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
@@ -485,7 +487,6 @@ internal class Fixture {
                 )
             }
         }
-        let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
         if path == "user" {
             return Answer(
                 Check.Map(
@@ -917,6 +918,54 @@ internal class Fixture {
         throw Exception("Unhandled fixture API: " + path)
     }
 
+    internal func ClaimRendezvous(args[]string, body JsonNode) {
+        let method = Array.IndexOf(args, "--method")
+        let config = Path.Combine(Root, "claim-rendezvous.json")
+        if args[0] != "api" ||
+            method < 0 ||
+            args[method + 1] != "PATCH" ||
+            args[method + 2] != "repos/owner/project/git/refs/heads/tokate/contributions/1" ||
+            !File.Exists(config) {
+            return
+        }
+        let rendezvous = Check.Json(File.ReadAllText(config))
+        let sha = Check.Text(body["sha"])
+        let parents = Git("upstream", []string{"rev-list", "--parents", "-n", "1", sha}).Split(' ')
+        Check.That(Check.Text(body["force"]) == "false", "Rendezvous requires a non-forced ref update")
+        Check.That(
+            parents.Length == 2 && parents[1] == Check.Text(rendezvous["expected"]),
+            "Rendezvous requires exactly one parent matching the shared expected state"
+        )
+        let proposed = Check.Json(Git("upstream", []string{"show", sha + ":state.json"}))
+        let participant = Check.Text(proposed["reservation"]?["reservation"])
+        let first = Check.Text(rendezvous["first"])
+        let second = Check.Text(rendezvous["second"])
+        Check.That(participant == first || participant == second, "Unexpected claim rendezvous participant")
+        let directory = Check.Text(rendezvous["directory"])
+        let peer = Path.Combine(directory, (participant == first ? second: first) + ".arrived")
+        let changed = Chan[bool](1)
+        using let watcher = FileSystemWatcher(directory, "*.arrived")
+        watcher.Created += (sender Object?, event FileSystemEventArgs) -> {
+            select {
+                case changed <- true { }
+                default { }
+            }
+        }
+        watcher.EnableRaisingEvents = true
+        let deadline = after(TimeSpan.FromMilliseconds(Int32.Parse(Check.Text(rendezvous["timeout_ms"]))))
+        File.WriteAllText(Path.Combine(directory, participant + ".arrived"), "")
+        while !File.Exists(peer) {
+            select {
+                case <- changed { }
+                case <- deadline {
+                    let message = "Claim rendezvous timed out: " + participant + " missing " + Path.GetFileName(peer)
+                    File.WriteAllText(Path.Combine(directory, participant + ".failed"), message)
+                    throw Exception(message)
+                }
+            }
+        }
+    }
+
     internal func ApiLease() FileStream {
         let deadline = DateTime.UtcNow.AddSeconds(30)
         while true {
@@ -939,6 +988,9 @@ internal class Fixture {
     }
 
     internal func Run(name string, args[]string) int32 {
+        if name != "gh" {
+            State = Check.Json(File.ReadAllText(StatePath))
+        }
         for key in[]string{
             "OPENAI_API_KEY",
             "UNRELATED_DONOR_VALUE",

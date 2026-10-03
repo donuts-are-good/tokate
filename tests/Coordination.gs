@@ -3,6 +3,7 @@ package TokateTests
 import Gsharp.Concurrency
 import System
 import System.Collections.Generic
+import System.Diagnostics
 import System.IO
 import System.Text.Json.Nodes
 
@@ -180,6 +181,75 @@ internal class CoordinationFlow : IDisposable {
         Flow.NoPr()
     }
 
+    internal func ClaimRendezvous(first JsonNode, second JsonNode, timeout int32 = 10000) string {
+        Check.That(Check.Text(first["expected"]) == Check.Text(second["expected"]), "Claims must share expected state")
+        let directory = Path.Combine(Flow.Temp.Root, "claim-rendezvous-" + Guid.NewGuid().ToString("N"))
+        Directory.CreateDirectory(directory)
+        File.WriteAllText(
+            Path.Combine(Flow.Bin, "claim-rendezvous.json"),
+            Check.Map(
+                "directory",
+                directory,
+                "expected",
+                Check.Text(first["expected"]),
+                "first",
+                Check.Text(first["uuid"]),
+                "second",
+                Check.Text(second["uuid"]),
+                "timeout_ms",
+                timeout
+            )
+                .ToJsonString()
+        )
+        return directory
+    }
+
+    internal func ClearRendezvous(directory string) {
+        File.Delete(Path.Combine(Flow.Bin, "claim-rendezvous.json"))
+        Directory.Delete(directory, true)
+    }
+
+    internal func SimultaneousClaimsMissingParticipant() {
+        let first = ClaimRequest()
+        let second = ClaimRequest()
+        let path = Event(first)
+        let directory = ClaimRendezvous(first, second, 1000)
+        let clock = Stopwatch.StartNew()
+        try {
+            let result = Coordinate(path, 1)
+            Check.Contains(result.Error, "GitHub mutation failed")
+            let failure = File.ReadAllText(Path.Combine(directory, Check.Text(first["uuid"]) + ".failed"))
+            Check.Contains(failure, "Claim rendezvous timed out: " + Check.Text(first["uuid"]))
+            Check.Contains(failure, "missing " + Check.Text(second["uuid"]) + ".arrived")
+            Check.That(
+                clock.ElapsedMilliseconds < 10000,
+                "Missing participant did not fail within the bounded deadline"
+            )
+            Check.That(
+                File.Exists(Path.Combine(directory, Check.Text(first["uuid"]) + ".arrived")),
+                "Claim never arrived"
+            )
+            Check.That(
+                !File.Exists(Path.Combine(directory, Check.Text(second["uuid"]) + ".arrived")),
+                "Absent claim arrived"
+            )
+            Check.That(Check.Text(State()["sha"]) == Check.Text(first["expected"]), "Timed-out claim changed authority")
+            Flow.Reload()
+            for call in Flow.State["api_calls"]?.AsArray() ?? throw Exception("Missing API evidence") {
+                Check.That(
+                    Check.Text(call["method"]) != "PATCH" || Check.Text(call["path"]) !=
+                    "repos/owner/project/git/refs/heads/tokate/contributions/1",
+                    "Timed-out rendezvous reached the shared API-state lock"
+                )
+            }
+        } finally {
+            ClearRendezvous(directory)
+        }
+        Check.That(!Directory.Exists(directory), "Timed-out rendezvous markers were not cleaned up")
+        Claim()
+        Flow.NoInference()
+    }
+
     internal func SimultaneousClaims() {
         let first = ClaimRequest()
         let second = ClaimRequest()
@@ -188,10 +258,27 @@ internal class CoordinationFlow : IDisposable {
         let env = Dictionary[string, string](Flow.Temp.Env)
         env["GH_TOKEN"] = "fixture-owner"
         let output = Chan[Result](2)
-        go Concurrent(Flow.Binary, path1, env, output)
-        go Concurrent(Flow.Binary, path2, env, output)
-        let a = <-output
-        let b = <-output
+        let directory = ClaimRendezvous(first, second)
+        var a Result
+        var b Result
+        try {
+            go Concurrent(Flow.Binary, path1, env, output)
+            go Concurrent(Flow.Binary, path2, env, output)
+            a = <-output
+            b = <-output
+            for request in[]JsonNode{first, second} {
+                let failure = Path.Combine(directory, Check.Text(request["uuid"]) + ".failed")
+                if File.Exists(failure) {
+                    throw Exception(File.ReadAllText(failure))
+                }
+                Check.That(
+                    File.Exists(Path.Combine(directory, Check.Text(request["uuid"]) + ".arrived")),
+                    "Claim did not reach rendezvous: " + Check.Text(request["uuid"]) + "\n" + a.Error + b.Error
+                )
+            }
+        } finally {
+            ClearRendezvous(directory)
+        }
         Check.That(
             (a.Code == 0 && b.Code == 1) || (a.Code == 1 && b.Code == 0),
             "Competing command claims did not produce exactly one winner: " + a.Error + b.Error
@@ -213,7 +300,8 @@ internal class CoordinationFlow : IDisposable {
         }
         Check.That(
             attempts == 2 && rejected == 1,
-            "Concurrent claims did not exercise the non-forced competing ref updates"
+            "Concurrent claims did not exercise the non-forced competing ref updates: PATCH attempts=" +
+                attempts.ToString() + ", 422 rejections=" + rejected.ToString()
         )
         Coordinate(Event(ClaimRequest(), 124, "other"), 1)
         Flow.NoInference()
@@ -1228,6 +1316,7 @@ internal class CoordinationFlow : IDisposable {
         internal func All(binary string, selected string = "") {
             for name in[]string{
                 "SimultaneousClaims",
+                "SimultaneousClaimsMissingParticipant",
                 "ReplayAndInterruptedState",
                 "ExternalPublication",
                 "CanonicalExternal",
@@ -1259,6 +1348,9 @@ internal class CoordinationFlow : IDisposable {
                 switch name {
                     case "SimultaneousClaims" {
                         test.SimultaneousClaims()
+                    }
+                    case "SimultaneousClaimsMissingParticipant" {
+                        test.SimultaneousClaimsMissingParticipant()
                     }
                     case "ReplayAndInterruptedState" {
                         test.ReplayAndInterruptedState()
