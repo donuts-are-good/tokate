@@ -79,6 +79,7 @@ internal class CliDiscovery {
                 []string{"checks", "--run", "saved", "--repo", "owner/project", "--json"},
                 []string{"doctor", "--json=true"},
                 []string{"status", "--run", "saved", "--json", "--json"},
+                []string{"amend", "--run", "saved", "--commit", String('a', 40) + "\n", "--seconds", "30", "--json"},
                 []string{"approve", "--issue", "0", "--json"}
             } {
                 Envelope(Call(binary, argv, temp, 1), argv[0], "error", "invalid_arguments")

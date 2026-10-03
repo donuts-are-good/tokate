@@ -698,6 +698,9 @@ internal class CorrectionChecks {
             let record = Read(failed)
             record.AsObject().Remove("failure_reason")
             record.AsObject().Remove("failure_stage")
+            record["error"] = JsonValue.Create(
+                "Owner verification failed. See verification.json. No PR will be opened."
+            )
             File.WriteAllText(Path.Combine(failed, "run.json"), record.ToJsonString())
             File.WriteAllText(
                 Path.Combine(failed, "checkout/result.txt"),
@@ -1064,6 +1067,7 @@ internal class CorrectionChecks {
             policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]")
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Correction JSON checks")
+            flow.Git("-C", flow.Upstream, "push", Path.Combine(flow.Bin, "fork"), "main")
             flow.Approve()
             let run = flow.Claim()
             flow.Mode("staged_whitespace")
