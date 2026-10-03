@@ -104,16 +104,14 @@ internal class DonorSelection {
             var availability = args.Get("availability", "unknown")
             let unavailable = availability == "unavailable" ? model: ""
             let choices = SortedDictionary[string, JsonElement](StringComparer.Ordinal)
-            for entry in J.Get(policy.Value, "models").EnumerateObject() {
-                var supported HashSet[string]
-                if entry.Name == unavailable || !capabilities.TryGetValue(entry.Name, out supported) {
+            for entry in capabilities {
+                if entry.Key == unavailable {
                     continue
                 }
-                for level in J.Items(entry.Value) {
-                    let candidateEffort = level.GetString() ?? ""
-                    if supported.Contains(candidateEffort) {
-                        choices[entry.Name + " / " + candidateEffort] = J.Parse(
-                            J.Write(J.Map("model", entry.Name, "effort", candidateEffort))
+                for candidateEffort in entry.Value {
+                    if policy.Allows(entry.Key, candidateEffort) && policy.ManagedPair(entry.Key, candidateEffort) {
+                        choices[entry.Key + " / " + candidateEffort] = J.Parse(
+                            J.Write(J.Map("model", entry.Key, "effort", candidateEffort))
                         )
                     }
                 }
@@ -126,14 +124,10 @@ internal class DonorSelection {
             if !choices.ContainsKey(model + " / " + effort) {
                 var rejection = "Incomplete donor model/effort choice."
                 if model != "" && effort != "" {
-                    var policyEligible bool
-                    for level in J.Items(J.Get(J.Get(policy.Value, "models"), model)) {
-                        if level.GetString() == effort {
-                            policyEligible = true
-                        }
-                    }
                     var supported HashSet[string]
-                    rejection = !policyEligible ? "Model/effort pair is not allowed by the repository policy.":
+                    rejection = !policy.ManagedPair(model, effort) ?
+                    "Tokate-managed execution requires a known model and supported effort control.":
+                    !policy.Allows(model, effort) ? "Model/effort pair is not allowed by the repository policy.":
                     (
                         !capabilities.TryGetValue(model, out supported) || !supported.Contains(effort) ?
                         "Model/effort capability is not advertised by the offline native Codex catalog; availability is unknown.":

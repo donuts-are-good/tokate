@@ -233,6 +233,12 @@ internal class Fixture {
             requested.Add(value)
         }
         State["exec_args"] = requested
+        State["requested_model"] = JsonValue.Create(args[Array.IndexOf(args, "--model") + 1])
+        for arg in args {
+            if arg.StartsWith("model_reasoning_effort=") {
+                State["requested_effort"] = JsonValue.Create(arg)
+            }
+        }
         Save()
         let mode = Check.Text(State["mode"])
         if mode == "model_failure" {

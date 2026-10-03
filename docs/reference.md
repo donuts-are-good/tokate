@@ -119,7 +119,7 @@ New `claim` and `work` commands use a compatible, eligible saved default; explic
 model or effort arguments override the corresponding saved choice. `select`
 reads current upstream policy and explains a choice without reserving work or
 starting inference. Managed selection currently supports only `codex/openai`.
-Version 1 retains its exact model/effort restrictions; version 2 also requires
+Both policy versions enforce the selected model-policy mode; version 2 also requires
 the exact harness/provider pair. No owner policy is changed.
 
 Selection verifies explicit CLI controls with `codex exec --help` and exact
@@ -150,7 +150,9 @@ selection flags conflict with `--run`. Model failure stops without retries or
 fallback. Existing runs from before this feature retain their pair and confirmation
 behavior. Version-2 `prepare --source tokate` can use the same defaults/arguments
 when `--tools` is omitted; an explicit tool declaration must match selection.
-External and mixed-tool declarations still validate every tool against owner policy.
+Unrestricted policy lists known managed pairs from the same offline catalog; it
+never selects an alternative automatically. External and mixed-tool declarations
+still validate every tool against owner policy.
 
 ### Issue URLs and local repository context
 
@@ -203,6 +205,34 @@ save Fish output as `~/.config/fish/completions/tokate.fish`. Regenerate after a
 update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
+
+Policies of either version accept an optional top-level `model_policy` with exactly
+`"whitelist"` or `"unrestricted"`. A missing field preserves the existing whitelist:
+`models` must be a nonempty map of exact model identifiers to nonempty effort arrays,
+and every chosen pair must be listed. Explicit `"whitelist"` has the same pair rules.
+Explicit `"unrestricted"` requires `models` to be omitted or `{}`; a nonempty or
+malformed map is contradictory. Null, other types/values and duplicate mode fields
+are rejected. Unrestricted choice still validates model identifiers and effort
+tokens; it does not establish model availability or choose a model automatically.
+
+Owners opt in by editing and committing their policy, then issuing fresh approval.
+Adding or changing the mode changes the policy byte digest and makes existing
+approval authority stale. Saved approvals, runs, receipts and donor preferences
+are retained without conversion. When upgrading to version 2, keep the existing
+`models` restrictions unless the owner explicitly changes them. `init` keeps its
+existing version-1 whitelist template. Managed choices use explicit arguments or
+a compatible donor default. Both modes keep supported harness/provider controls, donor consent,
+runtime limits, both network gates, independent verification and owner review.
+
+Under an explicit mode, version-2 external declarations can use the effort token
+`"absent"` for a known lack of an effort control. A whitelist must list that exact
+model/`absent` pair; unrestricted choice permits it. `"unknown"` retains its legacy
+meaning of unknown effort and is never converted to `"absent"`. Omitted/null effort
+is invalid. Tokate-managed execution rejects absent or unknown controls before
+inference and never sends these tokens as harness settings. Every declaration in
+mixed external work is validated at preparation, publication and receipt review.
+Version-2 amendment and correction editing declarations use the same external
+rules, including explicit `absent`; original managed execution remains separate.
 
 Policy versions 1 and 2 accept optional `protected_paths`, for example
 `["scripts/verify.sh", "scripts/checks/"]`. Omitted or empty adds no paths;

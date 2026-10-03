@@ -327,8 +327,23 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2Original(flow CoordinationFlow, native bool = false) string {
+        private func V2Original(flow CoordinationFlow, native bool = false, modelPolicy string = "") string {
             flow.Initialize()
+            if modelPolicy != "" {
+                let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["model_policy"] = JsonValue.Create(modelPolicy)
+                if modelPolicy == "unrestricted" {
+                    policy.AsObject().Remove("models")
+                } else {
+                    (policy["models"] ?? throw Exception("Missing model whitelist"))["claude-sonnet-4-6"] = Check.Json(
+                        "[\"absent\"]"
+                    )
+                }
+                File.WriteAllText(path, policy.ToJsonString())
+                flow.Flow.Commit("External amendment effort policy")
+                flow.Flow.Approve()
+            }
             let claim = flow.Claim()
             if native {
                 File.WriteAllText(
@@ -350,14 +365,20 @@ internal class AmendmentFlow {
             return run
         }
 
-        private func V2(binary string, mode string = "", native bool = false) {
+        private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
             using let flow = CoordinationFlow(binary)
-            let run = V2Original(flow, native)
+            let run = V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let contribution = Check.Text(flow.State()["state"]?["contribution"])
             Review(flow.Flow, true)
             let commit = Edit(flow.Flow, run)
-            let tools = native ? "": flow.Tools
+            if modelPolicy != "" {
+                File.WriteAllText(
+                    flow.Tools,
+                    "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"absent\"}]"
+                )
+            }
+            let tools = native && modelPolicy == "" ? "": flow.Tools
             if mode == "lost_push_response" || mode == "lost_request_response" {
                 flow.Flow.Mode(mode)
                 Amend(flow.Flow, run, commit, 1, tools)
@@ -504,6 +525,7 @@ internal class AmendmentFlow {
                 "V1Body",
                 "Rejections",
                 "V2",
+                "V2Absent",
                 "V2Native",
                 "V2Push",
                 "V2Request",
@@ -533,6 +555,11 @@ internal class AmendmentFlow {
                     }
                     case "V2" {
                         V2(binary)
+                    }
+                    case "V2Absent" {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            V2(binary, "absent", native: true, modelPolicy: mode)
+                        }
                     }
                     case "V2Native" {
                         V2(binary, native: true)

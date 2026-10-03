@@ -814,10 +814,27 @@ internal class CorrectionChecks {
             }
         }
 
-        private func Managed(binary string) {
-            for originalMode in[]string{"staged_whitespace", "verification_fail"} {
+        private func Managed(binary string, modelPolicy string = "") {
+            for originalMode in modelPolicy == "" ? []string{"staged_whitespace", "verification_fail"}: []string{
+                "staged_whitespace"
+            } {
                 using let flow = CoordinationFlow(binary)
                 flow.Initialize()
+                if modelPolicy != "" {
+                    let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+                    let policy = Check.Json(File.ReadAllText(path))
+                    policy["model_policy"] = JsonValue.Create(modelPolicy)
+                    if modelPolicy == "unrestricted" {
+                        policy.AsObject().Remove("models")
+                    } else {
+                        (policy["models"] ?? throw Exception("Missing model whitelist"))[
+                            "claude-sonnet-4-6"
+                        ] = Check.Json("[\"absent\"]")
+                    }
+                    File.WriteAllText(path, policy.ToJsonString())
+                    flow.Flow.Commit("External correction effort policy")
+                    flow.Flow.Approve()
+                }
                 let run = ManagedRun(flow, originalMode)
                 Prepared(flow.Flow, run)
                 let originalTools = Check.Text(Read(run)["tools"])
@@ -825,6 +842,7 @@ internal class CorrectionChecks {
                 File.WriteAllText(
                     flow.Tools,
                     "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"unknown\"}]"
+                        .Replace("unknown", modelPolicy == "" ? "unknown": "absent")
                 )
                 Recover(flow.Flow, run, commit, tools: flow.Tools)
                 Once(flow.Flow)
@@ -1070,6 +1088,7 @@ internal class CorrectionChecks {
                 "Incomplete",
                 "ProtectedAndExact",
                 "InterruptedNative",
+                "ManagedAbsent",
                 "Managed",
                 "InterruptedManaged",
                 "ChangedCandidate",
@@ -1117,6 +1136,11 @@ internal class CorrectionChecks {
                     }
                     case "InterruptedNative" {
                         InterruptedNative(binary)
+                    }
+                    case "ManagedAbsent" {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            Managed(binary, mode)
+                        }
                     }
                     case "Managed" {
                         Managed(binary)

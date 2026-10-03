@@ -124,7 +124,10 @@ internal class Coordinator {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(
+                    J.Get(metadata, "tools"),
+                    J.Text(metadata, "source")
+                )
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {
                     RequestData.Correction(correction, J.Text(metadata, "head"), J.Get(record, "policy"))

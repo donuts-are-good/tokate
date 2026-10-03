@@ -40,22 +40,11 @@ internal class V2Contribution {
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             RequestData.Tools(J.Get(run.Element(), "tools"))
-            policy.ValidateTools(J.Get(run.Element(), "tools"))
+            policy.ValidateTools(J.Get(run.Element(), "tools"), run.Text("source"))
             let tools = J.Items(J.Get(run.Element(), "tools"))
-            if run.Text("source") == "tokate" {
-                if tools.Count != 1 || J.Text(tools[0], "harness") != "codex" || J.Text(
-                    tools[0],
-                    "provider"
-                ) != "openai" ||
-                    run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(
-                    tools[0],
-                    "effort"
-                ) ||
-                    run.Text("model") == "unknown" || run.Text("effort") == "unknown" {
-                    throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
-                }
-            } else if run.Text("source") != "external" {
-                throw Exception("Invalid contribution source")
+            if run.Text("source") == "tokate" &&
+                (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
+                throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
             let fork = Data.Repo(run.Text("head_repo"))
             if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
@@ -88,19 +77,7 @@ internal class V2Contribution {
             var selection = JsonElement{}
             if tools.ValueKind != JsonValueKind.Undefined {
                 RequestData.Tools(tools)
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools)
-            }
-            if source == "tokate" &&
-                tools.ValueKind != JsonValueKind.Undefined &&
-                (
-                J.Items(tools).Count != 1 || J.Text(J.Items(tools)[0], "harness") != "codex" || J.Text(
-                    J.Items(tools)[0],
-                    "provider"
-                ) != "openai"
-            ) {
-                throw Exception(
-                    "Tokate-launched execution currently supports one codex/openai declaration; other harnesses use external"
-                )
+                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools, source)
             }
             let approval = J.Get(record, "approval")
             if source == "tokate" {
@@ -470,7 +447,7 @@ internal class V2Contribution {
                 throw Exception("PR receipt lacks current exact-commit coordination authority")
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
-            policy.ValidateTools(J.Get(metadata, "tools"))
+            policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
             let amendment = J.Get(receipt, "amendment")
             if current.GetRawText() != contribution.GetRawText() {
                 Amendment.ValidateReceipt(amendment, policy)
