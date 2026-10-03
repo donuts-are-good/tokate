@@ -1,6 +1,7 @@
 package TokateTests
 
 import Gsharp.Concurrency
+import Microsoft.Win32.SafeHandles
 import System
 import System.Collections.Generic
 import System.Diagnostics
@@ -1894,7 +1895,7 @@ internal class NativeFlow : IDisposable {
 
     private func BoundaryRun(run string) {
         let results = Chan[Exception?](1)
-        let pins = List[FileStream]()
+        let pins = List[SafeFileHandle]()
         let identities = List[string]()
         let release = Path.Combine(Bin, "namespace-release")
         var failure Exception?
@@ -1913,7 +1914,7 @@ internal class NativeFlow : IDisposable {
             let pid = Int32.Parse(File.ReadAllText(ready))
             Check.That(pid > 0, "Invalid owned task PID")
             for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
-                let pin = File.Open(
+                let pin = File.OpenHandle(
                     "/proc/" + pid.ToString() + "/ns/" + name,
                     FileMode.Open,
                     FileAccess.Read,
@@ -1923,9 +1924,7 @@ internal class NativeFlow : IDisposable {
                 let identity = File.ReadAllText(Path.Combine(run, "checkout", "expected-" + name + "-namespace"))
                 identities.Add(identity)
                 Check.That(
-                    FileInfo(
-                        "/proc/self/fd/" + pin.SafeFileHandle.DangerousGetHandle().ToString()
-                    ).LinkTarget == identity,
+                    FileInfo("/proc/self/fd/" + pin.DangerousGetHandle().ToString()).LinkTarget == identity,
                     "Owned task namespace pin did not match " + name
                 )
             }
@@ -1939,8 +1938,8 @@ internal class NativeFlow : IDisposable {
             var index int32
             for pin in pins {
                 Check.That(
-                    !pin.SafeFileHandle.IsClosed && FileInfo(
-                        "/proc/self/fd/" + pin.SafeFileHandle.DangerousGetHandle().ToString()
+                    !pin.IsClosed && FileInfo(
+                        "/proc/self/fd/" + pin.DangerousGetHandle().ToString()
                     ).LinkTarget == identities[index],
                     "Task namespace pin expired before verification returned"
                 )
