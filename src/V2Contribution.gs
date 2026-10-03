@@ -334,8 +334,6 @@ internal class V2Contribution {
             Terminal.Message("Verified commit saved. Use submit --run " + directory)
         }
 
-        // List only this issue's bounded comment history, then fetch matching
-        // comments canonically. A string match or login is never authority.
         internal func Posted(repo string, issue int32, actor JsonElement, request JsonElement) bool {
             RequestData.PositiveId(actor)
             var count int32
@@ -413,6 +411,9 @@ internal class V2Contribution {
             RequestData.PositiveId(actor)
             let binding = RequestData.Binding(actor, value)
             let journal = path + ".posting.json"
+            if FileInfo(journal).LinkTarget != nil {
+                throw Exception("Request posting journal must not be a symbolic link")
+            }
             if File.Exists(journal) {
                 let saved = RequestData.FileData(journal, 16384)
                 if J.Text(saved, "repo") != repo || J.Number(saved, "issue") != issue || J.Get(saved, "actor")
@@ -449,13 +450,23 @@ internal class V2Contribution {
                 state.Reservation(actor)
                 expires = CoordinationState.Unix(J.Get(state.Value(), "reservation"), "expires")
             }
-            // Durable write intent is local evidence, not a response cache. An
-            // interrupted POST can only resume from unique canonical evidence.
-            File.WriteAllText(
-                journal,
-                J.Write(J.Map("repo", repo, "issue", issue, "actor", actor, "binding", binding, "request", value)) +
-                    "\n"
-            )
+            {
+                using let file = FileStream(
+                    journal,
+                    FileStreamOptions{
+                        Mode: FileMode.CreateNew,
+                        Access: FileAccess.Write,
+                        Share: FileShare.None,
+                        UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                    }
+                )
+                using let writer = StreamWriter(file)
+                writer.WriteLine(
+                    J.Write(J.Map("repo", repo, "issue", issue, "actor", actor, "binding", binding, "request", value))
+                )
+                writer.Flush()
+                file.Flush(true)
+            }
             try {
                 let posted = GitHub.Api(
                     "repos/" + repo + "/issues/" + issue.ToString() + "/comments",

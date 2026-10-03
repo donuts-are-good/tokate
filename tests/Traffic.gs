@@ -5,7 +5,6 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json.Nodes
 
-// Command-level traffic and fault evidence, separate from transport unit paths.
 internal class CommandTrafficChecks {
     shared {
         private func Budgets(
@@ -56,6 +55,11 @@ internal class CommandTrafficChecks {
             let request = flow.ClaimRequest()
             flow.Flow.ResetTraffic()
             Budgets(flow.Flow, Request(flow, request), 10, 1, 1, 1)
+            Check.That(
+                File.GetUnixFileMode(Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")) ==
+                (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "Request posting journal is not private"
+            )
             flow.Flow.ResetTraffic()
             Budgets(flow.Flow, Request(flow, request), 6, 0, 0)
             flow.Flow.Reload()
@@ -73,6 +77,54 @@ internal class CommandTrafficChecks {
             flow.Flow.Traffic(4, 0, 0, 0)
             flow.Flow.NoInference()
             flow.Flow.NoPr()
+        }
+
+        private func JournalSafety(binary string) {
+            for kind in[]string{"link", "dangling", "existing", "partial", "race", "race-link"} {
+                using let flow = CoordinationFlow(binary)
+                flow.Initialize()
+                let request = flow.ClaimRequest()
+                let path = Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")
+                let target = Path.Combine(flow.Flow.Temp.Root, "synthetic-journal-target")
+                if kind == "link" {
+                    File.WriteAllText(target, "synthetic-journal-sentinel")
+                }
+                if kind == "link" || kind == "dangling" {
+                    File.CreateSymbolicLink(path, target)
+                } else if kind == "existing" || kind == "partial" {
+                    File.WriteAllText(path, kind == "partial" ? "{": "synthetic-journal-sentinel")
+                } else {
+                    flow.Flow.Reload()
+                    flow.Flow.State["journal_race_path"] = JsonValue.Create(path)
+                    flow.Flow.State["journal_race_link"] = JsonValue.Create(kind == "race-link")
+                    flow.Flow.State["journal_race_target"] = JsonValue.Create(target)
+                    flow.Flow.Save()
+                }
+                flow.Flow.ResetTraffic()
+                Request(flow, request, 1)
+                flow.Flow.Reload()
+                Check.That(Check.Text(flow.Flow.State["request_count"]) == "", "Unsafe journal caused a POST")
+                if kind == "link" || kind == "dangling" || kind == "race-link" {
+                    Check.That(FileInfo(path).LinkTarget == target, "Journal link evidence was not preserved")
+                }
+                for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                    Check.That(Check.Text(call["method"]) == "GET", "Unsafe journal caused a GitHub write")
+                }
+                if kind == "link" {
+                    Check.That(
+                        File.ReadAllText(target) == "synthetic-journal-sentinel",
+                        "Journal link changed its target"
+                    )
+                } else {
+                    Check.That(!File.Exists(target), "Dangling journal created its target")
+                }
+                if kind == "existing" || kind == "race" || kind == "partial" {
+                    Check.That(
+                        File.ReadAllText(path) == (kind == "partial" ? "{": "synthetic-journal-sentinel"),
+                        "Journal creation overwrote existing or partial evidence"
+                    )
+                }
+            }
         }
 
         private func LostRequest(binary string) {
@@ -316,6 +368,7 @@ internal class CommandTrafficChecks {
         internal func All(binary string, selected string = "") {
             for name in[]string{
                 "RequestReuse",
+                "JournalSafety",
                 "LostRequest",
                 "CanonicalRequest",
                 "SubmitReuse",
@@ -329,6 +382,9 @@ internal class CommandTrafficChecks {
                 switch name {
                     case "RequestReuse" {
                         RequestReuse(binary)
+                    }
+                    case "JournalSafety" {
+                        JournalSafety(binary)
                     }
                     case "LostRequest" {
                         LostRequest(binary)

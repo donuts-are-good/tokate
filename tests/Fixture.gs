@@ -622,6 +622,16 @@ internal class Fixture {
         if tail.StartsWith("contents/") {
             let split = tail.IndexOf("?ref=")
             let file = tail.Substring(9, split - 9)
+            let journal = Check.Text(State["journal_race_path"])
+            if file == ".github/tokate-pr.md" && journal != "" {
+                if Check.Text(State["journal_race_link"]) == "true" {
+                    File.CreateSymbolicLink(journal, Check.Text(State["journal_race_target"]))
+                } else {
+                    File.WriteAllText(journal, "synthetic-journal-sentinel")
+                }
+                State["journal_race_path"] = nil
+                Save()
+            }
             let reference = Uri.UnescapeDataString(tail.Substring(split + 5))
             var content string
             try {

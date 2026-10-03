@@ -307,8 +307,6 @@ internal class Publication {
             return run
         }
 
-        // Read only check contexts for the pinned commit. Both endpoints support
-        // authenticated conditional reads through the existing transport.
         private func CheckRows(repo string, head string) JsonElement {
             let rows = List[Object]()
             let prefix = "repos/" + repo + "/commits/" + head
@@ -435,7 +433,6 @@ internal class Publication {
                 if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
                     throw Exception("PR changed while reading checks")
                 }
-                // Authority is revalidated after check reads for both receipt versions.
                 let live = Verify(run.Text("repo"), run.Number("pr"))
                 if live.Text("commit") != run.Text("commit") {
                     throw Exception("PR authority changed while reading checks")
