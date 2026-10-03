@@ -166,6 +166,22 @@ internal class Data {
 
 internal class GitHub {
     shared {
+        internal func AutomationCommit(message string, tree string, parents IEnumerable[string]) Object {
+            let identity = J.Map("name", "Tokate", "email", "tokate@users.noreply.github.com")
+            return J.Map(
+                "message",
+                message,
+                "tree",
+                tree,
+                "parents",
+                parents,
+                "author",
+                identity,
+                "committer",
+                identity
+            )
+        }
+
         internal suspend func Api(
             path string,
             body Object? = nil,

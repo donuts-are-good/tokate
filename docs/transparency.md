@@ -60,6 +60,15 @@ delegates authentication to `gh auth git-credential`. Codex authenticates its ow
 inference requests. Tokate does not copy credentials into task prompts, receipts,
 or a shared account.
 
+Automated version-1 approval/reassignment and all version-2 coordination-state
+commits explicitly set both author and committer to `Tokate` with
+`tokate@users.noreply.github.com`; GitHub supplies the timestamps. This generated
+metadata does not prove an authenticated actor, a GitHub account, or a verified
+signature and grants no authority. Write permission, canonical comment actor
+and numeric identity, reservation ownership, scope approval, and receipt checks
+remain authoritative. Donor attribution and receipt/provenance meanings are
+unchanged; existing commits and records remain valid under their current rules.
+
 The API boundary invokes sanitized `gh api --include` commands. It reads response
 status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
 Date and poll-interval metadata. Conditional reads keep bodies and ETags only

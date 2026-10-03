@@ -144,12 +144,9 @@ internal class Workflow {
             )
             let record = GitHub.Api(
                 "repos/" + repo + "/git/commits",
-                J.Map(
-                    "message",
+                GitHub.AutomationCommit(
                     "Approve Tokate issue #" + number.ToString() + " for " + donor,
-                    "tree",
                     J.Text(tree, "sha"),
-                    "parents",
                     parents
                 )
             )

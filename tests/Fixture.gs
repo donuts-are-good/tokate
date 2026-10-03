@@ -645,12 +645,25 @@ internal class Fixture {
             return Answer(Check.Map("sha", Git(folder, []string{"write-tree"})))
         }
         if tail == "git/commits" {
+            for field in[]string{"author", "committer"} {
+                let prefix = field == "author" ? "GIT_AUTHOR_": "GIT_COMMITTER_"
+                Env[prefix + "NAME"] = body[field] == nil ? "API Fixture": Check.Text(body[field]?["name"])
+                Env[prefix + "EMAIL"] = body[field] == nil ? "api-default@example.test": Check.Text(
+                    body[field]?["email"]
+                )
+            }
             let command = List[string]{"commit-tree", Check.Text(body["tree"])}
             for parent in body["parents"]?.AsArray() ?? JsonArray() {
                 command.Add("-p")
                 command.Add(Check.Text(parent))
             }
-            return Answer(Check.Map("sha", Git(folder, command.ToArray(), Check.Text(body["message"]))))
+            let sha = Git(folder, command.ToArray(), Check.Text(body["message"]))
+            if State["api_commits"] == nil {
+                State["api_commits"] = JsonArray()
+            }
+            let commits = State["api_commits"]?.AsArray() ?? throw Exception("Missing API commits")
+            commits.Add(Check.Map("sha", sha, "request", body))
+            return Answer(Check.Map("sha", sha))
         }
         if tail == "git/refs" {
             try {
@@ -798,6 +811,10 @@ internal class Fixture {
                     }
                 }
                 return 0
+            }
+            for prefix in[]string{"GIT_AUTHOR_", "GIT_COMMITTER_"} {
+                Env.Remove(prefix + "NAME")
+                Env.Remove(prefix + "EMAIL")
             }
             for key in[]string{"GIT_NO_REPLACE_OBJECTS", "GIT_GRAFT_FILE"} {
                 if let value = Environment.GetEnvironmentVariable(key) {
