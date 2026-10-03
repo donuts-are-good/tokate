@@ -52,6 +52,11 @@ internal class Cli {
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
+            CliOption(
+                "base-branch",
+                "BRANCH",
+                "Owner-selected target; default: upstream default branch (prompt on a terminal)"
+            ),
             CliOption("model", "MODEL", "Owner-approved model"),
             CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra"),
             CliOption("harness", "HARNESS", "Explicit harness; managed execution supports codex"),
@@ -186,18 +191,18 @@ internal class Cli {
             ),
             CliCommand(
                 "approve",
-                "repo,issue,donor",
+                "repo,issue,donor,base-branch",
                 "repo,issue,donor",
                 "Write GitHub approval, assignment and label; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
                 "approve https://github.com/owner/project/issues/42 --donor donor"
             ),
             CliCommand(
                 "assign",
-                "repo,issue,donor",
+                "repo,issue,donor,base-branch",
                 "repo,issue,donor",
                 "Replace approval and donor on an approved issue on GitHub; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
                 "assign --repo owner/project --issue 42 --donor donor"
             ),
             CliCommand(
@@ -415,6 +420,9 @@ internal class Cli {
             }
             if args.Get("donor") != "" && args.Get("donor") != "@me" {
                 Data.Login(args.Get("donor"))
+            }
+            if args.Get("base-branch") != "" {
+                Data.Branch(args.Get("base-branch"))
             }
             if args.Get("model") != "" && !Regex.IsMatch(args.Get("model"), "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
                 throw Exception("Invalid model name: --model")

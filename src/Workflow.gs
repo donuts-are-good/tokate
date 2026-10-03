@@ -43,11 +43,18 @@ internal class Workflow {
             if args.Command == "assign" && !GitHub.HasLabel(issue) {
                 throw Exception("Approve the issue first")
             }
-            let branch = J.Text(info, "default_branch")
-            let revision = J.Text(GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(branch)), "sha")
-            let policy = Policy.Load(repo, revision)
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", revision)
+            let authority = J.Text(info, "default_branch")
+            let branch = ApprovalBase.Select(args, authority)
+            let authorityBase = GitHub.Branch(repo, authority)
+            let revision = branch == authority ? authorityBase: GitHub.Branch(repo, branch)
+            let policy = Policy.Load(repo, authorityBase)
+            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
             ValidateTemplate(template)
+            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
+            let decree = Decree.CaptureTree(repo, Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
+            Terminal.Step(
+                "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
+            )
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
             var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
             let others = List[string]()
@@ -104,6 +111,10 @@ internal class Workflow {
                 revision,
                 "base_branch",
                 branch,
+                "decree",
+                decree,
+                "authority_branch",
+                authority,
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
@@ -121,7 +132,6 @@ internal class Workflow {
             if old.ValueKind != JsonValueKind.Undefined {
                 parents.Add(J.Text(J.Get(old, "object"), "sha"))
             }
-            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + revision)
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
                 J.Map(
@@ -222,15 +232,7 @@ internal class Workflow {
                 J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
                 throw Exception("Issue or assignment changed. The owner must approve again.")
             }
-            let info = GitHub.Api("repos/" + repo)
-            let currentBranch = J.Text(info, "default_branch")
-            let current = J.Text(GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(currentBranch)), "sha")
-            let policy = Policy.Load(repo, current)
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", current)
-            if currentBranch != J.Text(approval, "base_branch") || policy.Digest != J.Text(approval, "policy_hash") ||
-                Data.Hash(template) != J.Text(approval, "template_hash") {
-                throw Exception("Repository policy or template changed. The owner must approve again.")
-            }
+            let configuration = ApprovalBase.Check(repo, approval, 1)
             return J.Parse(
                 J.Write(
                     J.Map(
@@ -241,9 +243,9 @@ internal class Workflow {
                         "issue",
                         issue,
                         "policy",
-                        policy.Value,
+                        J.Get(configuration, "policy"),
                         "template",
-                        template
+                        J.Text(configuration, "template")
                     )
                 )
             )

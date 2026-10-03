@@ -65,6 +65,10 @@ func Main(args[]string) int32 {
             DonorSelectionChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if args.Length == 1 && args[0] == "--targets" {
+            TargetBranches.All(binary)
+            return 0
+        }
         if args.Length == 2 && args[0] == "--cli-shell" {
             CliDiscovery.All(binary, args[1])
             return 0
@@ -90,6 +94,10 @@ func Main(args[]string) int32 {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--decree" {
+            DecreeFlow.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         ProcessChecks.All()
         ProtectedPathChecks.All()
         CliDiscovery.All(binary)
@@ -98,6 +106,8 @@ func Main(args[]string) int32 {
         CoordinationFlow.All(binary)
         CorrectionChecks.All(binary)
         AmendmentFlow.All(binary)
+        DecreeFlow.All(binary)
+        TargetBranches.All(binary)
         VerificationChecks.All()
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")

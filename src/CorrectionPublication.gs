@@ -150,7 +150,7 @@ internal class CorrectionPublication {
                 throw Exception("Only the saved verified exact correction can be published")
             }
             let record = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
-            Correction.Exact(directory, run, correction, J.Get(record, "policy"))
+            Correction.Exact(directory, run, correction, record)
             Publication.VerificationReport(run, record)
             if !Correction.Same(J.Get(run.Element(), "verification"), J.Get(correction.Element(), "verification")) {
                 throw Exception("Correction verification results changed")
@@ -309,7 +309,7 @@ internal class CorrectionPublication {
                     }
                 }
                 Correction.Authority(directory, run)
-                Correction.Exact(directory, run, correction, J.Get(record, "policy"))
+                Correction.Exact(directory, run, correction, record)
                 let raced = Existing(run, correction)
                 if raced.ValueKind != JsonValueKind.Undefined {
                     Complete(directory, run, correction, raced)
@@ -570,7 +570,7 @@ internal class CorrectionPublication {
                     )
                     return
                 }
-                Correction.Exact(directory, run, correction, J.Get(record, "policy"))
+                Correction.Exact(directory, run, correction, record)
                 let latest = V2Authority(directory, run, correction)
                 SetStage(directory, correction, "request_pending")
                 try {

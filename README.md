@@ -26,7 +26,7 @@ The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub reposito
 ## For Owners:
 
 1. Sign in with `gh auth login` and run `tokate init` in your repository.
-2. Set the project's checks and allowed model/effort pairs, then commit the generated files. Your AI can follow the [owner setup guide](AGENTS.md#guide-a-repository-owner).
+2. Set the project's checks and allowed model/effort pairs, then commit the generated files. Optionally add root [DECREE.md codebase instructions](docs/reference.md#owner-codebase-instructions). Your AI can follow the [owner setup guide](AGENTS.md#guide-a-repository-owner).
 3. Write an issue with clear acceptance criteria and approve a donor:
 
 ```sh

@@ -27,7 +27,7 @@ internal class Contribution {
             if !File.Exists(candidatePath) {
                 File.WriteAllText(candidatePath, candidate)
             }
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             if File.ReadAllText(candidatePath) != candidate {
                 throw Exception("Saved candidate patch changed")
             }
@@ -62,7 +62,7 @@ internal class Contribution {
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
             let patch = Snapshot(checkout, run)
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
             }

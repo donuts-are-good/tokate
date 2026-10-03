@@ -221,7 +221,13 @@ internal class V2Contribution {
             run.Fields["commit"] = commit
             try {
                 Commands.Git(checkout, "diff", "--check", run.Text("base"), commit)
-                ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), commit)
+                ProtectedPaths.Local(
+                    checkout,
+                    J.Get(record, "policy"),
+                    J.Get(record, "approval"),
+                    run.Text("base"),
+                    commit
+                )
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
                 run.Fields["error"] = error.Message
@@ -284,7 +290,7 @@ internal class V2Contribution {
                 throw Exception("Verified base changed")
             }
             Commands.Git(checkout, "diff", "--exit-code")
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
@@ -302,7 +308,13 @@ internal class V2Contribution {
                 J.Text(J.Get(record, "issue"), "title")
             )
             run.Fields["commit"] = Commands.Git(checkout, "rev-parse", "HEAD")
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                run.Text("commit")
+            )
             run.Fields["verification_provenance"] = "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
@@ -349,7 +361,13 @@ internal class V2Contribution {
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
             Commands.Git(checkout, "diff", "--check", run.Text("base"), run.Text("commit"))
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                run.Text("commit")
+            )
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
                 Commands.Git(
@@ -483,6 +501,7 @@ internal class V2Contribution {
             ProtectedPaths.Remote(
                 repo,
                 J.Get(record, "policy"),
+                J.Get(record, "approval"),
                 J.Text(J.Get(record, "approval"), "base"),
                 J.Text(metadata, "fork"),
                 exactHead
@@ -493,6 +512,7 @@ internal class V2Contribution {
             run.Fields["pr"] = number
             run.Fields["commit"] = exactHead
             run.Fields["pr_url"] = J.Text(pull, "html_url")
+            run.Fields["policy"] = J.Get(record, "policy")
             return run
         }
     }

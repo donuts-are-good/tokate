@@ -74,6 +74,7 @@ tokate doctor
 tokate init [--path DIR]
 tokate policy --repo OWNER/REPO
 tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN
+tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN --base-branch release/next
 tokate assign --repo OWNER/REPO --issue 42 --donor LOGIN
 tokate revoke --repo OWNER/REPO --issue 42
 tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
@@ -248,6 +249,70 @@ owners choose additional paths explicitly. Adoption changes the policy hash and 
 fresh approval; existing approvals and receipts are never rewritten.
 
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
+Fresh `approve` and `assign` accept `--base-branch BRANCH`. On a terminal, omitting
+it prompts for a target with the upstream default branch as the default; redirected
+commands use that default directly. Passing the option selects the same target
+without a prompt. The approval pins `base_branch` and its exact `base` commit,
+and records the repository default branch as `authority_branch`. Policy and PR
+template always come from that authority branch, even when the target contains
+different Tokate configuration.
+
+Revalidation requires the selected target to exist, the default/authority branch
+to remain unchanged, and current authority policy/template hashes to match.
+Target movement preserves approval when applicable `DECREE.md` snapshot freshness
+checks pass. Tokate displays the current target and approved revisions when they
+differ and prepares the exact approved base.
+Publication and receipt/check validation use the selected target. There is no
+automatic rebase, reconciliation or readiness change. Records without
+`authority_branch` retain their existing default-branch/base-branch and freshness
+rules and are never migrated automatically.
+
+### Owner codebase instructions
+
+Owners may commit an optional root `DECREE.md`; no configuration or nested discovery
+is needed. For example:
+
+```markdown
+Use the existing formatter and descriptive function names.
+Keep GitHub transport in ApiTransport; share task context across adapters.
+Run scripts/verify.sh and report the actual results and limitations.
+```
+
+Use a supporting release (Tokate 0.2.18+) for the owner, donor and version-2
+coordinator. Older binaries do not gain delivery from a new approval record alone.
+New v1/v2 approvals capture the complete text from the exact selected target
+commit before approval writes, recording `decree.present`, lowercase `sha256`, and
+`text`. Absence is valid; an empty file is present. Only regular Git blobs
+(`100644`/`100755`), strict UTF-8 without NUL, at most 64 KiB of source bytes are
+accepted. BOM, whitespace and line endings are preserved. Symlinks (including
+in-repository targets), directories, submodules, LFS pointers, unreadable content,
+malformed encoding, oversized files and truncated discovery fail explicitly.
+
+Every Tokate-managed v1/v2 session receives the approved text in an identified
+owner-instruction section through the shared task context, independently of
+`AGENTS.md` discovery. Future adapters and resumed/handed-off execution that starts
+a new managed session must use that builder; this feature adds no lifecycle
+operations or harness support. Tokate currently launches Codex/OpenAI; external
+coding sessions receive no automatic delivery. Authentication stays with the
+harness. Instructions cannot expand Tokate permissions or donor budgets, and
+delivery does not prove compliance.
+
+For snapshot-bearing approvals, target addition, deletion or changed content,
+including unsupported replacements, requires fresh approval. Unrelated target
+advancement preserves the approved base. Donors cannot add, change, delete or
+rename root `DECREE.md`; both rename endpoints are protected in managed changes,
+external verification and coordinator publication. Working-tree/fork replacements
+cannot supply session instructions. Full text is stored once in approval data,
+not copied into saved runs, public PR reports or receipts.
+
+Legacy approvals without `decree` derive instructions only when a new managed
+session starts, from their immutable approved `base`, labelled **legacy
+approved-base**. Old approvals, runs, receipts, freshness and donor-diff permissions
+remain unchanged; routine reapproval is unnecessary. This does not establish
+delivery to previous sessions or track live legacy `DECREE.md` changes.
+
+`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
+
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 

@@ -1232,7 +1232,7 @@ internal class NativeFlow : IDisposable {
             owner: true,
             traffic: true
         )
-        Traffic(8, 5, 0, 0, approval)
+        Traffic(9, 5, 0, 0, approval)
         ResetTraffic()
         let claimed = Call(
             []string{

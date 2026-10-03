@@ -17,7 +17,7 @@ internal class ProtectedPathChecks {
         private func Refused(checkout string, policy JsonElement, base string, head string = "") {
             var refused bool
             try {
-                ProtectedPaths.Local(checkout, policy, base, head)
+                ProtectedPaths.Local(checkout, policy, JsonElement(), base, head)
             } catch (error Exception) {
                 Check.Contains(error.Message, "protected owner")
                 refused = true

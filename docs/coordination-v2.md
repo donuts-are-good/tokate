@@ -193,6 +193,12 @@ tool-reported usage locally. This still does not cryptographically attest model
 identity or billing. `work` saves the verified commit; version-2 publication goes
 through the coordinator. No silent model substitution or harness fallback occurs.
 
+Optional root [DECREE.md instructions](reference.md#owner-codebase-instructions)
+use the same approved snapshot and shared task context as managed v1 sessions.
+Snapshot-bearing approvals also bind current target presence/content and protect
+both donor rename endpoints. External sessions are not launched by Tokate and
+receive no automatic instruction delivery. Use a supporting coordinator release.
+
 `submit` posts a stable publication UUID and exact head/fork/branch, all declared
 tools, source and `verification: "donor-reported-pass"`. The privileged coordinator
 does not execute checks or trust this declaration as independently observed. It
@@ -252,7 +258,8 @@ nothing after a successful recorded outcome. Failed/interrupted mutations are no
 automatically retried. Operators redeliver the same request only after inspecting
 state. There is no background polling or per-token update stream.
 
-Measured deterministic actual-command budgets (successful GETs, no rate limits):
+Measured deterministic actual-command budgets (successful GETs, no rate limits,
+unchanged approved target commit):
 
 | Path | Reads | Mutations | Live 304s |
 | --- | ---: | ---: | ---: |
@@ -260,6 +267,9 @@ Measured deterministic actual-command budgets (successful GETs, no rate limits):
 | Identical replay | 4 | 0 | 0 |
 | New draft publication | 31 | 4 | 19 |
 | Publication recovery with existing exact PR | 31 | 3 | 19 |
+
+When the target advances, each snapshot freshness check adds two reads for absent
+instructions or three for present instructions. Legacy freshness is unchanged.
 
 Each state transition creates a tree, a single-parent commit, and a non-forced ref
 update. Pacing/retry bounds and `--traffic` numeric diagnostics reuse the existing

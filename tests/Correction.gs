@@ -1058,6 +1058,94 @@ internal class CorrectionChecks {
             AmendCorrected(flow, run, archive)
         }
 
+        private func DecreeEdits(binary string) {
+            for version in[]int32{1, 2} {
+                for legacy in[]bool{false, true} {
+                    using let test = DecreeFlow(binary, version)
+                    test.Initialize()
+                    test.Text("Approved owner instructions\n")
+                    test.Flow.Approve()
+                    if legacy {
+                        test.Legacy()
+                    }
+                    let run = test.Start()
+                    test.Flow.Mode("staged_whitespace")
+                    test.Flow.Call([]string{"work", "--run", run}, 1)
+                    let archive = Prepared(test.Flow, run)
+                    let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                    let decree = Path.Combine(run, "checkout/DECREE.md")
+                    File.WriteAllText(decree, "Corrected instruction edit\n")
+                    var commit = Correct(test.Flow, run)
+                    if !legacy {
+                        Check.Contains(Recover(test.Flow, run, commit, 1).Error, "approved root DECREE.md")
+                        let refused = Read(run, "correction.json")
+                        Check.That(refused["verification"] == nil, "Protected correction reached verification")
+                        Check.That(
+                            Check.Text(refused["failure_stage"]) == "candidate_validation",
+                            "Protected correction passed candidate validation"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                            "Refused correction rewrote original run"
+                        )
+                        test.Flow.NoPr()
+                        File.WriteAllText(decree, "Approved owner instructions\n")
+                        commit = Correct(test.Flow, run)
+                    }
+                    Recover(test.Flow, run, commit)
+                    if let coordinator = test.V2 {
+                        test.Flow.Call([]string{"submit", "--run", run})
+                        test.Flow.Reload()
+                        let request = Check.Json(Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8))
+                        coordinator.Coordinate(coordinator.Event(request))
+                        test.Flow.Call([]string{"submit", "--run", run})
+                    }
+                    let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+                    let correction = File.ReadAllText(Path.Combine(run, "correction.json"))
+                    let previous = Check.Text(Read(run)["commit"])
+                    File.WriteAllText(decree, "Amended instruction edit\n")
+                    commit = Correct(test.Flow, run, "Amendment with instruction edit\n")
+                    let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+                    if legacy {
+                        test.Flow.Call(args)
+                        if let coordinator = test.V2 {
+                            test.Flow.Reload()
+                            let request = Check.Json(
+                                Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8)
+                            )
+                            coordinator.Coordinate(coordinator.Event(request))
+                            test.Flow.Call(args)
+                        }
+                        test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"})
+                    } else {
+                        Check.Contains(test.Flow.Call(args, 1).Error, "approved root DECREE.md")
+                        Check.That(
+                            !Directory.Exists(Path.Combine(run, "amendments", commit)),
+                            "Protected amendment reached verification"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "run.json")) == saved,
+                            "Refused amendment rewrote saved run"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "correction.json")) == correction,
+                            "Refused amendment changed correction evidence"
+                        )
+                        test.Flow.Reload()
+                        Check.That(
+                            Check.Text(test.Flow.State["pulls"]?[0]?["head"]?["sha"]) == previous,
+                            "Protected amendment published"
+                        )
+                    }
+                    Check.That(
+                        File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
+                        "Instruction edit changed original archive"
+                    )
+                    Once(test.Flow, 1)
+                }
+            }
+        }
+
         private func CorrectedAmendmentsV2(binary string) {
             using let flow = CoordinationFlow(binary)
             flow.Initialize()
@@ -1076,6 +1164,7 @@ internal class CorrectionChecks {
 
         internal func All(binary string, selected string = "") {
             for name in[]string{
+                "DecreeEdits",
                 "CorrectedAmendmentsV1",
                 "CorrectedAmendmentsV2",
                 "Whitespace",
@@ -1101,6 +1190,9 @@ internal class CorrectionChecks {
                     continue
                 }
                 switch name {
+                    case "DecreeEdits" {
+                        DecreeEdits(binary)
+                    }
                     case "CorrectedAmendmentsV1" {
                         CorrectedAmendmentsV1(binary)
                     }

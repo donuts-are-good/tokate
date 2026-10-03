@@ -317,6 +317,7 @@ internal class Coordinator {
             ProtectedPaths.Remote(
                 repo,
                 policy.Value,
+                J.Get(record, "approval"),
                 J.Text(metadata, "previous"),
                 J.Text(metadata, "fork"),
                 J.Text(metadata, "head")
@@ -488,6 +489,7 @@ internal class Coordinator {
             ProtectedPaths.Remote(
                 repo,
                 J.Get(record, "policy"),
+                J.Get(record, "approval"),
                 J.Text(J.Get(record, "approval"), "base"),
                 J.Text(metadata, "fork"),
                 J.Text(metadata, "head")
