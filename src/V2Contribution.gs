@@ -393,12 +393,6 @@ internal class V2Contribution {
             let path = Path.GetFullPath(args.Need("file"))
             let value = RequestData.FileData(path, 8192)
             RequestData.Request(value)
-            using let lease = File.Open(
-                path + ".posting.lock",
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
             let info = GitHub.Api("repos/" + Data.Repo(args.Need("repo")))
             let repo = Data.Repo(J.Text(info, "full_name"))
             if !String.Equals(repo, args.Need("repo"), StringComparison.OrdinalIgnoreCase) {

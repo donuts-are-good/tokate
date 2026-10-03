@@ -1,6 +1,8 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
+import System.Collections.Generic
 import System.Diagnostics
 import System.IO
 import System.Text.Json.Nodes
@@ -125,6 +127,66 @@ internal class CommandTrafficChecks {
                     )
                 }
             }
+        }
+
+        private func RequestAttempt(binary string, path string, env Dictionary[string, string], output Chan[Result]) {
+            output <- Check.Run(
+                binary,
+                []string{"request", "--repo", "owner/project", "--issue", "1", "--file", path},
+                env
+            )
+        }
+
+        private func SameFileRequest(binary string) {
+            using let flow = CoordinationFlow(binary)
+            flow.Initialize()
+            let path = Path.Combine(flow.Flow.Temp.Root, "request-input.json")
+            let request = flow.ClaimRequest()
+            File.WriteAllText(path, request.ToJsonString())
+            let target = Path.Combine(flow.Flow.Temp.Root, "synthetic-lock-target")
+            File.CreateSymbolicLink(path + ".posting.lock", target)
+            flow.Flow.Mode("lost_request_response")
+            flow.Flow.ResetTraffic()
+            let output = Chan[Result](2)
+            let env = Dictionary[string, string](flow.Flow.Temp.Env)
+            go RequestAttempt(binary, path, env, output)
+            go RequestAttempt(binary, path, env, output)
+            let first = <-output
+            let second = <-output
+            Check.That(
+                (first.Code == 0 || first.Code == 1) &&
+                    (second.Code == 0 || second.Code == 1) &&
+                    (first.Code == 0 || second.Code == 0),
+                "Same-file request had no reconciled winner: " + first.Error + second.Error
+            )
+            flow.Flow.Reload()
+            var posts int32
+            for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                if Check.Text(call["method"]) == "POST" && Check.Text(call["path"]).EndsWith("/comments") {
+                    posts++
+                }
+            }
+            Check.That(
+                posts == 1 && Check.Text(flow.Flow.State["request_count"]) == "1" && Check.Text(
+                    flow.Flow.State["workflow_records"]
+                ) == "1",
+                "Concurrent lost-response request repeated its POST or workflow event"
+            )
+            Check.That(!File.Exists(target), "Request opened an untrusted posting lock link")
+            Check.That(FileInfo(path + ".posting.lock").LinkTarget == target, "Request changed unrelated lock evidence")
+            flow.Flow.ResetTraffic()
+            Budgets(
+                flow.Flow,
+                flow.Flow.Call(
+                    []string{"request", "--repo", "owner/project", "--issue", "1", "--file", path},
+                    traffic: true
+                ),
+                6,
+                0,
+                0
+            )
+            flow.Flow.NoInference()
+            flow.Flow.NoPr()
         }
 
         private func LostRequest(binary string) {
@@ -369,6 +431,7 @@ internal class CommandTrafficChecks {
             for name in[]string{
                 "RequestReuse",
                 "JournalSafety",
+                "SameFileRequest",
                 "LostRequest",
                 "CanonicalRequest",
                 "SubmitReuse",
@@ -385,6 +448,9 @@ internal class CommandTrafficChecks {
                     }
                     case "JournalSafety" {
                         JournalSafety(binary)
+                    }
+                    case "SameFileRequest" {
+                        SameFileRequest(binary)
                     }
                     case "LostRequest" {
                         LostRequest(binary)
