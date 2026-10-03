@@ -227,7 +227,8 @@ Every host command starts with only explicit environment requirements. Codex rec
 Independent owner verification uses Linux bubblewrap directly, without discovering or launching Codex. Each command starts from an empty mount namespace with a writable canonical checkout, its actual `.git` directory read-only, read-only standard system tool/runtime directories and `/etc/alternatives` links, and explicit nonsecret loader, certificate and DNS files. Host `/`, `/etc`, `/home`, `/run` and `/var` are never mounted wholesale. Checkout/Git symlinks and external Git layouts are refused before repository code runs. It uses private `/tmp`, `/var/tmp` and `/dev`, PID/IPC/UTS/user namespaces, dropped capabilities, and a clean environment with fixed system PATH and private HOME/TMPDIR outside the checkout. Host credentials, sibling contributions, control files, logs and sockets are outside its mounts. Nested sandbox probes are supported. Missing sandbox support fails closed; commands use the remaining total budget and existing process cleanup. This does not sandbox external coding work or change receipts.
 
 Each selected runtime file is copied once into private invocation storage, with a
-4 MiB limit per file, and mounted read-only. Copies remain linked through process
+4 MiB limit per file, and mounted read-only. Storage inside the checkout or through
+symlinks is refused. Copies remain linked through process
 cleanup and are then removed, including on failure. Replacing or unlinking the
 original source does not break nested verification mounts.
 

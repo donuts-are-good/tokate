@@ -38,6 +38,7 @@ func Main(args[]string) int32 {
         }
         if args.Length == 1 && args[0] == "--runtime-files" {
             VerificationChecks.RuntimeFiles()
+            VerificationChecks.RuntimeCancellation()
             return 0
         }
         if args.Length == 1 && args[0] == "--verification" {

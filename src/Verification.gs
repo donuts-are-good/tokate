@@ -1,5 +1,6 @@
 package Tokate
 
+import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.IO
@@ -161,61 +162,93 @@ internal class Verification {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
             }
-            let storage = RuntimeStorage()
-            var result CommandResult
-            try {
-                for path in[]string{
-                    "/etc/ld.so.cache",
-                    "/etc/nsswitch.conf",
-                    "/etc/hosts",
-                    "/etc/resolv.conf",
-                    "/etc/ssl/certs/ca-certificates.crt",
-                    "/etc/ssl/cert.pem",
-                    "/etc/pki/tls/certs/ca-bundle.crt"
-                } {
-                    if File.Exists(path) {
-                        args.AddRange([]string{"--ro-bind", RuntimeFile(path, storage.FullName), path})
+            let cancellation = Chan[bool](1)
+            let onCancel = ConsoleCancelEventHandler(
+                (sender Object?, event ConsoleCancelEventArgs) -> {
+                    event.Cancel = true
+                    select {
+                        case cancellation <- true { }
+                        default { }
                     }
                 }
-                args.AddRange(
-                    []string{
-                        "--proc",
-                        "/proc",
-                        "--dev",
-                        "/dev",
-                        "--tmpfs",
-                        "/tmp",
-                        "--dir",
-                        "/tmp/tokate-home",
-                        "--dir",
-                        "/var",
-                        "--tmpfs",
-                        "/var/tmp",
-                        "--bind",
-                        checkout,
-                        checkout,
-                        "--ro-bind",
-                        git,
-                        git,
-                        "--chdir",
-                        checkout,
-                        "--"
+            )
+            Console.CancelKeyPress += onCancel
+            try {
+                let storage = RuntimeStorage()
+                var result CommandResult
+                try {
+                    let runtimeStorage = DirectoryPath(storage.FullName)
+                    if runtimeStorage == checkout || runtimeStorage.StartsWith(checkout + "/") {
+                        throw Exception("Verification runtime storage must be outside the checkout: " + runtimeStorage)
                     }
-                )
-                args.AddRange(command)
-                result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, seconds: seconds, isolated: true)
-            } catch (error Exception) {
-                CleanupRuntime(storage.FullName, error)
-                throw error
+                    for path in[]string{
+                        "/etc/ld.so.cache",
+                        "/etc/nsswitch.conf",
+                        "/etc/hosts",
+                        "/etc/resolv.conf",
+                        "/etc/ssl/certs/ca-certificates.crt",
+                        "/etc/ssl/cert.pem",
+                        "/etc/pki/tls/certs/ca-bundle.crt"
+                    } {
+                        if File.Exists(path) {
+                            args.AddRange([]string{"--ro-bind", RuntimeFile(path, storage.FullName), path})
+                        }
+                    }
+                    args.AddRange(
+                        []string{
+                            "--proc",
+                            "/proc",
+                            "--dev",
+                            "/dev",
+                            "--tmpfs",
+                            "/tmp",
+                            "--dir",
+                            "/tmp/tokate-home",
+                            "--dir",
+                            "/var",
+                            "--tmpfs",
+                            "/var/tmp",
+                            "--bind",
+                            checkout,
+                            checkout,
+                            "--ro-bind",
+                            git,
+                            git,
+                            "--chdir",
+                            checkout,
+                            "--"
+                        }
+                    )
+                    args.AddRange(command)
+                    result = Commands.Run(
+                        "/usr/bin/bwrap",
+                        args.ToArray(),
+                        checkout,
+                        seconds: seconds,
+                        isolated: true,
+                        cancellation: cancellation
+                    )
+                } catch (error Exception) {
+                    CleanupRuntime(storage.FullName, error)
+                    throw error
+                }
+                var failure Exception? = nil
+                if result.Code != 0 {
+                    failure = Exception(
+                        "Verification command exited " + result.Code.ToString() + ": " + result.Error + result.Output
+                    )
+                }
+                CleanupRuntime(storage.FullName, failure)
+                select {
+                    case <- cancellation {
+                        throw Exception("Verification cancelled")
+                    }
+                    default { }
+                }
+                return result
+            } finally {
+                Console.CancelKeyPress -= onCancel
             }
-            var failure Exception? = nil
-            if result.Code != 0 {
-                failure = Exception(
-                    "Verification command exited " + result.Code.ToString() + ": " + result.Error + result.Output
-                )
-            }
-            CleanupRuntime(storage.FullName, failure)
-            return result
         }
     }
 }
