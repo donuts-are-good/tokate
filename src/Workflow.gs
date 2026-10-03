@@ -8,7 +8,6 @@ import System.Text.Json
 internal class Workflow {
     shared {
         internal func Init(args Args) {
-            args.Allow("path")
             let root = Path.GetFullPath(args.Get("path", "."))
             let directory = Path.Combine(root, ".github")
             Directory.CreateDirectory(directory)
@@ -35,7 +34,6 @@ internal class Workflow {
         internal func ApprovalRef(number int32) string -> "tokate/approvals/" + number.ToString()
 
         internal func Approve(args Args) {
-            args.Allow("repo,issue,donor")
             let repo = Data.Repo(args.Need("repo"))
             let number = args.Number("issue")
             let info = RequireOwner(repo)
@@ -191,7 +189,6 @@ internal class Workflow {
         }
 
         internal func Revoke(args Args) {
-            args.Allow("repo,issue")
             let repo = Data.Repo(args.Need("repo"))
             RequireOwner(repo)
             let state = CoordinationState.Load(repo, args.Number("issue"), true)

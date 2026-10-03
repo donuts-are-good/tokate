@@ -52,44 +52,99 @@ user-local location.
 
 ## Commands and recovery
 
-```text
-Tokate 0.2.10 (toh-KAH-teh)
-Donate AI usage to approved GitHub issues.
+Use `tokate --help` or `tokate -h` to list commands. Focused help includes required
+arguments, defaults, examples and effects:
 
-  tokate doctor                           Check tools and sandbox without inference
-  tokate update                           Install the latest stable release
-  tokate uninstall                        Remove Tokate, keep saved runs
-
-Owner:
-  tokate init [--path DIR]                 Create policy and PR template
-  tokate policy --repo OWNER/REPO          Read upstream policy
-  tokate approve --repo OWNER/REPO --issue N --donor LOGIN
-  tokate assign  --repo OWNER/REPO --issue N --donor LOGIN
-  tokate revoke  --repo OWNER/REPO --issue N
-
-Donor:
-  tokate work --repo OWNER/REPO --issue N --model MODEL --effort EFFORT
-              [--seconds 3600] [--fork LOGIN/REPO] [--allow-network] [--runs DIR]
-  tokate claim <same options>              Reserve without starting inference
-  tokate work --run DIR                    Execute a saved claim once
-  tokate recover --run DIR [--seconds 300]  Reverify a completed turn without inference
-  tokate publish --run DIR                 Retry publication without inference
-  tokate status --run DIR                  Show saved run
-
-Review:
-  tokate verify-pr --repo OWNER/REPO --pr N Validate approval and receipt
-  tokate checks --repo OWNER/REPO --pr N [--watch] [--timeout 1200]
-  tokate checks --run DIR [--watch] [--timeout 1200]
-
-Requires Linux x86_64 (glibc 2.34+), git, gh, setsid, bubblewrap, and a current native Codex CLI with permission
-profiles. Sign in with gh auth login and codex login. Create your fork with
- gh repo fork OWNER/REPO --clone=false
-
-Checks exit 0 when all owner-required checks pass, 8 when pending, 1 on failure.
-Add --traffic to any command for numeric Tokate gh-api counts on stderr.
-Counts exclude unseen GitHub CLI/Git requests and workflow executions.
-PRs are drafts. The owner reviews and merges. No quota transfer or correctness guarantee.
+```sh
+tokate work --help
+tokate help work
+tokate work -h
 ```
+
+Help and completion run locally without prerequisite warnings, GitHub access or
+inference. Unknown commands (including `unknown --help`), unknown or duplicate
+options, missing values, invalid numbers and conflicting inputs fail with relevant
+usage before prerequisite checks or workflow actions. Value options accept both
+`--name value` and `--name=value`; flags such as `--watch` do not take a value.
+Do not combine `work --run DIR` with new-claim options, or `checks --run DIR` with
+`--repo` / `--pr`. `--watch` and `--timeout` remain available for saved-run checks.
+
+```sh
+tokate doctor
+tokate init [--path DIR]
+tokate policy --repo OWNER/REPO
+tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN
+tokate assign --repo OWNER/REPO --issue 42 --donor LOGIN
+tokate revoke --repo OWNER/REPO --issue 42
+tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
+tokate claim --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
+tokate work --run DIR
+tokate recover --run DIR [--seconds 300]
+tokate publish --run DIR
+tokate status --run DIR
+tokate verify-pr --repo OWNER/REPO --pr 10
+tokate checks --repo OWNER/REPO --pr 10 [--watch] [--timeout 1200]
+tokate checks --run DIR [--watch] [--timeout 1200]
+```
+
+`work` starts inference and verifies the result. Version 1 then pushes and
+publishes a draft PR. Version 2 saves a verified commit for `submit`.
+See [version-2 commands and coordination](coordination-v2.md). `recover` and `publish` can push and publish without inference.
+`claim` writes a reservation branch and local run but starts no inference.
+Owner approval commands write to GitHub. `policy`, `verify-pr` and `checks` read
+GitHub; saved-run checks also write local results. `status`, help and completion
+are local. `update` downloads and replaces Tokate; `uninstall` removes it offline.
+`doctor` probes tools and the sandbox without inference.
+
+### Issue URLs and local repository context
+
+For commands accepting `--issue`, a GitHub issue URL can supply both repository
+and issue. Pass it positionally or as an option:
+
+```sh
+tokate work https://github.com/OWNER/REPO/issues/42 --model MODEL --effort EFFORT
+tokate approve --issue=https://github.com/OWNER/REPO/issues/42 --donor LOGIN
+# From a repository with one unambiguous GitHub remote:
+tokate work --issue=42 --model MODEL --effort EFFORT
+tokate policy
+```
+
+Explicit `--repo OWNER/REPO` and `--issue N` remain available. `--repo` also accepts
+an HTTPS GitHub repository URL with optional `.git` suffix. Explicit inputs must
+agree with any supplied issue URL; matching values are accepted. Browser issue
+URL fragments and queries are ignored. Pull request URLs and non-GitHub hosts
+are rejected.
+
+When `--repo` is absent and no issue URL supplies it, Tokate reads only local
+`git remote -v` output. All fetch and push URLs must identify the same GitHub
+repository, ignoring case and `.git`. HTTPS, `git@github.com:OWNER/REPO.git` and
+`ssh://git@github.com/OWNER/REPO.git` remotes are supported. No remotes, unsupported
+hosts or formats, and differing origin/upstream or push URLs require explicit
+`--repo`; Tokate never guesses which repository should receive work. Explicit
+repositories and issue URLs override local context. Help and completion never
+inspect local remotes.
+
+### Shell completion
+
+Generate completion from the same command and option definitions as help.
+Completion offers commands, command-specific options, reasoning efforts and local
+directories; it never calls GitHub, fetches model lists or starts inference.
+Load it for the current shell:
+
+```sh
+# Bash
+source <(tokate completion bash)
+# Zsh (initialize the completion system first)
+autoload -Uz compinit && compinit
+source <(tokate completion zsh)
+# Fish
+tokate completion fish | source
+```
+
+To persist it, save `tokate completion bash` output and source that file from
+`.bashrc`; save Zsh output as `_tokate` in a directory on `fpath` before `compinit`;
+save Fish output as `~/.config/fish/completions/tokate.fish`. Regenerate after an
+update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
@@ -258,6 +313,10 @@ install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 ```sh
 scripts/verify.sh
 ```
+
+Completion checks use Bash by default. Optional checks require only the shell
+being tested: `artifacts/tests/tokate-tests --cli-shell zsh` or
+`artifacts/tests/tokate-tests --cli-shell fish`. Tokate does not require these shells.
 
 The pinned public G# SDK is 0.4.1150. Verification uses the pinned SDK formatter,
 builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end

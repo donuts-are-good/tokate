@@ -68,13 +68,12 @@ internal class V2Contribution {
         }
 
         internal func Prepare(args Args) {
-            args.Allow("repo,issue,state,fork,source,tools,runs,seconds,allow-network")
             let repo = Data.Repo(args.Need("repo"))
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
             let donor = Data.Login(J.Text(viewer, "login"))
             let state = CoordinationState.Load(repo, issue)
-            if state.Sha != CoordinationState.ShaValue(args.Need("state")) {
+            if state.Sha != Data.CommitSha(args.Need("state")) {
                 throw Exception("Stale coordination revision")
             }
             state.Reservation(J.Get(viewer, "id"))
@@ -150,7 +149,6 @@ internal class V2Contribution {
         }
 
         internal func External(args Args) {
-            args.Allow("run,commit")
             let directory = Path.GetFullPath(args.Need("run"))
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),
@@ -163,7 +161,7 @@ internal class V2Contribution {
                 throw Exception("Expected an unexecuted external version-2 contribution")
             }
             let record = Recheck(run)
-            let commit = CoordinationState.ShaValue(args.Need("commit"))
+            let commit = Data.CommitSha(args.Need("commit"))
             let metadata = J.Parse(
                 J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", commit))
             )
@@ -290,7 +288,6 @@ internal class V2Contribution {
         }
 
         internal func Request(args Args) {
-            args.Allow("repo,issue,file")
             let value = RequestData.FileData(args.Need("file"), 8192)
             RequestData.Request(value)
             GitHub.Api(
@@ -301,7 +298,6 @@ internal class V2Contribution {
         }
 
         internal func Submit(args Args) {
-            args.Allow("run")
             let directory = Path.GetFullPath(args.Need("run"))
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),

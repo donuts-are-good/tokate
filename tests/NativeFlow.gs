@@ -159,16 +159,17 @@ internal class NativeFlow : IDisposable {
         Temp.Env["PATH"] = empty
         let help = Call([]string{"--help"})
         Check.Contains(help.Output, "toh-KAH-teh")
-        for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
-            Check.Contains(help.Error, name + ": missing")
-        }
+        Check.That(help.Error == "", "Help emitted prerequisite warnings")
         Check.That(!(help.Output + help.Error).Contains('\u001b'), "Redirected output contains ANSI")
         let doctor = Call([]string{"doctor"}, 1)
         Check.Contains(doctor.Output, "sandbox: skipped")
         for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
             Check.Contains(doctor.Output, name + ": missing")
         }
-        let work = Call([]string{"work", "--repo", "owner/project", "--issue", "1"}, 1)
+        let work = Call(
+            []string{"work", "--repo", "owner/project", "--issue", "1", "--model", "model", "--effort", "high"},
+            1
+        )
         Check.Contains(work.Error, "Install the tools needed")
         NoInference()
     }
@@ -184,7 +185,10 @@ internal class NativeFlow : IDisposable {
         Check.Contains(result.Error, "codex: missing")
         Check.Contains(result.Output, "Approved")
         Check.Contains(
-            Call([]string{"work", "--repo", "owner/project", "--issue", "1"}, 1).Error,
+            Call(
+                []string{"work", "--repo", "owner/project", "--issue", "1", "--model", "model", "--effort", "high"},
+                1
+            ).Error,
             "Install the tools needed"
         )
     }

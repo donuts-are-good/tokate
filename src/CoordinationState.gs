@@ -98,20 +98,13 @@ internal class CoordinationState {
             return result
         }
 
-        internal func ShaValue(value string) string {
-            if !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
-                throw Exception("Expected an exact 40-character Git commit SHA")
-            }
-            return value
-        }
-
         internal func Load(repo string, issue int32, missing bool = false) CoordinationState {
             let result = CoordinationState()
             let reference = GitHub.Api("repos/" + repo + "/git/ref/heads/" + Ref(issue), missing: missing)
             if reference.ValueKind == JsonValueKind.Undefined {
                 return result
             }
-            result.Sha = ShaValue(J.Text(J.Get(reference, "object"), "sha"))
+            result.Sha = Data.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
             let value = RequestData.Parse(GitHub.FileAt(repo, "state.json", result.Sha), 1024 * 1024)
             if J.Number(value, "version") != 2 || J.Text(value, "repo") != repo || J.Number(value, "issue") != issue {
                 throw Exception("Invalid version-2 coordination state")

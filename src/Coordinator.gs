@@ -10,7 +10,6 @@ import System.Text.RegularExpressions
 internal class Coordinator {
     shared {
         internal func Run(args Args) {
-            args.Allow("repo,event")
             let repo = Data.Repo(args.Need("repo"))
             let event = RequestData.FileData(args.Need("event"), 1024 * 1024)
             if Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") != "issue_comment" || J.Text(

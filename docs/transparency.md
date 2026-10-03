@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.10 discovers tools, handles data, and
+This document describes how Tokate 0.2.13 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -10,6 +10,11 @@ delegates authentication. Source links support the behavior described below.
 Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
 effort explicitly.
 
+- Help and shell completion use local command definitions without scanning tools,
+  inspecting remotes, accessing GitHub, or starting inference. Invalid CLI inputs
+  fail before prerequisite checks and workflow actions. When needed, repository
+  discovery reads local `git remote -v` output and requires one unambiguous
+  GitHub repository; it never fetches or calls a credential helper.
 - Startup looks for `git`, `gh`, `codex`, `setsid`, and `bwrap` in absolute directories
   listed in `PATH`. It checks file existence and executable permissions. It does
   not recursively search the home directory or open harness configuration files.
@@ -27,7 +32,8 @@ effort explicitly.
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.
 
-Source: [Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
+Source: [Cli.gs](../src/Cli.gs), [Completion.gs](../src/Completion.gs),
+[Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
 
 ## Installer access
 
@@ -193,8 +199,8 @@ prints it. Command errors can also appear in terminal output.
   `pr-body.md` and `publication.json` save the generated body and exact PR-create
   request before Git push or PR creation. Inspect them together with
   `changes.patch` and the checkout; they also remain available after a publication
-  failure. Existing `work` still publishes automatically, with no additional
-  approval prompt. `publish --run DIR` regenerates content and retries publication
+  failure. Version-1 `work` publishes automatically without another approval
+  prompt. Version-2 `work` saves a verified commit for `submit`. `publish --run DIR` regenerates content and retries publication
   without inference; editing these saved previews does not change the generated
   request. Repository changes or an approved public template can nevertheless
   contain or reproduce sensitive content. There is no general secret scrubber.

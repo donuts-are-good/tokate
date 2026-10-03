@@ -53,6 +53,14 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 1 && args[0] == "--cli" {
+            CliDiscovery.All(binary)
+            return 0
+        }
+        if args.Length == 2 && args[0] == "--cli-shell" {
+            CliDiscovery.All(binary, args[1])
+            return 0
+        }
         if args.Length == 2 && args[0] == "--shell" {
             Installer.Lifecycle(project, binary, args[1])
             Console.WriteLine("PASS installer lifecycle for " + args[1])
@@ -67,6 +75,7 @@ func Main(args[]string) int32 {
             return 0
         }
         ProcessChecks.All()
+        CliDiscovery.All(binary)
         NativeFlow.All(binary)
         CoordinationFlow.All(binary)
         VerificationChecks.All()

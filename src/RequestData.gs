@@ -145,14 +145,14 @@ internal class RequestData {
                 .IsMatch(J.Text(value, "approval"), "^[0-9a-f]{64}$") {
                 throw Exception("Request needs a canonical UUID and approval identity")
             }
-            CoordinationState.ShaValue(J.Text(value, "expected"))
+            Data.CommitSha(J.Text(value, "expected"))
             let metadata = J.Get(value, "metadata")
             if J.Text(value, "action") == "claim" {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
                 Keys(metadata, "fork,branch,head,source,tools,verification")
                 Data.Repo(J.Text(metadata, "fork"))
-                CoordinationState.ShaValue(J.Text(metadata, "head"))
+                Data.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
                     (J.Text(metadata, "source") != "external" && J.Text(metadata, "source") != "tokate") ||
                     J.Text(metadata, "verification") != "donor-reported-pass" {

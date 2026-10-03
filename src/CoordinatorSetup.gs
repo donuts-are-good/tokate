@@ -10,7 +10,6 @@ import System.Text.RegularExpressions
 internal class CoordinatorSetup {
     shared {
         internal func Run(args Args) {
-            args.Allow("repo,output")
             let repo = Data.Repo(args.Need("repo"))
             let requested = Path.GetFullPath(args.Need("output"))
             let output = Path.Combine(
