@@ -335,7 +335,11 @@ internal class Workflow {
                 return V2Contribution.Recheck(run)
             }
             let viewer = GitHub.Api("user")
-            if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) {
+            if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) || J.Get(
+                viewer,
+                "id"
+            )
+                .ToString() != J.Get(run.Element(), "donor_id").ToString() {
                 throw Exception("Use the GitHub account that claimed this run")
             }
             let record = Approved(Data.Repo(run.Text("repo")), run.Number("issue"), Data.Login(run.Text("donor")))

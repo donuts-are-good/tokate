@@ -80,6 +80,8 @@ tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 tokate claim --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 tokate work --run DIR
 tokate recover --run DIR [--seconds 300]
+tokate recover --run DIR --prepare
+tokate recover --run DIR --commit SHA --seconds N [--tools FILE]
 tokate publish --run DIR
 tokate status --run DIR
 tokate verify-pr --repo OWNER/REPO --pr 10
@@ -148,7 +150,7 @@ update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
-`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
+`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 
@@ -338,3 +340,39 @@ The real native Codex `doctor` probe is a separate required matrix check; passin
 the deterministic suite does not establish the managed Codex boundary.
 
 `tokate recover --run DIR [--seconds 300]` explicitly reruns all owner checks after a completed agent turn failed verification. It revalidates approval and the completed turn and report before archiving legacy managed scratch caches, preserves failure evidence, and publishes only after success. Incomplete turns leave those caches in place and run no verification. The separate verification budget cannot exceed the owner limit. No inference runs. The PR discloses recovery and unknown original runtime. Failed inference still requires fresh approval.
+
+For an explicit correction before first publication, run `recover --run DIR --prepare`
+**before editing**. Preparation runs no inference, verification or publication. It
+atomically preserves original records, raw turn/report, approval, failed checks,
+available staged binary patch, unstaged changes and untracked files in
+`original-evidence/`. Links are recorded without following them. Missing original
+artifacts remain explicit; capture-time checkout evidence is not reconstructed
+model output. Repeated preparation preserves the same archive.
+
+Correct and commit the checkout, leaving it clean at an exact 40-character SHA,
+then run `recover --run DIR --commit SHA --seconds N [--tools FILE]`. The separate
+positive verification budget is required and bounded by the original policy.
+Omitting tools, or declaring `[]`, means manual/unknown editing. Other declarations
+use the existing tool schema and must satisfy owner policy (v1 permits only
+codex/openai with an approved model/effort). Every original owner command runs in
+the existing independent sandbox. Head, tree, complete patch and cleanliness must
+remain unchanged. Policy, template and workflow edits, including either rename
+endpoint, are rejected. Original model, runtime and usage describe original work
+only; correction editing and exact-commit verification are disclosed separately.
+
+This supports completed native v1 and managed v2 turns, including staged whitespace
+failure before candidate creation and first verification failure. External v2,
+incomplete/failed inference, published work, another donor, stale approval and
+expired/replaced reservations are refused. No authority is renewed or migrated.
+Each correction has a separate UUID, candidate, budget, tools and results in
+`correction.json` and `correction-UUID/`. Failed/interrupted checks retain progress
+and require a new corrected commit for another explicit attempt.
+
+V1 publishes a draft on the original claim branch after all checks pass. V2 saves
+the corrected commit for `submit --run DIR`; the coordinator remains publisher.
+Repeating a successful correction with the same candidate, budget and tools resumes
+publication only, without rerunning checks. Publication intent is saved before
+writes. Recovery inspects the branch, all matching PRs, and (v2) the exact request
+and coordination outcome. An uncertain write with missing or ambiguous physical
+state is refused instead of being blindly repeated. Keep the private evidence for
+inspection; neither a failed check nor pending coordinator publication is success.

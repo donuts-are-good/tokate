@@ -16,6 +16,8 @@ internal class Contribution {
             timer Stopwatch,
             seconds int32
         ) {
+            run.Fields["failure_stage"] = "candidate_validation"
+            run.Fields["failure_reason"] = "candidate_invalid"
             let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if Commands.Git(checkout, "status", "--porcelain") == "" {
                 throw Exception("No changes returned. No PR will be opened.")
@@ -27,6 +29,8 @@ internal class Contribution {
             }
             File.WriteAllText(candidatePath, candidate)
             Terminal.Step("Running independent owner verification...")
+            run.Fields["failure_stage"] = "owner_verification"
+            run.Fields["failure_reason"] = "verification_failed"
             let verification = List[Object]()
             for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
                 let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
@@ -52,6 +56,8 @@ internal class Contribution {
                 }
             }
             run.Fields["verification"] = verification
+            run.Fields["failure_stage"] = "changed_candidate"
+            run.Fields["failure_reason"] = "candidate_changed"
             let patch = Snapshot(checkout, run)
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
@@ -60,6 +66,8 @@ internal class Contribution {
             run.Fields["usage"] = usage
             run.Fields["elapsed_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
             run.Fields["state"] = "generated"
+            run.Fields.Remove("failure_reason")
+            run.Fields.Remove("failure_stage")
             run.Save(directory)
         }
 

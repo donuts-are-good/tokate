@@ -259,10 +259,19 @@ internal class Worker {
                 let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"))
                 File.WriteAllText(Path.Combine(directory, "events.jsonl"), result.Output)
                 File.WriteAllText(Path.Combine(directory, "stderr.log"), result.Error)
+                run.Fields["inference_exit_code"] = result.Code
                 if result.Code != 0 {
+                    run.Fields["failure_reason"] = "inference_failed"
+                    run.Fields["failure_stage"] = "inference"
                     throw Exception("Codex failed. See stderr.log in " + directory)
                 }
+                run.Fields["failure_reason"] = "incomplete_turn"
+                run.Fields["failure_stage"] = "inference"
                 let usage = CompletedUsage(directory, result.Output)
+                run.Fields["turn_completed"] = true
+                run.Fields["usage"] = usage
+                run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                run.Save(directory)
                 Contribution.Finish(directory, run, record, usage, timer, run.Number("seconds"))
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
@@ -274,24 +283,29 @@ internal class Worker {
 
         internal func CompletedUsage(directory string, output string) Dictionary[string, Object?] {
             var completed bool
+            var completions int32
             let usage = Dictionary[string, Object?]()
             for line in output.Split('\n') {
                 if String.IsNullOrWhiteSpace(line) {
                     continue
                 }
                 let item = J.Parse(line)
+                if J.Text(item, "type") == "turn.started" {
+                    completed = false
+                }
                 if J.Text(item, "type") == "turn.failed" {
                     throw Exception("Codex reported a failed turn")
                 }
                 if J.Text(item, "type") == "turn.completed" {
                     completed = true
+                    completions++
                     for field in J.Get(item, "usage").EnumerateObject() {
                         usage[field.Name] = field.Value.Clone()
                     }
                 }
             }
             let report = File.ReadAllText(Path.Combine(directory, "report.md"))
-            if !completed || String.IsNullOrWhiteSpace(report) {
+            if !completed || completions != 1 || String.IsNullOrWhiteSpace(report) {
                 throw Exception("Codex did not produce a completed turn and report")
             }
             return usage
