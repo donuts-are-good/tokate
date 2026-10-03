@@ -194,7 +194,7 @@ internal class Cli {
                 "[--repo OWNER/REPO] --issue N|URL --file FILE",
                 "request --repo owner/project --issue 42 --file request.json"
                 ,
-                effects: "local_read github_read github_write"
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "prepare",

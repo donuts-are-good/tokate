@@ -327,15 +327,192 @@ internal class V2Contribution {
             Terminal.Message("Verified commit saved. Use submit --run " + directory)
         }
 
+        internal func Posted(repo string, issue int32, actor JsonElement, request JsonElement) bool {
+            RequestData.PositiveId(actor)
+            var count int32
+            for page in 1 ... 21 {
+                let response = GitHub.Api(
+                    "repos/" + repo + "/issues/" + issue.ToString() + "/comments?per_page=100&page=" + page.ToString()
+                )
+                if response.ValueKind != JsonValueKind.Array {
+                    throw Exception("Cannot inspect complete request comment evidence")
+                }
+                let rows = J.Items(response)
+                for row in rows {
+                    if J.Get(J.Get(row, "user"), "id").ToString() != actor.ToString() {
+                        continue
+                    }
+                    let body = J.Text(row, "body")
+                    if !body.StartsWith("/tokate ", StringComparison.Ordinal) {
+                        continue
+                    }
+                    var candidate JsonElement
+                    try {
+                        candidate = RequestData.Parse(body.Substring(8))
+                    } catch {
+                        continue
+                    }
+                    if J.Text(candidate, "uuid") != J.Text(request, "uuid") {
+                        continue
+                    }
+                    let id = RequestData.PositiveId(J.Get(row, "id"))
+                    let canonical = GitHub.Api("repos/" + repo + "/issues/comments/" + id.ToString())
+                    if RequestData.PositiveId(J.Get(canonical, "id")) != id || RequestData.PositiveId(
+                        J.Get(J.Get(canonical, "user"), "id")
+                    ) != RequestData.PositiveId(actor) || J.Text(
+                        canonical,
+                        "issue_url"
+                    ) != "https://api.github.com/repos/" +
+                        repo +
+                        "/issues/" +
+                        issue.ToString() || J.Text(canonical, "body") != body || RequestData.Canonical(
+                        candidate
+                    ) != RequestData.Canonical(request) {
+                        throw Exception("Request UUID has changed actor, contents, repository or issue evidence")
+                    }
+                    count++
+                }
+                if rows.Count < 100 {
+                    if count > 1 {
+                        throw Exception("Ambiguous duplicate request comments")
+                    }
+                    return count == 1
+                }
+            }
+            throw Exception("Request comment inspection exceeded its bounded history; no write made")
+        }
+
         internal func Request(args Args) {
-            let value = RequestData.FileData(args.Need("file"), 8192)
+            let path = Path.GetFullPath(args.Need("file"))
+            let value = RequestData.FileData(path, 8192)
             RequestData.Request(value)
-            GitHub.Api(
-                "repos/" + Data.Repo(args.Need("repo")) + "/issues/" + args.Number("issue").ToString() + "/comments",
-                J.Map("body", "/tokate " + RequestData.Canonical(value))
-            )
+            let info = GitHub.Api("repos/" + Data.Repo(args.Need("repo")))
+            let repo = Data.Repo(J.Text(info, "full_name"))
+            if !String.Equals(repo, args.Need("repo"), StringComparison.OrdinalIgnoreCase) {
+                throw Exception("Canonical request repository differs from command")
+            }
+            RequestData.PositiveId(J.Get(info, "id"))
+            let issue = args.Number("issue")
+            let viewer = GitHub.Api("user")
+            let actor = J.Get(viewer, "id")
+            RequestData.PositiveId(actor)
+            let binding = RequestData.Binding(actor, value)
+            let journal = path + ".posting.json"
+            if FileInfo(journal).LinkTarget != nil {
+                throw Exception("Request posting journal must not be a symbolic link")
+            }
+            if File.Exists(journal) {
+                let saved = RequestData.FileData(journal, 16384)
+                if J.Text(saved, "repo") != repo || J.Number(saved, "issue") != issue || J.Get(saved, "actor")
+                    .ToString() != actor.ToString() || J.Text(saved, "binding") != binding || RequestData.Canonical(
+                    J.Get(saved, "request")
+                ) != RequestData.Canonical(value) {
+                    throw Exception("Saved request UUID binding changed; use a new file and UUID for new work")
+                }
+            }
+            let state = CoordinationState.Load(repo, issue)
+            let outcome = RequestData.Recorded(state.Value(), actor, value)
+            if outcome.ValueKind != JsonValueKind.Undefined {
+                Terminal.Json(outcome, "Recorded request outcome; no comment posted")
+                return
+            }
+            if Posted(repo, issue, actor, value) {
+                Terminal.Message("Exact request already posted; awaiting coordinator outcome")
+                return
+            }
+            if File.Exists(journal) {
+                throw Exception(
+                    "interrupted_publication: saved request has no unique physical comment; refusing blind retry"
+                )
+            }
+            if state.Sha != J.Text(value, "expected") || J.Text(state.Value(), "approval_id") != J.Text(
+                value,
+                "approval"
+            ) {
+                throw Exception("Stale state or approval; no request posted")
+            }
+            state.Check(repo, issue, Data.Login(J.Text(viewer, "login")))
+            var expires int64
+            if J.Text(value, "action") != "claim" {
+                state.Reservation(actor)
+                expires = CoordinationState.Unix(J.Get(state.Value(), "reservation"), "expires")
+            }
+            {
+                using let file = FileStream(
+                    journal,
+                    FileStreamOptions{
+                        Mode: FileMode.CreateNew,
+                        Access: FileAccess.Write,
+                        Share: FileShare.None,
+                        UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                    }
+                )
+                using let writer = StreamWriter(file)
+                writer.WriteLine(
+                    J.Write(J.Map("repo", repo, "issue", issue, "actor", actor, "binding", binding, "request", value))
+                )
+                writer.Flush()
+                file.Flush(true)
+            }
+            try {
+                let posted = GitHub.Api(
+                    "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
+                    J.Map("body", "/tokate " + RequestData.Canonical(value)),
+                    expires: expires
+                )
+                if J.Text(posted, "issue_url") != "https://api.github.com/repos/" +
+                    repo +
+                    "/issues/" +
+                    issue.ToString() || RequestData.PositiveId(
+                    J.Get(J.Get(posted, "user"), "id")
+                ) != RequestData.PositiveId(actor) || J.Text(posted, "body") != "/tokate " + RequestData.Canonical(
+                    value
+                ) {
+                    throw Exception("Comment write response lacks exact request evidence")
+                }
+                RequestData.PositiveId(J.Get(posted, "id"))
+            } catch (error Exception) {
+                let latest = CoordinationState.Load(repo, issue)
+                if RequestData.Recorded(latest.Value(), actor, value)
+                    .ValueKind == JsonValueKind.Undefined &&
+                    !Posted(repo, issue, actor, value) {
+                    throw Exception(
+                        "Uncertain request write; no unique canonical evidence. No POST retry made. " + error.Message
+                    )
+                }
+            }
             Terminal.Message("Request posted; coordinator outcome is recorded in the issue state ref")
         }
+
+        private func PublicationRequest(run Data) JsonElement -> J.Parse(
+            J.Write(
+                J.Map(
+                    "uuid",
+                    run.Text("publication_uuid"),
+                    "expected",
+                    run.Text("state_sha"),
+                    "approval",
+                    run.Text("approval"),
+                    "action",
+                    "publish",
+                    "metadata",
+                    J.Map(
+                        "fork",
+                        run.Text("head_repo"),
+                        "branch",
+                        run.Text("branch"),
+                        "head",
+                        run.Text("commit"),
+                        "source",
+                        run.Text("source"),
+                        "tools",
+                        J.Get(run.Element(), "tools"),
+                        "verification",
+                        "donor-reported-pass"
+                    )
+                )
+            )
+        )
 
         internal func Submit(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
@@ -350,6 +527,32 @@ internal class V2Contribution {
                 FileShare.None
             )
             let run = Data.Load(directory)
+            let path = Path.Combine(directory, "request.json")
+            if run.Text("publication_uuid") != "" && File.Exists(path) {
+                let saved = RequestData.FileData(path, 8192)
+                let expected = PublicationRequest(run)
+                if RequestData.Canonical(saved) != RequestData.Canonical(expected) {
+                    throw Exception("Saved publication UUID binding changed")
+                }
+                let viewer = GitHub.Api("user")
+                if J.Get(viewer, "id").ToString() != J.Get(run.Element(), "donor_id").ToString() {
+                    throw Exception("Saved publication belongs to another authenticated actor")
+                }
+                let state = CoordinationState.Load(Data.Repo(run.Text("repo")), run.Number("issue"))
+                let outcome = RequestData.Recorded(state.Value(), J.Get(viewer, "id"), saved)
+                if outcome.ValueKind != JsonValueKind.Undefined {
+                    if J.Text(state.Value(), "approval_id") != run.Text("approval") || J.Text(
+                        J.Get(state.Value(), "reservation"),
+                        "reservation"
+                    ) != run.Text("id") {
+                        throw Exception("Saved publication has stale coordination authority")
+                    }
+                    state.Reservation(J.Get(viewer, "id"))
+                    state.Check(Data.Repo(run.Text("repo")), run.Number("issue"), run.Text("donor"))
+                    Terminal.Json(outcome, "Recorded publication outcome; no comment posted")
+                    return
+                }
+            }
             let record = Recheck(run)
             if run.Text("state") != "generated" || run.Text("commit") == "" {
                 throw Exception("Only an independently verified exact commit can be submitted")
@@ -390,32 +593,7 @@ internal class V2Contribution {
                 run.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")
                 run.Save(directory)
             }
-            let request = J.Map(
-                "uuid",
-                run.Text("publication_uuid"),
-                "expected",
-                run.Text("state_sha"),
-                "approval",
-                run.Text("approval"),
-                "action",
-                "publish",
-                "metadata",
-                J.Map(
-                    "fork",
-                    run.Text("head_repo"),
-                    "branch",
-                    run.Text("branch"),
-                    "head",
-                    run.Text("commit"),
-                    "source",
-                    run.Text("source"),
-                    "tools",
-                    J.Get(run.Element(), "tools"),
-                    "verification",
-                    "donor-reported-pass"
-                )
-            )
-            let path = Path.Combine(directory, "request.json")
+            let request = PublicationRequest(run)
             File.WriteAllText(path, J.Write(request) + "\n")
             Request(
                 Args(

@@ -691,57 +691,19 @@ internal class Amendment {
                 let path = Path.Combine(location, "request.json")
                 File.WriteAllText(path, J.Write(request) + "\n")
                 if amendment.Text("state") != "requested" {
-                    var found bool
-                    var page int32 = 1
-                    while !found {
-                        let comments = J.Items(
-                            GitHub.Api(
-                                "repos/" + run.Text("repo") + "/issues/" + run.Number("issue").ToString() +
-                                    "/comments?per_page=100&page=" +
-                                    page.ToString()
-                            )
+                    V2Contribution.Request(
+                        Args(
+                            []string{
+                                "request",
+                                "--repo",
+                                run.Text("repo"),
+                                "--issue",
+                                run.Number("issue").ToString(),
+                                "--file",
+                                path
+                            }
                         )
-                        for comment in comments {
-                            if J.Get(J.Get(comment, "user"), "id").ToString() != J.Get(run.Element(), "donor_id")
-                                .ToString() || !J.Text(comment, "body").StartsWith(
-                                "/tokate ",
-                                StringComparison.Ordinal
-                            ) {
-                                continue
-                            }
-                            var posted JsonElement
-                            try {
-                                posted = RequestData.Parse(J.Text(comment, "body").Substring(8))
-                            } catch {
-                                continue
-                            }
-                            if J.Text(posted, "uuid") == amendment.Text("id") {
-                                if RequestData.Canonical(posted) != RequestData.Canonical(request) {
-                                    throw Exception("Saved amendment UUID has a changed request comment")
-                                }
-                                found = true
-                            }
-                        }
-                        if comments.Count < 100 {
-                            break
-                        }
-                        page++
-                    }
-                    if !found {
-                        V2Contribution.Request(
-                            Args(
-                                []string{
-                                    "request",
-                                    "--repo",
-                                    run.Text("repo"),
-                                    "--issue",
-                                    run.Number("issue").ToString(),
-                                    "--file",
-                                    path
-                                }
-                            )
-                        )
-                    }
+                    )
                     amendment.Fields["state"] = "requested"
                     amendment.Save(location)
                 }

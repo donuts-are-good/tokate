@@ -51,6 +51,8 @@ internal class Decree {
             var blob JsonElement
             try {
                 blob = GitHub.Api("repos/" + repo + "/git/blobs/" + sha)
+            } catch (error ApiDeadlineException) {
+                throw error
             } catch (error Exception) {
                 throw Exception("DECREE.md blob is unreadable. " + error.Message)
             }
@@ -133,6 +135,8 @@ internal class Decree {
             var current JsonElement
             try {
                 current = Capture(repo, revision)
+            } catch (error ApiDeadlineException) {
+                throw error
             } catch (error Exception) {
                 throw Exception(
                     "Current DECREE.md is unsupported or unreadable; fresh owner approval is required. " + error.Message

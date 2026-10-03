@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.18 discovers tools, handles data, and
+This document describes how Tokate 0.2.19 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -97,6 +97,15 @@ reports only numeric attempted reads, mutations, live 304s and retries on stderr
 it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API bounds and recovery](reference.md#commands-and-recovery) and
 [ApiTransport.gs](../src/ApiTransport.gs).
+
+Version-2 `request --file FILE` writes a local posting intent and lock beside the
+request file. The intent contains the canonical repository/issue, numeric actor,
+exact validated payload and binding hash, with no credentials or API response logs.
+It prevents an interrupted comment POST from being repeated without unique remote
+evidence. These records are not published or used to cache authority. Explicit
+checks watches use conditional commit check/status APIs; unchanged snapshots do
+not rewrite local results. Workflow event/job counts in tests are fixture-derived
+bounds and do not establish actual hosted runner executions.
 
 Tokate clears each host command's child environment and copies only explicit
 requirements using individual environment-variable lookups. It does not inspect

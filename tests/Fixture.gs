@@ -85,7 +85,13 @@ internal class Fixture {
         Save()
         Console.Write("HTTP/2.0 " + status.ToString() + " Synthetic\r\n")
         Console.Write("Date: " + DateTimeOffset.UtcNow.ToString("r", CultureInfo.InvariantCulture) + "\r\n")
-        Console.Write("X-Poll-Interval: 2\r\nX-Synthetic-Ignored: synthetic-response-secret\r\n" + headers + "\r\n")
+        Console.Write(
+            "X-Poll-Interval: " +
+                (State["poll_interval"] == nil ? "2": Check.Text(State["poll_interval"])) +
+                "\r\nX-Synthetic-Ignored: synthetic-response-secret\r\n" +
+                headers +
+                "\r\n"
+        )
         if value != nil {
             Console.WriteLine(value.ToJsonString())
         }
@@ -530,7 +536,11 @@ internal class Fixture {
             )
         }
         if tail.StartsWith("issues/comments/") {
-            return Answer(State["comments"]?[tail.Substring(16)] ?? throw Exception("Missing canonical comment"))
+            return Answer(
+                State["canonical_comment_override"] ??
+                    State["comments"]?[tail.Substring(16)] ??
+                    throw Exception("Missing canonical comment")
+            )
         }
         if tail.StartsWith("compare/") {
             let comparison = tail.Substring(8).Split("...")
@@ -607,12 +617,72 @@ internal class Fixture {
             }
             return Answer(value)
         }
+        if tail.StartsWith("commits/") && tail.Contains("/check-runs?") {
+            if Check.Text(State["check_change"]) == "base" {
+                let target = State["pulls"]?[0]?["base"] ?? throw Exception("Missing base")
+                target["ref"] = JsonValue.Create("main")
+            }
+            let polls = State["check_polls"] == nil ? 0: Int32.Parse(Check.Text(State["check_polls"]))
+            if let samples = State["check_sequence"] {
+                let entries = samples.AsArray()
+                State["checks"] = entries[Math.Min(polls, entries.Count - 1)]?.DeepClone()
+            }
+            State["check_polls"] = JsonValue.Create(polls + 1)
+            let statePath = Check.Text(State["check_state_path"])
+            if statePath != "" {
+                let times = State["check_state_times"]?.AsArray() ?? JsonArray()
+                times.Add(JsonValue.Create(File.GetLastWriteTimeUtc(statePath).Ticks.ToString()) as JsonNode)
+                State["check_state_times"] = times
+            }
+            let effect = Check.Text(State["check_read_effect"])
+            if effect == "head" {
+                let head = State["pulls"]?[0]?["head"] ?? throw Exception("Missing PR head")
+                head["sha"] = JsonValue.Create(String('a', 40))
+            } else if effect == "approval" {
+                let issue = State["issue"] ?? throw Exception("Missing issue")
+                issue["labels"] = JsonArray()
+            }
+            State["check_read_effect"] = nil
+            let runs = JsonArray()
+            for check in State["checks"]?.AsArray() ?? JsonArray() {
+                let bucket = Check.Text(check["bucket"])
+                runs.Add(
+                    Check.Map(
+                        "name",
+                        Check.Text(check["name"]),
+                        "status",
+                        bucket == "pending" ? "in_progress": "completed",
+                        "conclusion",
+                        bucket == "pass" ? "success": (
+                            bucket == "fail" ? "failure":
+                            (bucket == "cancel" ? "cancelled": (bucket == "skipping" ? "skipped": ""))
+                        ),
+                        "html_url",
+                        "https://example.test/check"
+                    )
+                )
+            }
+            return Answer(State["check_runs"] ?? Check.Map("total_count", runs.Count, "check_runs", runs))
+        }
+        if tail.StartsWith("commits/") && tail.Contains("/status?") {
+            return Answer(Check.Map("statuses", State["statuses"] ?? JsonArray()))
+        }
         if tail.StartsWith("commits/") {
             return Answer(Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(8)})))
         }
         if tail.StartsWith("contents/") {
             let split = tail.IndexOf("?ref=")
             let file = tail.Substring(9, split - 9)
+            let journal = Check.Text(State["journal_race_path"])
+            if file == ".github/tokate-pr.md" && journal != "" {
+                if Check.Text(State["journal_race_link"]) == "true" {
+                    File.CreateSymbolicLink(journal, Check.Text(State["journal_race_target"]))
+                } else {
+                    File.WriteAllText(journal, "synthetic-journal-sentinel")
+                }
+                State["journal_race_path"] = nil
+                Save()
+            }
             let reference = Uri.UnescapeDataString(tail.Substring(split + 5))
             var content string
             try {
@@ -642,6 +712,8 @@ internal class Fixture {
                 State["posted_request"] = body.DeepClone()
                 let count = State["request_count"] == nil ? 1: Int32.Parse(Check.Text(State["request_count"])) + 1
                 State["request_count"] = JsonValue.Create(count)
+                State["workflow_records"] = JsonValue.Create(count)
+                State["workflow_jobs"] = JsonValue.Create(count)
                 let comment = Check.Map(
                     "id",
                     100 + count,
@@ -657,6 +729,16 @@ internal class Fixture {
                 State["comments"] = comments
                 if Check.Text(State["mode"]) == "request_fail_after_write" {
                     return Response(500)
+                }
+                if Check.Text(State["mode"]) == "request_rate_after_write" {
+                    return Response(429, headers: "Retry-After: 1\r\n")
+                }
+                if Check.Text(State["mode"]) == "request_ambiguous_after_write" {
+                    let duplicate = comment.DeepClone()
+                    duplicate["id"] = JsonValue.Create(1000 + count)
+                    comments[(1000 + count).ToString()] = duplicate
+                    Save()
+                    return 1
                 }
                 let posted = State["request_comments"]?.AsArray() ?? JsonArray()
                 posted.Add(comment.DeepClone())

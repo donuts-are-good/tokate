@@ -151,6 +151,7 @@ internal class SuiteDriver {
                 }
                 case "Coordination" {
                     CoordinationFlow.All(binary)
+                    CommandTrafficChecks.All(binary)
                 }
                 case "Correction" {
                     CorrectionChecks.All(binary)

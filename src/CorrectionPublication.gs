@@ -468,44 +468,12 @@ internal class CorrectionPublication {
             return state
         }
 
-        private func Posted(run Data, request JsonElement) bool {
-            var count int32
-            var page int32 = 1
-            while page <= 20 {
-                let rows = J.Items(
-                    GitHub.Api(
-                        "repos/" + run.Text("repo") + "/issues/" + run.Number("issue").ToString() +
-                            "/comments?per_page=100&page=" +
-                            page.ToString()
-                    )
-                )
-                for row in rows {
-                    if J.Get(J.Get(row, "user"), "id").ToString() != J.Get(run.Element(), "donor_id").ToString() {
-                        continue
-                    }
-                    let body = J.Text(row, "body")
-                    if body.StartsWith("/tokate ", StringComparison.Ordinal) {
-                        try {
-                            let value = RequestData.Parse(body.Substring(8))
-                            if J.Text(value, "uuid") == J.Text(request, "uuid") {
-                                if !Correction.Same(value, request) {
-                                    throw Exception("Publication UUID already has different request contents")
-                                }
-                                count++
-                            }
-                        } catch (error JsonException) { }
-                    }
-                }
-                if rows.Count < 100 {
-                    if count > 1 {
-                        throw Exception("Ambiguous duplicate saved publication requests")
-                    }
-                    return count == 1
-                }
-                page++
-            }
-            throw Exception("Publication comment inspection exceeded its bounded history; intent preserved")
-        }
+        private func Posted(run Data, request JsonElement) bool -> V2Contribution.Posted(
+            Data.Repo(run.Text("repo")),
+            run.Number("issue"),
+            J.Get(run.Element(), "donor_id"),
+            request
+        )
 
         internal func Submit(directory string) {
             using let lease = File.Open(

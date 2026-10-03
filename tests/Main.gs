@@ -98,6 +98,10 @@ func Main(args[]string) int32 {
             NativeFlow.All(binary, args[1])
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--traffic-commands" {
+            CommandTrafficChecks.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--coordination" {
             CoordinationFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0

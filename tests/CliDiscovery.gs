@@ -104,7 +104,7 @@ internal class CliDiscovery {
                 Check.Text(defaults?["operations"]?[1]?["effects"]?["local_write"]) == "false",
                 "Defaults read advertised a write"
             )
-            for name in[]string{"select", "amend"} {
+            for name in[]string{"select", "amend", "request"} {
                 let command = Envelope(Call(binary, []string{"help", name, "--json"}, temp), "help", "ok")["data"]?[
                     "commands"
                 ]?[0]
@@ -112,9 +112,9 @@ internal class CliDiscovery {
                     Check.Text(command?["effects"]?["local_write"]) == "true" && Check.Text(
                         command?["effects"]?["github_read"]
                     ) == "true",
-                    "Missing selection/amendment effects"
+                    "Missing command write effects"
                 )
-                Check.That(Check.Text(command?["inference"]) == "false", "Selection/amendment advertised inference")
+                Check.That(Check.Text(command?["inference"]) == "false", "Non-inference command advertised inference")
             }
             let workMetadata = Envelope(Call(binary, []string{"help", "work", "--json"}, temp), "help", "ok")
             for name in[]string{"seconds", "runs", "fork", "allow-network"} {

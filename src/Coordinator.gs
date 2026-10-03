@@ -53,24 +53,7 @@ internal class Coordinator {
             let request = RequestData.Parse(text.Substring(8))
             RequestData.Request(request)
             let state = CoordinationState.Load(repo, number)
-            let binding = Data.Hash(
-                RequestData.Canonical(
-                    J.Parse(
-                        J.Write(
-                            J.Map(
-                                "actor",
-                                actor,
-                                "expected",
-                                J.Text(request, "expected"),
-                                "approval",
-                                J.Text(request, "approval"),
-                                "request",
-                                request
-                            )
-                        )
-                    )
-                )
-            )
+            let binding = RequestData.Binding(actor, request)
             let outcomes = J.Items(J.Get(state.Value(), "outcomes"))
             for old in outcomes {
                 if J.Text(old, "uuid") == J.Text(request, "uuid") {

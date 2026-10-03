@@ -546,7 +546,11 @@ tokate verify-pr --repo owner/project --pr 43
 tokate checks --repo owner/project --pr 43 --watch
 ```
 
-`verify-pr` checks PR author, claim branch, commit, current approval, issue text, policy, and the reported model/effort pair. It is read-only and does not check out or execute PR code. Receipt validation is not independent proof of inference usage. `checks` also validates the receipt and checks the head before and after reading CI. It exits 0 on pass, 8 on pending or watch timeout, and 1 on failure. It never marks the PR ready or merges it.
+`verify-pr` checks PR author, claim branch, commit, current approval, issue text, policy, and the reported model/effort pair. It is read-only and does not check out or execute PR code. Receipt validation is not independent proof of inference usage. `checks` also validates the receipt and checks the head before and after reading CI. `--timeout` bounds the entire operation, including
+initial authority reads, check subprocesses, retries and waits. Watches use narrow
+conditional reads for the exact commit and respect server polling/rate-limit delays.
+Unchanged pending polls repeat neither output nor local state writes. It exits 0
+on pass, 8 on pending or watch timeout, and 1 on failure. It never marks the PR ready or merges it.
 
 Both receipt versions and coordinator publication recheck protected paths using
 one authenticated GitHub comparison for the exact approved base and head. Missing,
