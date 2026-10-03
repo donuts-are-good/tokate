@@ -101,6 +101,24 @@ internal class NativeFlow : IDisposable {
         owner: true
     )
 
+    internal func CommitIdentity(folder string, sha string, name string, email string) {
+        let identity = Git("-C", folder, "show", "-s", "--format=%an%n%ae%n%cn%n%ce", sha).Split('\n')
+        Check.That(identity.Length == 4, "Missing commit attribution")
+        Check.That(identity[0] == name && identity[2] == name, "Unexpected author or committer name")
+        Check.That(identity[1] == email && identity[3] == email, "Unexpected author or committer email")
+    }
+
+    internal func AutomationAttribution() {
+        Reload()
+        for commit in State["api_commits"]?.AsArray() ?? JsonArray() {
+            for field in[]string{"author", "committer"} {
+                let identity = commit["request"]?[field] ?? throw Exception("Missing explicit " + field)
+                Check.That(identity.AsObject().Count == 2 && identity["date"] == nil, "API must supply timestamps")
+            }
+            CommitIdentity(Upstream, Check.Text(commit["sha"]), "Tokate", "tokate@users.noreply.github.com")
+        }
+    }
+
     internal func Claim(
         seconds string = "30",
         model string = "gpt-6.1-sol",
@@ -235,6 +253,12 @@ internal class NativeFlow : IDisposable {
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Publication reran inference")
         Check.That(Check.Text(State["pulls"]?[0]?["draft"]) == "true", "PR must be draft")
+        CommitIdentity(
+            Path.Combine(Bin, "fork"),
+            Check.Text(State["pulls"]?[0]?["head"]?["sha"]),
+            "donor",
+            "123+donor@users.noreply.github.com"
+        )
         Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Call([]string{"checks", "--run", run}, 8)
         for check in[]string{"unrelated:pass:8", "verify:skipping:8", "verify:fail:1", "verify:pass:0"} {
@@ -1443,6 +1467,7 @@ internal class NativeFlow : IDisposable {
                         throw Exception("Unknown test: " + name)
                     }
                 }
+                flow.AutomationAttribution()
                 Console.WriteLine("PASS " + name)
             }
         }

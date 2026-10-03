@@ -24,12 +24,9 @@ internal class CoordinationState {
         )
         let commit = GitHub.Api(
             "repos/" + repo + "/git/commits",
-            J.Map(
-                "message",
+            GitHub.AutomationCommit(
                 "Tokate coordination #" + issue.ToString(),
-                "tree",
                 J.Text(tree, "sha"),
-                "parents",
                 []string{expected}
             ),
             expires: expires

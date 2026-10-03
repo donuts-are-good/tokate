@@ -291,6 +291,7 @@ internal class CoordinationFlow : IDisposable {
             !File.Exists(Path.Combine(run, "checkout/.git/objects/info/alternates")),
             "Imported external Git metadata"
         )
+        Flow.CommitIdentity(Path.Combine(run, "checkout"), commit, "Donor", "donor@example.test")
         Flow.Call([]string{"submit", "--run", run})
         Flow.Reload()
         let posted = Check.Text(Flow.State["posted_request"]?["body"])
@@ -560,6 +561,12 @@ internal class CoordinationFlow : IDisposable {
         Flow.Call([]string{"work", "--run", run})
         Flow.Call([]string{"submit", "--run", run})
         let request = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
+        Flow.CommitIdentity(
+            Path.Combine(Flow.Bin, "fork"),
+            Check.Text(request["metadata"]?["head"]),
+            "donor",
+            "tokate@users.noreply.github.com"
+        )
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
@@ -711,6 +718,7 @@ internal class CoordinationFlow : IDisposable {
                         test.Compatibility()
                     }
                 }
+                test.Flow.AutomationAttribution()
                 Console.WriteLine("PASS V2 " + name)
             }
         }
