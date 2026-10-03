@@ -128,9 +128,9 @@ remote state may have changed even if the response was lost. Inspect that state
 before retrying; for publication use the saved run's `publish` command, which
 looks for an existing PR and reuses it without inference or another PR write.
 These transport bounds do not implement atomic coordination (#11),
-pause/resume/handoff or coordinator workflow traffic accounting (#19); those
-issues remain open for their integrated flows. The same-repository conditional
-read fix also leaves #54 open for its remaining criteria.
+pause/resume/handoff or coordinator workflow traffic accounting (#19), or the
+remaining contribution lifecycle criteria (#14); those issues remain open for
+their integrated flows.
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 
@@ -234,7 +234,12 @@ original source does not break nested verification mounts.
 
 Agent and verifier network access default off and require both owner policy and donor opt-in. Allowing access permits outbound command traffic and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex, bubblewrap and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
-Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop uses additional inference. Time caps are not exact token or subscription-percentage caps.
+Each subprocess uses one monotonic deadline for stdin delivery, execution and
+output collection. Completion at or beyond that deadline fails, including a
+blocked stdin writer. Process groups are killed on timeout, cancellation, and
+normal completion; the process and all pipe workers are collected before returning.
+No automatic repair loop uses additional inference. Time caps are not exact token
+or subscription-percentage caps.
 
 ## Build from source
 
@@ -265,7 +270,9 @@ or Python runtime is required.
 Owner verification tests use real bubblewrap, disable the fixture harness after
 its completed turn, and check filesystem/environment isolation, read-only Git,
 both network gates, nested probes, runtime-file replacement, unsafe-layout refusal and detached-descendant
-cleanup on normal exit and timeout. These tests must pass on required Ubuntu CI;
+cleanup on normal exit and timeout. Real-pipe subprocess checks cover successful
+1 MiB input, delayed consumption exceeding the deadline, blocked-input cancellation,
+descendant cleanup, failure meanings and output limits. These tests must pass on required Ubuntu CI;
 fixtures do not replace the real verifier boundary.
 The real native Codex `doctor` probe is a separate required matrix check; passing
 the deterministic suite does not establish the managed Codex boundary.

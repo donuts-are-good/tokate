@@ -35,6 +35,36 @@ internal class Commands {
             }
         }
 
+        private func Write(writer StreamWriter, input string?, completed Chan[Exception?]) {
+            var failure Exception? = nil
+            try {
+                if input != nil {
+                    writer.Write(input)
+                }
+            } catch (error Exception) {
+                failure = error
+            } finally {
+                try {
+                    writer.Close()
+                } catch (error Exception) {
+                    if failure == nil {
+                        failure = error
+                    }
+                }
+            }
+            completed <- failure
+        }
+
+        private func Wait(process Process, completed Chan[Exception?]) {
+            var failure Exception? = nil
+            try {
+                process.WaitForExit()
+            } catch (error Exception) {
+                failure = error
+            }
+            completed <- failure
+        }
+
         internal func Run(
             exe string,
             args[]string,
@@ -100,11 +130,21 @@ internal class Commands {
                     default { }
                 }
             }
+            let allowance = TimeSpan.FromMilliseconds(milliseconds > 0 ? milliseconds: seconds * 1000)
+            let clock = Stopwatch.StartNew()
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
+            using let deadline = after(
+                TimeSpan.FromMilliseconds(Math.Max(0.0, (allowance - clock.Elapsed).TotalMilliseconds))
+            )
+            let stdin = Chan[Exception?](1)
             let stdout = Chan[string](1)
             let stderr = Chan[string](1)
+            let exited = Chan[Exception?](1)
+            let cancelled = cancellation ?? Chan[bool](1)
+            go Commands.Write(process.StandardInput, input, stdin)
             go Commands.Read(process.StandardOutput, stdout)
             go Commands.Read(process.StandardError, stderr)
+            go Commands.Wait(process, exited)
             let onCancel = ConsoleCancelEventHandler(
                 (sender Object?, event ConsoleCancelEventArgs) -> {
                     if let signal = cancellation {
@@ -118,48 +158,88 @@ internal class Commands {
                 }
             )
             Console.CancelKeyPress += onCancel
+            var inputDone bool
+            var outputDone bool
+            var errorDone bool
+            var exitDone bool
+            let result = CommandResult()
             try {
-                if let signal = cancellation {
+                while !inputDone || !outputDone || !errorDone || !exitDone {
+                    if clock.Elapsed >= allowance {
+                        throw Exception("Runtime limit reached for " + exe)
+                    }
+                    var failure Exception? = nil
                     select {
-                        case <- signal {
+                        case let error = <- stdin {
+                            inputDone = true
+                            failure = error
+                        }
+                        case let output = <- stdout {
+                            outputDone = true
+                            result.Output = output
+                        }
+                        case let error = <- stderr {
+                            errorDone = true
+                            result.Error = error
+                        }
+                        case let error = <- exited {
+                            exitDone = true
+                            KillGroup(-process.Id, 9)
+                            failure = error
+                        }
+                        case <- cancelled {
+                            throw Exception("Command cancelled: " + exe)
+                        }
+                        case <- deadline {
+                            throw Exception("Runtime limit reached for " + exe)
+                        }
+                    }
+                    select {
+                        case <- cancelled {
                             throw Exception("Command cancelled: " + exe)
                         }
                         default { }
                     }
-                }
-                if input != nil {
-                    process.StandardInput.Write(input)
-                }
-                process.StandardInput.Close()
-                if !process.WaitForExit(milliseconds > 0 ? milliseconds: seconds * 1000) {
-                    KillGroup(-process.Id, 9)
-                    process.WaitForExit()
-                    throw Exception("Runtime limit reached for " + exe)
-                }
-                KillGroup(-process.Id, 9)
-                if let signal = cancellation {
-                    select {
-                        case <- signal {
-                            throw Exception("Command cancelled: " + exe)
-                        }
-                        default { }
+                    if clock.Elapsed >= allowance {
+                        throw Exception("Runtime limit reached for " + exe)
+                    }
+                    if let error = failure {
+                        throw error
                     }
                 }
-                let output = <-stdout
-                let error = <-stderr
-                return CommandResult{Code: process.ExitCode, Output: output, Error: error}
+                result.Code = process.ExitCode
             } finally {
                 Console.CancelKeyPress -= onCancel
                 KillGroup(-process.Id, 9)
-                if cancellation != nil {
-                    if !process.HasExited {
-                        try {
-                            process.Kill(true)
-                        } catch (error InvalidOperationException) { }
-                    }
-                    process.WaitForExit()
+                if !process.HasExited {
+                    try {
+                        process.Kill(true)
+                    } catch (error InvalidOperationException) { }
+                }
+                process.WaitForExit()
+                if !exitDone {
+                    <-exited
+                }
+                if !inputDone {
+                    <-stdin
+                }
+                if !outputDone {
+                    <-stdout
+                }
+                if !errorDone {
+                    <-stderr
                 }
             }
+            select {
+                case <- cancelled {
+                    throw Exception("Command cancelled: " + exe)
+                }
+                default { }
+            }
+            if clock.Elapsed >= allowance {
+                throw Exception("Runtime limit reached for " + exe)
+            }
+            return result
         }
 
         internal func Checked(

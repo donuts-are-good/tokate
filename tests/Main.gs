@@ -45,6 +45,10 @@ func Main(args[]string) int32 {
             VerificationChecks.All()
             return 0
         }
+        if args.Length == 1 && args[0] == "--process" {
+            ProcessChecks.All()
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
@@ -58,6 +62,7 @@ func Main(args[]string) int32 {
             NativeFlow.All(binary, args[1])
             return 0
         }
+        ProcessChecks.All()
         NativeFlow.All(binary)
         VerificationChecks.All()
         Installer.Lifecycle(project, binary)
