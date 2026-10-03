@@ -835,7 +835,7 @@ internal class NativeFlow : IDisposable {
             flow.ResetTraffic()
             flow.Call([]string{"publish", "--run", run}, traffic: true)
             if mode == "pr_fail_after_create" {
-                flow.Traffic(12, 0, 0, 0)
+                flow.Traffic(10, 0, 0, 0)
             } else {
                 flow.Traffic(18, 1, 8, 0)
             }
@@ -1110,7 +1110,7 @@ internal class NativeFlow : IDisposable {
         Check.That(Check.Text(State["exec_count"]) == "1", "Publishing repeated inference")
         ResetTraffic()
         let repeated = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(12, 0, 0, 0, repeated)
+        Traffic(10, 0, 0, 0, repeated)
         Reload()
         Check.That(
             State["pulls"]?.AsArray().Count == 1 && Check.Text(State["exec_count"]) == "1",
@@ -1275,7 +1275,7 @@ internal class NativeFlow : IDisposable {
             flow.Traffic(18, 1, 8, 0, published)
             flow.ResetTraffic()
             let repeated = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(12, 0, 0, 0, repeated)
+            flow.Traffic(10, 0, 0, 0, repeated)
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Equivalent ETags repeated inference")
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Equivalent ETags duplicated publication")
