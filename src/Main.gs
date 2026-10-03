@@ -29,11 +29,18 @@ func Main(args[]string) int32 {
         if options.Command == "update" || options.Command == "uninstall" {
             return Installation.Run(options.Command)
         }
-        if options.Command != "doctor" {
+        if options.Command != "doctor" && options.Command != "defaults" {
             Startup.Check(options.Command)
         }
         if options.Command == "doctor" {
             return Startup.Doctor()
+        } else if options.Command == "defaults" {
+            DonorDefaults.Run(options)
+        } else if options.Command == "select" {
+            let repo = Data.Repo(options.Need("repo"))
+            let info = GitHub.Api("repos/" + repo)
+            let selection = DonorSelection.Resolve(options, Policy.Load(repo, J.Text(info, "default_branch")))
+            Terminal.Json(selection, "Donor selection")
         } else if options.Command == "init" {
             Workflow.Init(options)
         } else if options.Command == "coordinator-setup" {
@@ -62,7 +69,7 @@ func Main(args[]string) int32 {
             Workflow.Claim(options)
         } else if options.Command == "work" {
             let directory = options.Get("run") == "" ? Workflow.Claim(options): Path.GetFullPath(options.Need("run"))
-            Worker.Execute(directory)
+            Worker.Execute(directory, options)
             if Data.Load(directory).Number("version") == 2 {
                 V2Contribution.Commit(directory)
             } else {

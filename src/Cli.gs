@@ -53,6 +53,16 @@ internal class Cli {
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption("model", "MODEL", "Owner-approved model"),
             CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra"),
+            CliOption("harness", "HARNESS", "Explicit harness; managed execution supports codex"),
+            CliOption("provider", "PROVIDER", "Explicit provider; managed execution supports openai"),
+            CliOption(
+                "availability",
+                "STATUS",
+                "Donor report for the candidate model; never an account probe",
+                "unknown available unavailable"
+            ),
+            CliOption("non-interactive", "", "Never prompt; require an eligible default or explicit choice"),
+            CliOption("yes", "", "Confirm inference with the selected pair; never accept a substitute"),
             CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
             CliOption("fork", "LOGIN/REPO", "Donor fork; default: your login/upstream name"),
             CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
@@ -76,6 +86,22 @@ internal class Cli {
             CliCommand("doctor", "", "", "Check tools and sandbox locally; no inference.", "", "doctor"),
             CliCommand("update", "", "", "Download and install latest stable Tokate; no inference.", "", "update"),
             CliCommand("uninstall", "", "", "Remove managed installation offline; keep saved runs.", "", "uninstall"),
+            CliCommand(
+                "defaults",
+                "harness,provider,model,effort",
+                "",
+                "Set, read or remove donor-entered Tokate defaults locally; no discovery or inference.",
+                "set --harness HARNESS --provider PROVIDER --model MODEL --effort EFFORT\n       tokate defaults read|remove",
+                "defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high"
+            ),
+            CliCommand(
+                "select",
+                "repo,harness,provider,model,effort,availability,non-interactive",
+                "repo",
+                "Select under current owner policy and offline harness capabilities; no inference or reservation.",
+                "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
+                "select --repo owner/project --non-interactive"
+            ),
             CliCommand(
                 "init",
                 "path",
@@ -110,10 +136,10 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "repo,issue,state,source,tools,fork,seconds,allow-network,runs",
-                "repo,issue,state,source,tools",
+                "repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,allow-network,runs",
+                "repo,issue,state,source",
                 "Save a v2 run for an existing reservation; no inference or publication.",
-                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external|tokate --tools FILE [options]",
+                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]",
                 "prepare --issue 42 --state SHA --source external --tools tools.json"
             ),
             CliCommand(
@@ -174,19 +200,19 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,model,effort,seconds,fork,runs,allow-network",
-                "repo,issue,model,effort",
+                "repo,issue,harness,provider,model,effort,availability,non-interactive,seconds,fork,runs,allow-network",
+                "repo,issue",
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
             ),
             CliCommand(
                 "work",
-                "repo,issue,model,effort,seconds,fork,runs,allow-network,run",
-                "repo,issue,model,effort",
+                "repo,issue,harness,provider,model,effort,availability,non-interactive,yes,seconds,fork,runs,allow-network,run",
+                "repo,issue",
                 "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]\n       tokate work --run DIR",
-                "work --repo owner/project --issue 42 --model MODEL --effort high"
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
+                "work --repo owner/project --issue 42 --model MODEL --effort high --yes"
             ),
             CliCommand(
                 "recover",
@@ -341,6 +367,7 @@ internal class Cli {
                     if key != "--run" &&
                         key != "--help" &&
                         key != "--traffic" &&
+                        !(args.Command == "work" && (key == "--yes" || key == "--non-interactive")) &&
                         !(args.Command == "checks" && (key == "--watch" || key == "--timeout")) {
                         throw Exception("--run conflicts with " + key)
                     }
@@ -370,7 +397,12 @@ internal class Cli {
             if args.Get("model") != "" && !Regex.IsMatch(args.Get("model"), "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
                 throw Exception("Invalid model name: --model")
             }
-            for key in[]string{"effort", "source"} {
+            for key in[]string{"harness", "provider"} {
+                if args.Get(key) != "" && !Regex.IsMatch(args.Get(key), "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$") {
+                    throw Exception("Invalid identifier: --" + key)
+                }
+            }
+            for key in[]string{"effort", "source", "availability"} {
                 if args.Get(key) != "" && Array.IndexOf(
                     OptionFor(args.Command, key).Choices.Split(' '),
                     args.Get(key)
@@ -393,6 +425,26 @@ internal class Cli {
             }
             if args.Help {
                 return
+            }
+            if args.Command == "defaults" {
+                if args.Subject != "set" && args.Subject != "read" && args.Subject != "remove" {
+                    throw Exception("Required defaults operation: set, read or remove")
+                }
+                for key in[]string{"harness", "provider", "model", "effort"} {
+                    if args.Subject == "set" {
+                        args.Need(key)
+                    } else if args.Get(key) != "" {
+                        throw Exception("defaults " + args.Subject + " does not take --" + key)
+                    }
+                }
+            }
+            if args.Command == "prepare" && args.Get("source") == "external" {
+                args.Need("tools")
+                for key in[]string{"harness", "provider", "model", "effort", "availability", "non-interactive"} {
+                    if args.Get(key) != "" {
+                        throw Exception("External declarations use --tools; selection option conflicts: --" + key)
+                    }
+                }
             }
             if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
                 return

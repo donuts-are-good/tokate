@@ -2,13 +2,13 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.14 discovers tools, handles data, and
+This document describes how Tokate 0.2.16 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
 
 Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
-effort explicitly.
+effort explicitly or explicitly save Tokate-owned defaults.
 
 - Help and shell completion use local command definitions without scanning tools,
   inspecting remotes, accessing GitHub, or starting inference. Invalid CLI inputs
@@ -27,13 +27,28 @@ effort explicitly.
 - Starting work invokes `codex login status` and checks the output for a ChatGPT
   login. Codex handles access to its own authentication storage. Tokate does not
   open that storage or request the credential value.
-- Model and effort are explicit donor arguments, checked against repository
-  policy. The agent invocation ignores user configuration and rules and supplies
+- `defaults set|read|remove` handles only four donor-entered tokens in
+  `~/.local/state/tokate/donor-defaults.json`, with bounded strict JSON, private
+  file permissions and symlink refusal. It reads no harness settings or credentials.
+- `select`, new claims and managed v2 preparation check exact owner restrictions
+  and native Codex controls. `codex exec --help` and `codex debug models --bundled`
+  run offline in an empty temporary `HOME`/`CODEX_HOME`, without inherited
+  authentication. Only catalog model names and supported efforts are used; raw
+  catalog output is not saved or displayed. Catalog presence is capability
+  evidence, not account availability. Availability remains unknown or explicitly
+  donor-reported. Selection never starts inference or changes saved preferences.
+- Model and effort are checked against repository
+  policy. New runs record selection evidence and revalidate capabilities before
+  execution; saved runs never consult new defaults. New work requires explicit
+  confirmation, and model failure never retries or falls back.
+  The agent invocation ignores user configuration and rules and supplies
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.
 
 Source: [Cli.gs](../src/Cli.gs), [Completion.gs](../src/Completion.gs),
 [Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
+Defaults and selection: [DonorDefaults.gs](../src/DonorDefaults.gs),
+[DonorSelection.gs](../src/DonorSelection.gs).
 
 ## Installer access
 
@@ -76,12 +91,14 @@ it excludes unseen GitHub CLI/Git requests and workflow executions. See
 Tokate clears each host command's child environment and copies only explicit
 requirements using individual environment-variable lookups. It does not inspect
 authentication files, mixed settings, `.env` files, or environment dumps to
-infer harness defaults. Donors choose model and effort explicitly.
+infer harness defaults. Donors choose model and effort explicitly, including
+explicitly saved Tokate defaults.
 
 | Process | Inherited requirements |
 | --- | --- |
 | Ordinary host commands, including local Git and tool version checks | `PATH`, `HOME`, `LANG` |
 | Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
+| Offline Codex selection probes | No inherited values; fixed system `PATH` and empty temporary `HOME`/`CODEX_HOME` |
 | GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
 | Independent verification wrapper and owner commands | No inherited values; fixed system `PATH`, command scratch `HOME`/`TMPDIR`, `LANG=C.UTF-8`, `GIT_NO_REPLACE_OBJECTS=1`, and `GIT_GRAFT_FILE=/dev/null` |

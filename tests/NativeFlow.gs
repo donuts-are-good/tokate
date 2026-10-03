@@ -86,6 +86,9 @@ internal class NativeFlow : IDisposable {
         }
         File.WriteAllText(Path.Combine(Temp.Env["GH_CONFIG_DIR"], "identity"), owner ? "owner": "donor")
         let all = List[string](args)
+        if args[0] == "work" && Array.IndexOf(args, "--yes") < 0 {
+            all.Add("--yes")
+        }
         if traffic {
             all.Add("--traffic")
         }

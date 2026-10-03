@@ -259,14 +259,31 @@ internal class Workflow {
             let donor = Data.Login(J.Text(viewer, "login"))
             let record = Approved(repo, number, donor)
             let approval = J.Get(record, "approval")
-            let model = args.Need("model")
-            let effort = args.Need("effort")
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            policy.Digest = J.Text(approval, "policy_hash")
+            let selection = DonorSelection.Resolve(args, policy)
+            let model = J.Text(selection, "model")
+            let effort = J.Text(selection, "effort")
             let seconds = args.Number(
                 "seconds",
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
             let network = args.Get("allow-network") == "true"
-            Policy(J.Write(J.Get(record, "policy"))).Validate(model, effort, seconds, network)
+            policy.Validate(model, effort, seconds, network)
+            Terminal.Step(
+                "Selected " + J.Text(selection, "harness") + "/" + J.Text(selection, "provider") +
+                    ": " +
+                    model +
+                    " / " +
+                    effort +
+                    " from " +
+                    J.Text(selection, "source") +
+                    "; current policy permits it and native Codex advertises the controls. Availability: " +
+                    J.Text(selection, "availability") + "."
+            )
+            if args.Command == "work" {
+                DonorSelection.Confirm(args, selection)
+            }
             let head = Data.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
             if !String.Equals(head.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Use a fork owned by your signed-in account")
@@ -298,6 +315,9 @@ internal class Workflow {
             run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
             run.Fields["model"] = model
             run.Fields["effort"] = effort
+            run.Fields["harness"] = J.Text(selection, "harness")
+            run.Fields["provider"] = J.Text(selection, "provider")
+            run.Fields["selection"] = selection
             run.Fields["seconds"] = seconds
             run.Fields["network"] = network
             run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)

@@ -148,7 +148,7 @@ internal class Worker {
             }
         }
 
-        internal func Execute(directory string) {
+        internal func Execute(directory string, options Args) {
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),
                 FileMode.OpenOrCreate,
@@ -165,7 +165,16 @@ internal class Worker {
                 )
             }
             Terminal.Step("Checking owner approval and donor login...")
+            let selected = J.Get(run.Element(), "selection")
+            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
+                DonorSelection.Confirm(options, selected)
+            }
             let record = Workflow.Recheck(run)
+            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
+                let policy = Policy(J.Write(J.Get(record, "policy")))
+                policy.Digest = run.Text("policy_hash")
+                DonorSelection.Revalidate(run, policy)
+            }
             let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw Exception("Run codex login with your ChatGPT subscription first")
@@ -216,6 +225,9 @@ internal class Worker {
                 Path.Combine(directory, "report.md")
             }
             Config(args, "model_reasoning_effort", J.Write(run.Text("effort")))
+            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
+                Config(args, "model_provider", J.Write(J.Text(selected, "provider")))
+            }
             Config(args, "approval_policy", "\"never\"")
             Config(args, "web_search", "\"disabled\"")
             Config(args, "allow_login_shell", "false")
