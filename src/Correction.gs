@@ -97,8 +97,10 @@ internal class Correction {
             if (run.Text("state") != "failed" && run.Text("state") != "generated") || run.Text(
                 "failure_reason"
             ) == "inference_failed" ||
-                run
-                .Text("error").StartsWith("Codex failed.") ||
+                run.Text("failure_reason") == "inference_interrupted" || run.Flag("output_truncated") || run.Text(
+                "error"
+            )
+                .StartsWith("Codex failed.") ||
                 (run.Fields.ContainsKey("inference_exit_code") && run.Number("inference_exit_code") != 0) {
                 throw Exception("incomplete_turn: correction requires a completed successful inference turn")
             }
@@ -211,7 +213,15 @@ internal class Correction {
             if !input.CanSeek {
                 throw Exception("Original evidence must be a regular file: " + source)
             }
-            using let output = File.Open(target, FileMode.CreateNew, FileAccess.Write, FileShare.None)
+            using let output = FileStream(
+                target,
+                FileStreamOptions{
+                    Mode: FileMode.CreateNew,
+                    Access: FileAccess.Write,
+                    Share: FileShare.None,
+                    UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                }
+            )
             input.CopyTo(output)
         }
 
@@ -287,6 +297,16 @@ internal class Correction {
                         CopyFile(source, Path.Combine(temporary, file))
                     } else {
                         missing.Add(file)
+                    }
+                }
+                for evidence in Directory.EnumerateDirectories(directory, "verification-*") {
+                    if FileInfo(evidence).LinkTarget != nil {
+                        throw Exception("Original verification evidence must not be links")
+                    }
+                    let target = Path.Combine(temporary, Path.GetFileName(evidence))
+                    Directory.CreateDirectory(target)
+                    for file in Directory.EnumerateFileSystemEntries(evidence) {
+                        CopyFile(file, Path.Combine(target, Path.GetFileName(file)))
                     }
                 }
                 File.WriteAllText(Path.Combine(temporary, "approval.json"), J.Write(record) + "\n")
@@ -499,27 +519,15 @@ internal class Correction {
                     if remaining < 1 {
                         throw CliFailure("verification_failed", "Correction verification budget exhausted")
                     }
-                    let words = List[string]()
-                    for word in J.Items(command) {
-                        words.Add(word.GetString() ?? "")
-                    }
-                    let result = Verification.Run(
+                    correction.Fields["verification"] = results
+                    Save(directory, correction)
+                    let result = Verification.Check(
+                        attempt,
+                        results,
+                        command,
                         checkout,
-                        words.ToArray(),
                         run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
                         remaining
-                    )
-                    results.Add(
-                        J.Map(
-                            "command",
-                            command,
-                            "exit_code",
-                            result.Code,
-                            "output",
-                            result.Output,
-                            "error",
-                            result.Error
-                        )
                     )
                     correction.Fields["verification"] = results
                     File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")

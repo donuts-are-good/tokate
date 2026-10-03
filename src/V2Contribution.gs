@@ -239,41 +239,59 @@ internal class V2Contribution {
             run.Fields["state"] = "verifying"
             run.Save(directory)
             let results = List[Object]()
-            for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                if remaining < 1 {
-                    throw Exception("Verification budget exhausted")
-                }
-                let words = List[string]()
-                for word in J.Items(command) {
-                    words.Add(word.GetString() ?? "")
-                }
-                let result = Verification.Run(checkout, words.ToArray(), run.Flag("network"), remaining)
-                results.Add(
-                    J.Map("command", command, "exit_code", result.Code, "output", result.Output, "error", result.Error)
-                )
-                File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(results))
-                if result.Code != 0 {
-                    throw CliFailure(
-                        "verification_failed",
-                        "Independent external verification failed; no publication authority granted"
-                    )
-                }
-            }
-            Verification.Candidate(checkout)
-            if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.Git(
-                checkout,
-                "status",
-                "--porcelain"
-            ) != "" {
-                throw Exception("Independent verification changed the declared commit or checkout")
-            }
-            Recheck(run)
             run.Fields["verification"] = results
-            run.Fields["verification_provenance"] = "tokate-observed locally, exact commit " + commit
-            run.Fields["tool_provenance"] = "donor-reported; identity, usage and coding time not independently attested"
-            run.Fields["state"] = "generated"
+            PublicOutput.FailureCode = "verification_failed"
+            run.Fields["failure_stage"] = "owner_verification"
+            run.Fields["failure_reason"] = "verification_failed"
             run.Save(directory)
+            try {
+                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                    let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                    if remaining < 1 {
+                        throw Exception("Verification budget exhausted")
+                    }
+                    let result = Verification.Check(
+                        directory,
+                        results,
+                        command,
+                        checkout,
+                        run.Flag("network"),
+                        remaining
+                    )
+                    if result.Code != 0 {
+                        throw CliFailure(
+                            "verification_failed",
+                            "Independent external verification failed; no publication authority granted"
+                        )
+                    }
+                }
+                PublicOutput.FailureCode = "invalid_state"
+                run.Fields["failure_stage"] = "changed_candidate"
+                run.Fields["failure_reason"] = "candidate_changed"
+                Verification.Candidate(checkout)
+                if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.Git(
+                    checkout,
+                    "status",
+                    "--porcelain"
+                ) != "" {
+                    throw Exception("Independent verification changed the declared commit or checkout")
+                }
+                Recheck(run)
+                run.Fields["verification"] = results
+                run.Fields["verification_provenance"] = "tokate-observed locally, exact commit " + commit
+                run.Fields[
+                    "tool_provenance"
+                ] = "donor-reported; identity, usage and coding time not independently attested"
+                run.Fields["state"] = "generated"
+                run.Fields.Remove("failure_stage")
+                run.Fields.Remove("failure_reason")
+                run.Save(directory)
+            } catch (error Exception) {
+                run.Fields["state"] = "failed"
+                run.Fields["error"] = error.Message
+                run.Save(directory)
+                throw error
+            }
             Terminal.Message("Exact external commit passed independent verification. Use submit --run " + directory)
         }
 

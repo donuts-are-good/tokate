@@ -32,28 +32,27 @@ internal class Contribution {
                 throw Exception("Saved candidate patch changed")
             }
             Terminal.Step("Running independent owner verification...")
+            PublicOutput.FailureCode = "verification_failed"
             run.Fields["failure_stage"] = "owner_verification"
             run.Fields["failure_reason"] = "verification_failed"
             let verification = List[Object]()
+            run.Fields["verification"] = verification
+            run.Save(directory)
             for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
                 let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 if remaining < 1 {
                     throw Exception("Runtime budget exhausted before verification")
                 }
-                let verifyArgs = List[string]()
-                for word in J.Items(command) {
-                    verifyArgs.Add(word.GetString() ?? "")
-                }
-                let check = Verification.Run(
+                run.Fields["verification"] = verification
+                run.Save(directory)
+                let check = Verification.Check(
+                    directory,
+                    verification,
+                    command,
                     checkout,
-                    verifyArgs.ToArray(),
                     run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
                     remaining
                 )
-                verification.Add(
-                    J.Map("command", command, "exit_code", check.Code, "output", check.Output, "error", check.Error)
-                )
-                File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
                 if check.Code != 0 {
                     run.Fields["failure_reason"] = "verification_failed"
                     throw CliFailure(
@@ -63,6 +62,7 @@ internal class Contribution {
                 }
             }
             run.Fields["verification"] = verification
+            PublicOutput.FailureCode = "invalid_state"
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
             let patch = Snapshot(checkout, run)

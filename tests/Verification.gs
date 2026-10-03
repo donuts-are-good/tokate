@@ -219,6 +219,8 @@ internal class VerificationChecks {
             Directory.CreateDirectory(Path.Combine(checkout, ".git"))
             Directory.CreateDirectory(Path.Combine(checkout, "scripts"))
             Directory.CreateDirectory(storage)
+            let evidence = Path.Combine(temp.Root, "evidence")
+            Directory.CreateDirectory(evidence)
             temp.Env["TMPDIR"] = storage
             File.Copy(
                 Environment.ProcessPath ?? throw Exception("Missing test executable"),
@@ -229,6 +231,7 @@ internal class VerificationChecks {
                 "set -eu\n" +
                     "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; sleep 0.05; done' </dev/null >/dev/null 2>&1 &\n" +
                     "while [ ! -s heartbeat ]; do sleep 0.01; done\n" +
+                    "printf synthetic-cancelled-output; printf synthetic-cancelled-error >&2\n" +
                     "touch ready\n" +
                     "sleep 120\n"
             )
@@ -246,7 +249,7 @@ internal class VerificationChecks {
                 "-q",
                 "-e",
                 "-c",
-                "test -t 0; echo $$$$ > verifier.pid; exec ./runtime-tests --verify-checkout checkout",
+                "test -t 0; echo $$$$ > verifier.pid; exec ./runtime-tests --verify-captured checkout evidence",
                 "/dev/null"
             } {
                 info.ArgumentList.Add(arg)
@@ -271,6 +274,20 @@ internal class VerificationChecks {
                 let output = terminal.StandardOutput.ReadToEnd() + terminal.StandardError.ReadToEnd()
                 Check.That(terminal.ExitCode != 0, output)
                 Check.Contains(output, "cancelled")
+                Check.That(!output.Contains("synthetic-cancelled"), "Cancelled verifier output escaped")
+                let checks = J.Items(J.Parse(File.ReadAllText(Path.Combine(evidence, "verification.json"))))
+                Check.That(
+                    checks.Count == 1 && J.Get(checks[0], "exit_code")
+                        .ValueKind == System
+                        .Text
+                        .Json
+                        .JsonValueKind
+                        .Undefined,
+                    "Cancelled verification fabricated success"
+                )
+                Check.That(J.Text(checks[0], "state") == "interrupted", "Cancelled verification lost active phase")
+                Check.That(J.Text(checks[0], "output") == "synthetic-cancelled-output", "Cancelled stdout lost")
+                Check.That(J.Text(checks[0], "error") == "synthetic-cancelled-error", "Cancelled stderr lost")
                 Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked on cancellation")
                 let heartbeat = Path.Combine(checkout, "heartbeat")
                 let length = FileInfo(heartbeat).Length
@@ -425,20 +442,57 @@ internal class VerificationChecks {
                 using let temp = Temp()
                 let checkout = Path.Combine(temp.Root, "checkout")
                 Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+                let evidence = Path.Combine(temp.Root, "evidence")
+                Directory.CreateDirectory(evidence)
+                let results = List[Object]()
                 let script = "set -eu\n" +
+                    "test ! -e '" +
+                    evidence +
+                    "'\n" +
+                    "printf synthetic-verifier-output; printf synthetic-verifier-error >&2\n" +
                     "setsid /bin/sh -c 'i=0; while [ $$i -lt 100 ]; do echo beat >> heartbeat; i=$$((i+1)); sleep 0.05; done' </dev/null >/dev/null 2>&1 &\n" +
                     "while [ ! -s heartbeat ]; do sleep 0.01; done\n" +
                     (timeout ? "sleep 120\n": "exit 0\n")
                 var timedOut bool
                 try {
-                    let result = Verification.Run(checkout, []string{"/bin/sh", "-c", script}, false, timeout ? 1: 5)
+                    Verification.Check(evidence, results, J.Parse("[\"/bin/true\"]"), checkout, false, 5)
+                    let command = J.Parse(J.Write([]string{"/bin/sh", "-c", script}))
+                    let result = Verification.Check(evidence, results, command, checkout, false, timeout ? 1: 5)
                     Check.That(result.Code == 0, result.Error)
-                } catch (error Exception) {
+                } catch (error CommandInterrupted) {
                     Check.That(timeout, error.Message)
                     Check.Contains(error.Message, "Runtime limit reached")
+                    Check.That(error.Result.Code == nil, "Timeout fabricated an exit code")
+                    Check.That(error.Result.Output == "synthetic-verifier-output", "Verifier stdout lost")
+                    Check.That(error.Result.Error == "synthetic-verifier-error", "Verifier stderr lost")
                     timedOut = true
                 }
                 Check.That(timedOut == timeout, "Incorrect verification timeout result")
+                let checks = J.Items(J.Parse(File.ReadAllText(Path.Combine(evidence, "verification.json"))))
+                Check.That(checks.Count == 2 && J.Number(checks[0], "exit_code") == 0, "Prior passed check lost")
+                let check = checks[1]
+                Check.That(J.Text(check, "state") == (timeout ? "interrupted": "completed"), "Active phase lost")
+                Check.That(
+                    J.Get(check, "exit_code")
+                        .ValueKind == (
+                        timeout ? System.Text.Json.JsonValueKind.Undefined: System.Text.Json.JsonValueKind.Number
+                    ),
+                    "Invalid terminal exit code"
+                )
+                Check.That(
+                    File.ReadAllText(
+                        Path.Combine(evidence, J.Text(check, "output_file"))
+                    ) == "synthetic-verifier-output",
+                    "Raw verifier prefix lost"
+                )
+                Check.That(
+                    File.ReadAllText(Path.Combine(evidence, J.Text(check, "error_file"))) == "synthetic-verifier-error",
+                    "Raw verifier stderr lost"
+                )
+                Check.That(
+                    !J.Bool(check, "output_truncated") && !J.Bool(check, "error_truncated"),
+                    "Truncation flags changed"
+                )
                 let heartbeat = Path.Combine(checkout, "heartbeat")
                 Check.That(File.Exists(heartbeat), "Detached descendant never started")
                 let length = FileInfo(heartbeat).Length

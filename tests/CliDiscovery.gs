@@ -251,7 +251,9 @@ internal class CliDiscovery {
             )
             Check.That(
                 Check.Text(status["data"]?["artifacts"]?["events.jsonl"]) == Path.Combine(saved, "events.jsonl"),
-                "Missing full artifact path"
+                "Missing full artifact path. Expected " + Path.Combine(saved, "events.jsonl") +
+                    "\n" +
+                    statusResult.Output
             )
             Check.That(Check.Text(status["next_actions"]?[0]?[3]) == saved, "Action path shortened")
             let legacy = Check.Run(binary, []string{"status", "--run", saved}, temp.Env)
@@ -271,6 +273,39 @@ internal class CliDiscovery {
                     !(statusResult.Output + statusResult.Error + legacy.Output + legacy.Error).Contains(marker),
                     "Raw marker escaped summary: " + marker
                 )
+            }
+            firstRow.AsObject().Remove("exit_code")
+            firstRow["state"] = JsonValue.Create("interrupted")
+            firstRow["output_truncated"] = JsonValue.Create(true)
+            firstRow["error_truncated"] = JsonValue.Create(false)
+            record["verification"] = rows.DeepClone()
+            record["failure_reason"] = JsonValue.Create("inference_interrupted")
+            record["output_truncated"] = JsonValue.Create(true)
+            File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
+            let stoppedResult = Check.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
+            let stopped = Envelope(stoppedResult, "status", "ok")
+            let stoppedCheck = stopped["data"]?["verification"]?[0] ?? throw Exception("Missing interrupted check")
+            Check.That(
+                Check.Text(stoppedCheck["state"]) == "interrupted" && stoppedCheck["exit_code"] == nil && Check.Text(
+                    stoppedCheck["output_truncated"]
+                ) == "true" &&
+                    Check.Text(stoppedCheck["error_truncated"]) == "false",
+                "Incomplete verification acquired an exit code or lost stream truncation"
+            )
+            Check.That(
+                Check.Text(stopped["data"]?["error"]?["code"]) == "inference_failed" && Check.Text(
+                    stopped["data"]?["output_truncated"]
+                ) == "true",
+                "Interrupted inference lost its safe failure classification"
+            )
+            Check.That(
+                !stoppedResult.Output.Contains("synthetic-verifier-output-marker") && !stoppedResult.Output.Contains(
+                    "synthetic-verifier-error-marker"
+                ),
+                "Interrupted verification leaked private output"
+            )
+            for action in stopped["next_actions"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(action[1]) != "recover", "Interrupted inference suggested recovery")
             }
             record["failure_reason"] = JsonValue.Create("verification_failed")
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
@@ -298,6 +333,11 @@ internal class CliDiscovery {
                 "Correction reason missing"
             )
             Check.That(!correctedResult.Output.Contains("synthetic-correction-error-marker"), "Correction error leaked")
+            Check.That(
+                Check.Text(corrected["data"]?["correction"]?["verification"]?[0]?["state"]) == "interrupted" &&
+                    corrected["data"]?["correction"]?["verification"]?[0]?["exit_code"] == nil,
+                "Correction summary lost incomplete verification state"
+            )
             for action in corrected["next_actions"]?.AsArray() ?? JsonArray() {
                 Check.That(Check.Text(action[1]) != "recover", "Suggested legacy recovery for explicit correction")
             }

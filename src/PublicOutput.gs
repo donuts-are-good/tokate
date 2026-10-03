@@ -166,11 +166,11 @@ internal class PublicOutput {
             let value = run.Element()
             let result = Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated"
             )
             result["run"] = directory
             let verification = J.Get(value, "verification")
-            result["verification"] = Rows(verification, "exit_code", true)
+            result["verification"] = Rows(verification, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(verification).Count
             let usage = J.Map()
             for key in[]string{"input_tokens", "cached_input_tokens", "output_tokens"} {
@@ -202,9 +202,11 @@ internal class PublicOutput {
                 result["correction"] = ChangeSummary(correction, location)
             }
             if run.Text("state") == "failed" {
-                let reason = run.Text("failure_reason") == "incomplete_turn" ? "inference_failed": run.Text(
-                    "failure_reason"
-                )
+                let reason = (
+                    run.Text("failure_reason") == "incomplete_turn" || run.Text(
+                        "failure_reason"
+                    ) == "inference_interrupted"
+                ) ? "inference_failed": run.Text("failure_reason")
                 let code = Recovery.Eligible(run) ? "verification_failed": (
                     KnownReason(reason) ? reason: "command_failed"
                 )
@@ -259,7 +261,7 @@ internal class PublicOutput {
             result["tools"] = Rows(tools, "harness,provider,model,effort,version")
             result["tool_count"] = J.Items(tools).Count
             let checks = J.Get(value, "verification")
-            result["verification"] = Rows(checks, "exit_code", true)
+            result["verification"] = Rows(checks, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(checks).Count
             let reason = change.Text("failure_reason")
             if change.Text("state") == "failed" || reason != "" || change.Fields.ContainsKey("error") ||

@@ -9,11 +9,35 @@ import System.Runtime.InteropServices
 import System.Text
 
 internal class CommandResult {
-    internal var Code int32
+    internal var Code int32?
     internal var Output string = ""
     internal var Error string = ""
     internal var Truncated bool
     internal var ReadFailed bool
+    internal var OutputTruncated bool
+    internal var ErrorTruncated bool
+}
+
+internal class CommandOutput {
+    internal var Text string = ""
+    internal var Truncated bool
+    internal var Failure Exception?
+}
+
+internal class CommandInterrupted : Exception {
+    internal let Result CommandResult
+
+    internal init(error Exception, result CommandResult) : base(error.Message, error) {
+        Result = result
+    }
+}
+
+internal class CommandInputInterrupted : IOException {
+    internal let Result CommandResult
+
+    internal init(error IOException, result CommandResult) : base(error.Message, error) {
+        Result = result
+    }
 }
 
 @DllImport("libc", EntryPoint: "kill")
@@ -63,23 +87,78 @@ internal class CommandCancellation {
 
 internal class Commands {
     shared {
-        internal func Read(reader StreamReader, output Chan[string], result CommandResult) {
+        internal func Capture(path string) FileStream? {
+            if path == "" {
+                return nil
+            }
+            Verification.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
+            return FileStream(
+                path,
+                FileStreamOptions{
+                    Mode: FileMode.CreateNew,
+                    Access: FileAccess.Write,
+                    Share: FileShare.Read,
+                    BufferSize: 1,
+                    UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                }
+            )
+        }
+
+        internal func Read(
+            reader StreamReader,
+            output Chan[CommandOutput],
+            failed Chan[Exception],
+            capture FileStream? = nil
+        ) {
+            let result = CommandOutput()
+            let text = StringBuilder()
             try {
-                let text = StringBuilder()
+                using let writer StreamWriter? = capture == nil ? nil: StreamWriter(
+                    capture,
+                    UTF8Encoding(false),
+                    8192,
+                    true
+                )
+                if writer != nil {
+                    writer.AutoFlush = true
+                }
                 let buffer = [8192]char
                 var count int32
                 while (count = reader.Read(buffer, 0, buffer.Length)) > 0 {
-                    if text.Length + count <= 32 * 1024 * 1024 {
-                        text.Append(buffer, 0, count)
-                    } else {
-                        result.Truncated = true
+                    var retained = result.Truncated ? 0: Math.Min(count, 32 * 1024 * 1024 - text.Length)
+                    if retained > 0 && text.Length + retained == 32 * 1024 * 1024 && Char.IsHighSurrogate(
+                        buffer[retained - 1]
+                    ) {
+                        retained -= 1
+                    }
+                    result.Truncated = result.Truncated || retained < count
+                    if retained > 0 {
+                        text.Append(buffer, 0, retained)
+                        if writer != nil && result.Failure == nil {
+                            try {
+                                writer.Write(buffer, 0, retained)
+                            } catch (error Exception) {
+                                result.Failure = error
+                                failed <- error
+                            }
+                        }
                     }
                 }
-                output <- text.ToString()
             } catch (error Exception) {
-                result.ReadFailed = true
-                output <- error.Message
+                result.Failure = error
+                failed <- error
             }
+            result.Text = text.ToString()
+            output <- result
+        }
+
+        private func Collect(result CommandResult, output CommandOutput, error CommandOutput) {
+            result.Output = output.Text
+            result.Error = error.Text
+            result.OutputTruncated = output.Truncated
+            result.ErrorTruncated = error.Truncated
+            result.Truncated = output.Truncated || error.Truncated
+            result.ReadFailed = output.Failure != nil || error.Failure != nil
         }
 
         private func Write(writer StreamWriter, input string?, completed Chan[Exception?]) {
@@ -123,7 +202,9 @@ internal class Commands {
             isolated bool = false,
             milliseconds int32 = 0,
             cancellation Chan[bool]? = nil,
-            strictOutput bool = false
+            strictOutput bool = false,
+            outputPath string = "",
+            errorPath string = ""
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
@@ -180,6 +261,8 @@ internal class Commands {
                     default { }
                 }
             }
+            using let outputCapture = Capture(outputPath)
+            using let errorCapture = Capture(errorPath)
             let allowance = TimeSpan.FromMilliseconds(milliseconds > 0 ? milliseconds: seconds * 1000)
             let clock = Stopwatch.StartNew()
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
@@ -192,14 +275,15 @@ internal class Commands {
                 TimeSpan.FromMilliseconds(Math.Max(0.0, (allowance - clock.Elapsed).TotalMilliseconds))
             )
             let stdin = Chan[Exception?](1)
-            let stdout = Chan[string](1)
-            let stderr = Chan[string](1)
+            let stdout = Chan[CommandOutput](1)
+            let stderr = Chan[CommandOutput](1)
             let exited = Chan[Exception?](1)
             let cancelled = cancellation ?? Chan[bool](1)
             go Commands.Write(process.StandardInput, input, stdin)
             let result = CommandResult()
-            go Commands.Read(outputReader, stdout, result)
-            go Commands.Read(process.StandardError, stderr, result)
+            let failed = Chan[Exception](4)
+            go Commands.Read(outputReader, stdout, failed, outputCapture)
+            go Commands.Read(process.StandardError, stderr, failed, errorCapture)
             go Commands.Wait(process, exited)
             let callback = CommandCancellation(process, cancellation)
             let onCancel = ConsoleCancelEventHandler(callback.OnCancel)
@@ -208,6 +292,10 @@ internal class Commands {
             var outputDone bool
             var errorDone bool
             var exitDone bool
+            var inputFailed bool
+            var output = CommandOutput()
+            var stderrOutput = CommandOutput()
+            var terminal Exception? = nil
             try {
                 while !inputDone || !outputDone || !errorDone || !exitDone {
                     if clock.Elapsed >= allowance {
@@ -218,19 +306,25 @@ internal class Commands {
                         case let error = <- stdin {
                             inputDone = true
                             failure = error
+                            inputFailed = error != nil
                         }
-                        case let output = <- stdout {
+                        case let captured = <- stdout {
                             outputDone = true
-                            result.Output = output
+                            output = captured
+                            failure = captured.Failure
                         }
-                        case let error = <- stderr {
+                        case let captured = <- stderr {
                             errorDone = true
-                            result.Error = error
+                            stderrOutput = captured
+                            failure = captured.Failure
                         }
                         case let error = <- exited {
                             exitDone = true
                             KillGroup(-process.Id, 9)
                             failure = error
+                        }
+                        case let error = <- failed {
+                            throw error
                         }
                         case <- cancelled {
                             throw Exception("Command cancelled: " + exe)
@@ -253,6 +347,8 @@ internal class Commands {
                     }
                 }
                 result.Code = process.ExitCode
+            } catch (error Exception) {
+                terminal = error
             } finally {
                 Console.CancelKeyPress -= onCancel
                 callback.Stop()
@@ -270,20 +366,31 @@ internal class Commands {
                     <-stdin
                 }
                 if !outputDone {
-                    <-stdout
+                    output = <-stdout
                 }
                 if !errorDone {
-                    <-stderr
+                    stderrOutput = <-stderr
                 }
             }
-            select {
-                case <- cancelled {
-                    throw Exception("Command cancelled: " + exe)
+            Collect(result, output, stderrOutput)
+            if terminal == nil {
+                select {
+                    case <- cancelled {
+                        terminal = Exception("Command cancelled: " + exe)
+                    }
+                    default { }
                 }
-                default { }
+                if clock.Elapsed >= allowance {
+                    terminal = Exception("Runtime limit reached for " + exe)
+                }
             }
-            if clock.Elapsed >= allowance {
-                throw Exception("Runtime limit reached for " + exe)
+            terminal = terminal ?? output.Failure ?? stderrOutput.Failure
+            if let error = terminal {
+                result.Code = nil
+                if error is IOException io && inputFailed {
+                    throw CommandInputInterrupted(io, result)
+                }
+                throw CommandInterrupted(error, result)
             }
             return result
         }
@@ -339,13 +446,20 @@ internal class Commands {
         }
 
         internal func GitRaw(cwd string, args[]string) string {
-            let result = GitResult(cwd, args, true)
-            if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
-                result.Output
-            ) > 32 * 1024 * 1024 {
-                throw Exception("Cannot read complete Git path evidence: " + result.Error)
+            try {
+                let result = GitResult(cwd, args, true)
+                if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
+                    result.Output
+                ) > 32 * 1024 * 1024 {
+                    throw Exception("Cannot read complete Git path evidence: " + result.Error)
+                }
+                return result.Output
+            } catch (error CommandInterrupted) {
+                if error.Result.ReadFailed && error.InnerException is DecoderFallbackException {
+                    throw Exception("Cannot read complete Git path evidence", error)
+                }
+                throw error
             }
-            return result.Output
         }
     }
 }

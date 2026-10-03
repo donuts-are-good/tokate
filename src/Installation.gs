@@ -23,12 +23,12 @@ internal class Installation {
                 }
             }
             using let process = Process.Start(info) ?? throw Exception("Cannot start the installer")
-            let output = Chan[string](1)
-            let error = Chan[string](1)
-            let captured = CommandResult()
+            let output = Chan[CommandOutput](1)
+            let error = Chan[CommandOutput](1)
+            let failed = Chan[Exception](4)
             if PublicOutput.Enabled {
-                go Commands.Read(process.StandardOutput, output, captured)
-                go Commands.Read(process.StandardError, error, captured)
+                go Commands.Read(process.StandardOutput, output, failed)
+                go Commands.Read(process.StandardError, error, failed)
             }
             process.StandardInput.Write(Data.Resource("install.sh"))
             process.StandardInput.Close()
@@ -36,12 +36,12 @@ internal class Installation {
             if PublicOutput.Enabled {
                 let stdout = <-output
                 let stderr = <-error
-                if captured.ReadFailed {
+                if stdout.Failure != nil || stderr.Failure != nil {
                     throw CliFailure("command_failed", "Cannot read installer diagnostics")
                 }
-                PublicOutput.Truncated = PublicOutput.Truncated || captured.Truncated
-                Console.Error.Write(PublicOutput.Prose(stdout))
-                Console.Error.Write(PublicOutput.Prose(stderr))
+                PublicOutput.Truncated = PublicOutput.Truncated || stdout.Truncated || stderr.Truncated
+                Console.Error.Write(PublicOutput.Prose(stdout.Text))
+                Console.Error.Write(PublicOutput.Prose(stderr.Text))
             }
             return process.ExitCode
         }
