@@ -1883,6 +1883,96 @@ internal class NativeFlow : IDisposable {
         Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
     }
 
+    private func BoundaryWork(run string, results Chan[Exception?]) {
+        try {
+            Call([]string{"work", "--run", run})
+            results <- nil
+        } catch (error Exception) {
+            results <- error
+        }
+    }
+
+    private func BoundaryRun(run string) {
+        let results = Chan[Exception?](1)
+        let pins = List[FileStream]()
+        let identities = List[string]()
+        let release = Path.Combine(Bin, "namespace-release")
+        var failure Exception?
+        var drained bool
+        var released bool
+        go BoundaryWork(run, results)
+        try {
+            let ready = Path.Combine(Bin, "namespace-ready")
+            let clock = Stopwatch.StartNew()
+            while !File.Exists(ready) && clock.Elapsed.TotalSeconds < 5 {
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                }
+            }
+            Check.That(File.Exists(ready), "Owned task namespace readiness timed out")
+            let pid = Int32.Parse(File.ReadAllText(ready))
+            Check.That(pid > 0, "Invalid owned task PID")
+            for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
+                let pin = File.Open(
+                    "/proc/" + pid.ToString() + "/ns/" + name,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read
+                )
+                pins.Add(pin)
+                let identity = File.ReadAllText(Path.Combine(run, "checkout", "expected-" + name + "-namespace"))
+                identities.Add(identity)
+                Check.That(
+                    FileInfo(
+                        "/proc/self/fd/" + pin.SafeFileHandle.DangerousGetHandle().ToString()
+                    ).LinkTarget == identity,
+                    "Owned task namespace pin did not match " + name
+                )
+            }
+            File.WriteAllText(release, "release")
+            released = true
+            let workFailure = <-results
+            drained = true
+            if let error = workFailure {
+                throw error
+            }
+            var index int32
+            for pin in pins {
+                Check.That(
+                    !pin.SafeFileHandle.IsClosed && FileInfo(
+                        "/proc/self/fd/" + pin.SafeFileHandle.DangerousGetHandle().ToString()
+                    ).LinkTarget == identities[index],
+                    "Task namespace pin expired before verification returned"
+                )
+                index++
+            }
+        } catch (error Exception) {
+            failure = error
+        } finally {
+            if !released {
+                try {
+                    File.WriteAllText(release, "release")
+                } catch (error Exception) {
+                    failure = failure ?? error
+                }
+            }
+            if !drained {
+                let error = <-results
+                failure = failure ?? error
+            }
+            for pin in pins {
+                try {
+                    pin.Dispose()
+                } catch (error Exception) {
+                    failure = failure ?? error
+                }
+            }
+        }
+        if let error = failure {
+            throw error
+        }
+    }
+
     internal func VerificationBoundary() {
         let temporary = Path.Combine("/tmp", Path.GetFileName(Temp.Root) + "-private")
         let persistent = Path.Combine(Temp.Root, "private")
@@ -1895,7 +1985,9 @@ internal class NativeFlow : IDisposable {
         socket.Bind(UnixDomainSocketEndPoint(socketAddress))
         socket.Listen(1)
         try {
-            let script = "set -eu\ntest -f result.txt\n" +
+            let script = "set -eEu\n" +
+                "trap 'printf \"VerificationBoundary failed probe line=%s namespace=%s saved=%s current=%s\\n\" \"$$LINENO\" \"$${ns-}\" \"$$(if [ -n \"$${ns-}\" ]; then cat expected-$$ns-namespace; fi)\" \"$$(if [ -n \"$${ns-}\" ]; then readlink /proc/self/ns/$$ns; fi)\" >&2' ERR\n" +
+                "test -f result.txt\n" +
                 "test \"$$PATH\" = /usr/local/bin:/usr/bin:/bin\n" +
                 "test \"$$HOME\" = \"/tmp/tokate-home\" && test \"$$TMPDIR\" = \"$$HOME\"\n" +
                 "test ! -e \"$$HOME/agent-cache.json\"\n" +
@@ -1933,7 +2025,18 @@ internal class NativeFlow : IDisposable {
             Approve()
             let run = Claim()
             Mode("verification_boundary")
-            Call([]string{"work", "--run", run})
+            try {
+                BoundaryRun(run)
+            } catch (error Exception) {
+                let evidence = Path.Combine(run, "verification.json")
+                if File.Exists(evidence) {
+                    using let reader = StreamReader(evidence)
+                    let buffer = [16384]char
+                    let count = reader.ReadBlock(buffer, 0, buffer.Length)
+                    Console.Error.WriteLine("VerificationBoundary synthetic verification: " + String(buffer, 0, count))
+                }
+                throw error
+            }
             Check.Contains(File.ReadAllText(Path.Combine(run, "verification.json")), "verified-independent-boundary")
             Check.That(File.ReadAllText(temporary) == "synthetic host tmp credential", "Host tmp changed")
             Check.That(File.ReadAllText(persistent) == "synthetic sibling contribution", "Sibling contribution changed")
