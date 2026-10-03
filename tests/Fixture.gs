@@ -247,9 +247,8 @@ internal class Fixture {
             return 0
         }
         let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-        let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR") ?? throw Exception(
-            "GitHub CLI configuration home was lost"
-        )
+        let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR") ??
+            throw Exception("GitHub CLI configuration home was lost")
         Check.That(
             config == Path.Combine(Path.GetDirectoryName(Root) ?? "", "gh-home"),
             "Unexpected GitHub CLI configuration home"

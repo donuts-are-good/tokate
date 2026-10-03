@@ -247,7 +247,7 @@ install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 scripts/verify.sh
 ```
 
-The pinned public G# SDK is 0.4.591. Verification uses the pinned SDK formatter,
+The pinned public G# SDK is 0.4.1150. Verification uses the pinned SDK formatter,
 builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end
 harness against the actual binary. It uses two simulated GitHub identities, real
 local Git repositories, and deterministic Codex and release-download fixtures.

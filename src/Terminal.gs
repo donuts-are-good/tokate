@@ -67,7 +67,8 @@ internal class Terminal {
             table.AddColumn("Field")
             table.AddColumn("Value")
             for field in value.EnumerateObject() {
-                var text = field.Value.ValueKind == JsonValueKind.String ? field.Value.GetString() ?? "": field
+                var text = field.Value.ValueKind == JsonValueKind.String ? field.Value.GetString() ??
+                    "": field
                     .Value
                     .GetRawText()
                 if title == "Donor run" && field.Name == "verification" {
