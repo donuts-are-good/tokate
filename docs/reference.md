@@ -53,7 +53,7 @@ user-local location.
 ## Commands and recovery
 
 ```text
-Tokate 0.2.8 (toh-KAH-teh)
+Tokate 0.2.9 (toh-KAH-teh)
 Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
@@ -226,6 +226,12 @@ Every host command starts with only explicit environment requirements. Codex rec
 
 Independent owner verification uses Linux bubblewrap directly, without discovering or launching Codex. Each command starts from an empty mount namespace with a writable canonical checkout, its actual `.git` directory read-only, read-only standard system tool/runtime directories and `/etc/alternatives` links, and explicit nonsecret loader, certificate and DNS files. Host `/`, `/etc`, `/home`, `/run` and `/var` are never mounted wholesale. Checkout/Git symlinks and external Git layouts are refused before repository code runs. It uses private `/tmp`, `/var/tmp` and `/dev`, PID/IPC/UTS/user namespaces, dropped capabilities, and a clean environment with fixed system PATH and private HOME/TMPDIR outside the checkout. Host credentials, sibling contributions, control files, logs and sockets are outside its mounts. Nested sandbox probes are supported. Missing sandbox support fails closed; commands use the remaining total budget and existing process cleanup. This does not sandbox external coding work or change receipts.
 
+Each selected runtime file is copied once into private invocation storage, with a
+4 MiB limit per file, and mounted read-only. Storage inside the checkout or through
+symlinks is refused. Copies remain linked through process
+cleanup and are then removed, including on failure. Replacing or unlinking the
+original source does not break nested verification mounts.
+
 Agent and verifier network access default off and require both owner policy and donor opt-in. Allowing access permits outbound command traffic and should be limited to repositories the donor trusts. The Codex host still needs network access for inference. Installed Codex, bubblewrap and system administrators are trusted. This is OS sandboxing, not a separate VM or protection against kernel vulnerabilities. Run unfamiliar projects on a dedicated donor machine or VM.
 
 Process groups are killed on timeout, cancellation, and normal completion to clean up their background children. No automatic repair loop uses additional inference. Time caps are not exact token or subscription-percentage caps.
@@ -258,7 +264,7 @@ inference, downloading a release, or modifying GitHub. No external test framewor
 or Python runtime is required.
 Owner verification tests use real bubblewrap, disable the fixture harness after
 its completed turn, and check filesystem/environment isolation, read-only Git,
-both network gates, nested probes, unsafe-layout refusal and detached-descendant
+both network gates, nested probes, runtime-file replacement, unsafe-layout refusal and detached-descendant
 cleanup on normal exit and timeout. These tests must pass on required Ubuntu CI;
 fixtures do not replace the real verifier boundary.
 The real native Codex `doctor` probe is a separate required matrix check; passing
