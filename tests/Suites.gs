@@ -155,6 +155,12 @@ internal class SuiteDriver {
                 case "SynchronizationV2" {
                     SynchronizationChecks.All(binary, "v2")
                 }
+                case "SynchronizationV2First" {
+                    SynchronizationChecks.All(binary, "v2", 1)
+                }
+                case "SynchronizationV2Second" {
+                    SynchronizationChecks.All(binary, "v2", 2)
+                }
                 case "SynchronizationV1" {
                     SynchronizationChecks.All(binary, "v1")
                 }
@@ -212,8 +218,9 @@ internal class SuiteDriver {
                 )
                 File.Copy(Path.Combine(project, "global.json"), Path.Combine(published, "global.json"))
                 let jobs = []SuiteJob{
-                    Job("SynchronizationV2"),
+                    Job("SynchronizationV2First"),
                     Job("SynchronizationV1"),
+                    Job("SynchronizationV2Second"),
                     Job("Native"),
                     Job("Coordination"),
                     Job("Correction"),

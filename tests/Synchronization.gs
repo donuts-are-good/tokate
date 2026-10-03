@@ -565,8 +565,9 @@ internal class SynchronizationChecks {
             }
         }
 
-        internal func All(binary string, only string = "") {
+        internal func All(binary string, only string = "", partition int32 = 0) {
             for version in[]string{"v1", "v2"} {
+                var index int32
                 for mode in[]string{
                     "timeout",
                     "ordinary",
@@ -610,11 +611,15 @@ internal class SynchronizationChecks {
                     "after-coordinate",
                     "state-mismatch"
                 } {
+                    index++
                     if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
                         version != "v2" {
                         continue
                     }
                     if only != "" && only != version && only != mode && only != version + "/" + mode {
+                        continue
+                    }
+                    if (partition == 1 && index > 21) || (partition == 2 && index <= 21) {
                         continue
                     }
                     Run(binary, version == "v2", mode)
