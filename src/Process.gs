@@ -164,6 +164,8 @@ internal class Commands {
             info.Environment["GIT_TERMINAL_PROMPT"] = "0"
             info.Environment["GIT_CONFIG_NOSYSTEM"] = "1"
             info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+            info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+            info.Environment["GIT_GRAFT_FILE"] = "/dev/null"
             if let signal = cancellation {
                 select {
                     case <- signal {
@@ -293,6 +295,7 @@ internal class Commands {
 
         internal func Git(cwd string, args ...string) string {
             let all = List[string]{
+                "--no-replace-objects",
                 "-c",
                 "core.hooksPath=/dev/null",
                 "-c",

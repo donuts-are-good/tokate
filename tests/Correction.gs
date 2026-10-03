@@ -394,6 +394,25 @@ internal class CorrectionChecks {
         }
 
         private func ProtectedAndExact(binary string) {
+            for flag in[]string{"--assume-unchanged", "--skip-worktree"} {
+                using let flow = NativeFlow(binary)
+                flow.Initialize()
+                flow.Approve()
+                let run = flow.Claim()
+                flow.Mode("staged_whitespace")
+                flow.Call([]string{"work", "--run", run}, 1)
+                Prepared(flow, run)
+                let commit = Correct(flow, run)
+                let checkout = Path.Combine(run, "checkout")
+                flow.Git("-C", checkout, "update-index", flag, "result.txt")
+                File.AppendAllText(Path.Combine(checkout, "result.txt"), "Hidden correction change\n")
+                Check.That(flow.Git("-C", checkout, "status", "--porcelain") == "", "Index flag must hide change")
+                let result = Recover(flow, run, commit, 1)
+                Check.Contains(result.Error, "candidate_invalid")
+                Check.Contains(result.Error, "index contains")
+                Check.That(Read(run, "correction.json")["verification"] == nil, "Hidden index reached verification")
+                Once(flow)
+            }
             for rename in[]bool{false, true} {
                 using let flow = NativeFlow(binary)
                 flow.Initialize()

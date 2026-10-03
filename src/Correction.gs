@@ -83,7 +83,7 @@ internal class Correction {
         )
 
         internal func Candidate(checkout string, run Data, commit string) string {
-            Verification.Validate(checkout)
+            Verification.Candidate(checkout)
             Data.CommitSha(commit)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit ||
                 GitRaw(checkout, "status", "--porcelain=v1", "--untracked-files=all") != "" {

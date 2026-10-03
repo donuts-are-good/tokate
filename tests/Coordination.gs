@@ -319,6 +319,79 @@ internal class CoordinationFlow : IDisposable {
         Flow.NoInference()
     }
 
+    internal func CanonicalExternal() {
+        let claim = Claim()
+        let run = Prepare()
+        let benign = Candidate(claim)
+        let work = Path.Combine(Flow.Temp.Root, "donor-work")
+        File.AppendAllText(Path.Combine(work, ".github/tokate-pr.md"), "\nhidden protected change\n")
+        Flow.Git("-C", work, "add", ".")
+        Flow.Git(
+            "-C",
+            work,
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "-m",
+            "Protected correction"
+        )
+        let malicious = Flow.Git("-C", work, "rev-parse", "HEAD")
+        Flow.Git(
+            "-C",
+            work,
+            "push",
+            Path.Combine(Flow.Bin, "fork"),
+            malicious + ":refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
+        )
+        Flow.Reload()
+        Flow.State["replacement_for"] = JsonValue.Create(malicious)
+        Flow.State["replacement_with"] = JsonValue.Create(benign)
+        Flow.Save()
+        Flow.Mode("external_replacement")
+        let failure = Flow.Call([]string{"external", "--run", run, "--commit", malicious}, 1)
+        Check.Contains(failure.Error, "protected owner policy")
+        Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Hidden protected change was verified")
+        Check.That(
+            !File.Exists(Path.Combine(run, "request.json")),
+            "Hidden protected change obtained publication authority"
+        )
+        Flow.NoPr()
+        Flow.NoInference()
+    }
+
+    internal func CanonicalSubmit() {
+        let claim = Claim()
+        let run = Prepare()
+        let commit = Candidate(claim)
+        Flow.Call([]string{"external", "--run", run, "--commit", commit})
+        let checkout = Path.Combine(run, "checkout")
+        let savedPath = Path.Combine(run, "run.json")
+        let saved = File.ReadAllText(savedPath)
+        for flag in[]string{"--assume-unchanged", "--skip-worktree"} {
+            Flow.Git("-C", checkout, "update-index", flag, ".github/tokate-pr.md")
+            File.AppendAllText(Path.Combine(checkout, ".github/tokate-pr.md"), "\nhidden work file\n")
+            Check.That(Flow.Git("-C", checkout, "status", "--porcelain") == "", "Changed candidate must look clean")
+            Check.Contains(Flow.Call([]string{"submit", "--run", run}, 1).Error, "Candidate index")
+            Check.That(
+                !File.Exists(Path.Combine(run, "request.json")),
+                "Hidden work file obtained publication authority"
+            )
+            Check.That(File.ReadAllText(savedPath) == saved, "Blocked submit rewrote verification record")
+            Flow.Git("-C", checkout, "update-index", "--no-assume-unchanged", ".github/tokate-pr.md")
+            Flow.Git("-C", checkout, "update-index", "--no-skip-worktree", ".github/tokate-pr.md")
+            Flow.Git("-C", checkout, "checkout", "--", ".github/tokate-pr.md")
+        }
+        Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))
+        File.WriteAllText(Path.Combine(checkout, ".git/info/grafts"), commit + "\n")
+        Check.Contains(Flow.Call([]string{"submit", "--run", run}, 1).Error, "info/grafts")
+        Check.That(!File.Exists(Path.Combine(run, "request.json")), "Grafted candidate obtained publication authority")
+        Check.That(File.ReadAllText(savedPath) == saved, "Graft rejection rewrote verification record")
+        Flow.NoPr()
+        Flow.NoInference()
+    }
+
     internal func ExpiryAndRevocation() {
         let original = Claim()
         let run = Prepare()
@@ -654,6 +727,8 @@ internal class CoordinationFlow : IDisposable {
                 "SimultaneousClaims",
                 "ReplayAndInterruptedState",
                 "ExternalPublication",
+                "CanonicalExternal",
+                "CanonicalSubmit",
                 "ExpiryAndRevocation",
                 "InvalidEvents",
                 "InterruptedWrite",
@@ -679,6 +754,12 @@ internal class CoordinationFlow : IDisposable {
                     }
                     case "ExternalPublication" {
                         test.ExternalPublication()
+                    }
+                    case "CanonicalExternal" {
+                        test.CanonicalExternal()
+                    }
+                    case "CanonicalSubmit" {
+                        test.CanonicalSubmit()
                     }
                     case "ExpiryAndRevocation" {
                         test.ExpiryAndRevocation()

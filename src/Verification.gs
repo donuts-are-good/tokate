@@ -48,9 +48,21 @@ internal class Verification {
             }
             let git = DirectoryPath(Path.Combine(checkout, ".git"))
             GitDirectory(git)
-            for file in[]string{"commondir", "objects/info/alternates", "objects/info/http-alternates"} {
+            for file in[]string{"commondir", "objects/info/alternates", "objects/info/http-alternates", "info/grafts"} {
                 if File.Exists(Path.Combine(git, file)) || Directory.Exists(Path.Combine(git, file)) {
                     throw Exception("Verification requires self-contained Git metadata: " + file)
+                }
+            }
+            return checkout
+        }
+
+        internal func Candidate(directory string) string {
+            let checkout = Validate(directory)
+            for entry in Commands.Git(checkout, "ls-files", "-v", "-z").Split('\0') {
+                if entry != "" && (Char.IsLower(entry[0]) || entry[0] == 'S') {
+                    throw Exception(
+                        "Candidate index contains assume-unchanged or skip-worktree flags; inspect before continuing"
+                    )
                 }
             }
             return checkout
@@ -152,7 +164,13 @@ internal class Verification {
                 "/tmp/tokate-home",
                 "--setenv",
                 "LANG",
-                "C.UTF-8"
+                "C.UTF-8",
+                "--setenv",
+                "GIT_NO_REPLACE_OBJECTS",
+                "1",
+                "--setenv",
+                "GIT_GRAFT_FILE",
+                "/dev/null"
             }
             if !network {
                 args.Add("--unshare-net")

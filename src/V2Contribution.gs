@@ -195,6 +195,7 @@ internal class V2Contribution {
                 run.Text("base")
             )
             Commands.Git(checkout, "checkout", "--quiet", "--detach", commit)
+            Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit {
                 throw Exception("Fetched commit differs from exact declaration")
             }
@@ -223,6 +224,7 @@ internal class V2Contribution {
                     throw Exception("Independent external verification failed; no publication authority granted")
                 }
             }
+            Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.Git(
                 checkout,
                 "status",
@@ -240,6 +242,7 @@ internal class V2Contribution {
         }
 
         private func ProtectedDiff(checkout string, base string, commit string) {
+            Commands.Git(checkout, "diff", "--check", base, commit)
             let files = Commands.Git(checkout, "diff", "--name-only", base, commit)
             if files == "" {
                 throw Exception("Contribution must change the approved base")
@@ -263,7 +266,11 @@ internal class V2Contribution {
             if run.Text("source") != "tokate" || run.Text("state") != "generated" {
                 throw Exception("Expected successfully verified Tokate execution")
             }
-            let checkout = Path.Combine(directory, "checkout")
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
+            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+                throw Exception("Verified base changed")
+            }
+            Commands.Git(checkout, "diff", "--exit-code")
             let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
@@ -317,7 +324,7 @@ internal class V2Contribution {
                 throw Exception("Only an independently verified exact commit can be submitted")
             }
             Publication.VerificationReport(run, record)
-            let checkout = Path.Combine(directory, "checkout")
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("commit") || Commands.Git(
                 checkout,
                 "status",
@@ -325,6 +332,8 @@ internal class V2Contribution {
             ) != "" {
                 throw Exception("Verified checkout changed")
             }
+            Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
+            ProtectedDiff(checkout, run.Text("base"), run.Text("commit"))
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
                 Commands.Git(
@@ -335,7 +344,7 @@ internal class V2Contribution {
                     "credential.helper=!gh auth git-credential",
                     "push",
                     "https://github.com/" + run.Text("head_repo") + ".git",
-                    "HEAD:refs/heads/" + run.Text("branch")
+                    run.Text("commit") + ":refs/heads/" + run.Text("branch")
                 )
                 Recheck(run)
             }
