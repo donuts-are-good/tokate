@@ -22,15 +22,11 @@ internal class Recovery {
             if File.Exists(Path.Combine(directory, "correction.json")) {
                 throw Exception("Explicit corrections use recover --commit with their saved budget and provenance")
             }
-            if run.Text("state") != "failed" ||
-                (
-                run.Text("failure_reason") != "verification_failed" &&
-                    !(
-                    run.Text("failure_reason") == "" && run.Text("error") ==
-                    "Owner verification failed. See verification.json. No PR will be opened."
+            if !Eligible(run) {
+                throw CliFailure(
+                    "invalid_state",
+                    "Recovery requires a completed agent turn with failed owner verification"
                 )
-            ) {
-                throw Exception("Recovery requires a completed agent turn with failed owner verification")
             }
             let record = Workflow.Recheck(run)
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
@@ -62,6 +58,7 @@ internal class Recovery {
                 Terminal.Step("Recovering with independent verification only. No inference will run.")
                 Contribution.Finish(directory, run, record, usage, timer, seconds)
                 run.Fields.Remove("error")
+                run.Fields.Remove("failure_reason")
                 run.Save(directory)
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
@@ -70,5 +67,15 @@ internal class Recovery {
                 throw error
             }
         }
+
+        internal func Eligible(run Data) bool -> run.Number("version") == 1 && run.Text("state") == "failed" &&
+            (
+            run.Text("failure_reason") == "verification_failed" ||
+                (
+                run.Text("failure_reason") == "" && run.Text(
+                    "error"
+                ) == "Owner verification failed. See verification.json. No PR will be opened."
+            )
+        )
     }
 }

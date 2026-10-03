@@ -86,6 +86,7 @@ internal class Publication {
                 ProtectedPaths.Remote(
                     run.Text("repo"),
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     run.Text("base"),
                     run.Text("head_repo"),
                     run.Text("commit")
@@ -99,7 +100,7 @@ internal class Publication {
                     throw Exception("Saved checkout HEAD changed")
                 }
                 Commands.Git(checkout, "add", "-A")
-                ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+                ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
                 Commands.Git(checkout, "diff", "--cached", "--check")
                 let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
                 if patch == "" || patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
@@ -133,7 +134,13 @@ internal class Publication {
             if committedPatch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Canonical commit differs from the independently verified patch")
             }
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                run.Text("commit")
+            )
             let receipt = J.Map(
                 "version",
                 1,
@@ -252,7 +259,7 @@ internal class Publication {
                 "policy"
             ) ||
                 J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
-                throw Exception("PR approval or policy no longer matches")
+                throw CliFailure("stale_approval", "PR approval or policy no longer matches")
             }
             let expectedBranch = "tokate/issue-" + J.Number(receipt, "issue").ToString() + "-" + J.Text(record, "sha")
                 .Substring(0, 12)
@@ -295,6 +302,7 @@ internal class Publication {
                 Synchronization.Remote(
                     repo,
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     J.Text(approval, "base"),
                     history,
                     fork,
@@ -304,6 +312,7 @@ internal class Publication {
                 ProtectedPaths.Remote(
                     repo,
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     J.Text(approval, "base"),
                     Data.Repo(J.Text(J.Get(head, "repo"), "full_name")),
                     J.Text(head, "sha")
@@ -362,6 +371,7 @@ internal class Publication {
             run.Fields["pr"] = number
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["commit"] = J.Text(head, "sha")
+            run.Fields["policy"] = J.Get(record, "policy")
             return run
         }
 
@@ -377,8 +387,7 @@ internal class Publication {
                 if verified.Text("commit") != run.Text("commit") {
                     throw Exception("Saved commit differs from PR receipt")
                 }
-                let info = GitHub.Api("repos/" + Data.Repo(run.Text("repo")))
-                let policy = Policy.Load(run.Text("repo"), J.Text(info, "default_branch"))
+                let policy = Policy(J.Write(J.Get(verified.Element(), "policy")))
                 let pullPath = "repos/" + run.Text("repo") + "/pulls/" + run.Number("pr").ToString()
                 let pull = GitHub.Api(pullPath)
                 if J.Text(J.Get(pull, "head"), "sha") != run.Text("commit") {
@@ -401,7 +410,7 @@ internal class Publication {
                 if result.Output.Trim().StartsWith("[") {
                     rows = J.Parse(result.Output)
                 } else if !result.Error.Contains("no checks reported") {
-                    throw Exception("Cannot read PR checks: " + result.Error)
+                    throw CliFailure("command_failed", "Cannot read PR checks. Inspect the PR on GitHub.")
                 }
                 var failed bool
                 var pending bool
@@ -428,13 +437,12 @@ internal class Publication {
                 if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
                     throw Exception("PR changed while reading checks")
                 }
-                {
-                    let live = Verify(run.Text("repo"), run.Number("pr"))
-                    if live.Text("commit") != run.Text("commit") {
-                        throw Exception("Version-2 authority changed while reading checks")
-                    }
+                let live = Verify(run.Text("repo"), run.Number("pr"))
+                if live.Text("commit") != run.Text("commit") {
+                    throw Exception("PR authority changed while reading checks")
                 }
                 let status = failed ? "failed": (pending ? "pending": "passed")
+                PublicOutput.Checks(run, rows, status)
                 if directory != "" {
                     File.WriteAllText(
                         Path.Combine(directory, "checks.json"),

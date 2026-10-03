@@ -63,7 +63,8 @@ internal class AmendmentFlow {
             flow NativeFlow,
             owner bool = false,
             mutating bool = false,
-            synchronization bool = false
+            synchronization bool = false,
+            baseBranch string = ""
         ) string {
             flow.Initialize()
             if synchronization {
@@ -82,10 +83,20 @@ internal class AmendmentFlow {
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Owner checks")
             flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, "main")
-            flow.Call(
-                []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", owner ? "owner": "donor"},
-                owner: true
-            )
+            let approve = List[string]{
+                "approve",
+                "--repo",
+                "owner/project",
+                "--issue",
+                "1",
+                "--donor",
+                owner ? "owner": "donor"
+            }
+            if baseBranch != "" {
+                flow.Git("-C", flow.Upstream, "branch", baseBranch)
+                approve.AddRange([]string{"--base-branch", baseBranch})
+            }
+            flow.Call(approve.ToArray(), owner: true)
             let claim = flow.Call(
                 []string{
                     "claim",
@@ -335,10 +346,34 @@ internal class AmendmentFlow {
             }
         }
 
-        internal func V2Original(flow CoordinationFlow, native bool = false, synchronization bool = false) string {
+        internal func V2Original(
+            flow CoordinationFlow,
+            native bool = false,
+            modelPolicy string = "",
+            synchronization bool = false,
+            baseBranch string = ""
+        ) string {
             flow.Initialize()
             if synchronization {
                 SynchronizationChecks.SetupOwner(flow.Flow)
+                if baseBranch != "" {
+                    flow.Flow.Git("-C", flow.Flow.Upstream, "branch", baseBranch)
+                }
+                flow.Flow.Approve(baseBranch)
+            }
+            if modelPolicy != "" {
+                let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["model_policy"] = JsonValue.Create(modelPolicy)
+                if modelPolicy == "unrestricted" {
+                    policy.AsObject().Remove("models")
+                } else {
+                    (policy["models"] ?? throw Exception("Missing model whitelist"))["claude-sonnet-4-6"] = Check.Json(
+                        "[\"absent\"]"
+                    )
+                }
+                File.WriteAllText(path, policy.ToJsonString())
+                flow.Flow.Commit("External amendment effort policy")
                 flow.Flow.Approve()
             }
             let claim = flow.Claim()
@@ -362,14 +397,20 @@ internal class AmendmentFlow {
             return run
         }
 
-        private func V2(binary string, mode string = "", native bool = false) {
+        private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
             using let flow = CoordinationFlow(binary)
-            let run = V2Original(flow, native)
+            let run = V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let contribution = Check.Text(flow.State()["state"]?["contribution"])
             Review(flow.Flow, true)
             let commit = Edit(flow.Flow, run)
-            let tools = native ? "": flow.Tools
+            if modelPolicy != "" {
+                File.WriteAllText(
+                    flow.Tools,
+                    "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"absent\"}]"
+                )
+            }
+            let tools = native && modelPolicy == "" ? "": flow.Tools
             if mode == "lost_push_response" || mode == "lost_request_response" {
                 flow.Flow.Mode(mode)
                 Amend(flow.Flow, run, commit, 1, tools)
@@ -430,6 +471,15 @@ internal class AmendmentFlow {
                 flow.Coordinate(flow.Event(nextRequest))
                 Amend(flow.Flow, run, second)
                 AssertPublished(flow.Flow, run, second)
+                let current = CliDiscovery.Envelope(
+                    flow.Flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}),
+                    "coordination",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(current["data"]?["contribution"]?["head"]) == second,
+                    "Structured coordination omitted current amended head"
+                )
                 Check.That(
                     flow.State()["state"]?["amendments"]?.AsArray().Count == 2,
                     "V2 continuation lost prior amendment"
@@ -508,14 +558,59 @@ internal class AmendmentFlow {
             }
         }
 
+        private func Structured(binary string) {
+            using let flow = NativeFlow(binary)
+            let run = Original(flow)
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let failedCommit = Edit(flow, run, "")
+            let failed = CliDiscovery.Envelope(
+                flow.Call([]string{"amend", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
+                "amend",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(failed["data"]?["amendment"]?["state"]) == "failed" && Check.Text(
+                    failed["data"]?["amendment"]?["commit"]
+                ) == failedCommit,
+                "JSON amendment lost failed attempt"
+            )
+            let commit = Edit(flow, run)
+            let published = CliDiscovery.Envelope(
+                flow.Call([]string{"amend", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
+                "amend",
+                "ok"
+            )
+            Check.That(
+                Check.Text(published["data"]?["amendment"]?["state"]) == "published" && Check.Text(
+                    published["data"]?["commit"]
+                ) == commit,
+                "JSON amendment lost published head"
+            )
+            AssertOriginal(run, original)
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["exec_count"]) == "1" && flow.State["pulls"]?.AsArray().Count == 1,
+                "JSON amendment repeated inference or PR"
+            )
+            CliDiscovery.Envelope(
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
+                "verify-pr",
+                "ok"
+            )
+        }
+
         internal func All(binary string, only string = "") {
+            var matched bool
             for name in[]string{
+                "Structured",
                 "V1",
                 "V1Owner",
                 "V1Push",
                 "V1Body",
                 "Rejections",
                 "V2",
+                "V2Absent",
                 "V2Native",
                 "V2Push",
                 "V2Request",
@@ -527,7 +622,11 @@ internal class AmendmentFlow {
                 if only != "" && only != name {
                     continue
                 }
+                matched = true
                 switch name {
+                    case "Structured" {
+                        Structured(binary)
+                    }
                     case "V1" {
                         V1(binary)
                     }
@@ -545,6 +644,11 @@ internal class AmendmentFlow {
                     }
                     case "V2" {
                         V2(binary)
+                    }
+                    case "V2Absent" {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            V2(binary, "absent", native: true, modelPolicy: mode)
+                        }
                     }
                     case "V2Native" {
                         V2(binary, native: true)
@@ -570,6 +674,7 @@ internal class AmendmentFlow {
                 }
                 Console.WriteLine("PASS amendment " + name)
             }
+            Check.That(matched, "Unknown amendment selector: " + only)
         }
     }
 }

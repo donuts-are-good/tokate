@@ -23,7 +23,7 @@ internal class V2Contribution {
                 J.Get(state.Value(), "reservation"),
                 "reservation"
             ) != run.Text("id") {
-                throw Exception("Saved run has stale coordination authority")
+                throw CliFailure("stale_approval", "Saved run has stale coordination authority")
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, run.Number("issue"), run.Text("donor"))
@@ -36,26 +36,15 @@ internal class V2Contribution {
                 approval,
                 "base_branch"
             ) {
-                throw Exception("Saved run differs from reservation and approval")
+                throw CliFailure("stale_approval", "Saved run differs from reservation and approval")
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             RequestData.Tools(J.Get(run.Element(), "tools"))
-            policy.ValidateTools(J.Get(run.Element(), "tools"))
+            policy.ValidateTools(J.Get(run.Element(), "tools"), run.Text("source"))
             let tools = J.Items(J.Get(run.Element(), "tools"))
-            if run.Text("source") == "tokate" {
-                if tools.Count != 1 || J.Text(tools[0], "harness") != "codex" || J.Text(
-                    tools[0],
-                    "provider"
-                ) != "openai" ||
-                    run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(
-                    tools[0],
-                    "effort"
-                ) ||
-                    run.Text("model") == "unknown" || run.Text("effort") == "unknown" {
-                    throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
-                }
-            } else if run.Text("source") != "external" {
-                throw Exception("Invalid contribution source")
+            if run.Text("source") == "tokate" &&
+                (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
+                throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
             let fork = Data.Repo(run.Text("head_repo"))
             if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
@@ -76,7 +65,7 @@ internal class V2Contribution {
             let donor = Data.Login(J.Text(viewer, "login"))
             let state = CoordinationState.Load(repo, issue)
             if state.Sha != Data.CommitSha(args.Need("state")) {
-                throw Exception("Stale coordination revision")
+                throw CliFailure("stale_approval", "Stale coordination revision")
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, issue, donor)
@@ -88,19 +77,7 @@ internal class V2Contribution {
             var selection = JsonElement{}
             if tools.ValueKind != JsonValueKind.Undefined {
                 RequestData.Tools(tools)
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools)
-            }
-            if source == "tokate" &&
-                tools.ValueKind != JsonValueKind.Undefined &&
-                (
-                J.Items(tools).Count != 1 || J.Text(J.Items(tools)[0], "harness") != "codex" || J.Text(
-                    J.Items(tools)[0],
-                    "provider"
-                ) != "openai"
-            ) {
-                throw Exception(
-                    "Tokate-launched execution currently supports one codex/openai declaration; other harnesses use external"
-                )
+                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools, source)
             }
             let approval = J.Get(record, "approval")
             if source == "tokate" {
@@ -180,6 +157,7 @@ internal class V2Contribution {
                 )
             )
             let directory = Path.Combine(root, run.Text("id"))
+            PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
@@ -244,7 +222,13 @@ internal class V2Contribution {
             run.Fields["commit"] = commit
             try {
                 Commands.Git(checkout, "diff", "--check", run.Text("base"), commit)
-                ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), commit)
+                ProtectedPaths.Local(
+                    checkout,
+                    J.Get(record, "policy"),
+                    J.Get(record, "approval"),
+                    run.Text("base"),
+                    commit
+                )
             } catch (error Exception) {
                 run.Fields["state"] = "failed"
                 run.Fields["error"] = error.Message
@@ -270,7 +254,10 @@ internal class V2Contribution {
                 )
                 File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(results))
                 if result.Code != 0 {
-                    throw Exception("Independent external verification failed; no publication authority granted")
+                    throw CliFailure(
+                        "verification_failed",
+                        "Independent external verification failed; no publication authority granted"
+                    )
                 }
             }
             Verification.Candidate(checkout)
@@ -307,7 +294,7 @@ internal class V2Contribution {
                 throw Exception("Verified base changed")
             }
             Commands.Git(checkout, "diff", "--exit-code")
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
@@ -325,7 +312,13 @@ internal class V2Contribution {
                 J.Text(J.Get(record, "issue"), "title")
             )
             run.Fields["commit"] = Commands.Git(checkout, "rev-parse", "HEAD")
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                run.Text("commit")
+            )
             run.Fields["verification_provenance"] = "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
@@ -372,7 +365,13 @@ internal class V2Contribution {
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
             Commands.Git(checkout, "diff", "--check", run.Text("base"), run.Text("commit"))
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                run.Text("commit")
+            )
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
                 Commands.Git(
@@ -457,8 +456,9 @@ internal class V2Contribution {
             if parents.Count != 1 || J.Text(parents[0], "sha") != J.Text(receipt, "expected") || J.Text(
                 current,
                 "expected"
-            ) != J.Text(receipt, "expected") {
-                throw Exception("Receipt does not match the authoritative contribution revision")
+            ) != J
+                .Text(receipt, "expected") {
+                throw CliFailure("stale_approval", "Receipt does not match the authoritative contribution revision")
             }
             if J.Text(receipt, "repo") != repo || J.Text(receipt, "approval") != J.Text(state.Value(), "approval_id") ||
                 J.Text(receipt, "reservation") != J.Text(J.Get(state.Value(), "reservation"), "reservation") ||
@@ -473,10 +473,10 @@ internal class V2Contribution {
                 J.Get(record, "approval"),
                 "base_branch"
             ) {
-                throw Exception("PR receipt lacks current exact-commit coordination authority")
+                throw CliFailure("stale_approval", "PR receipt lacks current exact-commit coordination authority")
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
-            policy.ValidateTools(J.Get(metadata, "tools"))
+            policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
             let amendment = J.Get(receipt, "amendment")
             if current.GetRawText() != contribution.GetRawText() {
                 Amendment.ValidateReceipt(amendment, policy)
@@ -529,6 +529,7 @@ internal class V2Contribution {
                 Synchronization.Remote(
                     repo,
                     policy.Value,
+                    J.Get(record, "approval"),
                     J.Text(J.Get(record, "approval"), "base"),
                     history,
                     J.Text(metadata, "fork"),
@@ -538,6 +539,7 @@ internal class V2Contribution {
                 ProtectedPaths.Remote(
                     repo,
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     J.Text(J.Get(record, "approval"), "base"),
                     J.Text(metadata, "fork"),
                     exactHead
@@ -568,6 +570,7 @@ internal class V2Contribution {
             run.Fields["pr"] = number
             run.Fields["commit"] = exactHead
             run.Fields["pr_url"] = J.Text(pull, "html_url")
+            run.Fields["policy"] = J.Get(record, "policy")
             return run
         }
     }

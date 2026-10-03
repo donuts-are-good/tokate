@@ -88,7 +88,7 @@ internal class Coordinator {
                 request,
                 "approval"
             ) {
-                throw Exception("Stale state or approval; evicted requests cannot repeat effects")
+                throw CliFailure("stale_approval", "Stale state or approval; evicted requests cannot repeat effects")
             }
             let record = state.Check(repo, number, donor)
             var outcome Object = J.Map()
@@ -127,7 +127,10 @@ internal class Coordinator {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(
+                    J.Get(metadata, "tools"),
+                    J.Text(metadata, "source")
+                )
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {
                     RequestData.Correction(correction, J.Text(metadata, "head"), J.Get(record, "policy"))
@@ -496,6 +499,7 @@ internal class Coordinator {
                 Synchronization.Remote(
                     repo,
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     J.Text(J.Get(record, "approval"), "base"),
                     history,
                     J.Text(metadata, "fork"),
@@ -506,6 +510,7 @@ internal class Coordinator {
                 ProtectedPaths.Remote(
                     repo,
                     J.Get(record, "policy"),
+                    J.Get(record, "approval"),
                     J.Text(metadata, "previous"),
                     J.Text(metadata, "fork"),
                     J.Text(metadata, "head")
@@ -537,7 +542,7 @@ internal class Coordinator {
         private func Revalidate(repo string, issue int32, state CoordinationState, actor JsonElement, donor string) {
             let live = CoordinationState.Load(repo, issue)
             if live.Sha != state.Sha {
-                throw Exception("Coordination revision changed during publication")
+                throw CliFailure("stale_approval", "Coordination revision changed during publication")
             }
             live.Check(repo, issue, donor)
             live.Reservation(actor)
@@ -564,6 +569,7 @@ internal class Coordinator {
             ProtectedPaths.Remote(
                 repo,
                 J.Get(record, "policy"),
+                J.Get(record, "approval"),
                 J.Text(J.Get(record, "approval"), "base"),
                 J.Text(metadata, "fork"),
                 J.Text(metadata, "head")

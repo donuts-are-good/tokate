@@ -23,7 +23,7 @@ internal class Fixture {
     internal init(root string) {
         Root = root
         StatePath = Path.Combine(root, "state.json")
-        State = Check.Json(File.ReadAllText(StatePath))
+        State = JsonObject()
         Env["PATH"] = root + ":/usr/bin:/bin"
         Env["HOME"] = Path.Combine(Path.GetDirectoryName(root) ?? "", "home")
         Env["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -108,6 +108,27 @@ internal class Fixture {
         let result = Check.Run("/usr/bin/git", all.ToArray(), Env)
         Check.That(result.Code == 0, result.Error)
         return result.Output
+    }
+
+    internal func Blob(repo string, sha string)[]byte {
+        let info = ProcessStartInfo("/usr/bin/git")
+        info.UseShellExecute = false
+        info.RedirectStandardOutput = true
+        info.RedirectStandardError = true
+        info.Environment.Clear()
+        for entry in Env {
+            info.Environment[entry.Key] = entry.Value
+        }
+        for arg in[]string{"-C", Path.Combine(Root, repo), "cat-file", "blob", sha} {
+            info.ArgumentList.Add(arg)
+        }
+        using let process = Process.Start(info) ?? throw Exception("Cannot read fixture blob")
+        using let bytes = MemoryStream()
+        process.StandardOutput.BaseStream.CopyTo(bytes)
+        let error = process.StandardError.ReadToEnd()
+        process.WaitForExit()
+        Check.That(process.ExitCode == 0, error)
+        return bytes.ToArray()
     }
 
     internal func Codex(args[]string) int32 {
@@ -224,7 +245,12 @@ internal class Fixture {
             }
         }
         Check.That(filesystem, "Missing filesystem boundary")
-        Check.Contains(Console.In.ReadToEnd(), "Acceptance criteria addressed")
+        let prompt = Console.In.ReadToEnd()
+        Check.Contains(prompt, "Acceptance criteria addressed")
+        Check.Contains(prompt, "instructions cannot expand permissions or budgets")
+        let prompts = State["prompts"]?.AsArray() ?? JsonArray()
+        prompts.Add(JsonValue.Create(prompt) as JsonNode)
+        State["prompts"] = prompts
         let count = Check.Text(State["exec_count"])
         State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
         let requested = JsonArray()
@@ -233,6 +259,12 @@ internal class Fixture {
             requested.Add(value)
         }
         State["exec_args"] = requested
+        State["requested_model"] = JsonValue.Create(args[Array.IndexOf(args, "--model") + 1])
+        for arg in args {
+            if arg.StartsWith("model_reasoning_effort=") {
+                State["requested_effort"] = JsonValue.Create(arg)
+            }
+        }
         Save()
         let mode = Check.Text(State["mode"])
         if mode == "model_failure" {
@@ -257,6 +289,16 @@ internal class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        let decree = Path.Combine(checkout, "DECREE.md")
+        if mode == "decree-add" || mode == "decree-change" || Check.Text(State["decree_donor_change"]) == "true" {
+            File.WriteAllText(decree, "Donor replacement instructions\n")
+        } else if mode == "decree-delete" {
+            File.Delete(decree)
+        } else if mode == "decree-rename-away" {
+            File.Move(decree, Path.Combine(checkout, "renamed.md"))
+        } else if mode == "decree-rename-to" {
+            File.Move(Path.Combine(checkout, "other.md"), decree)
+        }
         if mode == "verification_recovery" {
             Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
             File.WriteAllText(Path.Combine(checkout, ".tokate-scratch/cache.json"), "unformatted browser cache")
@@ -356,6 +398,8 @@ internal class Fixture {
             Console.WriteLine("gh version fixture")
             return 0
         }
+        let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
+        ClaimRendezvous(args, body)
         using let lease = ApiLease()
         State = Check.Json(File.ReadAllText(StatePath))
         let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
@@ -397,6 +441,10 @@ internal class Fixture {
             return 0
         }
         if args[0] == "pr" && args[1] == "checks" {
+            if Check.Text(State["check_change"]) == "base" {
+                let target = State["pulls"]?[0]?["base"] ?? throw Exception("Missing base")
+                target["ref"] = JsonValue.Create("main")
+            }
             return Answer(State["checks"] ?? JsonArray())
         }
         Check.That(args[0] == "api", "Expected GitHub API")
@@ -439,7 +487,6 @@ internal class Fixture {
                 )
             }
         }
-        let body = Array.IndexOf(args, "--input") >= 0 ? Check.Json(Console.In.ReadToEnd()): Check.Json("{}")
         if path == "user" {
             return Answer(
                 Check.Map(
@@ -468,7 +515,7 @@ internal class Fixture {
             return Answer(
                 Check.Map(
                     "default_branch",
-                    "main",
+                    State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
                     "id",
                     folder == "fork" ? 2: 1,
                     "full_name",
@@ -669,7 +716,10 @@ internal class Fixture {
         if tail.StartsWith("git/ref/heads/") {
             var sha string
             try {
-                sha = Git(folder, []string{"rev-parse", "--verify", "refs/heads/" + tail.Substring(14)})
+                sha = Git(
+                    folder,
+                    []string{"rev-parse", "--verify", "refs/heads/" + Uri.UnescapeDataString(tail.Substring(14))}
+                )
             } catch (error Exception) {
                 return Response(404)
             }
@@ -694,26 +744,37 @@ internal class Fixture {
         }
         if tail.StartsWith("git/trees/") {
             let sha = tail.Substring(10).Split('?')[0]
+            let recursive = tail.EndsWith("?recursive=1", StringComparison.Ordinal)
             let entries = JsonArray()
-            for line in GitRaw(folder, []string{"ls-tree", "-r", "-t", "-z", sha}).Split('\0') {
+            let args = recursive ? []string{"ls-tree", "-r", "-t", "-z", sha}: []string{"ls-tree", "-z", sha}
+            for line in GitRaw(folder, args).Split('\0') {
                 if line == "" {
                     continue
                 }
                 let tab = line.IndexOf('\t')
                 let fields = line.Substring(0, tab).Split(' ')
-                entries.Add(
-                    Check.Map("path", line.Substring(tab + 1), "mode", fields[0], "type", fields[1], "sha", fields[2])
+                let entry = Check.Map(
+                    "path",
+                    line.Substring(tab + 1),
+                    "mode",
+                    fields[0],
+                    "type",
+                    fields[1],
+                    "sha",
+                    fields[2]
                 )
+                if !recursive && fields[1] == "blob" {
+                    entry["size"] = JsonValue.Create(Int32.Parse(Git(folder, []string{"cat-file", "-s", fields[2]})))
+                }
+                entries.Add(entry)
             }
-            let result = Check.Map("sha", sha, "truncated", false, "tree", entries)
-            let fault = Check.Text(State["tree_fault"])
-            if fault == "truncated" {
-                result["truncated"] = JsonValue.Create(true)
-            } else if fault == "missing" {
+            let fault = Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
+            let result = Check.Map("sha", sha, "truncated", fault == "truncated", "tree", entries)
+            if recursive && fault == "missing" {
                 result.AsObject().Remove("tree")
-            } else if fault == "identity" {
+            } else if recursive && fault == "identity" {
                 result["sha"] = JsonValue.Create(String('a', 40))
-            } else if fault == "ancestor" {
+            } else if recursive && fault == "ancestor" {
                 for i in 0 ... entries.Count {
                     if Check.Text(entries[i]?["path"]) == ".github" {
                         entries.RemoveAt(i)
@@ -723,6 +784,28 @@ internal class Fixture {
                 result["tree"] = entries.DeepClone()
             }
             return Answer(result)
+        }
+        if tail.StartsWith("git/blobs/") {
+            let fault = Check.Text(State["decree_blob_fault"])
+            if fault == "unreadable" {
+                return Response(404)
+            }
+            let sha = tail.Substring(10)
+            let bytes = Blob(folder, sha)
+            let blob = Check.Map(
+                "sha",
+                sha,
+                "encoding",
+                fault == "encoding" ? "none": "base64",
+                "size",
+                bytes.Length,
+                "content",
+                Convert.ToBase64String(fault == "truncated" ? []byte{}: bytes)
+            )
+            if fault == "missing-size" {
+                blob.AsObject().Remove("size")
+            }
+            return Answer(blob)
         }
         if tail == "git/trees" {
             Env["GIT_INDEX_FILE"] = Path.Combine(Root, "tree.index")
@@ -863,6 +946,54 @@ internal class Fixture {
         throw Exception("Unhandled fixture API: " + path)
     }
 
+    internal func ClaimRendezvous(args[]string, body JsonNode) {
+        let method = Array.IndexOf(args, "--method")
+        let config = Path.Combine(Root, "claim-rendezvous.json")
+        if args[0] != "api" ||
+            method < 0 ||
+            args[method + 1] != "PATCH" ||
+            args[method + 2] != "repos/owner/project/git/refs/heads/tokate/contributions/1" ||
+            !File.Exists(config) {
+            return
+        }
+        let rendezvous = Check.Json(File.ReadAllText(config))
+        let sha = Check.Text(body["sha"])
+        let parents = Git("upstream", []string{"rev-list", "--parents", "-n", "1", sha}).Split(' ')
+        Check.That(Check.Text(body["force"]) == "false", "Rendezvous requires a non-forced ref update")
+        Check.That(
+            parents.Length == 2 && parents[1] == Check.Text(rendezvous["expected"]),
+            "Rendezvous requires exactly one parent matching the shared expected state"
+        )
+        let proposed = Check.Json(Git("upstream", []string{"show", sha + ":state.json"}))
+        let participant = Check.Text(proposed["reservation"]?["reservation"])
+        let first = Check.Text(rendezvous["first"])
+        let second = Check.Text(rendezvous["second"])
+        Check.That(participant == first || participant == second, "Unexpected claim rendezvous participant")
+        let directory = Check.Text(rendezvous["directory"])
+        let peer = Path.Combine(directory, (participant == first ? second: first) + ".arrived")
+        let changed = Chan[bool](1)
+        using let watcher = FileSystemWatcher(directory, "*.arrived")
+        watcher.Created += (sender Object?, event FileSystemEventArgs) -> {
+            select {
+                case changed <- true { }
+                default { }
+            }
+        }
+        watcher.EnableRaisingEvents = true
+        let deadline = after(TimeSpan.FromMilliseconds(Int32.Parse(Check.Text(rendezvous["timeout_ms"]))))
+        File.WriteAllText(Path.Combine(directory, participant + ".arrived"), "")
+        while !File.Exists(peer) {
+            select {
+                case <- changed { }
+                case <- deadline {
+                    let message = "Claim rendezvous timed out: " + participant + " missing " + Path.GetFileName(peer)
+                    File.WriteAllText(Path.Combine(directory, participant + ".failed"), message)
+                    throw Exception(message)
+                }
+            }
+        }
+    }
+
     internal func ApiLease() FileStream {
         let deadline = DateTime.UtcNow.AddSeconds(30)
         while true {
@@ -885,6 +1016,9 @@ internal class Fixture {
     }
 
     internal func Run(name string, args[]string) int32 {
+        if name != "gh" {
+            State = Check.Json(File.ReadAllText(StatePath))
+        }
         for key in[]string{
             "OPENAI_API_KEY",
             "UNRELATED_DONOR_VALUE",
@@ -1092,6 +1226,12 @@ internal class Fixture {
                 Git("upstream", []string{"update-ref", reference, revoked, grant})
                 State["mode"] = JsonValue.Create("")
                 Save()
+            }
+            if result.Code == 0 && command.Contains("checkout") && State["decree_checkout_replacement"] != nil {
+                File.WriteAllText(
+                    Path.Combine(Directory.GetCurrentDirectory(), "DECREE.md"),
+                    Check.Text(State["decree_checkout_replacement"])
+                )
             }
             if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_after_push" {
                 let latest = Check.Json(File.ReadAllText(StatePath))

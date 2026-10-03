@@ -50,7 +50,10 @@ internal class ProtectedPaths {
             return path == entry
         }
 
-        internal func Check(policy JsonElement, path string) {
+        internal func Check(policy JsonElement, approval JsonElement, path string) {
+            if Decree.Protected(path, approval) {
+                throw Exception("Contribution changes approved root DECREE.md")
+            }
             if Matches(".github/workflows/", path) || path.StartsWith(".github/tokate", StringComparison.Ordinal) {
                 throw Exception("Contribution changes protected owner configuration: " + J.Write(path))
             }
@@ -61,8 +64,11 @@ internal class ProtectedPaths {
             }
         }
 
-        private func Relation(policy JsonElement, path string) int32 {
-            if Matches(".github/workflows/", path) || path.StartsWith(".github/tokate", StringComparison.Ordinal) {
+        private func Relation(policy JsonElement, approval JsonElement, path string) int32 {
+            if Decree.Protected(path, approval) || Matches(".github/workflows/", path) || path.StartsWith(
+                ".github/tokate",
+                StringComparison.Ordinal
+            ) {
                 return 2
             }
             var ancestor = path == ".github"
@@ -166,13 +172,14 @@ internal class ProtectedPaths {
 
         internal func EqualTrees(
             policy JsonElement,
+            approval JsonElement,
             trusted Dictionary[string, string],
             candidate Dictionary[string, string]
         ) {
             let paths = HashSet[string](trusted.Keys, StringComparer.Ordinal)
             paths.UnionWith(candidate.Keys)
             for path in paths {
-                let relation = Relation(policy, path)
+                let relation = Relation(policy, approval, path)
                 if relation == 0 {
                     continue
                 }
@@ -219,7 +226,7 @@ internal class ProtectedPaths {
             }
         }
 
-        internal func Local(checkout string, policy JsonElement, base string, head string = "") {
+        internal func Local(checkout string, policy JsonElement, approval JsonElement, base string, head string = "") {
             let args = List[string]{
                 "diff",
                 "--no-ext-diff",
@@ -247,11 +254,18 @@ internal class ProtectedPaths {
             }
             for i in 0 ... paths.Length - 1 {
                 Relative(paths[i])
-                Check(policy, paths[i])
+                Check(policy, approval, paths[i])
             }
         }
 
-        internal func Remote(repo string, policy JsonElement, base string, fork string, head string) {
+        internal func Remote(
+            repo string,
+            policy JsonElement,
+            approval JsonElement,
+            base string,
+            fork string,
+            head string
+        ) {
             Data.Repo(repo)
             Data.Repo(fork)
             Data.CommitSha(base)
@@ -274,7 +288,7 @@ internal class ProtectedPaths {
             for file in files.EnumerateArray() {
                 let path = J.Text(file, "filename")
                 Relative(path)
-                Check(policy, path)
+                Check(policy, approval, path)
                 if !filenames.Add(path) {
                     throw Exception("Duplicate GitHub file diff evidence")
                 }
@@ -291,7 +305,7 @@ internal class ProtectedPaths {
                 if status == "renamed" || previous.ValueKind != JsonValueKind.Undefined {
                     let name = J.Text(file, "previous_filename")
                     Relative(name)
-                    Check(policy, name)
+                    Check(policy, approval, name)
                 }
             }
         }

@@ -324,9 +324,18 @@ internal class DonorSelectionChecks {
             )
         }
 
-        private func VersionTwo(binary string) {
+        private func VersionTwo(binary string, unrestricted bool = false) {
             using let coordination = CoordinationFlow(binary)
             coordination.Initialize()
+            if unrestricted {
+                let path = Path.Combine(coordination.Flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["model_policy"] = JsonValue.Create("unrestricted")
+                policy.AsObject().Remove("models")
+                File.WriteAllText(path, policy.ToJsonString())
+                coordination.Flow.Commit("Unrestricted managed selection")
+                coordination.Flow.Approve()
+            }
             coordination.Claim()
             let flow = coordination.Flow
             Set(flow)
@@ -381,7 +390,156 @@ internal class DonorSelectionChecks {
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Rejected tool policy spent extra inference")
         }
 
-        internal func All(binary string) {
+        private func ModelPolicy(binary string) {
+            for omitted in[]bool{true, false} {
+                using let flow = NativeFlow(binary)
+                flow.Initialize()
+                let path = Path.Combine(flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["model_policy"] = JsonValue.Create("unrestricted")
+                if omitted {
+                    policy.AsObject().Remove("models")
+                } else {
+                    policy["models"] = Check.Map()
+                }
+                File.WriteAllText(path, policy.ToJsonString())
+                flow.Commit("Unrestricted model policy")
+                Select(flow, []string{}, 1)
+                let explicitChoice = Select(flow, []string{"--model", "gpt-6.1-sol", "--effort", "xhigh"})
+                Check.That(Check.Text(explicitChoice["effort"]) == "xhigh", "Unrestricted explicit effort changed")
+                Set(flow)
+                let saved = Select(flow, []string{})
+                Check.That(Check.Text(saved["source"]) == "saved donor default", "Unrestricted default rejected")
+                Select(flow, []string{"--effort", "xhigh"})
+                let unavailable = Select(flow, []string{"--availability", "unavailable"}, 1)
+                Check.Contains(Check.Text(unavailable["error"]), "donor-reported unavailable")
+                let unsupported = Select(flow, []string{"--model", "outside-catalog", "--effort", "high"}, 1)
+                Check.Contains(Check.Text(unsupported["error"]), "offline native Codex catalog")
+                for effort in[]string{"absent", "unknown"} {
+                    let settings = Check.Json(File.ReadAllText(Settings(flow)))
+                    settings["effort"] = JsonValue.Create(effort)
+                    File.WriteAllText(Settings(flow), settings.ToJsonString())
+                    let rejected = Select(flow, []string{}, 1)
+                    Check.Contains(Check.Text(rejected["error"]), "known model")
+                }
+                flow.Call([]string{"defaults", "remove"})
+                let command = "'" + binary + "' select --repo owner/project"
+                let chosen = Check.Run(
+                    "/usr/bin/script",
+                    []string{"-q", "-e", "-c", command, "/dev/null"},
+                    flow.Temp.Env,
+                    "1\n"
+                )
+                Check.Success(chosen)
+                Check.Contains(chosen.Output, "gpt-6-sol / high")
+                Check.Contains(chosen.Output, "interactive donor choice")
+                let cancelled = Check.Run(
+                    "/usr/bin/script",
+                    []string{"-q", "-e", "-c", command, "/dev/null"},
+                    flow.Temp.Env,
+                    "\n"
+                )
+                Check.That(cancelled.Code == 1, "Unrestricted terminal selection chose a fallback")
+                flow.NoInference()
+                flow.NoPr()
+            }
+            VersionTwo(binary, unrestricted: true)
+        }
+
+        private func Structured(binary string) {
+            using let flow = NativeFlow(binary)
+            let path = flow.Temp.Env["PATH"]
+            flow.Temp.Env["PATH"] = "/empty"
+            let missing = CliDiscovery.Envelope(flow.Call([]string{"defaults", "read", "--json"}), "defaults", "ok")
+            Check.That(missing["data"]?["default"] == nil, "Missing JSON defaults fabricated")
+            let saved = CliDiscovery.Envelope(
+                flow.Call(
+                    []string{
+                        "defaults",
+                        "set",
+                        "--harness",
+                        "codex",
+                        "--provider",
+                        "openai",
+                        "--model",
+                        "gpt-6.1-sol",
+                        "--effort",
+                        "high",
+                        "--json"
+                    }
+                ),
+                "defaults",
+                "ok"
+            )
+            Check.That(Check.Text(saved["data"]?["default"]?["model"]) == "gpt-6.1-sol", "JSON defaults dropped tuple")
+            flow.Temp.Env["PATH"] = path
+            flow.Initialize()
+            for availability in[]string{"unknown", "available"} {
+                let selected = CliDiscovery.Envelope(
+                    flow.Call([]string{"select", "--repo", "owner/project", "--availability", availability, "--json"}),
+                    "select",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(selected["data"]?["model"]) == "gpt-6.1-sol" && Check.Text(
+                        selected["data"]?["policy_eligible"]
+                    ) == "true",
+                    "JSON selection dropped evidence"
+                )
+            }
+            CliDiscovery.Envelope(
+                flow.Call(
+                    []string{
+                        "select",
+                        "--repo",
+                        "owner/project",
+                        "--model",
+                        "gpt-6.1-sol",
+                        "--effort",
+                        "high",
+                        "--availability",
+                        "unavailable",
+                        "--json"
+                    },
+                    1
+                ),
+                "select",
+                "error",
+                "command_failed"
+            )
+            let removed = CliDiscovery.Envelope(flow.Call([]string{"defaults", "remove", "--json"}), "defaults", "ok")
+            Check.That(Check.Text(removed["data"]?["removed"]) == "true", "JSON defaults removal missing")
+            let command = "'" + binary + "' select --repo owner/project --json 2> '" + Path.Combine(
+                flow.Temp.Root,
+                "diagnostics"
+            ) +
+                "'"
+            let terminal = Check.Run("/usr/bin/script", []string{"-q", "-e", "-c", command, "/dev/null"}, flow.Temp.Env)
+            CliDiscovery.Envelope(terminal, "select", "error", "command_failed")
+            Check.That(!terminal.Output.Contains("Choice number"), "JSON terminal selection prompted")
+            flow.NoInference()
+        }
+
+        internal func All(binary string, selected string = "") {
+            if selected != "" {
+                if selected == "Structured" {
+                    Structured(binary)
+                    Console.WriteLine(
+                        "PASS structured defaults/selection, availability and terminal no-prompt contract"
+                    )
+                } else if selected == "ModelPolicy" {
+                    ModelPolicy(binary)
+                    Console.WriteLine(
+                        "PASS unrestricted explicit/default/terminal selection, known controls and no fallback"
+                    )
+                } else {
+                    throw Exception("Unknown selection test group")
+                }
+                return
+            }
+
+            Structured(binary)
+            Console.WriteLine("PASS structured defaults/selection, availability and terminal no-prompt contract")
             LocalSettings(binary)
             Console.WriteLine("PASS donor defaults set/read/remove and nonsecret storage")
             Choices(binary)
@@ -395,6 +553,8 @@ internal class DonorSelectionChecks {
             InteractiveChoices(binary)
             Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
             VersionTwo(binary)
+            ModelPolicy(binary)
+            Console.WriteLine("PASS unrestricted explicit/default/terminal selection, known controls and no fallback")
             Console.WriteLine("PASS V2 authorized defaults, exact tool policy and declaration conflicts")
         }
     }

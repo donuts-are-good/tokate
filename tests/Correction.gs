@@ -698,6 +698,9 @@ internal class CorrectionChecks {
             let record = Read(failed)
             record.AsObject().Remove("failure_reason")
             record.AsObject().Remove("failure_stage")
+            record["error"] = JsonValue.Create(
+                "Owner verification failed. See verification.json. No PR will be opened."
+            )
             File.WriteAllText(Path.Combine(failed, "run.json"), record.ToJsonString())
             File.WriteAllText(
                 Path.Combine(failed, "checkout/result.txt"),
@@ -814,10 +817,27 @@ internal class CorrectionChecks {
             }
         }
 
-        private func Managed(binary string) {
-            for originalMode in[]string{"staged_whitespace", "verification_fail"} {
+        private func Managed(binary string, modelPolicy string = "") {
+            for originalMode in modelPolicy == "" ? []string{"staged_whitespace", "verification_fail"}: []string{
+                "staged_whitespace"
+            } {
                 using let flow = CoordinationFlow(binary)
                 flow.Initialize()
+                if modelPolicy != "" {
+                    let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+                    let policy = Check.Json(File.ReadAllText(path))
+                    policy["model_policy"] = JsonValue.Create(modelPolicy)
+                    if modelPolicy == "unrestricted" {
+                        policy.AsObject().Remove("models")
+                    } else {
+                        (policy["models"] ?? throw Exception("Missing model whitelist"))[
+                            "claude-sonnet-4-6"
+                        ] = Check.Json("[\"absent\"]")
+                    }
+                    File.WriteAllText(path, policy.ToJsonString())
+                    flow.Flow.Commit("External correction effort policy")
+                    flow.Flow.Approve()
+                }
                 let run = ManagedRun(flow, originalMode)
                 Prepared(flow.Flow, run)
                 let originalTools = Check.Text(Read(run)["tools"])
@@ -825,6 +845,7 @@ internal class CorrectionChecks {
                 File.WriteAllText(
                     flow.Tools,
                     "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"unknown\"}]"
+                        .Replace("unknown", modelPolicy == "" ? "unknown": "absent")
                 )
                 Recover(flow.Flow, run, commit, tools: flow.Tools)
                 Once(flow.Flow)
@@ -1040,6 +1061,94 @@ internal class CorrectionChecks {
             AmendCorrected(flow, run, archive)
         }
 
+        private func DecreeEdits(binary string) {
+            for version in[]int32{1, 2} {
+                for legacy in[]bool{false, true} {
+                    using let test = DecreeFlow(binary, version)
+                    test.Initialize()
+                    test.Text("Approved owner instructions\n")
+                    test.Flow.Approve()
+                    if legacy {
+                        test.Legacy()
+                    }
+                    let run = test.Start()
+                    test.Flow.Mode("staged_whitespace")
+                    test.Flow.Call([]string{"work", "--run", run}, 1)
+                    let archive = Prepared(test.Flow, run)
+                    let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                    let decree = Path.Combine(run, "checkout/DECREE.md")
+                    File.WriteAllText(decree, "Corrected instruction edit\n")
+                    var commit = Correct(test.Flow, run)
+                    if !legacy {
+                        Check.Contains(Recover(test.Flow, run, commit, 1).Error, "approved root DECREE.md")
+                        let refused = Read(run, "correction.json")
+                        Check.That(refused["verification"] == nil, "Protected correction reached verification")
+                        Check.That(
+                            Check.Text(refused["failure_stage"]) == "candidate_validation",
+                            "Protected correction passed candidate validation"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                            "Refused correction rewrote original run"
+                        )
+                        test.Flow.NoPr()
+                        File.WriteAllText(decree, "Approved owner instructions\n")
+                        commit = Correct(test.Flow, run)
+                    }
+                    Recover(test.Flow, run, commit)
+                    if let coordinator = test.V2 {
+                        test.Flow.Call([]string{"submit", "--run", run})
+                        test.Flow.Reload()
+                        let request = Check.Json(Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8))
+                        coordinator.Coordinate(coordinator.Event(request))
+                        test.Flow.Call([]string{"submit", "--run", run})
+                    }
+                    let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+                    let correction = File.ReadAllText(Path.Combine(run, "correction.json"))
+                    let previous = Check.Text(Read(run)["commit"])
+                    File.WriteAllText(decree, "Amended instruction edit\n")
+                    commit = Correct(test.Flow, run, "Amendment with instruction edit\n")
+                    let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+                    if legacy {
+                        test.Flow.Call(args)
+                        if let coordinator = test.V2 {
+                            test.Flow.Reload()
+                            let request = Check.Json(
+                                Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8)
+                            )
+                            coordinator.Coordinate(coordinator.Event(request))
+                            test.Flow.Call(args)
+                        }
+                        test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"})
+                    } else {
+                        Check.Contains(test.Flow.Call(args, 1).Error, "approved root DECREE.md")
+                        Check.That(
+                            !Directory.Exists(Path.Combine(run, "amendments", commit)),
+                            "Protected amendment reached verification"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "run.json")) == saved,
+                            "Refused amendment rewrote saved run"
+                        )
+                        Check.That(
+                            File.ReadAllText(Path.Combine(run, "correction.json")) == correction,
+                            "Refused amendment changed correction evidence"
+                        )
+                        test.Flow.Reload()
+                        Check.That(
+                            Check.Text(test.Flow.State["pulls"]?[0]?["head"]?["sha"]) == previous,
+                            "Protected amendment published"
+                        )
+                    }
+                    Check.That(
+                        File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
+                        "Instruction edit changed original archive"
+                    )
+                    Once(test.Flow, 1)
+                }
+            }
+        }
+
         private func CorrectedAmendmentsV2(binary string) {
             using let flow = CoordinationFlow(binary)
             flow.Initialize()
@@ -1056,8 +1165,67 @@ internal class CorrectionChecks {
             AmendCorrected(flow.Flow, run, archive, flow)
         }
 
+        private func Structured(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]")
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Commit("Correction JSON checks")
+            flow.Git("-C", flow.Upstream, "push", Path.Combine(flow.Bin, "fork"), "main")
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("staged_whitespace")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "trailing whitespace")
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let prepared = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--prepare", "--json"}),
+                "recover",
+                "ok"
+            )
+            Check.That(
+                Check.Text(prepared["data"]?["artifacts"]?["original_evidence"]) == Path.Combine(
+                    run,
+                    "original-evidence"
+                ),
+                "Prepared JSON lost original artifact"
+            )
+            let failedCommit = Correct(flow, run, "")
+            let failed = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
+                "recover",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(failed["data"]?["run_state"]?["correction"]?["state"]) == "failed",
+                "JSON correction lost failed attempt"
+            )
+            let commit = Correct(flow, run)
+            let published = CliDiscovery.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
+                "recover",
+                "ok"
+            )
+            Check.That(
+                Check.Text(published["data"]?["commit"]) == commit && Check.Text(
+                    published["data"]?["correction"]?["commit"]
+                ) == commit,
+                "JSON correction lost exact head"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
+                "JSON correction changed original"
+            )
+            Once(flow, 1)
+        }
+
         internal func All(binary string, selected string = "") {
+            var matched bool
             for name in[]string{
+                "DecreeEdits",
+                "Structured",
                 "CorrectedAmendmentsV1",
                 "CorrectedAmendmentsV2",
                 "Whitespace",
@@ -1070,6 +1238,7 @@ internal class CorrectionChecks {
                 "Incomplete",
                 "ProtectedAndExact",
                 "InterruptedNative",
+                "ManagedAbsent",
                 "Managed",
                 "InterruptedManaged",
                 "ChangedCandidate",
@@ -1081,7 +1250,14 @@ internal class CorrectionChecks {
                 if selected != "" && selected != name {
                     continue
                 }
+                matched = true
                 switch name {
+                    case "DecreeEdits" {
+                        DecreeEdits(binary)
+                    }
+                    case "Structured" {
+                        Structured(binary)
+                    }
                     case "CorrectedAmendmentsV1" {
                         CorrectedAmendmentsV1(binary)
                     }
@@ -1118,6 +1294,11 @@ internal class CorrectionChecks {
                     case "InterruptedNative" {
                         InterruptedNative(binary)
                     }
+                    case "ManagedAbsent" {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            Managed(binary, mode)
+                        }
+                    }
                     case "Managed" {
                         Managed(binary)
                     }
@@ -1142,6 +1323,7 @@ internal class CorrectionChecks {
                 }
                 Console.WriteLine("PASS correction " + name)
             }
+            Check.That(matched, "Unknown correction selector: " + selected)
         }
     }
 }

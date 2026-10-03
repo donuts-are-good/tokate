@@ -9,6 +9,17 @@ import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
 
+internal class CliFailure : Exception {
+    internal let Code string
+    internal let Action[]string
+    internal let Summary string
+    internal init(code string, message string, action[]string = nil, summary string = "") : base(message) {
+        Code = code
+        Action = action ?? []string{}
+        Summary = summary == "" ? message: summary
+    }
+}
+
 internal class Args {
     internal let Values Dictionary[string, string] = Dictionary[string, string]()
     internal var Command string = "help"
@@ -149,8 +160,21 @@ internal class Data {
         }
 
         internal func CommitSha(value string) string {
-            if !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
+            if value.Length != 40 || !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
                 throw Exception("Expected an exact 40-character Git commit SHA")
+            }
+            return value
+        }
+
+        internal func Branch(value string) string {
+            if value == "" || value == "@" || value.StartsWith("-") || value.EndsWith(".") || value.Contains("..") ||
+                value.Contains("@{") || Regex.IsMatch(value, "[\\x00-\\x20\\x7f~^:?*\\\\\\[]") {
+                throw Exception("Expected a Git branch name")
+            }
+            for part in value.Split('/') {
+                if part == "" || part.StartsWith(".") || part.EndsWith(".lock") {
+                    throw Exception("Expected a Git branch name")
+                }
             }
             return value
         }
@@ -198,6 +222,13 @@ internal class GitHub {
             return Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(result, "content")))
         }
 
+        internal func Branch(repo string, branch string) string -> Data.CommitSha(
+            J.Text(
+                J.Get(Api("repos/" + repo + "/git/ref/heads/" + Uri.EscapeDataString(Data.Branch(branch))), "object"),
+                "sha"
+            )
+        )
+
         internal func Issue(repo string, number int32) JsonElement {
             let issue = Api("repos/" + repo + "/issues/" + number.ToString())
             if J.Text(issue, "state") != "open" || J.Get(issue, "pull_request").ValueKind != JsonValueKind.Undefined {
@@ -233,6 +264,7 @@ internal class GitHub {
 internal class Policy {
     internal var Value JsonElement
     internal var Digest string = ""
+    internal var ModelPolicy string = "whitelist"
     internal init(text string) {
         Value = J.Parse(text)
         Digest = Data.Hash(text)
@@ -240,30 +272,58 @@ internal class Policy {
             throw Exception("Policy version must be 1 or 2")
         }
         ProtectedPaths.Validate(J.Get(Value, "protected_paths"))
+        var modes int32
+        var modelMaps int32
+        for field in Value.EnumerateObject() {
+            if field.Name == "model_policy" {
+                modes++
+                if modes > 1 ||
+                    field
+                    .Value
+                    .ValueKind != JsonValueKind.String ||
+                    (field.Value.GetString() != "whitelist" && field.Value.GetString() != "unrestricted") {
+                    throw Exception("model_policy must be exactly whitelist or unrestricted, without duplicates")
+                }
+                ModelPolicy = field.Value.GetString() ?? ""
+            }
+            if field.Name == "models" {
+                modelMaps++
+            }
+        }
         let models = J.Get(Value, "models")
-        if models.ValueKind != JsonValueKind.Object {
+        if modes > 0 && modelMaps > 1 {
+            throw Exception("Explicit model policy cannot contain duplicate models fields")
+        }
+        if ModelPolicy == "unrestricted" {
+            if models.ValueKind != JsonValueKind.Undefined &&
+                (models.ValueKind != JsonValueKind.Object || models.EnumerateObject().MoveNext()) {
+                throw Exception("Unrestricted model policy requires omitted models or an empty object")
+            }
+        } else if models.ValueKind != JsonValueKind.Object {
             throw Exception("Policy models must map model names to effort arrays")
         }
         var count int32
-        for model in models.EnumerateObject() {
-            if !Regex.IsMatch(model.Name, "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
-                throw Exception("Invalid model name")
-            }
-            let efforts = J.Items(model.Value)
-            if efforts.Count == 0 {
-                throw Exception("Each model needs allowed efforts")
-            }
-            for effort in efforts {
-                if effort.ValueKind != JsonValueKind.String || !",minimal,low,medium,high,xhigh,max,ultra,".Contains(
-                    "," + effort.GetString() + ","
-                ) &&
-                    !(J.Number(Value, "version") == 2 && effort.GetString() == "unknown") {
-                    throw Exception("Invalid reasoning effort")
+        if models.ValueKind == JsonValueKind.Object {
+            for model in models.EnumerateObject() {
+                if !Regex.IsMatch(model.Name, "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
+                    throw Exception("Invalid model name")
                 }
+                let efforts = J.Items(model.Value)
+                if efforts.Count == 0 {
+                    throw Exception("Each model needs allowed efforts")
+                }
+                for effort in efforts {
+                    if effort.ValueKind != JsonValueKind.String || !ValidEffort(effort.GetString() ?? "") {
+                        throw Exception("Invalid reasoning effort")
+                    }
+                }
+                count++
             }
-            count++
         }
-        if count == 0 || J.Number(Value, "max_seconds") < 1 || J.Number(Value, "max_seconds") > 86400 {
+        if (ModelPolicy == "whitelist" && count == 0) || J.Number(Value, "max_seconds") < 1 || J.Number(
+            Value,
+            "max_seconds"
+        ) > 86400 {
             throw Exception("Set models and a max_seconds limit from 1 to 86400")
         }
         if J.Get(Value, "allow_network").ValueKind != JsonValueKind.True && J.Get(Value, "allow_network")
@@ -311,14 +371,46 @@ internal class Policy {
         }
     }
 
-    internal func Validate(model string, effort string, seconds int32, network bool) {
-        var allowed bool
+    private func ValidEffort(effort string) bool -> Array.IndexOf(
+        "minimal low medium high xhigh max ultra".Split(' '),
+        effort
+    ) >= 0 ||
+        (
+        J.Number(Value, "version") == 2 &&
+            (
+            effort == "unknown" ||
+                (effort == "absent" && J.Get(Value, "model_policy").ValueKind == JsonValueKind.String)
+        )
+    )
+
+    internal func Allows(model string, effort string) bool {
+        if ModelPolicy == "unrestricted" {
+            return true
+        }
         for item in J.Items(J.Get(J.Get(Value, "models"), model)) {
             if item.GetString() == effort {
-                allowed = true
+                return true
             }
         }
-        if !allowed {
+        return false
+    }
+
+    internal func ManagedPair(model string, effort string) bool -> Regex.IsMatch(
+        model,
+        "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    ) &&
+        ValidEffort(effort) &&
+        effort != "absent" &&
+        (J.Number(Value, "version") != 2 || (model != "unknown" && effort != "unknown"))
+
+    internal func Validate(model string, effort string, seconds int32, network bool, external bool = false) {
+        if !Regex.IsMatch(model, "^[A-Za-z0-9][A-Za-z0-9._-]*$") || !ValidEffort(effort) {
+            throw Exception("Invalid model name or reasoning effort")
+        }
+        if !external && !ManagedPair(model, effort) {
+            throw Exception("Tokate-managed execution requires a known model and supported effort control")
+        }
+        if !Allows(model, effort) {
             throw Exception("Model/effort pair is not allowed by the repository policy")
         }
         if seconds < 1 || seconds > J.Number(Value, "max_seconds") {
@@ -329,9 +421,23 @@ internal class Policy {
         }
     }
 
-    internal func ValidateTools(tools JsonElement) {
+    internal func ValidateTools(tools JsonElement, source string = "external") {
         if J.Number(Value, "version") != 2 || J.Items(tools).Count == 0 {
             throw Exception("Version 2 needs a nonempty tool declaration")
+        }
+        if source != "external" && source != "tokate" {
+            throw Exception("Invalid contribution source")
+        }
+        if source == "tokate" &&
+            (
+            J.Items(tools).Count != 1 || J.Text(J.Items(tools)[0], "harness") != "codex" || J.Text(
+                J.Items(tools)[0],
+                "provider"
+            ) != "openai"
+        ) {
+            throw Exception(
+                "Tokate-launched execution currently supports one codex/openai declaration; other harnesses use external"
+            )
         }
         for tool in J.Items(tools) {
             var allowed bool
@@ -346,7 +452,7 @@ internal class Policy {
             if !allowed {
                 throw Exception("Declared harness/provider is not allowed by owner policy")
             }
-            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
+            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false, source == "external")
         }
     }
     shared {

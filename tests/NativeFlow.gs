@@ -97,10 +97,13 @@ internal class NativeFlow : IDisposable {
         return result
     }
 
-    internal func Approve() -> Call(
-        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-        owner: true
-    )
+    internal func Approve(baseBranch string = "") {
+        let args = List[string]{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}
+        if baseBranch != "" {
+            args.AddRange([]string{"--base-branch", baseBranch})
+        }
+        Call(args.ToArray(), owner: true)
+    }
 
     internal func CommitIdentity(folder string, sha string, name string, email string) {
         let identity = Git("-C", folder, "show", "-s", "--format=%an%n%ae%n%cn%n%ce", sha).Split('\n')
@@ -124,7 +127,8 @@ internal class NativeFlow : IDisposable {
         seconds string = "30",
         model string = "gpt-6.1-sol",
         code int32 = 0,
-        network bool = false
+        network bool = false,
+        effort string = "high"
     ) string {
         let args = List[string]{
             "claim",
@@ -135,7 +139,7 @@ internal class NativeFlow : IDisposable {
             "--model",
             model,
             "--effort",
-            "high",
+            effort,
             "--seconds",
             seconds,
             "--runs",
@@ -245,6 +249,140 @@ internal class NativeFlow : IDisposable {
         NoInference()
     }
 
+    internal func StructuredContract() {
+        let approval = Call(
+            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor", "--json"},
+            owner: true
+        )
+        CliDiscovery.Envelope(approval, "approve", "ok")
+        let policy = Call([]string{"policy", "--repo", "owner/project", "--json"})
+        let value = CliDiscovery.Envelope(policy, "policy", "ok")
+        Check.That(Check.Text(value["data"]?["policy"]?["version"]) == "1", "Missing projected policy")
+        let legacy = Check.Json(Call([]string{"policy", "--repo", "owner/project"}).Output)
+        Check.That(
+            legacy["schema_version"] == nil && Check.Text(legacy["version"]) == "1",
+            "Legacy piped policy changed"
+        )
+        let claim = CliDiscovery.Envelope(
+            Call(
+                []string{
+                    "claim",
+                    "--repo",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "high",
+                    "--seconds",
+                    "30",
+                    "--runs",
+                    Path.Combine(Temp.Root, "runs"),
+                    "--json"
+                }
+            ),
+            "claim",
+            "ok"
+        )
+        let run = Check.Text(claim["data"]?["run"])
+        Check.That(Path.IsPathFullyQualified(run), "Claim omitted executable run path")
+        NoInference()
+        let work = Call([]string{"work", "--run", run, "--json", "--traffic"})
+        CliDiscovery.Envelope(work, "work", "ok")
+        Check.Contains(work.Error, "Running gpt-6.1-sol")
+        Check.Contains(work.Error, "Tokate API traffic:")
+        Check.That(
+            !work.Output.Contains("synthetic-raw") && !work.Output.Contains("synthetic-usage-secret"),
+            "Inference output leaked"
+        )
+        CliDiscovery.Envelope(Call([]string{"publish", "--run", run, "--json"}), "publish", "ok")
+        CliDiscovery.Envelope(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
+            "verify-pr",
+            "ok"
+        )
+        CliDiscovery.Envelope(Call([]string{"checks", "--run", run, "--json"}, 8), "checks", "pending")
+        CliDiscovery.Envelope(
+            Call([]string{"checks", "--run", run, "--watch", "--timeout", "1", "--json"}, 8),
+            "checks",
+            "pending"
+        )
+        for outcome in[]string{"fail", "pass"} {
+            Reload()
+            State["checks"] = Check.Json(
+                "[{\"name\":\"verify\",\"bucket\":\"" + outcome + "\",\"output\":\"synthetic-check-log-marker\"}]"
+            )
+            Save()
+            let result = Call(
+                []string{"checks", "--repo", "owner/project", "--pr", "10", "--json"},
+                outcome == "pass" ? 0: 1
+            )
+            let check = CliDiscovery.Envelope(
+                result,
+                "checks",
+                outcome == "pass" ? "ok": "error",
+                outcome == "pass" ? "": "verification_failed"
+            )
+            Check.That(check["data"]?["checks"]?.AsArray().Count == 1, "Missing check summary")
+            Check.That(!result.Output.Contains("synthetic-check-log-marker"), "Raw check data leaked")
+        }
+        File.SetUnixFileMode(
+            Path.Combine(Bin, "codex-impl"),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        )
+        CliDiscovery.Envelope(Call([]string{"work", "--run", run, "--json"}, 1), "work", "error", "invalid_state")
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "JSON or suggestions spent extra inference")
+        Approve()
+        Reload()
+        let originalPulls = State["pulls"]?.ToJsonString() ?? ""
+        CliDiscovery.Envelope(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, 1, owner: true),
+            "verify-pr",
+            "error",
+            "stale_approval"
+        )
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Receipt rejection spent inference")
+        Check.That((State["pulls"]?.ToJsonString() ?? "") == originalPulls, "Receipt rejection changed the PR")
+        Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
+        CliDiscovery.Envelope(
+            Call([]string{"publish", "--run", run, "--json"}, 1),
+            "publish",
+            "error",
+            "stale_approval"
+        )
+    }
+
+    internal func StructuredFailures() {
+        for scenario in[]string{"authentication", "inference"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim(seconds: "1")
+            if scenario == "authentication" {
+                File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
+                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+                let value = CliDiscovery.Envelope(failure, "work", "error", "authentication_required")
+                Check.That(
+                    Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
+                        value["next_actions"]?[0]?[1]
+                    ) == "login",
+                    "Missing complete authentication action"
+                )
+                flow.NoInference()
+            } else {
+                flow.Mode("timeout")
+                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+                CliDiscovery.Envelope(failure, "work", "error", "inference_failed")
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Inference failure retried")
+            }
+            flow.NoPr()
+        }
+    }
+
     internal func CrossAccountFlow() {
         Approve()
         let run = Claim()
@@ -292,6 +430,135 @@ internal class NativeFlow : IDisposable {
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == "1800",
             "Saved explicit budget changed"
         )
+    }
+
+    internal func SetModelPolicy(mode string, models string = "") {
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let original = File.ReadAllText(path)
+        let policy = Check.Json(original)
+        if mode == "" {
+            policy.AsObject().Remove("model_policy")
+        } else {
+            policy["model_policy"] = JsonValue.Create(mode)
+        }
+        if models == "omit" {
+            policy.AsObject().Remove("models")
+        } else if models != "" {
+            policy["models"] = Check.Json(models)
+        }
+        if policy.ToJsonString() != original {
+            File.WriteAllText(path, policy.ToJsonString())
+            Commit("Owner selects model policy")
+        }
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func ModelPolicyModes() {
+        for mode in[]string{"", "whitelist", "unrestricted", "unrestricted-empty"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            let unrestricted = mode.StartsWith("unrestricted")
+            flow.SetModelPolicy(
+                unrestricted ? "unrestricted": mode,
+                unrestricted ? (mode.EndsWith("empty") ? "{}": "omit"):
+                "{\"gpt-6.1-sol\":[\"high\"],\"second-model\":[\"low\",\"xhigh\"]}"
+            )
+            flow.Approve()
+            if !unrestricted {
+                flow.Claim(model: "unlisted-model", code: 1)
+                flow.Claim(model: "second-model", code: 1)
+                flow.Claim(effort: "low", code: 1)
+            }
+            flow.Claim(seconds: "3601", code: 1)
+            flow.Claim(network: true, code: 1)
+            flow.Claim(effort: "unknown", code: 1)
+            flow.Claim(effort: "absent", code: 1)
+            flow.Claim(effort: "invalid", code: 1)
+            flow.NoInference()
+            let model = unrestricted ? "unlisted-model": "second-model"
+            let run = flow.Claim(model: model, effort: "low")
+            flow.Call([]string{"work", "--run", run})
+            flow.Call([]string{"publish", "--run", run})
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["requested_model"]) == model && Check.Text(
+                    flow.State["requested_effort"]
+                ) == "model_reasoning_effort=\"low\"",
+                "Harness settings differ from explicit donor selection"
+            )
+            let pulls = flow.State["pulls"]?.ToJsonString() ?? ""
+            let approval = flow.Git("-C", flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
+            flow.SetModelPolicy(
+                unrestricted ? "whitelist": "unrestricted",
+                unrestricted ?
+                "{\"gpt-6.1-sol\":[\"high\"]}": "omit"
+            )
+            Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "policy or template changed")
+            Check.Contains(
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true).Error,
+                "policy or template changed"
+            )
+            flow.Reload()
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == saved &&
+                    flow
+                    .State["pulls"]
+                    ?.ToJsonString() == pulls && flow.Git(
+                    "-C",
+                    flow.Upstream,
+                    "rev-parse",
+                    "refs/heads/tokate/approvals/1"
+                ) == approval,
+                "Model-policy edit rewrote saved authority or work"
+            )
+        }
+    }
+
+    internal func ModelPolicyMalformed() {
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let original = File.ReadAllText(path)
+        for version in[]int32{1, 2} {
+            for fields in[]string{
+                "\"model_policy\":null",
+                "\"model_policy\":true",
+                "\"model_policy\":1",
+                "\"model_policy\":[]",
+                "\"model_policy\":{}",
+                "\"model_policy\":\"other\"",
+                "\"model_policy\":\"whitelist\",\"model_policy\":\"unrestricted\"",
+                "\"model_policy\":\"unrestricted\",\"model_policy\":\"unrestricted\"",
+                "\"model_policy\":\"unrestricted\",\"models\":{\"model\":[\"high\"]}",
+                "\"model_policy\":\"unrestricted\",\"models\":null",
+                "\"model_policy\":\"unrestricted\",\"models\":[]",
+                "\"model_policy\":\"unrestricted\",\"models\":\"bad\"",
+                "\"model_policy\":\"unrestricted\",\"models\":{},\"models\":{}",
+                "\"model_policy\":\"whitelist\"",
+                "\"model_policy\":\"whitelist\",\"models\":{}",
+                "\"model_policy\":\"whitelist\",\"models\":null",
+                "\"model_policy\":\"whitelist\",\"models\":{\"bad model\":[\"high\"]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":\"high\"}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[null]}",
+                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[\"high,xhigh\"]}",
+                "\"models\":{}",
+                "\"models\":null",
+                "\"models\":{\"model\":[\"absent\"]}"
+            } {
+                let policy = Check.Json(original)
+                policy["version"] = JsonValue.Create(version)
+                policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
+                policy.AsObject().Remove("models")
+                let text = policy.ToJsonString()
+                File.WriteAllText(path, text.Substring(0, text.Length - 1) + "," + fields + "}")
+                Commit("Malformed model policy fixture")
+                Call([]string{"policy", "--repo", "owner/project"}, 1)
+                Check.That(File.ReadAllText(path).Contains(fields), "Policy inspection normalized owner bytes")
+            }
+        }
+        NoInference()
+        NoPr()
     }
 
     internal func FailedReassignment() {
@@ -1102,7 +1369,7 @@ internal class NativeFlow : IDisposable {
             owner: true,
             traffic: true
         )
-        Traffic(8, 5, 0, 0, approval)
+        Traffic(9, 5, 0, 0, approval)
         ResetTraffic()
         let claimed = Call(
             []string{
@@ -1582,12 +1849,24 @@ internal class NativeFlow : IDisposable {
         }
     }
 
-    internal func VerificationRecovery() {
+    internal func VerificationRecovery(legacy bool = false) {
         VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
         Approve()
         let run = Claim()
         Mode("verification_recovery")
-        Call([]string{"work", "--run", run}, 1)
+        let failure = Call([]string{"work", "--run", run, "--json"}, 1)
+        CliDiscovery.Envelope(failure, "work", "error", "verification_failed")
+        let runPath = Path.Combine(run, "run.json")
+        let failed = Check.Json(File.ReadAllText(runPath))
+        Check.That(Check.Text(failed["failure_reason"]) == "verification_failed", "New failure omitted stable reason")
+        failed["error"] = JsonValue.Create("Changed displayed wording: synthetic-saved-error-marker")
+        if legacy {
+            failed.AsObject().Remove("failure_reason")
+            failed["error"] = JsonValue.Create(
+                "Owner verification failed. See verification.json. No PR will be opened."
+            )
+        }
+        File.WriteAllText(runPath, failed.ToJsonString())
         NoPr()
         let original = File.ReadAllText(Path.Combine(run, "verification.json"))
         Check.That(Check.Json(original).AsArray().Count == 2, "Original checks were not all run")
@@ -1634,7 +1913,23 @@ internal class NativeFlow : IDisposable {
         Check.That(Check.Text(State["exec_count"]) == "1", "Incomplete turn recovery spent inference")
         NoPr()
         File.WriteAllText(events, savedEvents)
-        Call([]string{"recover", "--run", run})
+        let protectedPath = Path.Combine(run, "checkout/.github/tokate.json")
+        let protectedText = File.ReadAllText(protectedPath)
+        File.AppendAllText(protectedPath, "\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "cannot change owner policy")
+        File.WriteAllText(protectedPath, protectedText)
+        File.WriteAllText(runPath, savedRun)
+        let resultPath = Path.Combine(run, "checkout/result.txt")
+        let candidateText = File.ReadAllText(resultPath)
+        File.AppendAllText(resultPath, "changed candidate\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Saved candidate patch changed")
+        File.WriteAllText(resultPath, candidateText)
+        File.WriteAllText(runPath, savedRun)
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "verification.json")) == original,
+            "Rejected recovery reran verification"
+        )
+        CliDiscovery.Envelope(Call([]string{"recover", "--run", run, "--json"}), "recover", "ok")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")
         Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "verification-only recovery")
@@ -1679,14 +1974,26 @@ internal class NativeFlow : IDisposable {
     }
 
     shared {
-        internal func All(binary string, selected string = "") {
+        internal let SerialGroups[]string = []string{
+            "ReadTraffic",
+            "TemporaryIsolation",
+            "TemporaryHomeRejected",
+            "VerificationBoundary"
+        }
+
+        internal func All(binary string, selected string = "", parallel bool = false) {
+            var matched bool
             for name in[]string{
                 "HelpAndArguments",
                 "MissingTools",
                 "DoctorToolchain",
                 "OwnerWithoutCodex",
+                "StructuredContract",
+                "StructuredFailures",
                 "CrossAccountFlow",
                 "OwnerPolicy",
+                "ModelPolicyModes",
+                "ModelPolicyMalformed",
                 "FailedReassignment",
                 "MissingFork",
                 "DefaultBudget",
@@ -1728,11 +2035,16 @@ internal class NativeFlow : IDisposable {
                 "UnsupportedSandbox",
                 "VerificationBoundary",
                 "VerificationNetwork",
-                "VerificationRecovery"
+                "VerificationRecovery",
+                "LegacyVerificationRecovery"
             } {
                 if selected != "" && selected != name {
                     continue
                 }
+                if parallel && Array.IndexOf(SerialGroups, name) >= 0 {
+                    continue
+                }
+                matched = true
                 using let flow = NativeFlow(binary)
                 flow.Initialize()
                 switch name {
@@ -1748,11 +2060,23 @@ internal class NativeFlow : IDisposable {
                     case "OwnerWithoutCodex" {
                         flow.OwnerWithoutCodex()
                     }
+                    case "StructuredFailures" {
+                        flow.StructuredFailures()
+                    }
+                    case "StructuredContract" {
+                        flow.StructuredContract()
+                    }
                     case "CrossAccountFlow" {
                         flow.CrossAccountFlow()
                     }
                     case "OwnerPolicy" {
                         flow.OwnerPolicy()
+                    }
+                    case "ModelPolicyModes" {
+                        flow.ModelPolicyModes()
+                    }
+                    case "ModelPolicyMalformed" {
+                        flow.ModelPolicyMalformed()
                     }
                     case "FailedReassignment" {
                         flow.FailedReassignment()
@@ -1877,6 +2201,9 @@ internal class NativeFlow : IDisposable {
                     case "VerificationRecovery" {
                         flow.VerificationRecovery()
                     }
+                    case "LegacyVerificationRecovery" {
+                        flow.VerificationRecovery(true)
+                    }
                     case "VerificationNetwork" {
                         flow.VerificationNetwork()
                     }
@@ -1887,6 +2214,7 @@ internal class NativeFlow : IDisposable {
                 flow.AutomationAttribution()
                 Console.WriteLine("PASS " + name)
             }
+            Check.That(matched, "Unknown native selector: " + selected)
         }
     }
 }

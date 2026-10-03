@@ -117,14 +117,12 @@ internal class Synchronization {
             return value
         }
 
-        private func Target(repo string, target string, upstream string) {
-            let info = GitHub.Api("repos/" + repo)
-            if J.Text(info, "default_branch") != target || J.Text(
-                GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(target)),
-                "sha"
-            ) != upstream {
+        private func Target(repo string, approval JsonElement, target string, upstream string) {
+            ApprovalBase.Check(repo, approval, J.Number(approval, "version"))
+            if target != J.Text(approval, "base_branch") || GitHub.Branch(repo, target) != upstream {
                 throw Exception("Synchronization target moved; a new exact owner grant is required")
             }
+            Decree.CheckCurrent(repo, upstream, approval)
         }
 
         internal func Live(
@@ -200,7 +198,7 @@ internal class Synchronization {
                 throw Exception("Missing exact synchronization grant in amendment history")
             }
             if ready && last.ValueKind != JsonValueKind.Undefined {
-                Target(repo, J.Text(last, "target"), J.Text(last, "upstream"))
+                Target(repo, approved, J.Text(last, "target"), J.Text(last, "upstream"))
             }
         }
 
@@ -208,6 +206,7 @@ internal class Synchronization {
             checkout string,
             repo string,
             policy JsonElement,
+            approval JsonElement,
             base string,
             history JsonElement,
             head string
@@ -226,11 +225,13 @@ internal class Synchronization {
                 Commands.Git(checkout, "merge-base", "--is-ancestor", upstream, candidate)
                 ProtectedPaths.EqualTrees(
                     policy,
+                    approval,
                     ProtectedPaths.RemoteTree(repo, baseline),
                     ProtectedPaths.LocalTree(checkout, previous)
                 )
                 ProtectedPaths.EqualTrees(
                     policy,
+                    approval,
                     ProtectedPaths.RemoteTree(repo, upstream),
                     ProtectedPaths.LocalTree(checkout, candidate)
                 )
@@ -240,6 +241,7 @@ internal class Synchronization {
             Commands.Git(checkout, "merge-base", "--is-ancestor", predecessor, head)
             ProtectedPaths.EqualTrees(
                 policy,
+                approval,
                 ProtectedPaths.RemoteTree(repo, baseline),
                 ProtectedPaths.LocalTree(checkout, head)
             )
@@ -248,6 +250,7 @@ internal class Synchronization {
         internal func Remote(
             repo string,
             policy JsonElement,
+            approval JsonElement,
             base string,
             history JsonElement,
             fork string,
@@ -267,11 +270,13 @@ internal class Synchronization {
                 ProtectedPaths.Ancestor(repo, upstream, fork, candidate)
                 ProtectedPaths.EqualTrees(
                     policy,
+                    approval,
                     ProtectedPaths.RemoteTree(repo, baseline),
                     ProtectedPaths.RemoteTree(fork, previous)
                 )
                 ProtectedPaths.EqualTrees(
                     policy,
+                    approval,
                     ProtectedPaths.RemoteTree(repo, upstream),
                     ProtectedPaths.RemoteTree(fork, candidate)
                 )
@@ -281,6 +286,7 @@ internal class Synchronization {
             ProtectedPaths.Ancestor(repo, predecessor, fork, head)
             ProtectedPaths.EqualTrees(
                 policy,
+                approval,
                 ProtectedPaths.RemoteTree(repo, baseline),
                 ProtectedPaths.RemoteTree(fork, head)
             )
@@ -296,7 +302,7 @@ internal class Synchronization {
             }
         }
 
-        private func Fresh(repo string, pr int32, value JsonElement) {
+        private func Fresh(repo string, pr int32, value JsonElement, approval JsonElement) {
             Publication.Verify(repo, pr, false)
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + pr.ToString())
             Open(pull)
@@ -316,7 +322,7 @@ internal class Synchronization {
             ) {
                 throw Exception("Canonical published donor branch changed during grant creation")
             }
-            Target(repo, J.Text(value, "target"), J.Text(value, "upstream"))
+            Target(repo, approval, J.Text(value, "target"), J.Text(value, "upstream"))
             if J.Number(value, "approval_version") == 2 && CoordinationState.Load(repo, J.Number(value, "issue"))
                 .Sha != J.Text(value, "expected") {
                 throw Exception("Synchronization expected coordination state changed")
@@ -349,7 +355,7 @@ internal class Synchronization {
             let target = J.Text(approval, "base_branch")
             let previous = J.Text(J.Get(pull, "head"), "sha")
             let fork = Data.Repo(J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"))
-            Target(repo, target, upstream)
+            Target(repo, approval, target, upstream)
             ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), fork, previous)
             ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), repo, upstream)
             let value = J.Parse(
@@ -419,11 +425,12 @@ internal class Synchronization {
                 )
             )
             let grant = Data.CommitSha(J.Text(commit, "sha"))
-            Fresh(repo, pr, value)
+            Fresh(repo, pr, value, approval)
             Workflow.RequireOwner(repo)
             GitHub.Api("repos/" + repo + "/git/refs", J.Map("ref", "refs/heads/" + Ref(value), "sha", grant))
             Load(repo, grant)
-            Fresh(repo, pr, value)
+            Fresh(repo, pr, value, approval)
+            PublicOutput.ResultData = J.Map("repo", repo, "pr", pr, "grant", grant)
             Terminal.Message(
                 "Synchronization grant: " +
                     grant +
@@ -477,6 +484,7 @@ internal class Synchronization {
             ) != grant {
                 throw Exception("Revocation ref changed; inspect physical authority without retrying")
             }
+            PublicOutput.ResultData = J.Map("repo", repo, "grant", grant)
             Terminal.Message("Synchronization revoked; original grant preserved: " + grant)
         }
     }

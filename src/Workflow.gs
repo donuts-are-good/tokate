@@ -14,7 +14,7 @@ internal class Workflow {
             let policy = Path.Combine(directory, "tokate.json")
             let template = Path.Combine(directory, "tokate-pr.md")
             if File.Exists(policy) || File.Exists(template) {
-                throw Exception("Tokate files already exist. Edit them directly.")
+                throw CliFailure("invalid_state", "Tokate files already exist. Edit them directly.")
             }
             File.WriteAllText(policy, Data.Resource("tokate.json"))
             File.WriteAllText(template, Data.Resource("tokate-pr.md"))
@@ -43,11 +43,18 @@ internal class Workflow {
             if args.Command == "assign" && !GitHub.HasLabel(issue) {
                 throw Exception("Approve the issue first")
             }
-            let branch = J.Text(info, "default_branch")
-            let revision = J.Text(GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(branch)), "sha")
-            let policy = Policy.Load(repo, revision)
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", revision)
+            let authority = J.Text(info, "default_branch")
+            let branch = ApprovalBase.Select(args, authority)
+            let authorityBase = GitHub.Branch(repo, authority)
+            let revision = branch == authority ? authorityBase: GitHub.Branch(repo, branch)
+            let policy = Policy.Load(repo, authorityBase)
+            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
             ValidateTemplate(template)
+            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
+            let decree = Decree.CaptureTree(repo, Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
+            Terminal.Step(
+                "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
+            )
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
             var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
             let others = List[string]()
@@ -104,6 +111,10 @@ internal class Workflow {
                 revision,
                 "base_branch",
                 branch,
+                "decree",
+                decree,
+                "authority_branch",
+                authority,
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
@@ -121,7 +132,6 @@ internal class Workflow {
             if old.ValueKind != JsonValueKind.Undefined {
                 parents.Add(J.Text(J.Get(old, "object"), "sha"))
             }
-            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + revision)
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
                 J.Map(
@@ -206,7 +216,10 @@ internal class Workflow {
         internal func Approved(repo string, number int32, donor string) JsonElement {
             let issue = GitHub.Issue(repo, number)
             if !GitHub.HasLabel(issue) || !GitHub.Assigned(issue, donor) {
-                throw Exception("Issue needs Tokate approval and exactly one assigned donor matching your account")
+                throw CliFailure(
+                    "stale_approval",
+                    "Issue needs Tokate approval and exactly one assigned donor matching your account"
+                )
             }
             let reference = GitHub.Api("repos/" + repo + "/git/ref/heads/" + ApprovalRef(number))
             let sha = J.Text(J.Get(reference, "object"), "sha")
@@ -220,17 +233,9 @@ internal class Workflow {
                 StringComparison.OrdinalIgnoreCase
             ) ||
                 J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
-                throw Exception("Issue or assignment changed. The owner must approve again.")
+                throw CliFailure("stale_approval", "Issue or assignment changed. The owner must approve again.")
             }
-            let info = GitHub.Api("repos/" + repo)
-            let currentBranch = J.Text(info, "default_branch")
-            let current = J.Text(GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(currentBranch)), "sha")
-            let policy = Policy.Load(repo, current)
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", current)
-            if currentBranch != J.Text(approval, "base_branch") || policy.Digest != J.Text(approval, "policy_hash") ||
-                Data.Hash(template) != J.Text(approval, "template_hash") {
-                throw Exception("Repository policy or template changed. The owner must approve again.")
-            }
+            let configuration = ApprovalBase.Check(repo, approval, 1)
             return J.Parse(
                 J.Write(
                     J.Map(
@@ -241,9 +246,9 @@ internal class Workflow {
                         "issue",
                         issue,
                         "policy",
-                        policy.Value,
+                        J.Get(configuration, "policy"),
                         "template",
-                        template
+                        J.Text(configuration, "template")
                     )
                 )
             )
@@ -332,6 +337,7 @@ internal class Workflow {
                 )
             )
             let directory = Path.Combine(root, run.Text("id"))
+            PublicOutput.RunDirectory = directory
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -357,11 +363,15 @@ internal class Workflow {
                 "id"
             )
                 .ToString() != J.Get(run.Element(), "donor_id").ToString() {
-                throw Exception("Use the GitHub account that claimed this run")
+                throw CliFailure(
+                    "authentication_required",
+                    "Use the GitHub account that claimed this run",
+                    []string{"gh", "auth", "switch", "--user", run.Text("donor")}
+                )
             }
             let record = Approved(Data.Repo(run.Text("repo")), run.Number("issue"), Data.Login(run.Text("donor")))
             if J.Text(record, "sha") != run.Text("approval") {
-                throw Exception("Approval was replaced. This run cannot be published.")
+                throw CliFailure("stale_approval", "Approval was replaced. This run cannot be published.")
             }
             let approval = J.Get(record, "approval")
             if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
@@ -369,7 +379,7 @@ internal class Workflow {
                 "base_branch"
             ) ||
                 run.Text("policy_hash") != J.Text(approval, "policy_hash") {
-                throw Exception("Saved run differs from owner approval")
+                throw CliFailure("stale_approval", "Saved run differs from owner approval")
             }
             if run.Text("branch") != "tokate/issue-" + run.Number("issue").ToString() + "-" + run.Text("approval")
                 .Substring(0, 12) {

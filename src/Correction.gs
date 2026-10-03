@@ -61,7 +61,7 @@ internal class Correction {
             "--"
         )
 
-        internal func Candidate(checkout string, run Data, commit string, policy JsonElement) string {
+        internal func Candidate(checkout string, run Data, commit string, record JsonElement) string {
             Verification.Candidate(checkout)
             Data.CommitSha(commit)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit ||
@@ -70,13 +70,13 @@ internal class Correction {
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
             Commands.Git(checkout, "diff", "--no-ext-diff", "--no-textconv", "--check", run.Text("base"), commit, "--")
-            ProtectedPaths.Local(checkout, policy, run.Text("base"), commit)
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"), commit)
             return Patch(checkout, run.Text("base"), commit)
         }
 
-        internal func Exact(directory string, run Data, correction Data, policy JsonElement) {
+        internal func Exact(directory string, run Data, correction Data, record JsonElement) {
             let checkout = Path.Combine(directory, "checkout")
-            let patch = Candidate(checkout, run, correction.Text("commit"), policy)
+            let patch = Candidate(checkout, run, correction.Text("commit"), record)
             if Commands.Git(checkout, "rev-parse", "HEAD^{tree}") != correction.Text("tree") || Data.Hash(
                 patch
             ) != correction.Text("patch_sha256") || patch != File.ReadAllText(
@@ -142,7 +142,7 @@ internal class Correction {
                 let pinned = J.Parse(File.ReadAllText(Path.Combine(archive, "approval.json")))
                 for key in[]string{"approval", "policy", "template"} {
                     if RequestData.Canonical(J.Get(pinned, key)) != RequestData.Canonical(J.Get(record, key)) {
-                        throw Exception("Original approval, policy or template changed")
+                        throw CliFailure("stale_approval", "Original approval, policy or template changed")
                     }
                 }
             }
@@ -376,28 +376,8 @@ internal class Correction {
 
         internal func Tools(path string, policy JsonElement) JsonElement {
             let tools = path == "" ? J.Parse("[]"): RequestData.FileData(path, 4096)
-            ToolsFromValue(tools, policy)
+            RequestData.CorrectionTools(tools, policy)
             return tools
-        }
-
-        internal func ToolsFromValue(tools JsonElement, policy JsonElement) {
-            if tools.ValueKind != JsonValueKind.Array {
-                throw Exception("Correction tools must be an array; [] declares manual editing")
-            }
-            if J.Items(tools).Count > 0 {
-                RequestData.Tools(tools)
-                let owner = Policy(J.Write(policy))
-                if J.Number(policy, "version") == 2 {
-                    owner.ValidateTools(tools)
-                } else {
-                    for tool in J.Items(tools) {
-                        if J.Text(tool, "harness") != "codex" || J.Text(tool, "provider") != "openai" {
-                            throw Exception("Version-1 owner policy permits only codex/openai correction tools")
-                        }
-                        owner.Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
-                    }
-                }
-            }
         }
 
         internal func Provenance(correction Data) JsonElement -> J.Parse(
@@ -464,7 +444,7 @@ internal class Correction {
                             "Correction verification failed or was interrupted; a new corrected commit is an explicit new attempt"
                         )
                     }
-                    Exact(directory, run, saved, J.Get(record, "policy"))
+                    Exact(directory, run, saved, record)
                     Activate(directory, run, saved)
                     if run.Number("version") == 1 {
                         CorrectionPublication.PublishLocked(directory, run, saved, record)
@@ -501,12 +481,12 @@ internal class Correction {
                 }
                 CorrectionPublication.Remote(run, correction, true)
                 let checkout = Path.Combine(directory, "checkout")
-                let patch = Candidate(checkout, run, commit, J.Get(record, "policy"))
+                let patch = Candidate(checkout, run, commit, record)
                 correction.Fields["tree"] = Commands.Git(checkout, "rev-parse", "HEAD^{tree}")
                 correction.Fields["patch_sha256"] = Data.Hash(patch)
                 File.WriteAllText(Path.Combine(attempt, "candidate.patch"), patch)
                 Save(directory, correction)
-                Exact(directory, run, correction, J.Get(record, "policy"))
+                Exact(directory, run, correction, record)
                 correction.Fields["state"] = "verifying"
                 correction.Fields["failure_stage"] = "owner_verification"
                 correction.Fields["failure_reason"] = "verification_failed"
@@ -517,7 +497,7 @@ internal class Correction {
                 for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
                     let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
                     if remaining < 1 {
-                        throw Exception("Correction verification budget exhausted")
+                        throw CliFailure("verification_failed", "Correction verification budget exhausted")
                     }
                     let words = List[string]()
                     for word in J.Items(command) {
@@ -549,11 +529,14 @@ internal class Correction {
                 correction.Fields["verification_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 correction.Fields["failure_stage"] = "changed_candidate"
                 correction.Fields["failure_reason"] = "candidate_changed"
-                Exact(directory, run, correction, J.Get(record, "policy"))
+                Exact(directory, run, correction, record)
                 if failed {
                     correction.Fields["failure_stage"] = "owner_verification"
                     correction.Fields["failure_reason"] = "verification_failed"
-                    throw Exception("Owner verification failed for the explicit correction; all results are preserved")
+                    throw CliFailure(
+                        "verification_failed",
+                        "Owner verification failed for the explicit correction; all results are preserved"
+                    )
                 }
                 Authority(directory, run)
                 correction.Fields["state"] = "verified"
@@ -565,7 +548,11 @@ internal class Correction {
                 correction.Fields["state"] = "failed"
                 correction.Fields["error"] = error.Message
                 Save(directory, correction)
-                throw Exception(
+                let code = error is CliFailure failure ? failure.Code:
+                (correction.Text("failure_reason") == "verification_failed" ? "verification_failed": "invalid_state")
+                throw CliFailure(
+                    code,
+                    PublicOutput.Enabled ? PublicOutput.Message(code):
                     correction.Text("failure_reason") + " (" + correction.Text("failure_stage") + "): " + error.Message
                 )
             }

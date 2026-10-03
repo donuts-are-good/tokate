@@ -21,6 +21,7 @@ internal class SynchronizationChecks {
             Write(flow.Upstream, "protected/gone", "remove upstream\n")
             Write(flow.Upstream, "protected/link", "regular upstream\n")
             Write(flow.Upstream, "guard/other", "nonprotected sibling\n")
+            Write(flow.Upstream, "DECREE.md", "Approved owner instructions\n")
             Write(flow.Upstream, "shared.txt", "original shared line\n")
             flow.Commit("Approved protected fixtures")
         }
@@ -126,7 +127,8 @@ internal class SynchronizationChecks {
                     "--commit",
                     candidate,
                     "--upstream",
-                    upstream
+                    upstream,
+                    "--json"
                 },
                 code,
                 owner: owner
@@ -146,9 +148,9 @@ internal class SynchronizationChecks {
             if code != 0 {
                 return ""
             }
-            let start = result.Output.IndexOf("Synchronization grant: ")
-            Check.That(start >= 0, "Missing grant identity")
-            return result.Output.Substring(start + "Synchronization grant: ".Length, 40)
+            let grant = Check.Text(Check.Json(result.Output)["data"]?["grant"])
+            Check.That(grant.Length == 40, "Missing grant identity")
+            return grant
         }
 
         private func Amend(flow NativeFlow, run string, candidate string, grant string = "", code int32 = 0) Result {
@@ -160,7 +162,14 @@ internal class SynchronizationChecks {
         }
 
         private func Revoke(flow NativeFlow, grant string) {
-            flow.Call([]string{"revoke-sync", "--repo", "owner/project", "--grant", grant}, owner: true)
+            let result = flow.Call(
+                []string{"revoke-sync", "--repo", "owner/project", "--grant", grant, "--json"},
+                owner: true
+            )
+            Check.That(
+                Check.Text(Check.Json(result.Output)["data"]?["grant"]) == grant,
+                "Revocation lost grant identity"
+            )
             let value = Check.Json(flow.Git("-C", flow.Upstream, "show", grant + ":synchronization.json"))
             let reference = "refs/heads/tokate/synchronizations/1/" + Check.Text(value["id"])
             let revoked = flow.Git("-C", flow.Upstream, "rev-parse", reference)
@@ -217,6 +226,9 @@ internal class SynchronizationChecks {
                 case "sibling-removal" {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
                 }
+                case "decree", "decree-coordinator" {
+                    Write(checkout, "DECREE.md", "Unapproved donor instructions\n")
+                }
                 case "reversion" {
                     Write(checkout, ".github/workflows/verify.yml", "timeout-minutes: 15\n")
                 }
@@ -230,13 +242,19 @@ internal class SynchronizationChecks {
         private func Run(binary string, v2 bool, mode string) {
             using let coordination = CoordinationFlow(binary)
             let flow = coordination.Flow
-            let run = v2 ? AmendmentFlow.V2Original(coordination, synchronization: true): AmendmentFlow.Original(
-                flow,
-                synchronization: true
-            )
+            let selected = mode == "selected-target" || mode == "authority-policy"
+            let target = selected ? "release/review": ""
+            let run = v2 ? AmendmentFlow.V2Original(
+                coordination,
+                synchronization: true,
+                baseBranch: target
+            ): AmendmentFlow.Original(flow, synchronization: true, baseBranch: target)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let h = Check.Text(Saved(run)["commit"])
             let stateBefore = v2 ? Check.Text(coordination.State()["sha"]): ""
+            if selected {
+                flow.Git("-C", flow.Upstream, "checkout", target)
+            }
             let upstream = Upstream(flow, mode == "ordinary", mode == "conflict")
             var candidate = Candidate(flow, run, upstream, mode == "conflict")
             if mode == "stale-creation" {
@@ -245,6 +263,13 @@ internal class SynchronizationChecks {
             }
             if mode == "donor-grant" {
                 Grant(flow, candidate, upstream, 1, false)
+                return
+            }
+            if mode == "authority-policy" {
+                flow.Git("-C", flow.Upstream, "checkout", "main")
+                File.AppendAllText(Path.Combine(flow.Upstream, ".github/tokate.json"), "\n ")
+                flow.Commit("Authority policy changed")
+                Grant(flow, candidate, upstream, 1)
                 return
             }
             if mode == "unresolved" {
@@ -263,6 +288,8 @@ internal class SynchronizationChecks {
                 mode == "ancestor-submodule" ||
                 mode == "sibling-creation" ||
                 mode == "sibling-removal" ||
+                mode == "decree" ||
+                mode == "decree-coordinator" ||
                 mode == "reversion" ||
                 mode == "semantic" {
                 candidate = Mutate(flow, run, mode)
@@ -279,6 +306,57 @@ internal class SynchronizationChecks {
             let grant = Grant(flow, candidate, upstream)
             if v2 {
                 Check.That(Check.Text(coordination.State()["sha"]) == stateBefore, "Grant reset reservation/state S")
+            }
+            if mode == "decree-coordinator" {
+                flow.Git(
+                    "-C",
+                    Path.Combine(run, "checkout"),
+                    "push",
+                    Path.Combine(flow.Bin, "fork"),
+                    candidate + ":refs/heads/" + Check.Text(Saved(run)["branch"])
+                )
+                let state = coordination.State()
+                let request = Check.Map(
+                    "uuid",
+                    Guid.NewGuid().ToString("D"),
+                    "expected",
+                    Check.Text(state["sha"]),
+                    "approval",
+                    Check.Text(state["state"]?["approval_id"]),
+                    "action",
+                    "amend",
+                    "metadata",
+                    Check.Map(
+                        "fork",
+                        Check.Text(Saved(run)["head_repo"]),
+                        "branch",
+                        Check.Text(Saved(run)["branch"]),
+                        "previous",
+                        h,
+                        "head",
+                        candidate,
+                        "pr",
+                        10,
+                        "seconds",
+                        30,
+                        "tools",
+                        Check.Json(File.ReadAllText(coordination.Tools)),
+                        "verification",
+                        "donor-reported-pass",
+                        "sync",
+                        grant
+                    )
+                )
+                let result = coordination.Coordinate(coordination.Event(request), 1)
+                Check.Contains(
+                    result.Output + result.Error,
+                    "Synchronization changes protected owner content: \"DECREE.md\""
+                )
+                Check.That(
+                    Check.Text(coordination.State()["sha"]) == stateBefore,
+                    "Rejected DECREE changed coordination authority"
+                )
+                return
             }
             if mode == "revoked" {
                 Revoke(flow, grant)
@@ -316,6 +394,8 @@ internal class SynchronizationChecks {
                 mode == "conflict" ||
                 mode == "sibling-creation" ||
                 mode == "sibling-removal" ||
+                mode == "selected-target" ||
+                mode == "decree-after-sync" ||
                 mode == "after-coordinate" ||
                 mode == "state-mismatch"
             let result = Amend(flow, run, candidate, grant, success ? 0: 1)
@@ -328,6 +408,12 @@ internal class SynchronizationChecks {
                     Check.Contains(
                         result.Output + result.Error,
                         "Synchronization changes protected owner content: \"guard\""
+                    )
+                }
+                if mode == "decree" {
+                    Check.Contains(
+                        result.Output + result.Error,
+                        "Synchronization changes protected owner content: \"DECREE.md\""
                     )
                 }
                 if mode == "semantic" {
@@ -388,6 +474,16 @@ internal class SynchronizationChecks {
                 mode == "ordinary" ? "15": "30"
             )
             Check.Contains(flow.Git("-C", Path.Combine(flow.Bin, "fork"), "show", h + ":result.txt"), "")
+            if mode == "decree-after-sync" {
+                Write(Path.Combine(run, "checkout"), "DECREE.md", "Unapproved later instructions\n")
+                let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment changes DECREE")
+                let rejected = Amend(flow, run, next, code: 1)
+                Check.Contains(
+                    rejected.Output + rejected.Error,
+                    "Synchronization changes protected owner content: \"DECREE.md\""
+                )
+                return
+            }
             Write(Path.Combine(run, "checkout"), "followup.txt", "ordinary review correction\n")
             let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment after synchronization")
             Amend(flow, run, next)
@@ -450,6 +546,11 @@ internal class SynchronizationChecks {
                     "ancestor-submodule",
                     "sibling-creation",
                     "sibling-removal",
+                    "decree",
+                    "decree-after-sync",
+                    "decree-coordinator",
+                    "selected-target",
+                    "authority-policy",
                     "reversion",
                     "semantic",
                     "revoked",
@@ -469,7 +570,8 @@ internal class SynchronizationChecks {
                     "after-coordinate",
                     "state-mismatch"
                 } {
-                    if (mode == "after-coordinate" || mode == "state-mismatch") && version != "v2" {
+                    if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
+                        version != "v2" {
                         continue
                     }
                     if only != "" && only != version && only != mode && only != version + "/" + mode {

@@ -26,7 +26,7 @@ The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub reposito
 ## For Owners:
 
 1. Sign in with `gh auth login` and run `tokate init` in your repository.
-2. Set the project's checks and allowed model/effort pairs, then commit the generated files. Your AI can follow the [owner setup guide](AGENTS.md#guide-a-repository-owner).
+2. Set the project's checks and allowed model/effort pairs, then commit the generated files. Optionally add root [DECREE.md codebase instructions](docs/reference.md#owner-codebase-instructions). Your AI can follow the [owner setup guide](AGENTS.md#guide-a-repository-owner).
 3. Write an issue with clear acceptance criteria and approve a donor:
 
 ```sh
@@ -46,6 +46,9 @@ tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 ```
 
 Tokate prepares the checkout, runs the task and checks, then opens a draft PR. Your accounts and AI usage stay under your control.
+
+For assistants, every command accepts explicit `--json`; `tokate help --json` lists
+arguments and effects. See the [versioned output contract](docs/reference.md#explicit-structured-output).
 
 Use `tokate work --help`, `tokate help work` or `-h` for focused command help.
 You can pass an issue URL directly, or omit `--repo` when local remotes identify

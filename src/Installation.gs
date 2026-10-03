@@ -1,5 +1,6 @@
 package Tokate
 
+import Gsharp.Concurrency
 import System
 import System.Diagnostics
 
@@ -9,6 +10,8 @@ internal class Installation {
             let info = ProcessStartInfo("/bin/sh")
             info.UseShellExecute = false
             info.RedirectStandardInput = true
+            info.RedirectStandardOutput = PublicOutput.Enabled
+            info.RedirectStandardError = PublicOutput.Enabled
             info.ArgumentList.Add("-s")
             info.ArgumentList.Add("--")
             info.ArgumentList.Add(command)
@@ -20,9 +23,26 @@ internal class Installation {
                 }
             }
             using let process = Process.Start(info) ?? throw Exception("Cannot start the installer")
+            let output = Chan[string](1)
+            let error = Chan[string](1)
+            let captured = CommandResult()
+            if PublicOutput.Enabled {
+                go Commands.Read(process.StandardOutput, output, captured)
+                go Commands.Read(process.StandardError, error, captured)
+            }
             process.StandardInput.Write(Data.Resource("install.sh"))
             process.StandardInput.Close()
             process.WaitForExit()
+            if PublicOutput.Enabled {
+                let stdout = <-output
+                let stderr = <-error
+                if captured.ReadFailed {
+                    throw CliFailure("command_failed", "Cannot read installer diagnostics")
+                }
+                PublicOutput.Truncated = PublicOutput.Truncated || captured.Truncated
+                Console.Error.Write(PublicOutput.Prose(stdout))
+                Console.Error.Write(PublicOutput.Prose(stderr))
+            }
             return process.ExitCode
         }
     }

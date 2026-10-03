@@ -27,7 +27,7 @@ internal class Contribution {
             if !File.Exists(candidatePath) {
                 File.WriteAllText(candidatePath, candidate)
             }
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             if File.ReadAllText(candidatePath) != candidate {
                 throw Exception("Saved candidate patch changed")
             }
@@ -55,14 +55,18 @@ internal class Contribution {
                 )
                 File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
                 if check.Code != 0 {
-                    throw Exception("Owner verification failed. See verification.json. No PR will be opened.")
+                    run.Fields["failure_reason"] = "verification_failed"
+                    throw CliFailure(
+                        "verification_failed",
+                        "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+                    )
                 }
             }
             run.Fields["verification"] = verification
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
             let patch = Snapshot(checkout, run)
-            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
             }

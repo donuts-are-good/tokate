@@ -164,7 +164,27 @@ internal class RequestData {
                 if J.Number(value, "seconds") > J.Number(policy, "max_seconds") {
                     throw Exception("Correction budget exceeds original owner policy")
                 }
-                Tokate.Correction.ToolsFromValue(tools, policy)
+                CorrectionTools(tools, policy)
+            }
+        }
+
+        internal func CorrectionTools(tools JsonElement, policy JsonElement) {
+            if tools.ValueKind != JsonValueKind.Array {
+                throw Exception("Correction tools must be an array; [] declares manual editing")
+            }
+            if J.Items(tools).Count > 0 {
+                RequestData.Tools(tools)
+                let owner = Policy(J.Write(policy))
+                if J.Number(policy, "version") == 2 {
+                    owner.ValidateTools(tools)
+                } else {
+                    for tool in J.Items(tools) {
+                        if J.Text(tool, "harness") != "codex" || J.Text(tool, "provider") != "openai" {
+                            throw Exception("Version-1 owner policy permits only codex/openai correction tools")
+                        }
+                        owner.Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
+                    }
+                }
             }
         }
 
