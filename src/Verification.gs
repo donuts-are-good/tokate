@@ -55,6 +55,73 @@ internal class Verification {
             return checkout
         }
 
+        private func RuntimeFile(path string, storage string) string {
+            try {
+                using let source = File.Open(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete
+                )
+                let limit = 4 * 1024 * 1024
+                if source.Length > limit {
+                    throw Exception("Exceeds the 4 MiB runtime-file limit")
+                }
+                let copy = Path.Combine(storage, Path.GetFileName(path))
+                using let target = FileStream(
+                    copy,
+                    FileStreamOptions{
+                        Mode: FileMode.CreateNew,
+                        Access: FileAccess.Write,
+                        Share: FileShare.None,
+                        UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                    }
+                )
+                let buffer = [8192]byte
+                var length int32
+                var count int32
+                while (count = source.Read(buffer, 0, Math.Min(buffer.Length, limit - length + 1))) > 0 {
+                    if count > limit - length {
+                        throw Exception("Exceeds the 4 MiB runtime-file limit")
+                    }
+                    target.Write(buffer, 0, count)
+                    length += count
+                }
+                return copy
+            } catch (error Exception) {
+                throw Exception("Cannot prepare verification runtime file " + path + ": " + error.Message, error)
+            }
+        }
+
+        private func RuntimeStorage() DirectoryInfo {
+            try {
+                return Directory.CreateTempSubdirectory("tokate-verification-")
+            } catch (error Exception) {
+                throw Exception(
+                    "Cannot prepare private verification runtime storage in " + Path.GetTempPath() +
+                        ": " +
+                        error.Message,
+                    error
+                )
+            }
+        }
+
+        private func CleanupRuntime(storage string, failure Exception? = nil) {
+            try {
+                Directory.Delete(storage, true)
+            } catch (error Exception) {
+                let original = failure?.Message ?? ""
+                throw Exception(
+                    (original != "" ? original + "\n": "") +
+                        "Cannot clean verification runtime files at " +
+                        storage +
+                        ": " +
+                        error.Message,
+                    failure ?? error
+                )
+            }
+        }
+
         internal func Run(directory string, command[]string, network bool, seconds int32) CommandResult {
             if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
                 throw Exception(
@@ -94,46 +161,61 @@ internal class Verification {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
             }
-            for path in[]string{
-                "/etc/ld.so.cache",
-                "/etc/nsswitch.conf",
-                "/etc/hosts",
-                "/etc/resolv.conf",
-                "/etc/ssl/certs/ca-certificates.crt",
-                "/etc/ssl/cert.pem",
-                "/etc/pki/tls/certs/ca-bundle.crt"
-            } {
-                if File.Exists(path) {
-                    args.AddRange([]string{"--ro-bind", path, path})
+            let storage = RuntimeStorage()
+            var result CommandResult
+            try {
+                for path in[]string{
+                    "/etc/ld.so.cache",
+                    "/etc/nsswitch.conf",
+                    "/etc/hosts",
+                    "/etc/resolv.conf",
+                    "/etc/ssl/certs/ca-certificates.crt",
+                    "/etc/ssl/cert.pem",
+                    "/etc/pki/tls/certs/ca-bundle.crt"
+                } {
+                    if File.Exists(path) {
+                        args.AddRange([]string{"--ro-bind", RuntimeFile(path, storage.FullName), path})
+                    }
                 }
+                args.AddRange(
+                    []string{
+                        "--proc",
+                        "/proc",
+                        "--dev",
+                        "/dev",
+                        "--tmpfs",
+                        "/tmp",
+                        "--dir",
+                        "/tmp/tokate-home",
+                        "--dir",
+                        "/var",
+                        "--tmpfs",
+                        "/var/tmp",
+                        "--bind",
+                        checkout,
+                        checkout,
+                        "--ro-bind",
+                        git,
+                        git,
+                        "--chdir",
+                        checkout,
+                        "--"
+                    }
+                )
+                args.AddRange(command)
+                result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, seconds: seconds, isolated: true)
+            } catch (error Exception) {
+                CleanupRuntime(storage.FullName, error)
+                throw error
             }
-            args.AddRange(
-                []string{
-                    "--proc",
-                    "/proc",
-                    "--dev",
-                    "/dev",
-                    "--tmpfs",
-                    "/tmp",
-                    "--dir",
-                    "/tmp/tokate-home",
-                    "--dir",
-                    "/var",
-                    "--tmpfs",
-                    "/var/tmp",
-                    "--bind",
-                    checkout,
-                    checkout,
-                    "--ro-bind",
-                    git,
-                    git,
-                    "--chdir",
-                    checkout,
-                    "--"
-                }
-            )
-            args.AddRange(command)
-            return Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, seconds: seconds, isolated: true)
+            var failure Exception? = nil
+            if result.Code != 0 {
+                failure = Exception(
+                    "Verification command exited " + result.Code.ToString() + ": " + result.Error + result.Output
+                )
+            }
+            CleanupRuntime(storage.FullName, failure)
+            return result
         }
     }
 }

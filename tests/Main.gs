@@ -32,6 +32,18 @@ func Main(args[]string) int32 {
             Console.Error.Write(result.Error)
             return result.Code
         }
+        if args.Length == 3 && args[0] == "--runtime-files-parent" {
+            VerificationChecks.RuntimeFilesParent(args[1], args[2])
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--runtime-files" {
+            VerificationChecks.RuntimeFiles()
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--verification" {
+            VerificationChecks.All()
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
@@ -46,10 +58,7 @@ func Main(args[]string) int32 {
             return 0
         }
         NativeFlow.All(binary)
-        VerificationChecks.Alternatives()
-        VerificationChecks.Layouts()
-        VerificationChecks.FailClosed()
-        VerificationChecks.Cleanup()
+        VerificationChecks.All()
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
         Installer.RefuseInvalidPath(project)
