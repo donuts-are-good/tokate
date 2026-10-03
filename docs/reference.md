@@ -622,6 +622,28 @@ cleanup on normal exit and timeout. Real-pipe subprocess checks cover successful
 1 MiB input, delayed consumption exceeding the deadline, blocked-input cancellation,
 descendant cleanup, failure meanings and output limits. These tests must pass on required Ubuntu CI;
 fixtures do not replace the real verifier boundary.
+The native runner uses two G# workers for the Native, Coordination, Correction
+and Amendment suites, each through `Verification.Run` with a 1200-second bound.
+Published binaries and `global.json` are prepared once in synthetic Git storage
+so the verifier's existing read-only Git mount protects the shared suite inputs.
+Each suite gets fresh process, temporary-directory and environment namespaces.
+The outer suite retains the owner's existing network allowance for real loopback
+tests; inner managed and verifier fixtures still enforce their own grants.
+Process, security, CLI, selection, verifier-boundary and installer groups stay
+serial, as do ReadTraffic and the native TemporaryIsolation,
+TemporaryHomeRejected and VerificationBoundary groups that write outside their
+fixture root. A failure stops admission and drains the current peer under its
+own bound; Ctrl+C cancels both active verifiers. The runner reports actual passed
+group count and elapsed test time, including partial coverage on failure, and
+rejects unknown suite and group selectors.
+On 2026-10-03, one local Linux x64 namespace run passed all 127 groups
+(123 accepted groups and four driver regressions) in 831.223 seconds. The
+unchanged `bash scripts/verify.sh` command took 840.935 seconds, then exited 129
+at `git diff --check` because the managed checkout denied Git metadata access.
+The separate `tokate doctor` command exited 1 because Codex was absent from the
+standard PATH, so its real managed-sandbox probe was skipped. These local
+measurements do not establish a universal speedup or an exact-head CI result;
+the protected 30-minute CI job remains required.
 The real native Codex `doctor` probe is a separate required matrix check; passing
 the deterministic suite does not establish the managed Codex boundary.
 

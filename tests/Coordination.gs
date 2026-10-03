@@ -1314,6 +1314,7 @@ internal class CoordinationFlow : IDisposable {
         }
 
         internal func All(binary string, selected string = "") {
+            var matched bool
             for name in[]string{
                 "SimultaneousClaims",
                 "SimultaneousClaimsMissingParticipant",
@@ -1343,6 +1344,7 @@ internal class CoordinationFlow : IDisposable {
                 if selected != "" && selected != name {
                     continue
                 }
+                matched = true
                 using let test = CoordinationFlow(binary)
                 test.Initialize()
                 switch name {
@@ -1422,6 +1424,7 @@ internal class CoordinationFlow : IDisposable {
                 test.Flow.AutomationAttribution()
                 Console.WriteLine("PASS V2 " + name)
             }
+            Check.That(matched, "Unknown coordination selector: " + selected)
         }
     }
 }

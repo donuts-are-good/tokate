@@ -569,6 +569,7 @@ internal class AmendmentFlow {
         }
 
         internal func All(binary string, only string = "") {
+            var matched bool
             for name in[]string{
                 "Structured",
                 "V1",
@@ -589,6 +590,7 @@ internal class AmendmentFlow {
                 if only != "" && only != name {
                     continue
                 }
+                matched = true
                 switch name {
                     case "Structured" {
                         Structured(binary)
@@ -640,6 +642,7 @@ internal class AmendmentFlow {
                 }
                 Console.WriteLine("PASS amendment " + name)
             }
+            Check.That(matched, "Unknown amendment selector: " + only)
         }
     }
 }

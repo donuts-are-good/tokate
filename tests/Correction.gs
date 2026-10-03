@@ -1222,6 +1222,7 @@ internal class CorrectionChecks {
         }
 
         internal func All(binary string, selected string = "") {
+            var matched bool
             for name in[]string{
                 "DecreeEdits",
                 "Structured",
@@ -1249,6 +1250,7 @@ internal class CorrectionChecks {
                 if selected != "" && selected != name {
                     continue
                 }
+                matched = true
                 switch name {
                     case "DecreeEdits" {
                         DecreeEdits(binary)
@@ -1321,6 +1323,7 @@ internal class CorrectionChecks {
                 }
                 Console.WriteLine("PASS correction " + name)
             }
+            Check.That(matched, "Unknown correction selector: " + selected)
         }
     }
 }

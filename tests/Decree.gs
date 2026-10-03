@@ -662,6 +662,7 @@ internal class DecreeFlow : IDisposable {
         }
 
         internal func All(binary string, selected string = "") {
+            var matched bool
             for name in[]string{
                 "Delivery",
                 "Replacement",
@@ -677,6 +678,7 @@ internal class DecreeFlow : IDisposable {
                 if selected != "" && selected != name {
                     continue
                 }
+                matched = true
                 for version in[]int32{1, 2} {
                     if (name == "ExternalProtection" && version != 2) ||
                         ((name == "LegacyRecovery" || name == "PublicationProtection") && version != 1) {
@@ -723,6 +725,7 @@ internal class DecreeFlow : IDisposable {
                     Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
                 }
             }
+            Check.That(matched, "Unknown DECREE selector: " + selected)
         }
     }
 }
