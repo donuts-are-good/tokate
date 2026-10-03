@@ -23,7 +23,7 @@ internal class Fixture {
     internal init(root string) {
         Root = root
         StatePath = Path.Combine(root, "state.json")
-        State = Check.Json(File.ReadAllText(StatePath))
+        State = JsonObject()
         Env["PATH"] = root + ":/usr/bin:/bin"
         Env["HOME"] = Path.Combine(Path.GetDirectoryName(root) ?? "", "home")
         Env["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -681,6 +681,9 @@ internal class Fixture {
     }
 
     internal func Run(name string, args[]string) int32 {
+        if name != "gh" {
+            State = Check.Json(File.ReadAllText(StatePath))
+        }
         for key in[]string{
             "OPENAI_API_KEY",
             "UNRELATED_DONOR_VALUE",
