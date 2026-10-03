@@ -107,6 +107,15 @@ internal class Workflow {
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
+            if J.Number(policy.Value, "version") == 2 {
+                approval["version"] = 2
+                CoordinationState.Approve(repo, number, approval)
+                GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
+                Terminal.Message(
+                    "Version-2 approval recorded. Read coordination state before requesting a reservation."
+                )
+                return
+            }
             let old = GitHub.Api("repos/" + repo + "/git/ref/heads/" + ApprovalRef(number), missing: true)
             let parents = List[string]{revision}
             if old.ValueKind != JsonValueKind.Undefined {
@@ -182,6 +191,12 @@ internal class Workflow {
         internal func Revoke(args Args) {
             let repo = Data.Repo(args.Need("repo"))
             RequireOwner(repo)
+            let state = CoordinationState.Load(repo, args.Number("issue"), true)
+            if state.Sha != "" {
+                let expected = state.Sha
+                state.Fields["revoked"] = true
+                state.Write(repo, args.Number("issue"), expected)
+            }
             GitHub.Api(
                 "repos/" + repo + "/issues/" + args.Number("issue").ToString() + "/labels/tokate%3Aapproved",
                 method: "DELETE"
@@ -199,6 +214,9 @@ internal class Workflow {
             let reference = GitHub.Api("repos/" + repo + "/git/ref/heads/" + ApprovalRef(number))
             let sha = J.Text(J.Get(reference, "object"), "sha")
             let approval = J.Parse(GitHub.FileAt(repo, ".github/tokate-approval.json", sha))
+            if J.Number(approval, "version") != 1 {
+                throw Exception("Version-1 operations require a version-1 approval")
+            }
             if J.Text(approval, "repo") != repo || J.Number(approval, "issue") != number || !String.Equals(
                 J.Text(approval, "donor"),
                 donor,
@@ -313,6 +331,9 @@ internal class Workflow {
         }
 
         internal func Recheck(run Data) JsonElement {
+            if run.Number("version") == 2 {
+                return V2Contribution.Recheck(run)
+            }
             let viewer = GitHub.Api("user")
             if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Use the GitHub account that claimed this run")

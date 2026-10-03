@@ -1,0 +1,37 @@
+name: Tokate coordination
+on:
+  issue_comment:
+    types: [created]
+permissions: {}
+jobs:
+  coordinate:
+    if: >-
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, '/tokate ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: tokate-coordinate-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: write
+    steps:
+      # Trusted released binary only: no checkout, build, or donor expressions.
+      - name: Fetch pinned coordinator
+        env:
+          TOKATE_ARCHIVE_URL: '@ARCHIVE_URL@'
+          TOKATE_ARCHIVE_SHA256: '@ARCHIVE_SHA256@'
+          TOKATE_MEMBER: '@MEMBER@'
+        run: |
+          set -eu
+          curl -qfsSL --proto '=https' --proto-redir '=https' --max-time 60 --max-filesize 134217728 -H 'Accept: application/octet-stream' "$TOKATE_ARCHIVE_URL" -o "$RUNNER_TEMP/tokate.tar.gz"
+          printf '%s  %s\n' "$TOKATE_ARCHIVE_SHA256" "$RUNNER_TEMP/tokate.tar.gz" | sha256sum -c -
+          tar -xOzf "$RUNNER_TEMP/tokate.tar.gz" "$TOKATE_MEMBER" > "$RUNNER_TEMP/tokate"
+          chmod 755 "$RUNNER_TEMP/tokate"
+      - name: Coordinate bounded GitHub request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKATE_REPOSITORY: ${{ github.repository }}
+        run: '"$RUNNER_TEMP/tokate" coordinate --repo "$TOKATE_REPOSITORY" --event "$GITHUB_EVENT_PATH" --traffic'

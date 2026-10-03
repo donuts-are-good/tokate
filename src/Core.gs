@@ -148,6 +148,13 @@ internal class Data {
             return value
         }
 
+        internal func CommitSha(value string) string {
+            if !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
+                throw Exception("Expected an exact 40-character Git commit SHA")
+            }
+            return value
+        }
+
         internal func Login(value string) string {
             if !Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9-]*$") {
                 throw Exception("Invalid GitHub username")
@@ -163,8 +170,9 @@ internal class GitHub {
             path string,
             body Object? = nil,
             method string = "",
-            missing bool = false
-        ) JsonElement -> ApiTransport.Request(path, body, method, missing)
+            missing bool = false,
+            expires int64 = 0
+        ) JsonElement -> ApiTransport.Request(path, body, method, missing, expires)
 
         internal func FileAt(repo string, path string, revision string) string {
             let result = Api("repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision))
@@ -212,8 +220,8 @@ internal class Policy {
     internal init(text string) {
         Value = J.Parse(text)
         Digest = Data.Hash(text)
-        if J.Number(Value, "version") != 1 {
-            throw Exception("Policy version must be 1")
+        if J.Number(Value, "version") != 1 && J.Number(Value, "version") != 2 {
+            throw Exception("Policy version must be 1 or 2")
         }
         let models = J.Get(Value, "models")
         if models.ValueKind != JsonValueKind.Object {
@@ -231,7 +239,8 @@ internal class Policy {
             for effort in efforts {
                 if effort.ValueKind != JsonValueKind.String || !",minimal,low,medium,high,xhigh,max,ultra,".Contains(
                     "," + effort.GetString() + ","
-                ) {
+                ) &&
+                    !(J.Number(Value, "version") == 2 && effort.GetString() == "unknown") {
                     throw Exception("Invalid reasoning effort")
                 }
             }
@@ -268,6 +277,21 @@ internal class Policy {
                 throw Exception("Invalid required check name")
             }
         }
+        if J.Number(Value, "version") == 2 {
+            let reservation = J.Get(Value, "reservation_seconds")
+            if reservation.ValueKind != JsonValueKind.Undefined &&
+                (J.Number(Value, "reservation_seconds") < 300 || J.Number(Value, "reservation_seconds") > 604800) {
+                throw Exception("reservation_seconds must be from 300 to 604800 (default 86400)")
+            }
+            if J.Items(J.Get(Value, "allowed_tools")).Count == 0 {
+                throw Exception("Version 2 requires allowed_tools harness/provider pairs")
+            }
+            for tool in J.Items(J.Get(Value, "allowed_tools")) {
+                if J.Text(tool, "harness") == "" || J.Text(tool, "provider") == "" {
+                    throw Exception("Each allowed tool needs harness and provider")
+                }
+            }
+        }
     }
 
     internal func Validate(model string, effort string, seconds int32, network bool) {
@@ -285,6 +309,27 @@ internal class Policy {
         }
         if network && !J.Bool(Value, "allow_network") {
             throw Exception("Repository policy forbids command network access")
+        }
+    }
+
+    internal func ValidateTools(tools JsonElement) {
+        if J.Number(Value, "version") != 2 || J.Items(tools).Count == 0 {
+            throw Exception("Version 2 needs a nonempty tool declaration")
+        }
+        for tool in J.Items(tools) {
+            var allowed bool
+            for pair in J.Items(J.Get(Value, "allowed_tools")) {
+                if J.Text(pair, "harness") == J.Text(tool, "harness") && J.Text(pair, "provider") == J.Text(
+                    tool,
+                    "provider"
+                ) {
+                    allowed = true
+                }
+            }
+            if !allowed {
+                throw Exception("Declared harness/provider is not allowed by owner policy")
+            }
+            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
         }
     }
     shared {

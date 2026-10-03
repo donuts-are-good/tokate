@@ -13,7 +13,7 @@ import System.Text.Json.Nodes
 internal class Fixture {
     internal let Root string
     internal let StatePath string
-    internal let State JsonNode
+    internal var State JsonNode
     internal let Env Dictionary[string, string] = Dictionary[string, string]()
     internal var Include bool
     internal var Verb string = ""
@@ -246,6 +246,8 @@ internal class Fixture {
             Console.WriteLine("gh version fixture")
             return 0
         }
+        using let lease = ApiLease()
+        State = Check.Json(File.ReadAllText(StatePath))
         let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
         let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR") ??
             throw Exception("GitHub CLI configuration home was lost")
@@ -331,6 +333,12 @@ internal class Fixture {
         if path == "user" {
             return Answer(Check.Map("login", actor, "id", 123))
         }
+        if path.StartsWith("repos/obselate/tokate/releases/tags/") {
+            if let release = State["release"] {
+                return Answer(release)
+            }
+            return Response(404)
+        }
         let parts = path.Split('/')
         Check.That(parts[0] == "repos", "Expected repository API")
         let repo = parts[1] + "/" + parts[2]
@@ -344,12 +352,34 @@ internal class Fixture {
                 Check.Map(
                     "default_branch",
                     "main",
+                    "id",
+                    folder == "fork" ? 2: 1,
+                    "full_name",
+                    repo,
+                    "owner",
+                    Check.Map("login", parts[1], "id", folder == "fork" ? 123: 1),
                     "permissions",
                     Check.Map("push", actor == parts[1]),
                     "parent",
                     Check.Map("full_name", "owner/project")
                 )
             )
+        }
+        if tail.StartsWith("issues/comments/") {
+            return Answer(State["comments"]?[tail.Substring(16)] ?? throw Exception("Missing canonical comment"))
+        }
+        if tail.StartsWith("compare/") {
+            let comparison = tail.Substring(8).Split("...")
+            let sha = comparison[1].Split(':')[1]
+            Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
+            let names = Git("upstream", []string{"diff", "--name-only", comparison[0], sha})
+            let files = JsonArray()
+            for file in names.Split('\n') {
+                if file != "" {
+                    files.Add(Check.Map("filename", file))
+                }
+            }
+            return Answer(Check.Map("status", "ahead", "files", files))
         }
         if tail.StartsWith("commits/") {
             return Answer(Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(8)})))
@@ -358,13 +388,22 @@ internal class Fixture {
             let split = tail.IndexOf("?ref=")
             let file = tail.Substring(9, split - 9)
             let reference = Uri.UnescapeDataString(tail.Substring(split + 5))
-            let content = Git(folder, []string{"show", reference + ":" + file})
+            var content string
+            try {
+                content = Git(folder, []string{"show", reference + ":" + file})
+            } catch (error Exception) {
+                return Response(404)
+            }
             return Answer(
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )
         }
         if tail.StartsWith("issues/") {
             let issue = State["issue"] ?? throw Exception("Missing issue")
+            if tail.EndsWith("/comments") && method == "POST" {
+                State["posted_request"] = body.DeepClone()
+                return Answer(Check.Map("id", 100, "body", Check.Text(body["body"])))
+            }
             if method != "GET" {
                 if tail.EndsWith("/assignees") {
                     let people = issue["assignees"]?.AsArray() ?? JsonArray()
@@ -418,13 +457,27 @@ internal class Fixture {
             return Answer(Check.Map("object", Check.Map("sha", sha)))
         }
         if tail.StartsWith("git/commits/") {
+            let parents = JsonArray()
+            let line = Git(folder, []string{"rev-list", "--parents", "-n", "1", tail.Substring(12)}).Split(' ')
+            for i in 1 ... line.Length {
+                parents.Add(Check.Map("sha", line[i]))
+            }
             return Answer(
-                Check.Map("tree", Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(12) + "^{tree}"})))
+                Check.Map(
+                    "tree",
+                    Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(12) + "^{tree}"})),
+                    "parents",
+                    parents
+                )
             )
         }
         if tail == "git/trees" {
             Env["GIT_INDEX_FILE"] = Path.Combine(Root, "tree.index")
-            Git(folder, []string{"read-tree", Check.Text(body["base_tree"])})
+            Git(
+                folder,
+                body["base_tree"] == nil ? []string{"read-tree", "--empty"}:
+                []string{"read-tree", Check.Text(body["base_tree"])}
+            )
             for item in body["tree"]?.AsArray() ?? JsonArray() {
                 let sha = Git(folder, []string{"hash-object", "-w", "--stdin"}, Check.Text(item["content"]))
                 Git(
@@ -451,7 +504,28 @@ internal class Fixture {
             return Answer(Check.Map("ref", Check.Text(body["ref"])))
         }
         if tail.StartsWith("git/refs/heads/") {
-            Git(folder, []string{"update-ref", "refs/heads/" + tail.Substring(15), Check.Text(body["sha"])})
+            let reference = "refs/heads/" + tail.Substring(15)
+            if reference.StartsWith("refs/heads/tokate/contributions/") && Check.Text(
+                State["mode"]
+            ) == "interrupted_state_write" {
+                return Response(500)
+            }
+            let previous = Git(folder, []string{"rev-parse", reference})
+            try {
+                Check.That(Check.Text(body["force"]) == "false", "Ref updates must never force")
+                Git(folder, []string{"merge-base", "--is-ancestor", previous, Check.Text(body["sha"])})
+                Git(folder, []string{"update-ref", reference, Check.Text(body["sha"]), previous})
+            } catch (error Exception) {
+                return Response(422)
+            }
+            if reference.StartsWith("refs/heads/tokate/contributions/") && Check.Text(
+                State["mode"]
+            ) == "lost_state_response" {
+                State["mode"] = JsonValue.Create("")
+                Save()
+                Console.Error.WriteLine("Synthetic interrupted state response")
+                return 1
+            }
             return Answer(Check.Json("{}"))
         }
         if tail.StartsWith("pulls?") {
@@ -475,12 +549,16 @@ internal class Fixture {
                 "ref",
                 branch,
                 "repo",
-                Check.Map("owner", Check.Map("login", "donor"))
+                Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor", "id", 123))
             )
             body["base"] = Check.Map("ref", Check.Text(body["base"]))
             let pulls = JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls
+            if Check.Text(State["mode"]) == "revoke_after_pr" {
+                let issue = State["issue"] ?? throw Exception("Missing issue")
+                issue["labels"] = JsonArray()
+            }
             if Check.Text(State["mode"]) == "pr_fail_after_create" {
                 Save()
                 Console.Error.WriteLine("Synthetic lost PR response: synthetic-response-secret")
@@ -489,6 +567,27 @@ internal class Fixture {
             return Answer(body)
         }
         throw Exception("Unhandled fixture API: " + path)
+    }
+
+    internal func ApiLease() FileStream {
+        let deadline = DateTime.UtcNow.AddSeconds(30)
+        while true {
+            try {
+                return File.Open(
+                    Path.Combine(Root, "api.lock"),
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None
+                )
+            } catch (error IOException) {
+                if DateTime.UtcNow >= deadline {
+                    throw error
+                }
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(10)) { }
+                }
+            }
+        }
     }
 
     internal func Run(name string, args[]string) int32 {

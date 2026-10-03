@@ -57,6 +57,9 @@ internal class Publication {
         }
 
         internal func Publish(directory string) {
+            if Data.Load(directory).Number("version") == 2 {
+                throw Exception("Version-2 runs use submit and the owner-installed coordinator")
+            }
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),
                 FileMode.OpenOrCreate,
@@ -211,6 +214,9 @@ internal class Publication {
                 throw Exception("Malformed Tokate receipt")
             }
             let receipt = J.Parse(body.Substring(start + prefix.Length, end - start - prefix.Length))
+            if J.Number(receipt, "version") == 2 {
+                return V2Contribution.VerifyReceipt(repo, number, pull, receipt)
+            }
             if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
                 J.Get(pull, "user"),
                 "login"
@@ -315,6 +321,12 @@ internal class Publication {
                 let latest = GitHub.Api(pullPath)
                 if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
                     throw Exception("PR changed while reading checks")
+                }
+                if run.Number("version") == 2 {
+                    let live = Verify(run.Text("repo"), run.Number("pr"))
+                    if live.Text("commit") != run.Text("commit") {
+                        throw Exception("Version-2 authority changed while reading checks")
+                    }
                 }
                 let status = failed ? "failed": (pending ? "pending": "passed")
                 if directory != "" {

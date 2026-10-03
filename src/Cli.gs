@@ -62,6 +62,13 @@ internal class Cli {
             CliOption("pr", "N", "Positive pull request number"),
             CliOption("watch", "", "Wait for checks; default: off"),
             CliOption("timeout", "N", "Check wait limit, 1..86400 seconds; default: 1200"),
+            CliOption("state", "SHA", "Exact coordination-state commit"),
+            CliOption("source", "SOURCE", "Coding source", "external tokate"),
+            CliOption("tools", "FILE", "Nonsecret JSON tool declarations"),
+            CliOption("file", "FILE", "Strict claim or publication request JSON"),
+            CliOption("event", "FILE", "Trusted issue_comment event JSON"),
+            CliOption("output", "FILE", "New workflow file outside .github"),
+            CliOption("commit", "SHA", "Exact external fork commit to verify"),
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
             CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
         }
@@ -76,6 +83,62 @@ internal class Cli {
                 "Create local policy and PR template; no inference or publication.",
                 "[--path DIR]",
                 "init --path ."
+            ),
+            CliCommand(
+                "coordinator-setup",
+                "repo,output",
+                "repo,output",
+                "Download verified release assets and write a v2 workflow; no inference.",
+                "[--repo OWNER/REPO] --output FILE",
+                "coordinator-setup --repo owner/project --output coordinator.yml"
+            ),
+            CliCommand(
+                "coordination",
+                "repo,issue",
+                "repo,issue",
+                "Read authoritative v2 issue state from GitHub; no inference or publication.",
+                "[--repo OWNER/REPO] --issue N|URL",
+                "coordination https://github.com/owner/project/issues/42"
+            ),
+            CliCommand(
+                "request",
+                "repo,issue,file",
+                "repo,issue,file",
+                "Post a v2 claim or publication request to GitHub; no inference.",
+                "[--repo OWNER/REPO] --issue N|URL --file FILE",
+                "request --repo owner/project --issue 42 --file request.json"
+            ),
+            CliCommand(
+                "prepare",
+                "repo,issue,state,source,tools,fork,seconds,allow-network,runs",
+                "repo,issue,state,source,tools",
+                "Save a v2 run for an existing reservation; no inference or publication.",
+                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external|tokate --tools FILE [options]",
+                "prepare --issue 42 --state SHA --source external --tools tools.json"
+            ),
+            CliCommand(
+                "external",
+                "run,commit",
+                "run,commit",
+                "Fetch and verify an exact external commit in isolation; no inference or publication.",
+                "--run DIR --commit SHA",
+                "external --run /path/to/run --commit SHA"
+            ),
+            CliCommand(
+                "submit",
+                "run",
+                "run",
+                "Push Tokate-coded work and request a coordinated v2 draft PR; no inference.",
+                "--run DIR",
+                "submit --run /path/to/run"
+            ),
+            CliCommand(
+                "coordinate",
+                "repo,event",
+                "repo,event",
+                "Trusted owner workflow: update v2 state and publish approved requests; no inference.",
+                "--repo OWNER/REPO --event FILE",
+                "coordinate --repo owner/project --event event.json"
             ),
             CliCommand(
                 "policy",
@@ -113,7 +176,7 @@ internal class Cli {
                 "claim",
                 "repo,issue,model,effort,seconds,fork,runs,allow-network",
                 "repo,issue,model,effort",
-                "Reserve a GitHub branch and save a claim locally; no inference or PR publication.",
+                "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
             ),
@@ -121,7 +184,7 @@ internal class Cli {
                 "work",
                 "repo,issue,model,effort,seconds,fork,runs,allow-network,run",
                 "repo,issue,model,effort",
-                "Use your Codex allowance for inference, verify and publish a draft PR.",
+                "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]\n       tokate work --run DIR",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
             ),
@@ -129,7 +192,7 @@ internal class Cli {
                 "recover",
                 "run,seconds",
                 "run",
-                "Rerun verification without inference, then push and publish a draft PR.",
+                "Rerun v1 verification without inference, then push and publish a draft PR.",
                 "--run DIR [--seconds N]",
                 "recover --run /path/to/run --seconds 300"
             ),
@@ -137,7 +200,7 @@ internal class Cli {
                 "publish",
                 "run",
                 "run",
-                "Push and publish a draft PR from a successful saved run; no inference.",
+                "Push and publish a v1 draft PR from a successful run; no inference.",
                 "--run DIR",
                 "publish --run /path/to/run"
             ),
@@ -233,7 +296,7 @@ internal class Cli {
                 text.AppendLine("Tokate " + Data.Version() + " (toh-KAH-teh)")
                 text.AppendLine("Donate AI usage to approved GitHub issues.\n\nUsage: tokate <command> [options]\n")
                 for command in Commands {
-                    text.AppendLine("  " + command.Name.PadRight(12) + command.Summary)
+                    text.AppendLine("  " + command.Name.PadRight(18) + command.Summary.Replace("\n", " "))
                 }
                 text.AppendLine("\nUse tokate <command> --help, tokate help <command>, or -h for details.")
                 text.AppendLine(
@@ -296,7 +359,7 @@ internal class Cli {
                     args.Values["--" + key] = RepositoryInput.Repo(args.Get(key))
                 }
             }
-            for key in[]string{"path", "run", "runs"} {
+            for key in[]string{"path", "run", "runs", "file", "tools", "event", "output"} {
                 if args.Get(key) != "" {
                     Path.GetFullPath(args.Get(key))
                 }
@@ -307,11 +370,18 @@ internal class Cli {
             if args.Get("model") != "" && !Regex.IsMatch(args.Get("model"), "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
                 throw Exception("Invalid model name: --model")
             }
-            if args.Get("effort") != "" && Array.IndexOf(
-                OptionFor(args.Command, "effort").Choices.Split(' '),
-                args.Get("effort")
-            ) < 0 {
-                throw Exception("Invalid reasoning effort: --effort")
+            for key in[]string{"effort", "source"} {
+                if args.Get(key) != "" && Array.IndexOf(
+                    OptionFor(args.Command, key).Choices.Split(' '),
+                    args.Get(key)
+                ) < 0 {
+                    throw Exception("Invalid value for --" + key)
+                }
+            }
+            for key in[]string{"state", "commit"} {
+                if args.Get(key) != "" {
+                    Data.CommitSha(args.Get(key))
+                }
             }
             RepositoryInput.Issue(args)
             if args.Command == "completion" &&

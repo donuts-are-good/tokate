@@ -218,7 +218,13 @@ internal class ApiTransport {
             return Exception(message)
         }
 
-        internal suspend func Request(path string, body Object?, method string, missing bool) JsonElement {
+        internal suspend func Request(
+            path string,
+            body Object?,
+            method string,
+            missing bool,
+            expires int64 = 0
+        ) JsonElement {
             let timer = Stopwatch.StartNew()
             let verb = (method == "" ? (body == nil ? "GET": "POST"): method).ToUpperInvariant()
             let read = verb == "GET"
@@ -230,7 +236,13 @@ internal class ApiTransport {
                         Wait(NextMutation - Clock.Elapsed.TotalSeconds)
                     }
                 }
-                let remaining = 60.0 - timer.Elapsed.TotalSeconds
+                var remaining = 60.0 - timer.Elapsed.TotalSeconds
+                if !read && expires > 0 {
+                    remaining = Math.Min(remaining, expires - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0)
+                    if remaining <= 0 {
+                        throw Exception("Reservation expired before coordination mutation")
+                    }
+                }
                 if remaining <= 0 {
                     throw Failure(0, read, 0.0)
                 }
