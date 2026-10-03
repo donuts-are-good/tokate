@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.7 discovers tools, handles data, and
+This document describes how Tokate 0.2.8 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -57,8 +57,11 @@ or a shared account.
 The API boundary invokes sanitized `gh api --include` commands. It reads response
 status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
 Date and poll-interval metadata. Conditional reads keep bodies and ETags only
-in command memory and require live revalidation. Response headers, bodies and gh
-stderr are not persisted as diagnostics or copied into errors. `--traffic`
+in command memory and require live revalidation. A conditional 304 accepts valid
+weak or strong tags with the same opaque value, or a missing ETag, only with its
+matching in-memory body. Malformed and unrelated validators fail closed.
+Response headers, bodies and gh stderr are not persisted as diagnostics or
+copied into errors. `--traffic`
 reports only numeric attempted reads, mutations, live 304s and retries on stderr;
 it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API bounds and recovery](reference.md#commands-and-recovery) and

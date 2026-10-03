@@ -53,7 +53,7 @@ user-local location.
 ## Commands and recovery
 
 ```text
-Tokate 0.2.7 (toh-KAH-teh)
+Tokate 0.2.8 (toh-KAH-teh)
 Donate AI usage to approved GitHub issues.
 
   tokate doctor                           Check tools and sandbox without inference
@@ -109,6 +109,13 @@ GitHub CLI retains authentication responsibility. API calls are serial, and
 mutation starts are spaced at least one second apart in each Tokate process.
 GET bodies and ETags are held only in memory for that command. Every repeated
 read revalidates with `If-None-Match`; only a live 304 can reuse a cached body.
+Returned ETags use weak comparison: a valid `W/"opaque"` and `"opaque"` match
+the same case-sensitive opaque value, as required for GET `If-None-Match` by
+[RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html#section-13.1.2).
+Validators retain a 1024-character limit and reject embedded quotes, whitespace,
+control characters, invalid prefixes and malformed quoted tags. A 304 without
+an ETag can still reuse its matching in-memory entry; an unrelated or malformed
+returned ETag, or a 304 without that entry, fails closed.
 GET transport failures, 5xx responses and rate limits allow at most three
 attempts within a total 60-second deadline, including subprocess time and waits.
 Server Retry-After and exhausted rate-limit reset times take precedence over
@@ -122,7 +129,8 @@ before retrying; for publication use the saved run's `publish` command, which
 looks for an existing PR and reuses it without inference or another PR write.
 These transport bounds do not implement atomic coordination (#11),
 pause/resume/handoff or coordinator workflow traffic accounting (#19); those
-issues remain open for their integrated flows.
+issues remain open for their integrated flows. The same-repository conditional
+read fix also leaves #54 open for its remaining criteria.
 
 `--seconds` caps agent execution plus independent verification. The default for new claims is the smaller of 3600 seconds and the owner's limit. Explicit budgets must be from 1 to 86400 seconds and cannot exceed the owner's limit. Saved runs keep their original budget. It is not a token cap. `--fork LOGIN/NAME` selects a renamed fork owned by the donor. Network access requires both owner policy and donor `--allow-network`.
 

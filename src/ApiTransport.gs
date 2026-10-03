@@ -171,16 +171,32 @@ internal class ApiTransport {
         }
 
         private func ValidETag(value string) bool {
-            if value.Length < 2 || value.Length > 1024 || !value.EndsWith("\"") ||
-                (!value.StartsWith("\"") && !value.StartsWith("W/\"")) {
+            let start = value.StartsWith("W/", StringComparison.Ordinal) ? 2: 0
+            if value.Length < start +
+                2 ||
+                value.Length > 1024 ||
+                value[start] != '"' ||
+                value[value.Length - 1] != '"' {
                 return false
             }
-            for character in value {
-                if character < ' ' || character > '~' {
+            for i in start + 1 ... value.Length - 1 {
+                let character = value[i]
+                if character < '!' || character > '~' || character == '"' {
                     return false
                 }
             }
             return true
+        }
+
+        private func WeakETagMatch(left string, right string) bool {
+            if !ValidETag(left) || !ValidETag(right) {
+                return false
+            }
+            return String.Equals(
+                left.StartsWith("W/", StringComparison.Ordinal) ? left.Substring(2): left,
+                right.StartsWith("W/", StringComparison.Ordinal) ? right.Substring(2): right,
+                StringComparison.Ordinal
+            )
         }
 
         private func Failure(status int32, read bool, delay double) Exception {
@@ -256,7 +272,7 @@ internal class ApiTransport {
                 }
                 if response.Status == 304 {
                     ConditionalResponses++
-                    if !conditional || (response.ETag != "" && response.ETag != cached.ETag) {
+                    if !conditional || (response.ETag != "" && !WeakETagMatch(response.ETag, cached.ETag)) {
                         throw Exception(
                             "GitHub returned HTTP 304 without a matching in-memory body. Read failed closed."
                         )
