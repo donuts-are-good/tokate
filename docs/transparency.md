@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.13 discovers tools, handles data, and
+This document describes how Tokate 0.2.14 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -59,6 +59,17 @@ GitHub operations use the donor's or owner's installed GitHub CLI. Git publishin
 delegates authentication to `gh auth git-credential`. Codex authenticates its own
 inference requests. Tokate does not copy credentials into task prompts, receipts,
 or a shared account.
+
+Automated version-1 approval/reassignment and all version-2 coordination-state
+commits explicitly set both author and committer to `Tokate` with
+`tokate@users.noreply.github.com`; GitHub supplies the timestamps. This generated
+metadata does not prove an authenticated actor, a GitHub account, or a verified
+signature and grants no authority. Write permission, canonical comment actor
+and numeric identity, reservation ownership, scope approval, and receipt checks
+remain authoritative. Donor attribution and receipt/provenance meanings are
+unchanged; existing commits and records remain valid under their current rules.
+After acceptance, inspect the next routine automated commit using only author
+and committer noreply booleans, without printing contact values.
 
 The API boundary invokes sanitized `gh api --include` commands. It reads response
 status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
