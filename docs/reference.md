@@ -81,6 +81,7 @@ tokate claim --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
 tokate work --run DIR
 tokate recover --run DIR [--seconds 300]
 tokate publish --run DIR
+tokate amend --run DIR --commit SHA --seconds N [--tools FILE]
 tokate status --run DIR
 tokate verify-pr --repo OWNER/REPO --pr 10
 tokate checks --repo OWNER/REPO --pr 10 [--watch] [--timeout 1200]
@@ -89,7 +90,7 @@ tokate checks --run DIR [--watch] [--timeout 1200]
 
 `work` starts inference and verifies the result. Version 1 then pushes and
 publishes a draft PR. Version 2 saves a verified commit for `submit`.
-See [version-2 commands and coordination](coordination-v2.md). `recover` and `publish` can push and publish without inference.
+See [version-2 commands and coordination](coordination-v2.md). `recover`, `publish` and `amend` can push and publish without inference.
 `claim` writes a reservation branch and local run but starts no inference.
 Owner approval commands write to GitHub. `policy`, `verify-pr` and `checks` read
 GitHub; saved-run checks also write local results. `status`, help and completion
@@ -151,6 +152,31 @@ update to pick up new commands and options.
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Previews are regenerated on retry, so editing them does not alter the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
+
+For review corrections, commit edits in `DIR/checkout`, leave it clean at that
+exact descendant of the published head and approved base, then use `amend`.
+Its separate positive verification budget cannot exceed owner `max_seconds`.
+Omit `--tools` (or declare `[]`) for manual edits; otherwise declare every AI
+editing tool using the [tool schema](coordination-v2.md#external-or-tokate-launched-work).
+V1 permits Codex/OpenAI with its model/effort policy; v2 checks all allowed pairs.
+Original execution/model/time/usage observations retain their original meanings.
+Amendment editing time and usage are unknown or donor-reported, never attested.
+All original owner commands run in the independent sandbox without inference.
+Protected owner files, changed candidates/authority/remote heads and failed checks
+block publication while preserving local progress and original evidence.
+
+Amendment records and exact publication intent live in `DIR/amendments/SHA/`;
+original artifacts remain unchanged and are archived in `DIR/original-evidence/`.
+The same open PR receives a non-force push and an updated report/receipt;
+owner text outside those regions is preserved. Re-run the identical `amend`
+command after an interrupted publication to read remote state and skip applied
+writes and passed checks. Failed/interrupted verification needs a corrected
+commit. V2 posts a stable UUID request against current published state; await
+the installed coordinator, then re-run that command to record completion locally.
+An expired reservation needs owner action. Push, body and coordination updates
+are not atomic: `verify-pr` rejects partial physical states until they agree.
+No approval migration, inference retry or policy weakening occurs.
+
 
 `--traffic` prints numeric `reads`, `mutations`, `conditional_responses` (live HTTP
 304s), and `retry_attempts` on stderr, including failed commands. Reads and

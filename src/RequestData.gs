@@ -159,8 +159,27 @@ internal class RequestData {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
+            } else if J.Text(value, "action") == "amend" {
+                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification")
+                Data.Repo(J.Text(metadata, "fork"))
+                Data.CommitSha(J.Text(metadata, "head"))
+                Data.CommitSha(J.Text(metadata, "previous"))
+                if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") || J.Number(
+                    metadata,
+                    "pr"
+                ) < 1 ||
+                    J.Number(metadata, "seconds") < 1 || J.Text(metadata, "verification") != "donor-reported-pass" {
+                    throw Exception("Invalid amendment declaration")
+                }
+                let tools = J.Get(metadata, "tools")
+                if tools.ValueKind != JsonValueKind.Array {
+                    throw Exception("Amendment tools must be an array")
+                }
+                if J.Items(tools).Count > 0 {
+                    Tools(tools)
+                }
             } else {
-                throw Exception("Only claim and publish are donor request operations")
+                throw Exception("Only claim, publish and amend are donor request operations")
             }
         }
     }

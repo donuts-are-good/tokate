@@ -100,7 +100,8 @@ internal class Startup {
                     tool.Name == "setsid" ||
                         tool.Name == "gh" ||
                         command == "work" ||
-                        (tool.Name == "git" && command == "publish")
+                        (tool.Name == "git" && (command == "publish" || command == "amend")) ||
+                        (tool.Name == "bwrap" && command == "amend")
                 ) {
                     blocked = true
                 }

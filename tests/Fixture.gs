@@ -372,9 +372,9 @@ internal class Fixture {
             let comparison = tail.Substring(8).Split("...")
             let sha = comparison[1].Split(':')[1]
             Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
-            let names = Git("upstream", []string{"diff", "--name-only", comparison[0], sha})
+            let names = Git("upstream", []string{"diff", "--name-only", "--no-renames", "-z", comparison[0], sha})
             let files = JsonArray()
-            for file in names.Split('\n') {
+            for file in names.Split('\0') {
                 if file != "" {
                     files.Add(Check.Map("filename", file))
                 }
@@ -400,9 +400,34 @@ internal class Fixture {
         }
         if tail.StartsWith("issues/") {
             let issue = State["issue"] ?? throw Exception("Missing issue")
-            if tail.EndsWith("/comments") && method == "POST" {
-                State["posted_request"] = body.DeepClone()
-                return Answer(Check.Map("id", 100, "body", Check.Text(body["body"])))
+            if tail.Contains("/comments") {
+                let posted = State["request_comments"]?.AsArray() ?? JsonArray()
+                if method == "POST" {
+                    State["posted_request"] = body.DeepClone()
+                    let comment = Check.Map(
+                        "id",
+                        100 + posted.Count,
+                        "body",
+                        Check.Text(body["body"]),
+                        "user",
+                        Check.Map("id", 123, "login", actor)
+                    )
+                    posted.Add(comment)
+                    State["request_comments"] = posted
+                    if Check.Text(State["mode"]) == "lost_request_response" {
+                        State["mode"] = JsonValue.Create("")
+                        Save()
+                        return 1
+                    }
+                    return Answer(comment)
+                }
+                let pageText = path.Contains("&page=") ? path.Substring(path.IndexOf("&page=") + 6): "1"
+                let offset = (Int32.Parse(pageText) - 1) * 100
+                let page = JsonArray()
+                for i in offset ... Math.Min(offset + 100, posted.Count) {
+                    page.Add(posted[i]?.DeepClone())
+                }
+                return Answer(page)
             }
             if method != "GET" {
                 if tail.EndsWith("/assignees") {
@@ -528,16 +553,31 @@ internal class Fixture {
             }
             return Answer(Check.Json("{}"))
         }
-        if tail.StartsWith("pulls?") {
-            return Answer(State["pulls"] ?? JsonArray())
-        }
-        if tail.StartsWith("pulls/") {
-            return Answer(State["pulls"]?[0] ?? throw Exception("Missing PR"))
+        if tail.StartsWith("pulls?") || tail.StartsWith("pulls/") {
+            let pulls = State["pulls"]?.AsArray() ?? JsonArray()
+            if tail.StartsWith("pulls/") {
+                let pull = pulls[0] ?? throw Exception("Missing PR")
+                if method == "PATCH" {
+                    if Check.Text(State["mode"]) == "body_fail" {
+                        return Response(500)
+                    }
+                    pull["body"] = body["body"]?.DeepClone()
+                    if Check.Text(State["mode"]) == "lost_body_response" {
+                        State["mode"] = JsonValue.Create("")
+                        Save()
+                        Console.Error.WriteLine("Synthetic lost amendment body response")
+                        return 1
+                    }
+                }
+                return Answer(pull)
+            }
+            return Answer(pulls)
         }
         if tail == "pulls" {
             if Check.Text(State["mode"]) == "pr_fail" {
                 return Response(500)
             }
+            let headLogin = Check.Text(body["head"]).Split(':')[0]
             let branch = Check.Text(body["head"]).Split(':')[1]
             body["number"] = JsonValue.Create(10)
             body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/10")
@@ -545,11 +585,11 @@ internal class Fixture {
             body["user"] = Check.Map("login", actor)
             body["head"] = Check.Map(
                 "sha",
-                Git("fork", []string{"rev-parse", branch}),
+                Git(headLogin == "owner" ? "upstream": "fork", []string{"rev-parse", branch}),
                 "ref",
                 branch,
                 "repo",
-                Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor", "id", 123))
+                Check.Map("full_name", headLogin + "/project", "owner", Check.Map("login", headLogin, "id", 123))
             )
             body["base"] = Check.Map("ref", Check.Text(body["base"]))
             let pulls = JsonArray()
@@ -622,7 +662,14 @@ internal class Fixture {
                 Check.That(
                     File.Exists(
                         Path.Combine(Path.GetDirectoryName(Directory.GetCurrentDirectory()) ?? "", "publication.json")
-                    ),
+                    ) ||
+                        Directory
+                        .GetFiles(
+                        Path.Combine(Path.GetDirectoryName(Directory.GetCurrentDirectory()) ?? "", "amendments"),
+                        "publication.json",
+                        SearchOption.AllDirectories
+                    )
+                        .Length > 0,
                     "Publication content must be saved before push"
                 )
                 for key in[]string{
@@ -645,6 +692,11 @@ internal class Fixture {
                     ),
                     "password=synthetic-gh-credential"
                 )
+                State = Check.Json(File.ReadAllText(StatePath))
+                State["git_pushes"] = JsonValue.Create(
+                    Int32.Parse(Check.Text(State["git_pushes"] ?? JsonValue.Create(0))) + 1
+                )
+                Save()
                 if Check.Text(State["mode"]) == "push_fail" {
                     Console.Error.WriteLine("Synthetic push failure: synthetic-raw-push-secret")
                     return 1
@@ -664,6 +716,28 @@ internal class Fixture {
                 }
             }
             let result = Check.Run("/usr/bin/git", command.ToArray(), Env)
+            if push >= 0 && result.Code == 0 {
+                State = Check.Json(File.ReadAllText(StatePath))
+                for pull in State["pulls"]?.AsArray() ?? JsonArray() {
+                    if let head = pull["head"] {
+                        let target = Check.Text(head["repo"]?["full_name"]) == "owner/project" ? "upstream": "fork"
+                        if command[push + 1] == Path.Combine(Root, target) {
+                            head["sha"] = JsonValue.Create(Git(target, []string{"rev-parse", Check.Text(head["ref"])}))
+                        }
+                    }
+                }
+                Save()
+            }
+            if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "lost_push_response" {
+                let latest = Check.Json(File.ReadAllText(StatePath))
+                latest["mode"] = JsonValue.Create("")
+                latest["push_count"] = JsonValue.Create(
+                    Int32.Parse(Check.Text(latest["push_count"] ?? JsonValue.Create(0))) + 1
+                )
+                File.WriteAllText(StatePath, latest.ToJsonString())
+                Console.Error.WriteLine("Synthetic lost push response")
+                return 1
+            }
             if push >= 0 && result.Code == 0 && Check.Text(State["mode"]) == "revoke_after_push" {
                 let latest = Check.Json(File.ReadAllText(StatePath))
                 let issue = latest["issue"] ?? throw Exception("Missing issue")
