@@ -121,6 +121,20 @@ internal class Publication {
             if committedPatch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Canonical commit differs from the independently verified patch")
             }
+            for file in Commands.Git(
+                checkout,
+                "diff",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                run.Text("base"),
+                run.Text("commit")
+            )
+                .Split('\0') {
+                if Decree.Protected(file, J.Get(record, "approval")) {
+                    throw Exception("Contribution changes approved root DECREE.md")
+                }
+            }
             let receipt = J.Map(
                 "version",
                 1,

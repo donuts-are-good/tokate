@@ -198,7 +198,7 @@ internal class V2Contribution {
                 throw Exception("Fetched commit differs from exact declaration")
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
-            ProtectedDiff(checkout, run.Text("base"), commit)
+            ProtectedDiff(checkout, run.Text("base"), commit, J.Get(record, "approval"))
             let timer = Stopwatch.StartNew()
             run.Fields["state"] = "verifying"
             run.Fields["commit"] = commit
@@ -239,13 +239,23 @@ internal class V2Contribution {
             Terminal.Message("Exact external commit passed independent verification. Use submit --run " + directory)
         }
 
-        private func ProtectedDiff(checkout string, base string, commit string) {
-            Commands.Git(checkout, "diff", "--check", base, commit)
-            let files = Commands.Git(checkout, "diff", "--name-only", base, commit)
+        private func ProtectedDiff(
+            checkout string,
+            base string,
+            commit string,
+            approval JsonElement,
+            staged bool = false
+        ) {
+            let target = staged ? "--cached": commit
+            Commands.Git(checkout, "diff", "--check", base, target)
+            let files = Commands.Git(checkout, "diff", "--no-renames", "--name-only", "-z", base, target)
             if files == "" {
                 throw Exception("Contribution must change the approved base")
             }
-            for file in files.Split('\n') {
+            for file in files.Split('\0') {
+                if Decree.Protected(file, approval) {
+                    throw Exception("Contribution changes approved root DECREE.md")
+                }
                 if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
                     throw Exception("Contribution changes protected owner policy or workflows")
                 }
@@ -273,6 +283,7 @@ internal class V2Contribution {
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
             }
+            ProtectedDiff(checkout, run.Text("base"), "", J.Get(record, "approval"), true)
             Commands.Git(
                 checkout,
                 "-c",
@@ -327,7 +338,7 @@ internal class V2Contribution {
                 throw Exception("Verified checkout changed")
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
-            ProtectedDiff(checkout, run.Text("base"), run.Text("commit"))
+            ProtectedDiff(checkout, run.Text("base"), run.Text("commit"), J.Get(record, "approval"))
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
                 Commands.Git(

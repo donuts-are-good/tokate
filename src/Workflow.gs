@@ -48,6 +48,8 @@ internal class Workflow {
             let policy = Policy.Load(repo, revision)
             let template = GitHub.FileAt(repo, ".github/tokate-pr.md", revision)
             ValidateTemplate(template)
+            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
+            let decree = Decree.CaptureTree(repo, Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
             var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
             let others = List[string]()
@@ -104,6 +106,8 @@ internal class Workflow {
                 revision,
                 "base_branch",
                 branch,
+                "decree",
+                decree,
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
@@ -121,7 +125,6 @@ internal class Workflow {
             if old.ValueKind != JsonValueKind.Undefined {
                 parents.Add(J.Text(J.Get(old, "object"), "sha"))
             }
-            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + revision)
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
                 J.Map(
@@ -234,6 +237,7 @@ internal class Workflow {
                 Data.Hash(template) != J.Text(approval, "template_hash") {
                 throw Exception("Repository policy or template changed. The owner must approve again.")
             }
+            Decree.CheckCurrent(repo, current, approval)
             return J.Parse(
                 J.Write(
                     J.Map(

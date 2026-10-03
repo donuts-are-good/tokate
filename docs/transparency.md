@@ -198,7 +198,8 @@ prints it. Command errors can also appear in terminal output.
   Branch names, Git commit contents, the approved issue title as commit message,
   and donor noreply commit identity are also public. Changes to tracked content
   and newly staged files become part of the PR and still require owner review.
-- Codex receives the approved issue and accesses the checkout to perform the
+- Codex receives the approved issue and optional root `DECREE.md` owner instructions
+  through [shared task context](reference.md#owner-codebase-instructions), and accesses the checkout to perform the
   task. Inference sends task context through the donor's Codex service. A local
   CLI does not mean local inference or that repository content stays offline.
 - Raw agent reports, event logs, stderr, verification output, arbitrary usage

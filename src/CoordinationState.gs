@@ -72,6 +72,7 @@ internal class CoordinationState {
         ) != J.Text(approval, "template_hash") || branch != J.Text(approval, "base_branch") {
             throw Exception("Policy or template changed; fresh owner approval is required")
         }
+        Decree.CheckCurrent(repo, current, approval)
         return J.Parse(
             J.Write(J.Map("approval", approval, "policy", policy.Value, "template", template, "issue", task))
         )

@@ -106,9 +106,11 @@ internal class CoordinationFlow : IDisposable {
     internal func Claim() JsonNode {
         let request = ClaimRequest()
         let path = Event(request)
+        let decree = State()["state"]?["approval"]?["decree"]
+        let decreeReads = decree == nil ? 0: (Check.Text(decree?["present"]) == "true" ? 3: 2)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(9, 3, 1, 0, result)
+        Flow.Traffic(9 + decreeReads, 3, 1, 0, result)
         return request
     }
 
@@ -301,7 +303,7 @@ internal class CoordinationFlow : IDisposable {
         Flow.Mode("")
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(31, 3, 19, 0, result)
+        Flow.Traffic(37, 3, 23, 0, result)
         Flow.Reload()
         Check.That(Flow.State["pulls"]?.AsArray().Count == 1, "Interrupted publication duplicated PR")
         Check.That(
@@ -636,7 +638,7 @@ internal class CoordinationFlow : IDisposable {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(31, 4, 19, 0, result)
+        Flow.Traffic(37, 4, 23, 0, result)
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.Reload()
         Check.That(Check.Text(Flow.State["exec_count"]) == "1", "Tokate path did not execute exactly once")

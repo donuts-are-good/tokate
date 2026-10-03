@@ -291,6 +291,9 @@ internal class Coordinator {
             }
             for file in files {
                 for name in[]string{J.Text(file, "filename"), J.Text(file, "previous_filename")} {
+                    if Decree.Protected(name, J.Get(record, "approval")) {
+                        throw Exception("Contribution changes approved root DECREE.md")
+                    }
                     if name.StartsWith(".github/workflows/") || name.StartsWith(".github/tokate") {
                         throw Exception("Contribution changes protected owner configuration")
                     }

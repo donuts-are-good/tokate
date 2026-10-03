@@ -16,5 +16,6 @@
     <Compile Include="../src/Cli.gs" />
     <Compile Include="../src/Json.gs" />
     <Compile Include="../src/ApiTransport.gs" />
+    <Compile Include="../src/RequestData.gs" />
   </ItemGroup>
 </Project>

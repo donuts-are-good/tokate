@@ -20,7 +20,7 @@ internal class Contribution {
             if Commands.Git(checkout, "status", "--porcelain") == "" {
                 throw Exception("No changes returned. No PR will be opened.")
             }
-            let candidate = Snapshot(checkout, run)
+            let candidate = Snapshot(checkout, run, J.Get(record, "approval"))
             let candidatePath = Path.Combine(directory, "candidate.patch")
             if File.Exists(candidatePath) && File.ReadAllText(candidatePath) != candidate {
                 throw Exception("Saved candidate patch changed")
@@ -52,7 +52,7 @@ internal class Contribution {
                 }
             }
             run.Fields["verification"] = verification
-            let patch = Snapshot(checkout, run)
+            let patch = Snapshot(checkout, run, J.Get(record, "approval"))
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
             }
@@ -63,7 +63,7 @@ internal class Contribution {
             run.Save(directory)
         }
 
-        private func Snapshot(checkout string, run Data) string {
+        private func Snapshot(checkout string, run Data, approval JsonElement) string {
             Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
                 throw Exception("Agent changed Git history")
@@ -74,7 +74,19 @@ internal class Contribution {
             if patch == "" {
                 throw Exception("No changes returned. No PR will be opened.")
             }
-            for file in Commands.Git(checkout, "diff", "--cached", "--name-only", run.Text("base")).Split('\n') {
+            for file in Commands.Git(
+                checkout,
+                "diff",
+                "--cached",
+                "--no-renames",
+                "--name-only",
+                "-z",
+                run.Text("base")
+            )
+                .Split('\0') {
+                if Decree.Protected(file, approval) {
+                    throw Exception("Donor runs cannot change approved root DECREE.md")
+                }
                 if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
                     throw Exception("Donor runs cannot change owner policy, approval, templates, or CI workflows")
                 }
