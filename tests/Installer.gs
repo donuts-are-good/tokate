@@ -29,6 +29,9 @@ internal class Installer {
         internal func Fixture(args[]string, root string) int32 {
             let statePath = Path.Combine(root, "state.json")
             let state = Check.Json(File.ReadAllText(statePath))
+            if Check.Text(state["coordinator_download"]) == "true" {
+                return CoordinationFlow.ReleaseDownload(args, root)
+            }
             Check.That(args[0] == "-q", "curl must ignore user configuration")
             Check.That(Array.IndexOf(args, "--proto") >= 0 && Array.IndexOf(args, "=https") >= 0, "HTTPS required")
             if Check.Text(state["clean"]) == "true" {

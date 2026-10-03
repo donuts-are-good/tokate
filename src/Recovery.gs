@@ -14,6 +14,11 @@ internal class Recovery {
                 FileShare.None
             )
             let run = Data.Load(directory)
+            if run.Number("version") != 1 {
+                throw Exception(
+                    "Version-1 recovery does not reinterpret version-2 contributions; request fresh owner approval"
+                )
+            }
             if run.Text("state") != "failed" || run.Text(
                 "error"
             ) != "Owner verification failed. See verification.json. No PR will be opened." {
