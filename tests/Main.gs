@@ -18,6 +18,14 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
+        if args.Length == 2 && args[0] == "--capture-write-failure" {
+            ProcessChecks.LimitedCapture(args[1])
+            return 0
+        }
+        if args.Length == 2 && args[0] == "--capture-prefix" {
+            ProcessChecks.Prefix(args[1])
+            return 0
+        }
         if args.Length == 2 && args[0] == "--api-write" {
             try {
                 GitHub.Api("repos/owner/project/issues/1/assignees", method: args[1])
@@ -26,11 +34,26 @@ func Main(args[]string) int32 {
                 ApiTransport.Report()
             }
         }
+        if args.Length == 3 && args[0] == "--verify-captured" {
+            Verification.Check(
+                args[2],
+                System.Collections.Generic.List[Object](),
+                J.Parse("[\"bash\",\"scripts/verify.sh\"]"),
+                args[1],
+                false,
+                1800
+            )
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--verification-cancellation" {
+            VerificationChecks.RuntimeCancellation()
+            return 0
+        }
         if args.Length == 2 && args[0] == "--verify-checkout" {
             let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 1800)
             Console.Write(result.Output)
             Console.Error.Write(result.Error)
-            return result.Code
+            return result.Code ?? throw Exception("Missing completed verifier exit code")
         }
         if args.Length == 3 && args[0] == "--runtime-files-parent" {
             VerificationChecks.RuntimeFilesParent(args[1], args[2])
@@ -39,6 +62,10 @@ func Main(args[]string) int32 {
         if args.Length == 1 && args[0] == "--runtime-files" {
             VerificationChecks.RuntimeFiles()
             VerificationChecks.RuntimeCancellation()
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--verification-capture" {
+            VerificationChecks.Cleanup()
             return 0
         }
         if args.Length == 1 && args[0] == "--verification" {

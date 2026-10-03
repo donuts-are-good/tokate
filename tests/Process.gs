@@ -15,6 +15,10 @@ internal class ProcessChecks {
             CancellationLifetime()
             Failures()
             OutputLimit()
+            ReaderFailure()
+            CaptureWriteFailure()
+            CaptureSafety()
+            AbruptStop()
         }
 
         private func Collected(root string) {
@@ -29,7 +33,10 @@ internal class ProcessChecks {
         }
 
         private func Script(delay string, consume string) string ->
-        "echo $$$$ > parent.pid; sleep 120 & echo $$! > child.pid; sleep " + delay + "; " + consume
+        "printf synthetic-partial-output; printf synthetic-partial-error >&2; echo $$$$ > parent.pid; sleep 120 & echo $$! > child.pid; sleep " +
+            delay +
+            "; " +
+            consume
 
         private func Success() {
             using let temp = Temp()
@@ -38,11 +45,27 @@ internal class ProcessChecks {
                 []string{"-c", Script("0.05", "wc -c; printf synthetic-stderr >&2")},
                 temp.Root,
                 String('x', 1024 * 1024),
-                milliseconds: 5000
+                milliseconds: 5000,
+                outputPath: Path.Combine(temp.Root, "stdout.log"),
+                errorPath: Path.Combine(temp.Root, "stderr.log")
             )
             Check.That(result.Code == 0, "Piped input failed")
-            Check.That(result.Output.Trim() == "1048576", "Piped input was incomplete")
-            Check.That(result.Error == "synthetic-stderr", "Standard error was not collected")
+            Check.That(result.Output.Trim() == "synthetic-partial-output1048576", "Piped input was incomplete")
+            Check.That(result.Error == "synthetic-partial-errorsynthetic-stderr", "Standard error was not collected")
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "stdout.log")) == result.Output,
+                "Captured stdout changed"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "stderr.log")) == result.Error,
+                "Captured stderr changed"
+            )
+            Check.That(!result.OutputTruncated && !result.ErrorTruncated, "Normal output reported truncation")
+            Check.That(
+                File.GetUnixFileMode(Path.Combine(temp.Root, "stdout.log")) ==
+                (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "Capture file was not private"
+            )
             Collected(temp.Root)
             Console.WriteLine("PASS subprocess delivers 1 MiB through real pipes and collects output and descendants")
         }
@@ -57,9 +80,12 @@ internal class ProcessChecks {
                     []string{"-c", Script("2", "cat >/dev/null")},
                     temp.Root,
                     String('x', 1024 * 1024),
-                    milliseconds: 100
+                    milliseconds: 100,
+                    outputPath: Path.Combine(temp.Root, "stdout.log"),
+                    errorPath: Path.Combine(temp.Root, "stderr.log")
                 )
-            } catch (error Exception) {
+            } catch (error CommandInterrupted) {
+                Partial(temp.Root, error.Result)
                 Check.That(error.Message == "Runtime limit reached for /bin/sh", error.ToString())
                 limited = true
             }
@@ -92,9 +118,12 @@ internal class ProcessChecks {
                     temp.Root,
                     String('x', 1024 * 1024),
                     milliseconds: 5000,
-                    cancellation: signal
+                    cancellation: signal,
+                    outputPath: Path.Combine(temp.Root, "stdout.log"),
+                    errorPath: Path.Combine(temp.Root, "stderr.log")
                 )
-            } catch (error Exception) {
+            } catch (error CommandInterrupted) {
+                Partial(temp.Root, error.Result)
                 Check.That(error.Message == "Command cancelled: /bin/sh", error.ToString())
                 cancelled = true
             }
@@ -103,7 +132,13 @@ internal class ProcessChecks {
             signal <- true
             cancelled = false
             try {
-                Commands.Run("/bin/sh", []string{"-c", "touch unexpected-start"}, temp.Root, cancellation: signal)
+                Commands.Run(
+                    "/bin/sh",
+                    []string{"-c", "touch unexpected-start"},
+                    temp.Root,
+                    cancellation: signal,
+                    outputPath: Path.Combine(temp.Root, "prestart.log")
+                )
             } catch (error Exception) {
                 Check.That(error.Message == "Command cancelled: /bin/sh", error.ToString())
                 cancelled = true
@@ -112,6 +147,7 @@ internal class ProcessChecks {
                 cancelled && !File.Exists(Path.Combine(temp.Root, "unexpected-start")),
                 "Pre-cancelled command started"
             )
+            Check.That(!File.Exists(Path.Combine(temp.Root, "prestart.log")), "Pre-cancelled capture started")
             Console.WriteLine(
                 "PASS blocked-input and pre-start cancellation retain their exception and collect descendants"
             )
@@ -190,7 +226,8 @@ internal class ProcessChecks {
                     input: String('x', 1024 * 1024),
                     milliseconds: 5000
                 )
-            } catch (error IOException) {
+            } catch (error CommandInputInterrupted) {
+                Check.That(error.Result.Code == nil, "Stdin failure fabricated an exit code")
                 broken = true
             }
             Check.That(broken, "Stdin failure lost its IOException")
@@ -198,10 +235,13 @@ internal class ProcessChecks {
         }
 
         private func OutputLimit() {
+            using let temp = Temp()
             let result = Commands.Run(
                 "/bin/sh",
                 []string{"-c", "head -c 34603008 /dev/zero; head -c 34603008 /dev/zero >&2"},
-                milliseconds: 5000
+                milliseconds: 5000,
+                outputPath: Path.Combine(temp.Root, "stdout.log"),
+                errorPath: Path.Combine(temp.Root, "stderr.log")
             )
             Check.That(result.Code == 0, "Bounded output process failed")
             for text in[]string{result.Output, result.Error} {
@@ -210,7 +250,213 @@ internal class ProcessChecks {
                     "Output limit changed"
                 )
             }
+            Check.That(result.OutputTruncated && result.ErrorTruncated && result.Truncated, "Overflow was hidden")
+            Check.That(
+                FileInfo(Path.Combine(temp.Root, "stdout.log")).Length == result.Output.Length,
+                "Output capture unbounded"
+            )
+            Check.That(
+                FileInfo(Path.Combine(temp.Root, "stderr.log")).Length == result.Error.Length,
+                "Error capture unbounded"
+            )
+            let unicode = Commands.Run(
+                "/bin/sh",
+                []string{"-c", "yes é | head -c 68157440; printf finite-error >&2"},
+                milliseconds: 5000,
+                outputPath: Path.Combine(temp.Root, "unicode.log")
+            )
+            Check.That(unicode.OutputTruncated && !unicode.ErrorTruncated, "Per-stream truncation was lost")
+            Check.That(unicode.Output.Length <= 32 * 1024 * 1024, "Decoded-text limit was widened")
+            Check.That(
+                FileInfo(Path.Combine(temp.Root, "unicode.log")).Length > 32 * 1024 * 1024,
+                "Capture used a byte limit instead of decoded text"
+            )
             Console.WriteLine("PASS subprocess drains both output pipes while retaining the existing output limits")
+        }
+
+        private func Partial(root string, result CommandResult) {
+            Check.That(result.Output == "synthetic-partial-output", "Interrupted stdout was discarded")
+            Check.That(result.Error == "synthetic-partial-error", "Interrupted stderr was discarded")
+            Check.That(!result.OutputTruncated && !result.ErrorTruncated, "Partial streams were mislabelled")
+            Check.That(File.ReadAllText(Path.Combine(root, "stdout.log")) == result.Output, "Stdout prefix not flushed")
+            Check.That(File.ReadAllText(Path.Combine(root, "stderr.log")) == result.Error, "Stderr prefix not flushed")
+        }
+
+        private func ReaderFailure() {
+            using let temp = Temp()
+            var failed bool
+            try {
+                Commands.Run(
+                    "/bin/sh",
+                    []string{"-c", Script("0.05", "printf '\\377'; sleep 120")},
+                    temp.Root,
+                    milliseconds: 5000,
+                    strictOutput: true,
+                    outputPath: Path.Combine(temp.Root, "stdout.log")
+                )
+            } catch (error CommandInterrupted) {
+                Check.That(error.Result.ReadFailed, "Reader failure became success")
+                Check.Contains(error.Result.Error, "synthetic-partial-error")
+                failed = true
+            }
+            Check.That(failed, "Invalid UTF-8 became successful strict output")
+            Collected(temp.Root)
+            using let reader = StreamReader(
+                MemoryStream(System.Text.Encoding.UTF8.GetBytes("synthetic-capture-failure"))
+            )
+            using let full = FileStream(
+                "/dev/full",
+                FileStreamOptions{
+                    Mode: FileMode.Open,
+                    Access: FileAccess.Write,
+                    Share: FileShare.ReadWrite,
+                    BufferSize: 1
+                }
+            )
+            let output = Chan[CommandOutput](1)
+            let failures = Chan[Exception](4)
+            Commands.Read(reader, output, failures, full)
+            let result = <-output
+            Check.That(
+                result.Failure != nil && result.Text == "synthetic-capture-failure",
+                "Capture write failure became success"
+            )
+            Console.WriteLine("PASS strict reader and capture-write failures retain evidence")
+        }
+
+        internal func LimitedCapture(root string) {
+            var failed bool
+            let clock = Stopwatch.StartNew()
+            try {
+                Commands.Run(
+                    "/bin/sh",
+                    []string{"-c", Script("0.05", "head -c 16384 /dev/zero; sleep 120")},
+                    root,
+                    milliseconds: 5000,
+                    outputPath: Path.Combine(root, "limited.log")
+                )
+            } catch (error CommandInterrupted) {
+                Check.That(
+                    error.Result.Code == nil && error.Result.ReadFailed,
+                    "Capture failure became completed output"
+                )
+                Check.Contains(error.Result.Output, "synthetic-partial-output")
+                Check.Contains(error.Result.Error, "synthetic-partial-error")
+                Check.That(clock.ElapsedMilliseconds < 2000, "Capture failure bypassed immediate cleanup")
+                failed = true
+            }
+            Check.That(failed, "File-size limit did not fail capture")
+            Collected(root)
+        }
+
+        private func CaptureWriteFailure() {
+            using let temp = Temp()
+            Check.Success(
+                Check.Run(
+                    "/bin/bash",
+                    []string{
+                        "-c",
+                        "trap '' XFSZ; ulimit -f 1; exec \"$1\" --capture-write-failure \"$2\"",
+                        "fixture",
+                        Environment.ProcessPath ?? throw Exception("Missing test executable"),
+                        temp.Root
+                    },
+                    temp.Env
+                )
+            )
+            Check.That(
+                FileInfo(Path.Combine(temp.Root, "limited.log")).Length <= 1024,
+                "File-size fixture widened its limit"
+            )
+            Console.WriteLine("PASS capture-write failure propagates after real subprocess and descendant cleanup")
+        }
+
+        private func CaptureSafety() {
+            using let temp = Temp()
+            let sentinel = Path.Combine(temp.Root, "sentinel")
+            File.WriteAllText(sentinel, "original-evidence")
+            let link = Path.Combine(temp.Root, "link")
+            File.CreateSymbolicLink(link, sentinel)
+            let dangling = Path.Combine(temp.Root, "dangling")
+            File.CreateSymbolicLink(dangling, sentinel + "-missing")
+            for path in[]string{sentinel, link, dangling, temp.Root} {
+                var refused bool
+                try {
+                    Commands.Run("/bin/sh", []string{"-c", "touch unexpected-start"}, temp.Root, outputPath: path)
+                } catch (error Exception) {
+                    refused = true
+                }
+                Check.That(
+                    refused && !File.Exists(Path.Combine(temp.Root, "unexpected-start")),
+                    "Unsafe capture started"
+                )
+                Check.That(File.ReadAllText(sentinel) == "original-evidence", "Existing evidence replaced")
+            }
+            let alias = Path.Combine(temp.Root, "alias")
+            Directory.CreateSymbolicLink(alias, Path.Combine(temp.Root, "bin"))
+            var refused bool
+            try {
+                Commands.Run("/bin/true", []string{}, outputPath: Path.Combine(alias, "output"))
+            } catch (error Exception) {
+                refused = true
+            }
+            Check.That(refused, "Capture followed a parent link")
+            Commands.Run("/bin/true", []string{}, temp.Root)
+            Check.That(Directory.GetFiles(temp.Root, "*.log").Length == 0, "Unrelated commands captured by default")
+            Console.WriteLine("PASS capture refuses links and existing evidence and is opt-in")
+        }
+
+        internal func Prefix(root string) {
+            Commands.Run(
+                "/bin/sh",
+                []string{"-c", Script("120", "exit 0")},
+                root,
+                seconds: 180,
+                outputPath: Path.Combine(root, "stdout.log"),
+                errorPath: Path.Combine(root, "stderr.log")
+            )
+        }
+
+        private func AbruptStop() {
+            using let temp = Temp()
+            let info = ProcessStartInfo(Environment.ProcessPath ?? throw Exception("Missing test executable"))
+            info.ArgumentList.Add("--capture-prefix")
+            info.ArgumentList.Add(temp.Root)
+            using let process = Process.Start(info) ?? throw Exception("Cannot start abrupt capture fixture")
+            try {
+                let output = Path.Combine(temp.Root, "stdout.log")
+                let error = Path.Combine(temp.Root, "stderr.log")
+                var ready bool
+                for i in 0 ... 500 {
+                    if File.Exists(output) && File.ReadAllText(output) == "synthetic-partial-output" && File.Exists(
+                        error
+                    ) &&
+                        File.ReadAllText(error) == "synthetic-partial-error" && File.Exists(
+                        Path.Combine(temp.Root, "child.pid")
+                    ) {
+                        ready = true
+                        break
+                    }
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                    }
+                }
+                Check.That(ready, "Prefix was not flushed before abrupt stop")
+                process.Kill()
+                process.WaitForExit()
+                Check.That(File.ReadAllText(output) == "synthetic-partial-output", "SIGKILL lost stdout prefix")
+                Check.That(File.ReadAllText(error) == "synthetic-partial-error", "SIGKILL lost stderr prefix")
+            } finally {
+                if !process.HasExited {
+                    process.Kill()
+                    process.WaitForExit()
+                }
+                let pid = Path.Combine(temp.Root, "parent.pid")
+                if File.Exists(pid) {
+                    Commands.Run("/usr/bin/kill", []string{"-KILL", "--", "-" + File.ReadAllText(pid).Trim()})
+                }
+            }
+            Console.WriteLine("PASS flushed prefixes survive abrupt runner termination without terminal-state claims")
         }
     }
 }

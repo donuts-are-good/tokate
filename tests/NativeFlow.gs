@@ -1,5 +1,6 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.Diagnostics
@@ -430,11 +431,110 @@ internal class NativeFlow : IDisposable {
         Call([]string{"publish", "--run", run}, 1)
     }
 
+    internal func ManagedCancellation() {
+        Approve()
+        let run = Claim(seconds: "30")
+        Mode("timeout")
+        File.Copy(Binary, Path.Combine(Temp.Root, "tokate-runner"))
+        let info = ProcessStartInfo("/usr/bin/script")
+        info.WorkingDirectory = Temp.Root
+        info.UseShellExecute = false
+        info.RedirectStandardInput = true
+        info.RedirectStandardOutput = true
+        info.RedirectStandardError = true
+        info.Environment.Clear()
+        for entry in Temp.Env {
+            info.Environment[entry.Key] = entry.Value
+        }
+        for arg in[]string{
+            "-q",
+            "-e",
+            "-c",
+            "echo $$$$ > runner.pid; exec ./tokate-runner work --run '" + run + "'",
+            "/dev/null"
+        } {
+            info.ArgumentList.Add(arg)
+        }
+        using let terminal = Process.Start(info) ?? throw Exception("Cannot start managed cancellation fixture")
+        try {
+            terminal.StandardInput.Close()
+            let events = Path.Combine(run, "events.jsonl")
+            var ready bool
+            for i in 0 ... 1000 {
+                if File.Exists(events) && File.ReadAllText(events).Contains("partial-secret") && File.Exists(
+                    Path.Combine(run, "stderr.log")
+                ) &&
+                    File
+                    .ReadAllText(Path.Combine(run, "stderr.log")).Contains("synthetic-partial-stderr-secret") {
+                    ready = true
+                    break
+                }
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                }
+            }
+            Check.That(ready, "Managed cancellation did not flush evidence")
+            let pid = File.ReadAllText(Path.Combine(Temp.Root, "runner.pid")).Trim()
+            Check.Success(Check.Run("/usr/bin/kill", []string{"-INT", pid}, Temp.Env))
+            Check.That(terminal.WaitForExit(5000), "Managed cancellation did not finish cleanup")
+            let output = terminal.StandardOutput.ReadToEnd() + terminal.StandardError.ReadToEnd()
+            Check.That(terminal.ExitCode != 0, "Managed cancellation became success")
+            Check.Contains(output, "cancelled")
+            Check.That(!output.Contains("partial-secret"), "Raw managed cancellation output escaped")
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(saved["state"]) == "failed" && Check.Text(
+                    saved["failure_reason"]
+                ) == "inference_interrupted",
+                "Managed cancellation lost terminal reason"
+            )
+            Check.That(
+                saved["inference_exit_code"] == nil && saved["usage"] == nil,
+                "Managed cancellation fabricated completion"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "checkout/partial.txt")) == "partial-edit",
+                "Cancelled edit lost"
+            )
+            let child = File.ReadAllText(Path.Combine(Bin, "child.pid"))
+            let status = "/proc/" + child + "/stat"
+            Check.That(
+                !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
+                "Managed descendant survived cancellation"
+            )
+            Call([]string{"work", "--run", run}, 1)
+            Reload()
+            Check.That(Check.Text(State["exec_count"]) == "1", "Managed cancellation retried inference")
+            NoPr()
+        } finally {
+            if !terminal.HasExited {
+                terminal.Kill(true)
+                terminal.WaitForExit()
+            }
+        }
+    }
+
     internal func Timeout() {
         Approve()
         let run = Claim(seconds: "1")
         Mode("timeout")
-        Call([]string{"work", "--run", run}, 1)
+        let failure = Call([]string{"work", "--run", run}, 1)
+        Check.That(!(failure.Output + failure.Error).Contains("partial-secret"), "Raw output escaped timeout")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "partial-secret")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-partial-stderr-secret")
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "checkout/partial.txt")) == "partial-edit",
+            "Interrupted edit lost"
+        )
+        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        Check.That(
+            saved["turn_completed"] == nil && saved["usage"] == nil && saved["inference_exit_code"] == nil,
+            "Partial JSONL became completed inference"
+        )
+        Check.That(Check.Text(saved["failure_reason"]) == "inference_interrupted", "Wrong inference failure reason")
+        NoPr()
+        Call([]string{"recover", "--run", run, "--seconds", "1"}, 1)
+        Call([]string{"publish", "--run", run}, 1)
         let pid = File.ReadAllText(Path.Combine(Bin, "child.pid"))
         let status = "/proc/" + pid + "/stat"
         Check.That(!File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z", "Descendant survived timeout")
@@ -1695,6 +1795,7 @@ internal class NativeFlow : IDisposable {
                 "IssueEdit",
                 "Revocation",
                 "Timeout",
+                "ManagedCancellation",
                 "Reapproval",
                 "FalseSuccess",
                 "PolicyEdit",
@@ -1774,6 +1875,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "Revocation" {
                         flow.Revocation()
+                    }
+                    case "ManagedCancellation" {
+                        flow.ManagedCancellation()
                     }
                     case "Timeout" {
                         flow.Timeout()

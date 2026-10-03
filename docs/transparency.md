@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.17 discovers tools, handles data, and
+This document describes how Tokate 0.2.18 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -208,6 +208,23 @@ and check results.
 These files persist for inspection and recovery. There is no automatic expiry or
 general secret scrubber. Raw tool output can contain sensitive content if a tool
 prints it. Command errors can also appear in terminal output.
+
+Managed turns retain stdout in `events.jsonl` and stderr in `stderr.log` as
+bounded decoded-text chunks arrive. Independent checks retain separate private
+`verification-UUID/stdout.log` and `stderr.log` files within the run or correction
+or amendment attempt. Each stream retains at most 32 Mi decoded characters;
+excess output is drained and terminal records report truncation per stream.
+Capture files are newly created with mode 0600; existing evidence and links are
+refused. GitHub, credential and other host commands do not opt into this capture.
+
+An interrupted check retains its active phase, partial output and prior completed
+checks without inventing an exit code. A graceful timeout or cancellation retains
+the failure reason after cleanup. Abrupt termination can leave only the prefix
+already flushed, a trailing partial record and an unknown terminal state. This
+is not a guarantee of every byte, power-loss durability or cleanup after SIGKILL.
+Partial donor JSONL proves neither a completed turn nor usage and grants no retry
+or publication authority. Raw captures stay local and are not printed by default
+or copied into receipts, PRs, issue comments or remote coordination state.
 
 Explicit pre-publication correction additionally retains `original-evidence/`,
 including missing-file and link metadata, and separate `correction.json` and

@@ -278,11 +278,18 @@ internal class CorrectionChecks {
         private func OriginalTimeout(binary string) {
             using let flow = NativeFlow(binary)
             flow.Initialize()
-            flow.VerificationPolicy("sleep 12 && test -f result.txt")
+            flow.VerificationPolicy(
+                "printf synthetic-verifier-prefix; printf synthetic-verifier-error >&2; sleep 12 && test -f result.txt"
+            )
             flow.Approve()
             let run = flow.Claim("10")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Runtime limit reached")
-            Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Timeout saved a completed check")
+            let interrupted = Read(run, "verification.json")[0]
+            Check.That(interrupted?["exit_code"] == nil, "Timeout fabricated a completed check")
+            Check.Contains(Check.Text(interrupted?["output"]), "synthetic-verifier-prefix")
+            Check.Contains(Check.Text(interrupted?["error"]), "synthetic-verifier-error")
+            Check.That(Check.Text(interrupted?["state"]) == "interrupted", "Interrupted phase was lost")
+            let originalChecks = File.ReadAllText(Path.Combine(run, "verification.json"))
             let original = File.ReadAllText(Path.Combine(run, "candidate.patch"))
             let checkout = Path.Combine(run, "checkout")
             let tree = flow.Git("-C", checkout, "write-tree")
@@ -300,10 +307,13 @@ internal class CorrectionChecks {
                 Check.That(File.ReadAllText(Path.Combine(run, path)) == original, "Original candidate was replaced")
             }
             Check.That(
-                !File.Exists(Path.Combine(run, "original-evidence/verification.json")),
-                "Missing original check evidence was reconstructed"
+                File.ReadAllText(Path.Combine(run, "original-evidence/verification.json")) == originalChecks,
+                "Interrupted original check evidence replaced"
             )
-            Check.Contains(File.ReadAllText(Path.Combine(run, "original-evidence/capture.json")), "verification.json")
+            Check.That(
+                Directory.GetDirectories(Path.Combine(run, "original-evidence"), "verification-*").Length == 1,
+                "Original raw verifier prefix was not sealed"
+            )
             Check.Contains(Check.Text(Read(run, "original-evidence/run.json")["error"]), "Runtime limit reached")
         }
 
@@ -607,7 +617,10 @@ internal class CorrectionChecks {
         private func InterruptedVerification(binary string) {
             using let flow = NativeFlow(binary)
             flow.Initialize()
-            flow.VerificationPolicy("printf completed-first-check", second: "sleep 3 && printf completed-second-check")
+            flow.VerificationPolicy(
+                "printf completed-first-check",
+                second: "printf synthetic-interrupted-check; printf synthetic-interrupted-error >&2; sleep 3 && printf completed-second-check"
+            )
             flow.Approve()
             let run = flow.Claim()
             flow.Mode("staged_whitespace")
@@ -617,9 +630,13 @@ internal class CorrectionChecks {
             Check.Contains(Recover(flow, run, commit, 1, seconds: "1").Error, "verification_failed")
             let failed = Read(run, "correction.json")
             Check.That(
-                failed["verification"]?.AsArray().Count == 1,
-                "Interrupted verification lost prior check results"
+                failed["verification"]?.AsArray().Count == 2,
+                "Interrupted verification lost prior or active check results"
             )
+            Check.That(Check.Text(failed["verification"]?[0]?["exit_code"]) == "0", "Prior completed check lost")
+            Check.That(failed["verification"]?[1]?["exit_code"] == nil, "Interrupted check fabricated an exit code")
+            Check.Contains(Check.Text(failed["verification"]?[1]?["output"]), "synthetic-interrupted-check")
+            Check.Contains(Check.Text(failed["verification"]?[1]?["error"]), "synthetic-interrupted-error")
             Check.Contains(Check.Text(failed["error"]), "Runtime limit")
             let evidence = File.ReadAllText(Path.Combine(run, "correction.json"))
             Recover(flow, run, commit, 1, seconds: "1")

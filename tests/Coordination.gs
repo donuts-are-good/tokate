@@ -219,7 +219,7 @@ internal class CoordinationFlow : IDisposable {
         Flow.NoInference()
     }
 
-    internal func Prepare(source string = "external", code int32 = 0) string {
+    internal func Prepare(source string = "external", code int32 = 0, seconds string = "30") string {
         let state = State()
         let result = Flow.Call(
             []string{
@@ -235,7 +235,7 @@ internal class CoordinationFlow : IDisposable {
                 "--tools",
                 Tools,
                 "--seconds",
-                "30",
+                seconds,
                 "--runs",
                 Path.Combine(Flow.Temp.Root, "runs")
             },
@@ -475,6 +475,38 @@ internal class CoordinationFlow : IDisposable {
         )
         Flow.NoInference()
         Check.That(!File.Exists(marker), "Read-only validation executed PR code")
+    }
+
+    internal func InterruptedVerification() {
+        Flow.VerificationPolicy(
+            "printf synthetic-prior-check",
+            second: "printf synthetic-external-prefix; printf synthetic-external-error >&2; sleep 3"
+        )
+        Flow.Approve()
+        let claim = Claim()
+        let run = Prepare(seconds: "1")
+        let commit = Candidate(claim)
+        let failure = Flow.Call([]string{"external", "--run", run, "--commit", commit}, 1)
+        Check.That(!(failure.Output + failure.Error).Contains("synthetic-external"), "Raw external output escaped")
+        let savedPath = Path.Combine(run, "run.json")
+        let saved = Check.Json(File.ReadAllText(savedPath))
+        Check.That(Check.Text(saved["state"]) == "failed", "External timeout lost failed state")
+        Check.That(Check.Text(saved["failure_stage"]) == "owner_verification", "External phase lost")
+        Check.That(saved["verification"]?.AsArray().Count == 2, "External prior or active checks lost")
+        Check.That(Check.Text(saved["verification"]?[0]?["exit_code"]) == "0", "External prior check lost")
+        Check.That(saved["verification"]?[1]?["exit_code"] == nil, "External interruption fabricated exit code")
+        Check.Contains(Check.Text(saved["verification"]?[1]?["output"]), "synthetic-external-prefix")
+        Check.Contains(Check.Text(saved["verification"]?[1]?["error"]), "synthetic-external-error")
+        let evidence = File.ReadAllText(savedPath)
+        Flow.Call([]string{"submit", "--run", run}, 1)
+        Flow.Call([]string{"external", "--run", run, "--commit", commit}, 1)
+        Check.That(File.ReadAllText(savedPath) == evidence, "Interrupted external verification retried")
+        Check.That(
+            Flow.Git("-C", Path.Combine(run, "checkout"), "rev-parse", "HEAD") == commit,
+            "External candidate lost"
+        )
+        Flow.NoPr()
+        Flow.NoInference()
     }
 
     internal func ExternalPublication() {
@@ -939,6 +971,7 @@ internal class CoordinationFlow : IDisposable {
                 "SimultaneousClaims",
                 "ReplayAndInterruptedState",
                 "ExternalPublication",
+                "InterruptedVerification",
                 "CanonicalExternal",
                 "CanonicalSubmit",
                 "ExpiryAndRevocation",
@@ -967,6 +1000,9 @@ internal class CoordinationFlow : IDisposable {
                     }
                     case "ReplayAndInterruptedState" {
                         test.ReplayAndInterruptedState()
+                    }
+                    case "InterruptedVerification" {
+                        test.InterruptedVerification()
                     }
                     case "ExternalPublication" {
                         test.ExternalPublication()

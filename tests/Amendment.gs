@@ -59,13 +59,23 @@ internal class AmendmentFlow {
             flow.Save()
         }
 
-        private func Original(flow NativeFlow, owner bool = false, mutating bool = false) string {
+        private func Original(
+            flow NativeFlow,
+            owner bool = false,
+            mutating bool = false,
+            interruptible bool = false
+        ) string {
             flow.Initialize()
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["verification"] = Check.Json(
                 "[[\"/bin/sh\",\"-c\",\"test -f result.txt\"],[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]"
             )
+            if interruptible {
+                policy["verification"] = Check.Json(
+                    "[[\"/bin/sh\",\"-c\",\"printf synthetic-amendment-prior; test -f result.txt\"],[\"/bin/sh\",\"-c\",\"if test -f slow; then printf synthetic-amendment-prefix; printf synthetic-amendment-error >&2; sleep 3; fi; test -s result.txt\"]]"
+                )
+            }
             if mutating {
                 policy["verification"] = Check.Json(
                     "[[\"/bin/sh\",\"-c\",\"test -f result.txt; if test -f mutate; then printf changed >> result.txt; fi\"]]"
@@ -160,6 +170,41 @@ internal class AmendmentFlow {
             Check.That(
                 Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "checks.json")))["head"]) == commit,
                 "Owner checks were not bound to amendment"
+            )
+        }
+
+        private func InterruptedVerification(binary string) {
+            using let flow = NativeFlow(binary)
+            let run = Original(flow, interruptible: true)
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let commit = Edit(flow, run, "slow-check", "slow")
+            let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "1"}
+            let failure = flow.Call(args, 1)
+            Check.That(
+                !(failure.Output + failure.Error).Contains("synthetic-amendment"),
+                "Raw amendment output escaped"
+            )
+            let location = Path.Combine(run, "amendments", commit)
+            let saved = Saved(location)
+            Check.That(Check.Text(saved["state"]) == "failed", "Amendment failure state lost")
+            Check.That(Check.Text(saved["failure_reason"]) == "verification_failed", "Amendment failure reason lost")
+            Check.That(saved["verification"]?.AsArray().Count == 2, "Amendment prior or active check lost")
+            Check.That(Check.Text(saved["verification"]?[0]?["exit_code"]) == "0", "Amendment prior pass lost")
+            Check.That(saved["verification"]?[1]?["exit_code"] == nil, "Interrupted amendment fabricated exit code")
+            Check.Contains(Check.Text(saved["verification"]?[1]?["output"]), "synthetic-amendment-prefix")
+            Check.Contains(Check.Text(saved["verification"]?[1]?["error"]), "synthetic-amendment-error")
+            let evidence = File.ReadAllText(Path.Combine(location, "run.json"))
+            flow.Call(args, 1)
+            Check.That(
+                File.ReadAllText(Path.Combine(location, "run.json")) == evidence,
+                "Interrupted amendment retried checks"
+            )
+            AssertOriginal(run, original)
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Amendment launched inference")
+            Check.That(
+                Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"]) == Check.Text(Check.Json(original)["commit"]),
+                "Failed amendment changed remote PR"
             )
         }
 
@@ -321,7 +366,10 @@ internal class AmendmentFlow {
                 if failure == "checks" {
                     let saved = Saved(Path.Combine(run, "amendments", commit))
                     Check.That(Check.Text(saved["state"]) == "failed", "Failed verification lost evidence")
-                    Check.That(saved["verification"] == nil, "Failed amendment accepted verification")
+                    Check.That(
+                        Check.Text(saved["verification"]?[1]?["exit_code"]) != "0",
+                        "Failed amendment accepted verification"
+                    )
                     Amend(flow, run, commit, 1)
                 }
             }
@@ -503,6 +551,7 @@ internal class AmendmentFlow {
                 "V1Push",
                 "V1Body",
                 "Rejections",
+                "InterruptedVerification",
                 "V2",
                 "V2Native",
                 "V2Push",
@@ -527,6 +576,9 @@ internal class AmendmentFlow {
                     }
                     case "V1Body" {
                         V1Interrupted(binary, "lost_body_response")
+                    }
+                    case "InterruptedVerification" {
+                        InterruptedVerification(binary)
                     }
                     case "Rejections" {
                         Rejections(binary)
