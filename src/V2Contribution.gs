@@ -393,7 +393,10 @@ internal class V2Contribution {
         }
 
         internal func VerifyReceipt(repo string, number int32, pull JsonElement, receipt JsonElement) Data {
-            RequestData.Keys(receipt, "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment")
+            RequestData.Keys(
+                receipt,
+                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment"
+            )
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let contribution = J.Get(state.Value(), "contribution")
             let metadata = J.Get(contribution, "metadata")
@@ -464,7 +467,7 @@ internal class V2Contribution {
                 J.Get(record, "policy"),
                 J.Text(J.Get(record, "approval"), "base"),
                 J.Text(metadata, "fork"),
-                J.Text(metadata, "head")
+                exactHead
             )
             let run = Data()
             run.Fields["version"] = 2

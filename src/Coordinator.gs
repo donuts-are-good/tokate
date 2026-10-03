@@ -259,11 +259,25 @@ internal class Coordinator {
             Terminal.Json(J.Parse(J.Write(outcome)), "Request outcome")
         }
 
-        internal func OriginalReport(metadata JsonElement) string -> "Donor-declared contribution source: " + J.Text(
-            metadata,
-            "source"
-        ) +
-            ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+        internal func OriginalReport(metadata JsonElement) string {
+            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
+                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                report += " Explicit correction " + J.Text(correction, "uuid") +
+                    ": " +
+                    (
+                    J.Items(J.Get(correction, "tools"))
+                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
+                        J.Write(J.Get(correction, "tools"))
+                ) +
+                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
+                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
+                    J
+                    .Number(correction, "seconds").ToString() + " seconds."
+            }
+            return report
+        }
 
         private func Amend(
             repo string,
@@ -297,25 +311,13 @@ internal class Coordinator {
             }
             ValidateFork(repo, donor, metadata, actor)
             ValidateDiff(repo, record, metadata)
-            let comparison = GitHub.Api(
-                "repos/" + repo + "/compare/" + J.Text(metadata, "previous") + "..." + donor + ":" + J.Text(
-                    metadata,
-                    "head"
-                )
+            ProtectedPaths.Remote(
+                repo,
+                policy.Value,
+                J.Text(metadata, "previous"),
+                J.Text(metadata, "fork"),
+                J.Text(metadata, "head")
             )
-            if J.Text(comparison, "status") != "ahead" || J.Items(J.Get(comparison, "files")).Count == 0 || J.Items(
-                J.Get(comparison, "files")
-            )
-                .Count >= 300 {
-                throw Exception("Amendment must descend from the previous published head with a bounded nonempty diff")
-            }
-            for file in J.Items(J.Get(comparison, "files")) {
-                for name in[]string{J.Text(file, "filename"), J.Text(file, "previous_filename")} {
-                    if name.StartsWith(".github/workflows/") || name.StartsWith(".github/tokate") {
-                        throw Exception("Amendment changes protected owner configuration")
-                    }
-                }
-            }
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo
@@ -328,30 +330,31 @@ internal class Coordinator {
             amendment.Fields["previous"] = J.Text(metadata, "previous")
             amendment.Fields["seconds"] = J.Number(metadata, "seconds")
             amendment.Fields["tools"] = J.Get(metadata, "tools")
-            let receipt = J.Parse(
-                J.Write(
-                    J.Map(
-                        "version",
-                        2,
-                        "repo",
-                        repo,
-                        "issue",
-                        number,
-                        "approval",
-                        J.Text(value, "approval_id"),
-                        "expected",
-                        J.Text(request, "expected"),
-                        "reservation",
-                        run.Text("id"),
-                        "donor",
-                        donor,
-                        "head",
-                        J.Text(metadata, "head"),
-                        "amendment",
-                        Amendment.PublicRecord(amendment)
-                    )
-                )
+            let fields = J.Map(
+                "version",
+                2,
+                "repo",
+                repo,
+                "issue",
+                number,
+                "approval",
+                J.Text(value, "approval_id"),
+                "expected",
+                J.Text(request, "expected"),
+                "reservation",
+                run.Text("id"),
+                "donor",
+                donor,
+                "head",
+                J.Text(metadata, "head"),
+                "amendment",
+                Amendment.PublicRecord(amendment)
             )
+            let correction = J.Get(old, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                fields["correction"] = correction
+            }
+            let receipt = J.Parse(J.Write(fields))
             let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             let body = J.Text(pull, "body")
             let oldReceipt = Amendment.Receipt(body)
@@ -497,22 +500,7 @@ internal class Coordinator {
         ) string {
             let values = Dictionary[string, string]()
             values["issue"] = J.Number(J.Get(record, "issue"), "number").ToString()
-            values["report"] = "Donor-declared contribution source: " + J.Text(metadata, "source") +
-                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
-            let correction = J.Get(metadata, "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                values["report"] += " Explicit correction " + J.Text(correction, "uuid") +
-                    ": " +
-                    (
-                    J.Items(J.Get(correction, "tools"))
-                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
-                        J.Write(J.Get(correction, "tools"))
-                ) +
-                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
-                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
-                    J
-                    .Number(correction, "seconds").ToString() + " seconds."
-            }
+            values["report"] = Amendment.Report(OriginalReport(metadata))
             values["donor"] = donor
             values["model"] = "donor-reported tools: " + J.Write(J.Get(metadata, "tools"))
             values["effort"] = "per-tool declaration; not independently attested"

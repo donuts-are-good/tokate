@@ -69,6 +69,10 @@ internal class Amendment {
                 "head",
                 Head(state)
             )
+            let correction = J.Get(J.Get(original, "metadata"), "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                fields["correction"] = correction
+            }
             if J.Items(J.Get(state, "amendments")).Count > 0 {
                 fields["amendment"] = J.Map(
                     "id",
@@ -294,7 +298,8 @@ internal class Amendment {
             return J.Parse(J.Write(J.Map("record", record, "state", value, "sha", state.Sha)))
         }
 
-        private func Snapshot(checkout string, run Data, commit string, previous string) string {
+        private func Snapshot(checkout string, run Data, commit string, previous string, policy JsonElement) string {
+            Verification.Candidate(checkout)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.Git(
                 checkout,
                 "status",
@@ -304,44 +309,11 @@ internal class Amendment {
             ) != "" {
                 throw Exception("Amend requires a clean checkout at the declared exact commit")
             }
-            for entry in Commands.Git(checkout, "ls-files", "-v").Split('\n') {
-                if entry.Length > 0 && (Char.IsLower(entry[0]) || entry[0] == 'S') {
-                    throw Exception("Amend refuses hidden assume-unchanged or skip-worktree index entries")
-                }
-            }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
             Commands.Git(checkout, "merge-base", "--is-ancestor", previous, commit)
             Commands.Git(checkout, "diff", "--no-ext-diff", "--no-textconv", "--check", run.Text("base"), commit)
-            let files = Commands.Git(
-                checkout,
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                "--name-only",
-                "-z",
-                run.Text("base"),
-                commit
-            )
-            let changes = Commands.Git(
-                checkout,
-                "diff",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                "--name-only",
-                "-z",
-                previous,
-                commit
-            )
-            if files == "" || changes == "" {
-                throw Exception("Amendment must change the previously published commit")
-            }
-            for file in(files + "\0" + changes).Split('\0') {
-                if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
-                    throw Exception("Amendment changes protected owner policy, template or workflows")
-                }
-            }
+            ProtectedPaths.Local(checkout, policy, run.Text("base"), commit)
+            ProtectedPaths.Local(checkout, policy, previous, commit)
             return Commands.Git(checkout, "rev-parse", "HEAD^{tree}") + "\n" + Commands.Git(
                 checkout,
                 "diff",
@@ -405,7 +377,7 @@ internal class Amendment {
                 Publication.Verify(run.Text("repo"), number)
                 Remote(run, run.Text("commit"), "")
                 let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
-                let snapshot = Snapshot(checkout, run, commit, run.Text("commit"))
+                let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), policy.Value)
                 Archive(directory)
                 Directory.CreateDirectory(location)
                 amendment = Data()
@@ -460,7 +432,7 @@ internal class Amendment {
                             throw Exception("Amendment owner verification failed; saved progress retained")
                         }
                     }
-                    if Snapshot(checkout, run, commit, amendment.Text("previous")) != snapshot {
+                    if Snapshot(checkout, run, commit, amendment.Text("previous"), policy.Value) != snapshot {
                         throw Exception("Verification changed the exact amendment candidate")
                     }
                     amendment.Fields["verification"] = results
@@ -514,7 +486,7 @@ internal class Amendment {
             }
             Publication.VerificationReport(amendment, record)
             let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
-            let snapshot = Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous"))
+            let snapshot = Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous"), policy.Value)
             if Data.Hash(snapshot) != amendment.Text("snapshot") || snapshot != File.ReadAllText(
                 Path.Combine(location, "candidate.patch")
             ) {
@@ -636,7 +608,13 @@ internal class Amendment {
                 Authority(run, amendment)
                 Pull(run, amendment.Number("pr"), amendment.Text("previous"), "")
                 Remote(run, amendment.Text("previous"), "")
-                if Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous")) != snapshot {
+                if Snapshot(
+                    checkout,
+                    run,
+                    amendment.Text("commit"),
+                    amendment.Text("previous"),
+                    policy.Value
+                ) != snapshot {
                     throw Exception("Amendment checkout changed before push")
                 }
                 Commands.Git(
@@ -675,7 +653,13 @@ internal class Amendment {
                     Remote(run, amendment.Text("commit"), "")
                     let beforeWrite = Pull(run, amendment.Number("pr"), amendment.Text("commit"), "")
                     if J.Text(beforeWrite, "body") != body ||
-                        Snapshot(checkout, run, amendment.Text("commit"), amendment.Text("previous")) != snapshot {
+                        Snapshot(
+                        checkout,
+                        run,
+                        amendment.Text("commit"),
+                        amendment.Text("previous"),
+                        policy.Value
+                    ) != snapshot {
                         throw Exception("PR body or amendment checkout changed before body write")
                     }
                     GitHub.Api(

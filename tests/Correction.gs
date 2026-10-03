@@ -924,8 +924,142 @@ internal class CorrectionChecks {
             external.Flow.NoInference()
         }
 
+        private func AmendCorrected(flow NativeFlow, run string, archive string, coordinator CoordinationFlow? = nil) {
+            let correction = Read(run)["correction"]?.DeepClone()
+            let corrected = Check.Text(Read(run)["commit"])
+            for text in[]string{"First amendment\n", "Second amendment\n"} {
+                let commit = Correct(flow, run, text)
+                let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+                flow.Call(args)
+                if let managed = coordinator {
+                    flow.Reload()
+                    let request = Check.Json(Check.Text(flow.State["posted_request"]?["body"]).Substring(8))
+                    managed.Coordinate(managed.Event(request))
+                    flow.Call(args)
+                }
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"})
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing corrected PR")
+                let body = Check.Text(pull["body"])
+                let prefix = "<!-- tokate-receipt:"
+                let start = body.IndexOf(prefix) + prefix.Length
+                let receiptText = body.Substring(start, body.IndexOf(" -->", start) - start)
+                let receipt = Check.Json(receiptText)
+                Check.That(
+                    JsonNode.DeepEquals(receipt["correction"], correction),
+                    "Amendment changed correction provenance"
+                )
+                Check.That(Check.Text(receipt["correction"]?["head"]) == corrected, "Historical corrected head lost")
+                Check.That(Check.Text(receipt["head"]) == commit, "Receipt lost current amended head")
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
+                    "Amendment changed original correction archive"
+                )
+                let provenance = receipt["correction"] ?? throw Exception("Missing correction provenance")
+                provenance["head"] = JsonValue.Create(commit)
+                pull["body"] = JsonValue.Create(body.Replace(receiptText, receipt.ToJsonString()))
+                flow.Save()
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1)
+                pull["body"] = JsonValue.Create(body)
+                flow.Save()
+            }
+            let previous = Check.Text(Read(run)["commit"])
+            File.WriteAllText(Path.Combine(run, "checkout/scripts/verify.sh"), "exit 0\n")
+            let protectedCommit = Correct(flow, run)
+            Check.Contains(
+                flow.Call([]string{"amend", "--run", run, "--commit", protectedCommit, "--seconds", "30"}, 1).Error,
+                "protected owner path"
+            )
+            Check.That(
+                !Directory.Exists(Path.Combine(run, "amendments", protectedCommit)),
+                "Protected amendment reached verification"
+            )
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"]) == previous,
+                "Protected amendment published"
+            )
+            if let managed = coordinator {
+                let state = managed.State()
+                let metadata = Read(run)
+                flow.Git(
+                    "-C",
+                    Path.Combine(run, "checkout"),
+                    "push",
+                    Path.Combine(flow.Bin, "fork"),
+                    protectedCommit + ":refs/heads/" + Check.Text(metadata["branch"])
+                )
+                let request = Check.Map(
+                    "uuid",
+                    Guid.NewGuid().ToString("D"),
+                    "expected",
+                    Check.Text(state["sha"]),
+                    "approval",
+                    Check.Text(metadata["approval"]),
+                    "action",
+                    "amend",
+                    "metadata",
+                    Check.Map(
+                        "fork",
+                        Check.Text(metadata["head_repo"]),
+                        "branch",
+                        Check.Text(metadata["branch"]),
+                        "previous",
+                        previous,
+                        "head",
+                        protectedCommit,
+                        "pr",
+                        10,
+                        "seconds",
+                        30,
+                        "tools",
+                        Check.Json("[]"),
+                        "verification",
+                        "donor-reported-pass"
+                    )
+                )
+                Check.Contains(managed.Coordinate(managed.Event(request), 1).Error, "protected owner path")
+                Check.That(
+                    Check.Text(managed.State()["sha"]) == Check.Text(state["sha"]),
+                    "Protected coordinator amendment gained authority"
+                )
+            }
+            Once(flow, 1)
+        }
+
+        private func CorrectedAmendmentsV1(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            flow.ProtectedPolicy()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("staged_whitespace")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let archive = Prepared(flow, run)
+            Recover(flow, run, Correct(flow, run))
+            AmendCorrected(flow, run, archive)
+        }
+
+        private func CorrectedAmendmentsV2(binary string) {
+            using let flow = CoordinationFlow(binary)
+            flow.Initialize()
+            flow.Flow.ProtectedPolicy()
+            flow.Flow.Approve()
+            let run = ManagedRun(flow, "staged_whitespace")
+            let archive = Prepared(flow.Flow, run)
+            Recover(flow.Flow, run, Correct(flow.Flow, run))
+            flow.Flow.Call([]string{"submit", "--run", run})
+            flow.Flow.Reload()
+            let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+            flow.Coordinate(flow.Event(request))
+            flow.Flow.Call([]string{"submit", "--run", run})
+            AmendCorrected(flow.Flow, run, archive, flow)
+        }
+
         internal func All(binary string, selected string = "") {
             for name in[]string{
+                "CorrectedAmendmentsV1",
+                "CorrectedAmendmentsV2",
                 "Whitespace",
                 "BinaryRename",
                 "FirstVerification",
@@ -948,6 +1082,12 @@ internal class CorrectionChecks {
                     continue
                 }
                 switch name {
+                    case "CorrectedAmendmentsV1" {
+                        CorrectedAmendmentsV1(binary)
+                    }
+                    case "CorrectedAmendmentsV2" {
+                        CorrectedAmendmentsV2(binary)
+                    }
                     case "Whitespace" {
                         Whitespace(binary)
                     }

@@ -271,7 +271,12 @@ internal class Publication {
             )
             let correction = J.Get(receipt, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
-                RequestData.Correction(correction, J.Text(receipt, "head"), J.Get(record, "policy"))
+                RequestData.Correction(
+                    correction,
+                    J.Get(receipt, "amendment").ValueKind == JsonValueKind.Undefined ? J.Text(receipt, "head"):
+                    J.Text(receipt, "original_head"),
+                    J.Get(record, "policy")
+                )
             }
             ProtectedPaths.Remote(
                 repo,

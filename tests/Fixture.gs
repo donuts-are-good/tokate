@@ -722,20 +722,20 @@ internal class Fixture {
             return Answer(pulls)
         }
         if tail.StartsWith("pulls/") {
-                let pull = pulls[0] ?? throw Exception("Missing PR")
-                if method == "PATCH" {
-                    if Check.Text(State["mode"]) == "body_fail" {
-                        return Response(500)
-                    }
-                    pull["body"] = body["body"]?.DeepClone()
-                    if Check.Text(State["mode"]) == "lost_body_response" {
-                        State["mode"] = JsonValue.Create("")
-                        Save()
-                        Console.Error.WriteLine("Synthetic lost amendment body response")
-                        return 1
-                    }
+            let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+            if method == "PATCH" {
+                if Check.Text(State["mode"]) == "body_fail" {
+                    return Response(500)
                 }
-                return Answer(pull)
+                pull["body"] = body["body"]?.DeepClone()
+                if Check.Text(State["mode"]) == "lost_body_response" {
+                    State["mode"] = JsonValue.Create("")
+                    Save()
+                    Console.Error.WriteLine("Synthetic lost amendment body response")
+                    return 1
+                }
+            }
+            return Answer(pull)
         }
         if tail == "pulls" {
             let count = State["pr_create_count"] == nil ? 1: Int32.Parse(Check.Text(State["pr_create_count"])) + 1
@@ -974,7 +974,13 @@ internal class Fixture {
                 }
                 Save()
             }
-            if push >= 0 && result.Code == 0 && (Check.Text(State["mode"]) == "lost_push_response" || Check.Text(State["mode"]) == "push_fail_after_write") {
+            if push >= 0 &&
+                result.Code == 0 &&
+                (
+                Check.Text(State["mode"]) == "lost_push_response" || Check.Text(
+                    State["mode"]
+                ) == "push_fail_after_write"
+            ) {
                 let latest = Check.Json(File.ReadAllText(StatePath))
                 latest["mode"] = JsonValue.Create("")
                 latest["push_count"] = JsonValue.Create(
