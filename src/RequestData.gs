@@ -168,6 +168,56 @@ internal class RequestData {
             }
         }
 
+        internal func PositiveId(value JsonElement) int64 {
+            var id int64
+            if !value.TryGetInt64(out id) || id < 1 {
+                throw Exception("Expected a positive numeric GitHub identity")
+            }
+            return id
+        }
+
+        internal func Binding(actor JsonElement, request JsonElement) string {
+            PositiveId(actor)
+            return Data.Hash(
+                Canonical(
+                    J.Parse(
+                        J.Write(
+                            J.Map(
+                                "actor",
+                                actor,
+                                "expected",
+                                J.Text(request, "expected"),
+                                "approval",
+                                J.Text(request, "approval"),
+                                "request",
+                                request
+                            )
+                        )
+                    )
+                )
+            )
+        }
+
+        internal func Recorded(state CoordinationState, actor JsonElement, request JsonElement) JsonElement {
+            let binding = Binding(actor, request)
+            var result JsonElement
+            for old in J.Items(J.Get(state.Value(), "outcomes")) {
+                if J.Text(old, "uuid") == J.Text(request, "uuid") {
+                    if J.Text(old, "binding") != binding {
+                        throw Exception("UUID replay changed actor or request contents")
+                    }
+                    if result.ValueKind != JsonValueKind.Undefined {
+                        throw Exception("Ambiguous recorded request outcomes")
+                    }
+                    result = J.Get(old, "outcome")
+                    if result.ValueKind != JsonValueKind.Object {
+                        throw Exception("Invalid recorded request outcome")
+                    }
+                }
+            }
+            return result
+        }
+
         internal func Request(value JsonElement) {
             Keys(value, "uuid,expected,approval,action,metadata")
             var uuid Guid

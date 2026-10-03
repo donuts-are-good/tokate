@@ -132,6 +132,10 @@ internal class ApiCache {
     internal var Body JsonElement
 }
 
+internal class ApiDeadlineException : Exception {
+    internal init() : base("Checks watch timeout reached") { }
+}
+
 internal class ApiTransport {
     shared {
         private let Cache Dictionary[string, ApiCache] = Dictionary[string, ApiCache]()
@@ -141,6 +145,28 @@ internal class ApiTransport {
         private var Mutations int32
         private var ConditionalResponses int32
         private var Retries int32
+        private var Deadline double = Double.PositiveInfinity
+        private var NextPoll double
+        private var NextRead double
+
+        internal func BeginDeadline(seconds int32) {
+            Deadline = Clock.Elapsed.TotalSeconds + seconds
+            NextPoll = 0.0
+        }
+
+        internal func EndDeadline() {
+            Deadline = Double.PositiveInfinity
+        }
+
+        internal func CheckDeadline() {
+            if Clock.Elapsed.TotalSeconds >= Deadline {
+                throw ApiDeadlineException()
+            }
+        }
+
+        internal func PollWait() {
+            Wait(Math.Max(2.0, NextPoll - Clock.Elapsed.TotalSeconds))
+        }
 
         internal func Report() {
             Console.Error.WriteLine(
@@ -163,11 +189,14 @@ internal class ApiTransport {
         }
 
         private func Wait(seconds double) {
+            CheckDeadline()
             if seconds > 0 {
+                let remaining = Deadline - Clock.Elapsed.TotalSeconds
                 select {
-                    case <- after(TimeSpan.FromSeconds(seconds)) { }
+                    case <- after(TimeSpan.FromSeconds(Math.Min(seconds, remaining))) { }
                 }
             }
+            CheckDeadline()
         }
 
         private func ValidETag(value string) bool {
@@ -231,12 +260,23 @@ internal class ApiTransport {
             let input string? = body == nil ? nil: J.Write(body)
             let key = path + "\n" + input
             for attempt in 0 ... (read ? 3: 1) {
+                CheckDeadline()
+                if Clock.Elapsed.TotalSeconds < NextRead {
+                    let delay = NextRead - Clock.Elapsed.TotalSeconds
+                    if delay >= Deadline - Clock.Elapsed.TotalSeconds {
+                        Wait(Deadline - Clock.Elapsed.TotalSeconds)
+                    }
+                    if delay >= 60.0 - timer.Elapsed.TotalSeconds {
+                        throw Failure(429, read, delay)
+                    }
+                    Wait(delay)
+                }
                 if !read {
                     while Clock.Elapsed.TotalSeconds < NextMutation {
                         Wait(NextMutation - Clock.Elapsed.TotalSeconds)
                     }
                 }
-                var remaining = 60.0 - timer.Elapsed.TotalSeconds
+                var remaining = Math.Min(60.0 - timer.Elapsed.TotalSeconds, Deadline - Clock.Elapsed.TotalSeconds)
                 if !read && expires > 0 {
                     remaining = Math.Min(remaining, expires - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0)
                     if remaining <= 0 {
@@ -275,10 +315,27 @@ internal class ApiTransport {
                         milliseconds: Math.Max(1, Convert.ToInt32(Math.Floor(remaining * 1000.0)))
                     )
                 } catch { }
+                CheckDeadline()
                 if !read {
                     NextMutation = Clock.Elapsed.TotalSeconds + 1.0
                 }
                 let response = ApiResponse(result.Output)
+                if read {
+                    var poll double
+                    if Double.TryParse(
+                        response.PollInterval,
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out poll
+                    ) &&
+                        Double.IsFinite(poll) && poll >= 0 {
+                        NextPoll = Math.Max(NextPoll, Clock.Elapsed.TotalSeconds + poll)
+                    }
+                    NextPoll = Math.Max(NextPoll, Clock.Elapsed.TotalSeconds + response.Delay(response.RateLimited()))
+                }
+                if response.RateLimited() || response.Remaining == "0" || response.RetryAfter != "" {
+                    NextRead = Math.Max(NextRead, Clock.Elapsed.TotalSeconds + response.Delay(response.RateLimited()))
+                }
                 if timer.Elapsed.TotalSeconds >= 60.0 {
                     throw Failure(response.Status, read, response.Delay(response.RateLimited()))
                 }
@@ -321,6 +378,9 @@ internal class ApiTransport {
                     response.Status >= 500 ||
                     limited
                 let delay = Math.Max(response.Delay(limited), retryable ? Convert.ToDouble(attempt + 1): 0.0)
+                if read && retryable && delay >= Deadline - Clock.Elapsed.TotalSeconds {
+                    Wait(Deadline - Clock.Elapsed.TotalSeconds)
+                }
                 if !read || !retryable || attempt == 2 || delay >= 60.0 - timer.Elapsed.TotalSeconds {
                     throw Failure(response.Status, read, delay)
                 }

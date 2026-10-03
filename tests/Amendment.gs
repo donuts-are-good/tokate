@@ -360,7 +360,7 @@ internal class AmendmentFlow {
             let tools = native ? "": flow.Tools
             if mode == "lost_push_response" || mode == "lost_request_response" {
                 flow.Flow.Mode(mode)
-                Amend(flow.Flow, run, commit, 1, tools)
+                Amend(flow.Flow, run, commit, mode == "lost_request_response" ? 0: 1, tools)
                 flow.Flow.Mode("")
             }
             Amend(flow.Flow, run, commit, tools: tools)

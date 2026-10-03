@@ -244,23 +244,64 @@ count one event/workflow record per ordinary created comment, zero privileged jo
 and zero coordinator API calls. Each meaningful request creates one workflow run
 and at most one privileged job. Duplicates still authenticate/read state but write
 nothing after a successful recorded outcome. Failed/interrupted mutations are not
-automatically retried. Operators redeliver the same request only after inspecting
-state. There is no background polling or per-token update stream.
+automatically retried. Repeating `request` or `submit` reads the existing canonical
+comment or recorded outcome without another comment or workflow event. Evidence
+must match the canonical repository/issue, numeric authenticated actor, UUID and
+entire canonical payload. Changed UUID bindings and ambiguous comments fail closed.
+`request --file FILE` keeps write intent and a command lock beside FILE as
+`FILE.posting.json` and `FILE.posting.lock`; keep this local evidence with the
+original request. A lost response is reconciled with bounded remote reads. If no
+unique evidence exists, subsequent commands retain the intent and refuse another
+POST. An existing recorded submission still checks current approval and reservation;
+expired, replaced or revoked donors cannot publish. There is no background polling
+or per-token update stream.
 
-Measured deterministic actual-command budgets (successful GETs, no rate limits):
+Measured launch-base budgets retain the existing traffic/security regressions;
+the accepted checkout measured version-1 repeated publication at 10 reads, rather
+than the historical 9. Current deterministic actual-command budgets are enforced
+by the native harness (successful GETs, except the explicit lost-response rows):
 
-| Path | Reads | Mutations | Live 304s |
-| --- | ---: | ---: | ---: |
-| Claim | 9 | 3 | 1 |
-| Identical replay | 4 | 0 | 0 |
-| New draft publication | 31 | 4 | 19 |
-| Publication recovery with existing exact PR | 31 | 3 | 19 |
+| Path | Reads | Mutations | Live 304s | Comment POST attempts |
+| --- | ---: | ---: | ---: | ---: |
+| Version-1 claim | 9 | 1 | 0 | 0 |
+| Version-1 repeated publication | 10 | 0 | 0 | 0 |
+| Coordinator claim | 9 | 3 | 1 | 0 |
+| Coordinator identical replay | 4 | 0 | 0 | 0 |
+| Coordinator new draft publication | 31 | 4 | 19 | 0 |
+| Coordinator recovery with existing exact PR | 31 | 3 | 19 | 0 |
+| New claim request | 10 | 1 | 1 | 1 |
+| Identical pending request | 6 | 0 | 0 | 0 |
+| Request with recorded outcome | 4 | 0 | 0 | 0 |
+| Lost request response, unique remote comment | 14 | 1 | 3 | 1 |
+| Failed request without remote write | 13 | 1 | 4 | 1 |
+| Ambiguous lost request response | 15 | 1 | 3 | 1 |
+| External submit with lost response | 22 | 1 | 11 | 1 |
+| Identical pending external submit | 17 | 0 | 7 | 0 |
+| Submit with recorded outcome and live authority | 8 | 0 | 0 | 0 |
+| Saved-run v1 checks, one pending poll | 24 | 0 | 12 | 0 |
+| Saved-run v1 watch, two unchanged polls then pass | 72 | 0 | 59 | 0 |
+
+These counts cover one page of comments/checks and each command's own in-memory
+validators. Check inspection is limited to ten pages per endpoint; comment evidence
+to twenty pages, with canonical matching-comment reads. Larger histories fail closed.
+Watches use a single monotonic `--timeout` deadline from initial authority reads
+through subprocesses, retries and waits. Server `X-Poll-Interval`, `Retry-After` and
+rate reset delays take precedence over the two-second minimum interval. Both
+receipt versions recheck authority and head after check reads. Unchanged snapshots
+produce no repeated output or local state write. Check rows retain status/name/link;
+the REST endpoints do not provide a workflow name, so `workflow` is empty.
 
 Each state transition creates a tree, a single-parent commit, and a non-forced ref
 update. Pacing/retry bounds and `--traffic` numeric diagnostics reuse the existing
 transport. Counts exclude unseen Git/GitHub CLI transport and release downloads;
-workflow records/jobs are counted separately above. Remaining lifecycle traffic
-budgets remain #14/#19. The suite exercises actual binaries and real local Git
+workflow records/jobs are counted separately above. The fixture models one workflow
+record and at most one privileged job per successfully created request comment;
+duplicate commands add zero of each, and a pre-write failure adds zero. No real
+GitHub workflows run in these tests, so these are event-derived bounds, not measured
+runner executions. Cross-machine simultaneous comment POSTs cannot be made atomic
+by GitHub's comment API; the local request lock and coordinator compare-and-swap
+protect local duplicates and authoritative effects. Pause/resume/handoff remain
+#14 and have no measured command budgets in this scope. The suite exercises actual binaries and real local Git
 refs for competing claims, duplicate/changed replay, interrupted writes/responses,
 expiry/late donors, revocation after PR creation, external verification without
 Codex, bounded invalid events, released workflow setup and unchanged version-1
