@@ -178,7 +178,7 @@ Keep GitHub transport in ApiTransport; share task context across adapters.
 Run scripts/verify.sh and report the actual results and limitations.
 ```
 
-Use a supporting release (Tokate 0.2.17+) for the owner, donor and version-2
+Use a supporting release (Tokate 0.2.18+) for the owner, donor and version-2
 coordinator. Older binaries do not gain delivery from a new approval record alone.
 New v1/v2 approvals capture the complete text from the exact selected target
 commit before approval writes, recording `decree.present`, lowercase `sha256`, and
