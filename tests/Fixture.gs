@@ -222,6 +222,42 @@ internal class Fixture {
             Directory.CreateDirectory(Path.Combine(checkout, ".github/workflows"))
             File.WriteAllText(Path.Combine(checkout, ".github/workflows/verify.yml"), "tampered")
         }
+        if mode == "index_assume" || mode == "index_skip" || mode == "replacement" {
+            let template = ".github/tokate-pr.md"
+            if mode != "replacement" {
+                Check.Success(
+                    Check.Run(
+                        "/usr/bin/git",
+                        []string{
+                            "update-index",
+                            mode == "index_assume" ? "--assume-unchanged": "--skip-worktree",
+                            template
+                        },
+                        Env,
+                        cwd: checkout
+                    )
+                )
+            }
+            File.AppendAllText(Path.Combine(checkout, template), "\nhidden protected change\n")
+            if mode == "replacement" {
+                Check.Success(Check.Run("/usr/bin/git", []string{"add", template}, Env, cwd: checkout))
+                let tree = Check.Success(Check.Run("/usr/bin/git", []string{"write-tree"}, Env, cwd: checkout))
+                let replacement = Check.Success(
+                    Check.Run(
+                        "/usr/bin/git",
+                        []string{"commit-tree", tree, "-m", "Mask protected base"},
+                        Env,
+                        cwd: checkout
+                    )
+                )
+                Check.Success(Check.Run("/usr/bin/git", []string{"replace", "HEAD", replacement}, Env, cwd: checkout))
+            }
+        }
+        if mode == "graft" {
+            let head = Check.Success(Check.Run("/usr/bin/git", []string{"rev-parse", "HEAD"}, Env, cwd: checkout))
+            Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))
+            File.WriteAllText(Path.Combine(checkout, ".git/info/grafts"), head + "\n")
+        }
         if mode == "output_boundary" {
             Check.Contains(File.ReadAllText(Path.Combine(checkout, ".env")), "synthetic-repository-secret")
             Check.Contains(File.ReadAllText(Path.Combine(checkout, "ordinary.data")), "synthetic-repository-secret")
@@ -272,9 +308,9 @@ internal class Fixture {
             ) != nil,
             "GitHub configuration/keyring paths were lost"
         )
-        let actor = token == nil ? File.ReadAllText(Path.Combine(config, "identity")): (
-            token == "fixture-owner" ? "owner": "donor"
-        )
+        let actor = Check.Text(State["self_owned"]) == "true" ? "owner": token == nil ? File.ReadAllText(
+            Path.Combine(config, "identity")
+        ): (token == "fixture-owner" ? "owner": "donor")
         if args[0] == "auth" {
             Check.That(
                 args.Length == 3 && args[1] == "git-credential" && args[2] == "get",
@@ -545,11 +581,16 @@ internal class Fixture {
             body["user"] = Check.Map("login", actor)
             body["head"] = Check.Map(
                 "sha",
-                Git("fork", []string{"rev-parse", branch}),
+                Git(Check.Text(State["self_owned"]) == "true" ? "upstream": "fork", []string{"rev-parse", branch}),
                 "ref",
                 branch,
                 "repo",
-                Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor", "id", 123))
+                Check.Map(
+                    "full_name",
+                    Check.Text(State["self_owned"]) == "true" ? "owner/project": "donor/project",
+                    "owner",
+                    Check.Map("login", actor, "id", 123)
+                )
             )
             body["base"] = Check.Map("ref", Check.Text(body["base"]))
             let pulls = JsonArray()
@@ -607,6 +648,11 @@ internal class Fixture {
             return Codex(args)
         }
         if name == "git" {
+            for key in[]string{"GIT_NO_REPLACE_OBJECTS", "GIT_GRAFT_FILE"} {
+                if let value = Environment.GetEnvironmentVariable(key) {
+                    Env[key] = value
+                }
+            }
             let command = List[string]()
             for arg in args {
                 if arg == "https://github.com/owner/project.git" {
@@ -618,6 +664,19 @@ internal class Fixture {
                 }
             }
             let push = command.IndexOf("push")
+            if command.Contains("checkout") && Check.Text(State["mode"]) == "external_replacement" {
+                let replacement = Check.Text(State["replacement_with"])
+                Check.Success(
+                    Check.Run("/usr/bin/git", []string{"fetch", Path.Combine(Root, "fork"), replacement}, Env)
+                )
+                Check.Success(
+                    Check.Run(
+                        "/usr/bin/git",
+                        []string{"replace", Check.Text(State["replacement_for"]), replacement},
+                        Env
+                    )
+                )
+            }
             if push >= 0 {
                 Check.That(
                     File.Exists(
