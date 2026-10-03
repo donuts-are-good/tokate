@@ -10,7 +10,7 @@ internal class SynchronizationChecks {
         internal func SetupOwner(flow NativeFlow) {
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
-            policy["protected_paths"] = Check.Json("[\"protected/\",\"guard/missing\"]")
+            policy["protected_paths"] = Check.Json("[\"protected/\",\"guard/missing\",\"new-parent/missing\"]")
             policy["verification"] = Check.Json(
                 "[[\"/bin/sh\",\"-c\",\"test -f result.txt\"],[\"/bin/sh\",\"-c\",\"test -s result.txt && ! grep -q BAD result.txt\"]]"
             )
@@ -63,7 +63,6 @@ internal class SynchronizationChecks {
                 File.Delete(Path.Combine(flow.Upstream, "protected/link"))
                 File.CreateSymbolicLink(Path.Combine(flow.Upstream, "protected/link"), "content")
                 Write(flow.Upstream, "protected/new", "owner addition\n")
-                // Changing an unprotected sibling changes an ancestor tree SHA.
                 Write(flow.Upstream, "guard/other", "owner sibling change\n")
             }
             if conflict {
@@ -203,6 +202,21 @@ internal class SynchronizationChecks {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
                     File.CreateSymbolicLink(Path.Combine(checkout, "guard"), "protected")
                 }
+                case "ancestor-file" {
+                    Directory.Delete(Path.Combine(checkout, "guard"), true)
+                    Write(checkout, "guard", "donor ancestor file\n")
+                }
+                case "ancestor-submodule" {
+                    Directory.Delete(Path.Combine(checkout, "guard"), true)
+                    flow.Git("-C", checkout, "rm", "--cached", "-r", "guard")
+                    flow.Git("clone", flow.Upstream, Path.Combine(checkout, "guard"))
+                }
+                case "sibling-creation" {
+                    Write(checkout, "new-parent/public", "unrelated sibling\n")
+                }
+                case "sibling-removal" {
+                    Directory.Delete(Path.Combine(checkout, "guard"), true)
+                }
                 case "reversion" {
                     Write(checkout, ".github/workflows/verify.yml", "timeout-minutes: 15\n")
                 }
@@ -245,9 +259,22 @@ internal class SynchronizationChecks {
                 mode == "rename-to" ||
                 mode == "absence" ||
                 mode == "ancestor" ||
+                mode == "ancestor-file" ||
+                mode == "ancestor-submodule" ||
+                mode == "sibling-creation" ||
+                mode == "sibling-removal" ||
                 mode == "reversion" ||
                 mode == "semantic" {
                 candidate = Mutate(flow, run, mode)
+            }
+            if mode == "ancestor-submodule" {
+                Check.That(
+                    flow.Git("-C", Path.Combine(run, "checkout"), "ls-tree", candidate, "--", "guard").StartsWith(
+                        "160000 commit ",
+                        StringComparison.Ordinal
+                    ),
+                    "Missing actual ancestor submodule"
+                )
             }
             let grant = Grant(flow, candidate, upstream)
             if v2 {
@@ -287,6 +314,8 @@ internal class SynchronizationChecks {
             let success = mode == "timeout" ||
                 mode == "ordinary" ||
                 mode == "conflict" ||
+                mode == "sibling-creation" ||
+                mode == "sibling-removal" ||
                 mode == "after-coordinate" ||
                 mode == "state-mismatch"
             let result = Amend(flow, run, candidate, grant, success ? 0: 1)
@@ -295,6 +324,12 @@ internal class SynchronizationChecks {
                     Check.Text(Saved(run)["commit"]) == h,
                     "Rejected synchronization rewrote original saved head"
                 )
+                if mode.StartsWith("ancestor", StringComparison.Ordinal) {
+                    Check.Contains(
+                        result.Output + result.Error,
+                        "Synchronization changes protected owner content: \"guard\""
+                    )
+                }
                 if mode == "semantic" {
                     let failed = Saved(Path.Combine(run, "amendments", candidate))
                     Check.That(
@@ -353,7 +388,6 @@ internal class SynchronizationChecks {
                 mode == "ordinary" ? "15": "30"
             )
             Check.Contains(flow.Git("-C", Path.Combine(flow.Bin, "fork"), "show", h + ":result.txt"), "")
-            // Later ordinary D retains G/C/U without applying the exact grant to D.
             Write(Path.Combine(run, "checkout"), "followup.txt", "ordinary review correction\n")
             let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment after synchronization")
             Amend(flow, run, next)
@@ -377,7 +411,6 @@ internal class SynchronizationChecks {
             flow.Commit("Target moved before final acceptance")
             flow.Call([]string{"checks", "--run", run}, 1, owner: true)
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
-            // A new exact grant can synchronize a stale historical U; history remains intact.
             let newUpstream = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             let newCandidate = Candidate(flow, run, newUpstream)
             let newGrant = Grant(flow, newCandidate, newUpstream)
@@ -413,6 +446,10 @@ internal class SynchronizationChecks {
                     "rename-to",
                     "absence",
                     "ancestor",
+                    "ancestor-file",
+                    "ancestor-submodule",
+                    "sibling-creation",
+                    "sibling-removal",
                     "reversion",
                     "semantic",
                     "revoked",

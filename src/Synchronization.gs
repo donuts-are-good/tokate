@@ -5,8 +5,6 @@ import System.Collections.Generic
 import System.Text.Json
 import System.Text.RegularExpressions
 
-// Authority comes only from a live upstream ref written with repository push
-// permission. Commit authors, donor requests and local evidence are never grants.
 internal class Synchronization {
     shared {
         internal func History(value JsonElement) JsonElement {
@@ -129,8 +127,6 @@ internal class Synchronization {
             }
         }
 
-        // This check can run before private C is uploaded. It authenticates the
-        // entire history and exact new grant, without claiming contents or CI.
         internal func Live(
             repo string,
             pr int32,

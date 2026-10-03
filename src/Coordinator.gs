@@ -321,7 +321,6 @@ internal class Coordinator {
             }
             ValidateFork(repo, donor, metadata, actor)
             let history = Synchronization.Append(repo, Synchronization.History(current), J.Text(metadata, "sync"))
-            // Proof receives history separately while coordination authority remains S.
             SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
             let run = Data()
             run.Fields["version"] = 2

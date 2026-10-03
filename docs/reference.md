@@ -356,7 +356,6 @@ any historical grant blocks publication and receipt/check validation. Movement
 of the selected target stales readiness without rewriting historical approval or
 receipts; authorize a new exact synchronization after preparing a new candidate.
 Changed issue, assignment, policy or template still requires fresh approval.
-No DECREE authority workflow is introduced in this launch base.
 
 Grant/PR/state writes are separate effects. A race can leave a physical push, PR
 body or state update with invalid authority. Tokate rechecks around effects and

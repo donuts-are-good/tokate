@@ -61,9 +61,6 @@ internal class ProtectedPaths {
             }
         }
 
-        // Complete trees prove presence, absence, modes, types and both rename endpoints.
-        // Ancestor tree identities may vary with nonprotected siblings, but their
-        // modes/types must match so a symlink/file cannot hide a protected path.
         private func Relation(policy JsonElement, path string) int32 {
             if Matches(".github/workflows/", path) || path.StartsWith(".github/tokate", StringComparison.Ordinal) {
                 return 2
@@ -183,6 +180,11 @@ internal class ProtectedPaths {
                 var right string
                 let hasLeft = trusted.TryGetValue(path, out left)
                 let hasRight = candidate.TryGetValue(path, out right)
+                if relation == 1 &&
+                    (!hasLeft || left.StartsWith("040000 tree ", StringComparison.Ordinal)) &&
+                    (!hasRight || right.StartsWith("040000 tree ", StringComparison.Ordinal)) {
+                    continue
+                }
                 if relation == 1 && hasLeft && hasRight {
                     left = left.Substring(0, left.LastIndexOf(' '))
                     right = right.Substring(0, right.LastIndexOf(' '))
