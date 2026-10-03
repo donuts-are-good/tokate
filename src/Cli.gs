@@ -647,7 +647,7 @@ internal class Cli {
                     throw Exception("Invalid value for --" + key)
                 }
             }
-            for key in[]string{"state", "commit"} {
+            for key in[]string{"state", "commit", "grant", "upstream", "sync"} {
                 if args.Get(key) != "" {
                     Data.CommitSha(args.Get(key))
                 }

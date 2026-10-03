@@ -267,7 +267,10 @@ internal class SynchronizationChecks {
             }
             if mode == "authority-policy" {
                 flow.Git("-C", flow.Upstream, "checkout", "main")
-                File.AppendAllText(Path.Combine(flow.Upstream, ".github/tokate.json"), "\n ")
+                let path = Path.Combine(flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["max_seconds"] = JsonValue.Create(301)
+                File.WriteAllText(path, policy.ToJsonString())
                 flow.Commit("Authority policy changed")
                 Grant(flow, candidate, upstream, 1)
                 return

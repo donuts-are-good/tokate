@@ -424,7 +424,7 @@ internal class AmendmentFlow {
                 flow.Flow.Commit("External amendment effort policy")
                 flow.Flow.Approve()
             }
-            let claim = flow.Claim()
+            let claim = flow.Claim(baseBranch != "")
             if native {
                 File.WriteAllText(
                     flow.Tools,

@@ -80,6 +80,56 @@ internal class CliDiscovery {
                 []string{"doctor", "--json=true"},
                 []string{"status", "--run", "saved", "--json", "--json"},
                 []string{"amend", "--run", "saved", "--commit", String('a', 40) + "\n", "--seconds", "30", "--json"},
+                []string{"revoke-sync", "--repo", "owner/project", "--grant", "invalid", "--json"},
+                []string{"revoke-sync", "--repo", "owner/project", "--grant", String('a', 40) + "\n", "--json"},
+                []string{
+                    "authorize-sync",
+                    "--repo",
+                    "owner/project",
+                    "--pr",
+                    "10",
+                    "--commit",
+                    String('a', 40),
+                    "--upstream",
+                    "invalid",
+                    "--json"
+                },
+                []string{
+                    "authorize-sync",
+                    "--repo",
+                    "owner/project",
+                    "--pr",
+                    "10",
+                    "--commit",
+                    String('a', 40),
+                    "--upstream",
+                    String('a', 40) + "\n",
+                    "--json"
+                },
+                []string{
+                    "amend",
+                    "--run",
+                    "saved",
+                    "--commit",
+                    String('a', 40),
+                    "--seconds",
+                    "30",
+                    "--sync",
+                    "invalid",
+                    "--json"
+                },
+                []string{
+                    "amend",
+                    "--run",
+                    "saved",
+                    "--commit",
+                    String('a', 40),
+                    "--seconds",
+                    "30",
+                    "--sync",
+                    String('a', 40) + "\n",
+                    "--json"
+                },
                 []string{"approve", "--issue", "0", "--json"}
             } {
                 Envelope(Call(binary, argv, temp, 1), argv[0], "error", "invalid_arguments")
