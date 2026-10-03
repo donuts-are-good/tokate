@@ -164,7 +164,6 @@ internal class RequestData {
                 if J.Number(value, "seconds") > J.Number(policy, "max_seconds") {
                     throw Exception("Correction budget exceeds original owner policy")
                 }
-                // Apply exactly the same policy rules as the donor command.
                 Tokate.Correction.ToolsFromValue(tools, policy)
             }
         }

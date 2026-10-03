@@ -5,8 +5,6 @@ import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
 
-// These scenarios invoke the installed command and the real independent bwrap
-// verifier. Only GitHub and the one original harness invocation are fixtures.
 internal class CorrectionChecks {
     shared {
         private func Read(run string, file string = "run.json") JsonNode -> Check.Json(
@@ -20,8 +18,12 @@ internal class CorrectionChecks {
         }
 
         private func Correct(flow NativeFlow, run string, text string = "Explicit donor correction\n") string {
+            File.WriteAllText(Path.Combine(run, "checkout/result.txt"), text)
+            return Commit(flow, run)
+        }
+
+        private func Commit(flow NativeFlow, run string) string {
             let checkout = Path.Combine(run, "checkout")
-            File.WriteAllText(Path.Combine(checkout, "result.txt"), text)
             flow.Git("-C", checkout, "add", "-A")
             flow.Git(
                 "-C",
@@ -205,6 +207,86 @@ internal class CorrectionChecks {
                 "Original failed checks replaced"
             )
             Check.That(Directory.GetDirectories(run, "correction-*").Length == 2, "Failed attempt evidence lost")
+        }
+
+        private func OriginalTimeout(binary string) {
+            using let flow = NativeFlow(binary)
+            flow.Initialize()
+            flow.VerificationPolicy("sleep 12 && test -f result.txt")
+            flow.Approve()
+            let run = flow.Claim("10")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Runtime limit reached")
+            Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Timeout saved a completed check")
+            let original = File.ReadAllText(Path.Combine(run, "candidate.patch"))
+            let checkout = Path.Combine(run, "checkout")
+            let tree = flow.Git("-C", checkout, "write-tree")
+            Prepared(flow, run)
+            let commit = Commit(flow, run)
+            Check.That(flow.Git("-C", checkout, "rev-parse", "HEAD^{tree}") == tree, "Commit changed original work")
+            Check.That(
+                flow.Git("-C", checkout, "diff", "--binary", Check.Text(Read(run)["base"]), commit) == original,
+                "Commit changed the original candidate patch"
+            )
+            Recover(flow, run, commit)
+            Once(flow, 1)
+            Check.That(Check.Text(Read(run, "correction.json")["tree"]) == tree, "Correction verified a different tree")
+            for path in[]string{"candidate.patch", "original-evidence/candidate.patch"} {
+                Check.That(File.ReadAllText(Path.Combine(run, path)) == original, "Original candidate was replaced")
+            }
+            Check.That(
+                !File.Exists(Path.Combine(run, "original-evidence/verification.json")),
+                "Missing original check evidence was reconstructed"
+            )
+            Check.Contains(File.ReadAllText(Path.Combine(run, "original-evidence/capture.json")), "verification.json")
+            Check.Contains(Check.Text(Read(run, "original-evidence/run.json")["error"]), "Runtime limit reached")
+        }
+
+        private func WrongTarget(binary string) {
+            for stage in[]string{"recover", "prepare"} {
+                using let flow = NativeFlow(binary)
+                flow.Initialize()
+                flow.Approve()
+                let run = flow.Claim()
+                flow.Mode("staged_whitespace")
+                flow.Call([]string{"work", "--run", run}, 1)
+                var commit = ""
+                if stage == "recover" {
+                    Prepared(flow, run)
+                    commit = Correct(flow, run)
+                }
+                flow.Reload()
+                let pulls = JsonArray()
+                pulls.Add(
+                    Check.Map(
+                        "number",
+                        9,
+                        "state",
+                        "open",
+                        "draft",
+                        true,
+                        "base",
+                        Check.Map("ref", "other"),
+                        "head",
+                        Check.Map(
+                            "ref",
+                            Check.Text(Read(run)["branch"]),
+                            "repo",
+                            Check.Map("full_name", "donor/project")
+                        )
+                    )
+                )
+                flow.State["pulls"] = pulls
+                flow.Save()
+                if stage == "prepare" {
+                    Check.Contains(flow.Call([]string{"recover", "--run", run, "--prepare"}, 1).Error, "physical PR")
+                    Check.That(!Directory.Exists(Path.Combine(run, "original-evidence")), "Published work was prepared")
+                } else {
+                    Check.Contains(Recover(flow, run, commit, 1).Error, "physical PR")
+                    Check.That(Read(run, "correction.json")["verification"] == nil, "Published work reached checks")
+                }
+                Once(flow, 1)
+                Check.That(flow.State["pr_create_count"] == nil, "Wrong-target PR caused another PR write")
+            }
         }
 
         private func Tools(binary string) {
@@ -508,7 +590,6 @@ internal class CorrectionChecks {
             record.AsObject().Remove("failure_reason")
             record.AsObject().Remove("failure_stage")
             File.WriteAllText(Path.Combine(failed, "run.json"), record.ToJsonString())
-            // Old recovery still refuses edits to its saved candidate and spends no inference.
             File.WriteAllText(
                 Path.Combine(failed, "checkout/result.txt"),
                 "Disclosed edit requires explicit correction\n"
@@ -738,6 +819,8 @@ internal class CorrectionChecks {
             for name in[]string{
                 "Whitespace",
                 "FirstVerification",
+                "OriginalTimeout",
+                "WrongTarget",
                 "Tools",
                 "Refusals",
                 "Incomplete",
@@ -760,6 +843,12 @@ internal class CorrectionChecks {
                     }
                     case "FirstVerification" {
                         FirstVerification(binary)
+                    }
+                    case "OriginalTimeout" {
+                        OriginalTimeout(binary)
+                    }
+                    case "WrongTarget" {
+                        WrongTarget(binary)
                     }
                     case "Tools" {
                         Tools(binary)

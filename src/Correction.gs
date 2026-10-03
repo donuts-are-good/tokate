@@ -9,8 +9,6 @@ import System.Runtime.InteropServices
 import System.Security.Cryptography
 import System.Text.Json
 
-// O_NOFOLLOW and O_NONBLOCK prevent evidence capture from opening link targets
-// or blocking on a repository FIFO. Directories and links are recorded separately.
 @DllImport("libc", EntryPoint: "open", SetLastError: true)
 func EvidenceOpen(path string, flags int32) int32;
 
@@ -44,8 +42,6 @@ internal class Correction {
                     Write(Path.Combine(directory, "correction-" + previous.Text("uuid"), "record.json"), previous)
                 }
             }
-            // Current state is authoritative; a missing per-attempt mirror must
-            // never cause passed checks or an uncertain write to be repeated.
             Write(Path.Combine(directory, "correction.json"), correction)
             Write(Path.Combine(directory, "correction-" + correction.Text("uuid"), "record.json"), correction)
         }
@@ -67,7 +63,6 @@ internal class Correction {
             if result.Code != 0 {
                 throw Exception("git failed: " + result.Error + result.Output)
             }
-            // Commands.Read caps its output. Never accept a truncated patch.
             if result.Output.Length >= 32 * 1024 * 1024 {
                 throw Exception("Candidate evidence exceeds the 32 MiB output limit")
             }
@@ -383,7 +378,6 @@ internal class Correction {
                 let seal = Data()
                 seal.Fields["manifest_sha256"] = Data.Hash(manifest)
                 Write(Path.Combine(temporary, "seal.json"), seal)
-                // Rename exposes the entire archive at once. Existing archives are never overwritten.
                 Directory.Move(temporary, final)
             } finally {
                 if Directory.Exists(temporary) {

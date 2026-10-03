@@ -6,8 +6,6 @@ import System.IO
 import System.Text.Json
 import System.Text.RegularExpressions
 
-// Publication intent belongs to the correction, never to a previous PR head.
-// A write is preceded by durable intent and followed by physical-state inspection.
 internal class CorrectionPublication {
     shared {
         internal func Pulls(run Data) List[JsonElement] {
@@ -18,8 +16,8 @@ internal class CorrectionPublication {
                         "repos/" + Data.Repo(run.Text("repo")) + "/pulls?state=all&head=" + Uri.EscapeDataString(
                             run.Text("donor") + ":" + run.Text("branch")
                         ) +
-                            "&base=" +
-                            Uri.EscapeDataString(run.Text("base_branch")) + "&per_page=100&page=" + page.ToString()
+                            "&per_page=100&page=" +
+                            page.ToString()
                     )
                 )
                 pulls.AddRange(rows)
@@ -189,7 +187,6 @@ internal class CorrectionPublication {
                     throw Exception("Saved publication preview differs from exact intent")
                 }
             } else {
-                // Copy exact persisted intent, without regenerating content.
                 File.WriteAllText(path, expected)
             }
         }
@@ -321,7 +318,6 @@ internal class CorrectionPublication {
                 try {
                     GitHub.Api("repos/" + run.Text("repo") + "/pulls", J.Get(intent, "request"))
                 } catch (error Exception) {
-                    // A lost response may have created the PR. Only a read can resolve it.
                     let found = Existing(run, correction)
                     if found.ValueKind == JsonValueKind.Undefined {
                         throw error

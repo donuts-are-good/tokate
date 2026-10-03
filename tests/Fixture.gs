@@ -577,7 +577,19 @@ internal class Fixture {
             return Answer(Check.Json("{}"))
         }
         if tail.StartsWith("pulls?") {
-            return Answer(State["pulls"] ?? JsonArray())
+            let filter = Array.Find(
+                tail.Substring(tail.IndexOf('?') + 1).Split('&'),
+                field -> field.StartsWith("base=", StringComparison.Ordinal)
+            ) ??
+                ""
+            let target = filter == "" ? "": Uri.UnescapeDataString(filter.Substring(5))
+            let pulls = JsonArray()
+            for pull in(State["pulls"] ?? JsonArray()).AsArray() {
+                if target == "" || Check.Text(pull["base"]?["ref"]) == target {
+                    pulls.Add(pull.DeepClone())
+                }
+            }
+            return Answer(pulls)
         }
         if tail.StartsWith("pulls/") {
             return Answer(State["pulls"]?[0] ?? throw Exception("Missing PR"))
@@ -602,7 +614,7 @@ internal class Fixture {
                 Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor", "id", 123))
             )
             body["base"] = Check.Map("ref", Check.Text(body["base"]))
-            let pulls = JsonArray()
+            let pulls = State["pulls"]?.AsArray() ?? JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls
             if Check.Text(State["mode"]) == "revoke_after_pr" {
