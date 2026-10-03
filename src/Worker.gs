@@ -4,6 +4,7 @@ import System
 import System.Collections.Generic
 import System.Diagnostics
 import System.IO
+import System.Text.Json
 
 internal class Worker {
     shared {
@@ -192,6 +193,17 @@ internal class Worker {
                 "https://github.com/" + run.Text("repo") + ".git",
                 checkout
             )
+            if J.Get(J.Get(record, "approval"), "authority_branch").ValueKind != JsonValueKind.Undefined {
+                Commands.Git(
+                    checkout,
+                    "fetch",
+                    "--quiet",
+                    "--no-tags",
+                    "--no-recurse-submodules",
+                    "origin",
+                    run.Text("base")
+                )
+            }
             Commands.Git(checkout, "checkout", "--quiet", "--detach", run.Text("base"))
             Commands.Git(checkout, "remote", "remove", "origin")
             for file in Commands.Git(checkout, "ls-files").Split('\n') {

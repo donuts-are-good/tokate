@@ -74,6 +74,7 @@ tokate doctor
 tokate init [--path DIR]
 tokate policy --repo OWNER/REPO
 tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN
+tokate approve --repo OWNER/REPO --issue 42 --donor LOGIN --base-branch release/next
 tokate assign --repo OWNER/REPO --issue 42 --donor LOGIN
 tokate revoke --repo OWNER/REPO --issue 42
 tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
@@ -148,6 +149,24 @@ update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
+Fresh `approve` and `assign` accept `--base-branch BRANCH`. On a terminal, omitting
+it prompts for a target with the upstream default branch as the default; redirected
+commands use that default directly. Passing the option selects the same target
+without a prompt. The approval pins `base_branch` and its exact `base` commit,
+and records the repository default branch as `authority_branch`. Policy and PR
+template always come from that authority branch, even when the target contains
+different Tokate configuration.
+
+Revalidation requires the selected target to exist, the default/authority branch
+to remain unchanged, and current authority policy/template hashes to match.
+Target movement preserves approval when applicable `DECREE.md` snapshot freshness
+checks pass. Tokate displays the current target and approved revisions when they
+differ and prepares the exact approved base.
+Publication and receipt/check validation use the selected target. There is no
+automatic rebase, reconciliation or readiness change. Records without
+`authority_branch` retain their existing default-branch/base-branch and freshness
+rules and are never migrated automatically.
+
 ### Owner codebase instructions
 
 Owners may commit an optional root `DECREE.md`; no configuration or nested discovery
@@ -161,7 +180,7 @@ Run scripts/verify.sh and report the actual results and limitations.
 
 Use a supporting release (Tokate 0.2.17+) for the owner, donor and version-2
 coordinator. Older binaries do not gain delivery from a new approval record alone.
-New v1/v2 approvals capture the complete text from the exact approved upstream
+New v1/v2 approvals capture the complete text from the exact selected target
 commit before approval writes, recording `decree.present`, lowercase `sha256`, and
 `text`. Absence is valid; an empty file is present. Only regular Git blobs
 (`100644`/`100755`), strict UTF-8 without NUL, at most 64 KiB of source bytes are

@@ -359,6 +359,10 @@ internal class Fixture {
             return 0
         }
         if args[0] == "pr" && args[1] == "checks" {
+            if Check.Text(State["check_change"]) == "base" {
+                let target = State["pulls"]?[0]?["base"] ?? throw Exception("Missing base")
+                target["ref"] = JsonValue.Create("main")
+            }
             return Answer(State["checks"] ?? JsonArray())
         }
         Check.That(args[0] == "api", "Expected GitHub API")
@@ -423,7 +427,7 @@ internal class Fixture {
             return Answer(
                 Check.Map(
                     "default_branch",
-                    "main",
+                    State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
                     "id",
                     folder == "fork" ? 2: 1,
                     "full_name",
@@ -526,7 +530,10 @@ internal class Fixture {
         if tail.StartsWith("git/ref/heads/") {
             var sha string
             try {
-                sha = Git(folder, []string{"rev-parse", "--verify", "refs/heads/" + tail.Substring(14)})
+                sha = Git(
+                    folder,
+                    []string{"rev-parse", "--verify", "refs/heads/" + Uri.UnescapeDataString(tail.Substring(14))}
+                )
             } catch (error Exception) {
                 return Response(404)
             }

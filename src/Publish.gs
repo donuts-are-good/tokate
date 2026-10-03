@@ -275,6 +275,7 @@ internal class Publication {
             run.Fields["pr"] = number
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["commit"] = J.Text(head, "sha")
+            run.Fields["policy"] = J.Get(record, "policy")
             return run
         }
 
@@ -290,8 +291,7 @@ internal class Publication {
                 if verified.Text("commit") != run.Text("commit") {
                     throw Exception("Saved commit differs from PR receipt")
                 }
-                let info = GitHub.Api("repos/" + Data.Repo(run.Text("repo")))
-                let policy = Policy.Load(run.Text("repo"), J.Text(info, "default_branch"))
+                let policy = Policy(J.Write(J.Get(verified.Element(), "policy")))
                 let pullPath = "repos/" + run.Text("repo") + "/pulls/" + run.Number("pr").ToString()
                 let pull = GitHub.Api(pullPath)
                 if J.Text(J.Get(pull, "head"), "sha") != run.Text("commit") {
@@ -341,11 +341,9 @@ internal class Publication {
                 if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
                     throw Exception("PR changed while reading checks")
                 }
-                if run.Number("version") == 2 {
-                    let live = Verify(run.Text("repo"), run.Number("pr"))
-                    if live.Text("commit") != run.Text("commit") {
-                        throw Exception("Version-2 authority changed while reading checks")
-                    }
+                let live = Verify(run.Text("repo"), run.Number("pr"))
+                if live.Text("commit") != run.Text("commit") {
+                    throw Exception("PR authority changed while reading checks")
                 }
                 let status = failed ? "failed": (pending ? "pending": "passed")
                 if directory != "" {

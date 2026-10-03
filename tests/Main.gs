@@ -57,6 +57,10 @@ func Main(args[]string) int32 {
             CliDiscovery.All(binary)
             return 0
         }
+        if args.Length == 1 && args[0] == "--targets" {
+            TargetBranches.All(binary)
+            return 0
+        }
         if args.Length == 2 && args[0] == "--cli-shell" {
             CliDiscovery.All(binary, args[1])
             return 0
@@ -83,6 +87,7 @@ func Main(args[]string) int32 {
         NativeFlow.All(binary)
         CoordinationFlow.All(binary)
         DecreeFlow.All(binary)
+        TargetBranches.All(binary)
         VerificationChecks.All()
         Installer.Lifecycle(project, binary)
         Console.WriteLine("PASS installer lifecycle, failed updates, credential boundary, and offline removal")
