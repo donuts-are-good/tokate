@@ -82,7 +82,7 @@ internal class Publication {
                 SavePr(directory, run, existing)
                 return
             }
-            let checkout = Path.Combine(directory, "checkout")
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if run.Text("commit") == "" {
                 if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
                     throw Exception("Saved checkout HEAD changed")
@@ -115,6 +115,11 @@ internal class Publication {
                 "--porcelain"
             ) != "" {
                 throw Exception("Saved commit or checkout changed")
+            }
+            Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
+            let committedPatch = Commands.Git(checkout, "diff", "--binary", run.Text("base"), run.Text("commit"))
+            if committedPatch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
+                throw Exception("Canonical commit differs from the independently verified patch")
             }
             let receipt = J.Map(
                 "version",
@@ -186,7 +191,7 @@ internal class Publication {
                 "credential.helper=!gh auth git-credential",
                 "push",
                 "https://github.com/" + run.Text("head_repo") + ".git",
-                "HEAD:refs/heads/" + run.Text("branch")
+                run.Text("commit") + ":refs/heads/" + run.Text("branch")
             )
             Workflow.Recheck(run)
             let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
