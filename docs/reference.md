@@ -248,7 +248,6 @@ Protecting an entrypoint does not protect tools, manifests or test inputs it inv
 owners choose additional paths explicitly. Adoption changes the policy hash and requires
 fresh approval; existing approvals and receipts are never rewritten.
 
-`claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
 Fresh `approve` and `assign` accept `--base-branch BRANCH`. On a terminal, omitting
 it prompts for a target with the upstream default branch as the default; redirected
 commands use that default directly. Passing the option selects the same target
@@ -312,7 +311,6 @@ remain unchanged; routine reapproval is unnecessary. This does not establish
 delivery to previous sessions or track live legacy `DECREE.md` changes.
 
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
-
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
 
