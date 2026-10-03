@@ -295,7 +295,12 @@ internal class ApiTransport {
                     Cache.Remove(key)
                     return JsonElement{}
                 }
-                if response.Status >= 200 && response.Status < 300 && result.Code == 0 {
+                if response.Status >= 200 &&
+                    response.Status < 300 &&
+                    result.Code == 0 &&
+                    !result.Truncated &&
+                    !result
+                    .ReadFailed {
                     var value JsonElement
                     try {
                         value = response.Body.Trim() == "" ? JsonElement{}: J.Parse(response.Body)

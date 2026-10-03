@@ -24,10 +24,13 @@ internal class Contribution {
             }
             let candidate = Snapshot(checkout, run)
             let candidatePath = Path.Combine(directory, "candidate.patch")
-            if File.Exists(candidatePath) && File.ReadAllText(candidatePath) != candidate {
+            if !File.Exists(candidatePath) {
+                File.WriteAllText(candidatePath, candidate)
+            }
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
+            if File.ReadAllText(candidatePath) != candidate {
                 throw Exception("Saved candidate patch changed")
             }
-            File.WriteAllText(candidatePath, candidate)
             Terminal.Step("Running independent owner verification...")
             run.Fields["failure_stage"] = "owner_verification"
             run.Fields["failure_reason"] = "verification_failed"
@@ -59,6 +62,7 @@ internal class Contribution {
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
             let patch = Snapshot(checkout, run)
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
             if patch != candidate {
                 throw Exception("Verification changed the saved patch")
             }
@@ -81,11 +85,6 @@ internal class Contribution {
             let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch == "" {
                 throw Exception("No changes returned. No PR will be opened.")
-            }
-            for file in Commands.Git(checkout, "diff", "--cached", "--name-only", run.Text("base")).Split('\n') {
-                if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
-                    throw Exception("Donor runs cannot change owner policy, approval, templates, or CI workflows")
-                }
             }
             return patch
         }

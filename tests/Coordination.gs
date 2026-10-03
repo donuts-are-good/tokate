@@ -245,10 +245,42 @@ internal class CoordinationFlow : IDisposable {
         return index < 0 ? "": result.Output.Substring(index + 5).Trim()
     }
 
-    internal func Candidate(request JsonNode) string {
+    internal func Candidate(request JsonNode, change string = "") string {
         let checkout = Path.Combine(Flow.Temp.Root, "donor-work")
         Flow.Git("clone", Flow.Upstream, checkout)
         File.WriteAllText(Path.Combine(checkout, "result.txt"), "External mixed-tool contribution\n")
+        switch change {
+            case "entrypoint" {
+                File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "exit 0\n")
+            }
+            case "rename-out" {
+                Flow.Git("-C", checkout, "mv", "scripts/checks/original", "moved")
+            }
+            case "rename-in" {
+                Flow.Git("-C", checkout, "mv", "ordinary-source", "scripts/checks/moved")
+            }
+            case "directory-node" {
+                Directory.Delete(Path.Combine(checkout, "scripts/checks"), true)
+                File.WriteAllText(Path.Combine(checkout, "scripts/checks"), "replacement\n")
+            }
+            case "mode" {
+                File.SetUnixFileMode(
+                    Path.Combine(checkout, "scripts/verify.sh"),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                )
+            }
+            case "type" {
+                File.Delete(Path.Combine(checkout, "scripts/verify.sh"))
+                File.CreateSymbolicLink(Path.Combine(checkout, "scripts/verify.sh"), "../result.txt")
+            }
+            case "newline" {
+                File.WriteAllText(Path.Combine(checkout, "scripts/checks/line\n\".sh"), "new\n")
+            }
+            case "permitted" {
+                Directory.CreateDirectory(Path.Combine(checkout, "scripts/checks-old"))
+                File.WriteAllText(Path.Combine(checkout, "scripts/checks-old/line\n\".sh"), "permitted\n")
+            }
+        }
         Flow.Git("-C", checkout, "add", ".")
         Flow.Git(
             "-C",
@@ -270,6 +302,177 @@ internal class CoordinationFlow : IDisposable {
             "HEAD:refs/heads/tokate/v2-" + Check.Text(request["uuid"])
         )
         return commit
+    }
+
+    internal func ProtectedExternal() {
+        Flow.ProtectedPolicy()
+        Flow.Approve()
+        let claim = Claim()
+        let run = Prepare()
+        let commit = Candidate(claim, "entrypoint")
+        Check.Contains(
+            Flow.Call([]string{"external", "--run", run, "--commit", commit}, 1).Error,
+            "protected owner path"
+        )
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "checkout/scripts/verify.sh")) == "exit 0\n",
+            "External work lost"
+        )
+        Check.That(!File.Exists(Path.Combine(run, "verification.json")), "External replaced verifier ran")
+        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        Check.That(
+            Check.Text(saved["commit"]) == commit && Check.Text(saved["state"]) == "failed",
+            "External failure lost its exact commit"
+        )
+        Check.Contains(Check.Text(saved["error"]), "protected owner path")
+        Flow.Call([]string{"submit", "--run", run}, 1)
+        Flow.NoPr()
+        Flow.NoInference()
+    }
+
+    internal func PublishRequest(claim JsonNode, commit string) JsonNode {
+        let state = State()
+        return Check.Map(
+            "uuid",
+            Guid.NewGuid().ToString("D"),
+            "expected",
+            Check.Text(state["sha"]),
+            "approval",
+            Check.Text(state["state"]?["approval_id"]),
+            "action",
+            "publish",
+            "metadata",
+            Check.Map(
+                "fork",
+                "donor/project",
+                "branch",
+                "tokate/v2-" + Check.Text(claim["uuid"]),
+                "head",
+                commit,
+                "source",
+                "external",
+                "tools",
+                Check.Json(File.ReadAllText(Tools)),
+                "verification",
+                "donor-reported-pass"
+            )
+        )
+    }
+
+    internal func ProtectedCoordinator() {
+        for change in[]string{
+            "entrypoint",
+            "rename-out",
+            "rename-in",
+            "directory-node",
+            "mode",
+            "type",
+            "newline",
+            "permitted"
+        } {
+            using let test = CoordinationFlow(Flow.Binary)
+            test.Initialize()
+            test.Flow.ProtectedPolicy()
+            test.Flow.Approve()
+            let claim = test.Claim()
+            let commit = test.Candidate(claim, change)
+            let publication = test.PublishRequest(claim, commit)
+            if change == "permitted" {
+                test.Coordinate(test.Event(publication))
+                test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            } else {
+                Check.Contains(test.Coordinate(test.Event(publication), 1).Error, "protected owner path")
+                test.Flow.NoPr()
+                Check.That(test.State()["state"]?["contribution"] == nil, "Protected contribution gained authority")
+            }
+            test.Flow.NoInference()
+        }
+    }
+
+    internal func ProtectedManaged() {
+        Flow.ProtectedPolicy()
+        Flow.Approve()
+        Claim()
+        File.WriteAllText(
+            Tools,
+            "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+        )
+        let run = Prepare("tokate")
+        Flow.Mode("protected_entrypoint")
+        Check.Contains(Flow.Call([]string{"work", "--run", run}, 1).Error, "protected owner path")
+        Flow.Call([]string{"submit", "--run", run}, 1)
+        Flow.NoPr()
+    }
+
+    internal func ReceiptEvidence() {
+        Flow.ProtectedPolicy()
+        Flow.Approve()
+        let claim = Claim()
+        let commit = Candidate(claim, "permitted")
+        Coordinate(Event(PublishRequest(claim, commit)))
+        Flow.MetadataOnly()
+        for fault in[]string{
+            "missing-files",
+            "truncated-files",
+            "wrong-base",
+            "wrong-head",
+            "missing-previous",
+            "missing-status",
+            "missing-commits"
+        } {
+            Flow.DiffFault("diff_fault", fault)
+            Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+        }
+        Flow.DiffFault("diff_fault", "")
+        Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+        let checkout = Path.Combine(Flow.Temp.Root, "donor-work")
+        let marker = Path.Combine(checkout, "receipt-code-ran")
+        File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "touch '" + marker + "'\nexit 0\n")
+        Flow.Git("-C", checkout, "add", "-A")
+        Flow.Git(
+            "-C",
+            checkout,
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-m",
+            "Forged success"
+        )
+        let head = Flow.Git("-C", checkout, "rev-parse", "HEAD")
+        Flow.Git(
+            "-C",
+            checkout,
+            "push",
+            Path.Combine(Flow.Bin, "fork"),
+            "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
+        )
+        let state = State()
+        let value = state["state"] ?? throw Exception("Missing state")
+        let contribution = value["contribution"] ?? throw Exception("Missing contribution")
+        let metadata = contribution["metadata"] ?? throw Exception("Missing metadata")
+        let expected = Check.Text(contribution["expected"])
+        contribution["expected"] = JsonValue.Create(Check.Text(state["sha"]))
+        metadata["head"] = JsonValue.Create(head)
+        RewriteState(value)
+        Flow.Reload()
+        let pull = Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+        let prHead = pull["head"] ?? throw Exception("Missing PR head")
+        prHead["sha"] = JsonValue.Create(head)
+        pull["body"] = JsonValue.Create(
+            Check
+                .Text(pull["body"])
+                .Replace(commit, head, StringComparison.Ordinal)
+                .Replace(expected, Check.Text(state["sha"]), StringComparison.Ordinal)
+        )
+        Flow.Save()
+        Check.Contains(
+            Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
+            "protected owner path"
+        )
+        Flow.NoInference()
+        Check.That(!File.Exists(marker), "Read-only validation executed PR code")
     }
 
     internal func ExternalPublication() {
@@ -301,7 +504,7 @@ internal class CoordinationFlow : IDisposable {
         Flow.Mode("")
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(31, 3, 19, 0, result)
+        Flow.Traffic(33, 3, 19, 0, result)
         Flow.Reload()
         Check.That(Flow.State["pulls"]?.AsArray().Count == 1, "Interrupted publication duplicated PR")
         Check.That(
@@ -351,7 +554,7 @@ internal class CoordinationFlow : IDisposable {
         Flow.Save()
         Flow.Mode("external_replacement")
         let failure = Flow.Call([]string{"external", "--run", run, "--commit", malicious}, 1)
-        Check.Contains(failure.Error, "protected owner policy")
+        Check.Contains(failure.Error, "protected owner configuration")
         Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Hidden protected change was verified")
         Check.That(
             !File.Exists(Path.Combine(run, "request.json")),
@@ -636,7 +839,7 @@ internal class CoordinationFlow : IDisposable {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(31, 4, 19, 0, result)
+        Flow.Traffic(33, 4, 19, 0, result)
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.Reload()
         Check.That(Check.Text(Flow.State["exec_count"]) == "1", "Tokate path did not execute exactly once")
@@ -738,7 +941,11 @@ internal class CoordinationFlow : IDisposable {
                 "SetupRelease",
                 "TokateExecution",
                 "DeclarationRestrictions",
-                "Compatibility"
+                "Compatibility",
+                "ProtectedExternal",
+                "ProtectedCoordinator",
+                "ProtectedManaged",
+                "ReceiptEvidence"
             } {
                 if selected != "" && selected != name {
                     continue
@@ -754,6 +961,18 @@ internal class CoordinationFlow : IDisposable {
                     }
                     case "ExternalPublication" {
                         test.ExternalPublication()
+                    }
+                    case "ProtectedExternal" {
+                        test.ProtectedExternal()
+                    }
+                    case "ProtectedCoordinator" {
+                        test.ProtectedCoordinator()
+                    }
+                    case "ProtectedManaged" {
+                        test.ProtectedManaged()
+                    }
+                    case "ReceiptEvidence" {
+                        test.ReceiptEvidence()
                     }
                     case "CanonicalExternal" {
                         test.CanonicalExternal()

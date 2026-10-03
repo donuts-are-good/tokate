@@ -283,26 +283,13 @@ internal class Coordinator {
         }
 
         private func ValidateDiff(repo string, record JsonElement, metadata JsonElement) {
-            let comparison = GitHub.Api(
-                "repos/" + repo + "/compare/" + J.Text(J.Get(record, "approval"), "base") + "..." + J.Text(
-                    metadata,
-                    "fork"
-                )
-                    .Split('/')[0] +
-                    ":" +
-                    J.Text(metadata, "head")
+            ProtectedPaths.Remote(
+                repo,
+                J.Get(record, "policy"),
+                J.Text(J.Get(record, "approval"), "base"),
+                J.Text(metadata, "fork"),
+                J.Text(metadata, "head")
             )
-            let files = J.Items(J.Get(comparison, "files"))
-            if J.Text(comparison, "status") != "ahead" || files.Count == 0 || files.Count >= 300 {
-                throw Exception("Contribution must descend from approved base with a bounded nonempty diff")
-            }
-            for file in files {
-                for name in[]string{J.Text(file, "filename"), J.Text(file, "previous_filename")} {
-                    if name.StartsWith(".github/workflows/") || name.StartsWith(".github/tokate") {
-                        throw Exception("Contribution changes protected owner configuration")
-                    }
-                }
-            }
         }
 
         private func Body(

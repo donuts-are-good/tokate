@@ -80,6 +80,10 @@ never replace a real or unknown value with an allowed model to satisfy policy.
 Expanded eligibility, pause/handoff/renewal and automated assignment/readiness
 remain #12, #14, #27 and #28.
 
+Both policy versions support optional [`protected_paths`](reference.md#commands-and-recovery)
+with at most 64 literal paths, each at most 512 characters. Owners adopt it under
+fresh approval and explicitly select any tools or inputs beyond the entrypoint.
+
 ## Requests and authoritative state
 
 An owner uses the existing `approve`/`assign` commands with a version-2 policy.

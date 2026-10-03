@@ -223,6 +223,7 @@ internal class Policy {
         if J.Number(Value, "version") != 1 && J.Number(Value, "version") != 2 {
             throw Exception("Policy version must be 1 or 2")
         }
+        ProtectedPaths.Validate(J.Get(Value, "protected_paths"))
         let models = J.Get(Value, "models")
         if models.ValueKind != JsonValueKind.Object {
             throw Exception("Policy models must map model names to effort arrays")

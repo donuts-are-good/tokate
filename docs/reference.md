@@ -150,6 +150,19 @@ update to pick up new commands and options.
 
 `assign` replaces approval for an already approved issue. `approve` also issues fresh approval after a failed or abandoned attempt. Editing the issue, policy, template, or assignment requires fresh approval. Old runs then fail revalidation. Revocation blocks publication but cannot stop computation on another person's machine.
 
+Policy versions 1 and 2 accept optional `protected_paths`, for example
+`["scripts/verify.sh", "scripts/checks/"]`. Omitted or empty adds no paths;
+`.github/workflows/` and the `.github/tokate` prefix remain protected. The limit
+is 64 nonempty strings of at most 512 characters each. Use literal repository-relative
+slash paths: no absolute paths, backslashes, controls, empty segments, `.` or `..`.
+One final `/` protects the directory node and descendants at that slash boundary;
+other entries match exactly. Globs, case folding and Unicode normalization are not applied.
+Additions, deletions, content/mode/type changes and both rename endpoints are checked
+against the exact approved base and head throughout verification and publication.
+Protecting an entrypoint does not protect tools, manifests or test inputs it invokes;
+owners choose additional paths explicitly. Adoption changes the policy hash and requires
+fresh approval; existing approvals and receipts are never rewritten.
+
 `claim` reserves a branch without running inference. Use `work --run DIR` to execute it later. Runs are stored in `~/.local/state/tokate/runs/`, or the `--runs` directory. Each contains its claim, raw agent events and report, verification results, patch, generated PR body (`pr-body.md`), exact PR-create request (`publication.json`), and check results. Keep raw artifacts private. Tokate saves the publication previews before push or PR creation; `work` still publishes automatically. Inspect the previews and patch when reviewing saved work or recovering a publication failure. Legacy publication regenerates previews; explicit corrections preserve exact saved intent. Editing previews does not change the request.
 
 `publish --run DIR` retries publication after a successful run without running inference again. `recover --run DIR` reruns all checks after a completed agent turn failed independent verification. Failed or interrupted inference requires fresh owner approval. Claim branches remain for inspection and can be deleted after review.
@@ -269,6 +282,14 @@ tokate checks --repo owner/project --pr 43 --watch
 ```
 
 `verify-pr` checks PR author, claim branch, commit, current approval, issue text, policy, and the reported model/effort pair. It is read-only and does not check out or execute PR code. Receipt validation is not independent proof of inference usage. `checks` also validates the receipt and checks the head before and after reading CI. It exits 0 on pass, 8 on pending or watch timeout, and 1 on failure. It never marks the PR ready or merges it.
+
+Both receipt versions and coordinator publication recheck protected paths using
+one authenticated GitHub comparison for the exact approved base and head. Missing,
+mismatched or truncated evidence fails closed. Remote checks require fewer than
+300 comparison files. The complete file list covers the comparison even when its
+commit history exceeds the unpaged 250-commit response limit.
+Local path evidence is NUL-delimited, bounded to 100000 names and 32 MiB;
+undecodable UTF-8 names fail closed.
 
 Keep required checks and human review enforced in GitHub branch protection. Use ordinary `pull_request` CI without repository secrets for fork code. Do not execute untrusted PR code in a privileged `pull_request_target` job. Client-side rules do not stop a malicious person from bypassing Tokate and submitting an ordinary PR. Tests also cannot prove every aspect of correctness. Clear acceptance criteria and owner review remain necessary.
 
