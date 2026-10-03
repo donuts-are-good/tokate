@@ -1089,7 +1089,10 @@ internal class CoordinationFlow : IDisposable {
             unrestricted ?
             "{\"gpt-6.1-sol\":[\"high\"]}": "omit"
         )
-        Check.Contains(Flow.Call([]string{"submit", "--run", run}, 1).Error, "stale coordination authority")
+        Check.Contains(
+            Flow.Call([]string{"submit", "--run", run}, 1).Error,
+            "Repository policy or template changed. The owner must approve again."
+        )
         Check.Contains(
             Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true).Error,
             "Repository policy or template changed. The owner must approve again."
