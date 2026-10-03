@@ -4,7 +4,6 @@ import System
 import System.Text
 import System.Text.Json
 
-// Root-only, immutable Git discovery. Never use the contents API: it can follow links.
 internal class Decree {
     shared {
         internal func HasSnapshot(approval JsonElement) bool -> J.Get(approval, "decree").ValueKind !=
@@ -124,7 +123,6 @@ internal class Decree {
         }
 
         internal func CheckCurrent(repo string, revision string, approval JsonElement) {
-            // Legacy freshness and donor permissions remain unchanged.
             if !HasSnapshot(approval) {
                 return
             }

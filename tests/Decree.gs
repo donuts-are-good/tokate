@@ -7,7 +7,6 @@ import System.Text
 import System.Text.Json.Nodes
 import Tokate
 
-// Actual CLI approvals, rechecks, managed launches, verification and publication.
 internal class DecreeFlow : IDisposable {
     internal let Flow NativeFlow
     internal let V2 CoordinationFlow?
@@ -393,7 +392,6 @@ internal class DecreeFlow : IDisposable {
                 test.Legacy()
                 let approved = test.Approval().ToJsonString()
                 let run = test.Start()
-                // Live target and donor changes do not change legacy delivery or permissions.
                 test.Text("Live target replacement\n")
                 test.Flow.Mode("decree-change")
                 test.Flow.Call([]string{"work", "--run", run})

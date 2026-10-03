@@ -2,8 +2,6 @@ package Tokate
 
 import System.Text.Json
 
-// Every adapter/new managed session must build its prompt here. External sessions
-// are not launched by Tokate. Full instruction text belongs only in the approval.
 internal class TaskContext {
     shared {
         internal func Build(run Data, record JsonElement) string {
