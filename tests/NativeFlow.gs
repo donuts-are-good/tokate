@@ -457,8 +457,224 @@ internal class NativeFlow : IDisposable {
         Approve()
         let run = Claim()
         Mode("workflow")
-        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "cannot change owner policy")
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "protected owner configuration")
         NoPr()
+    }
+
+    internal func ProtectedPolicy(empty bool = false) {
+        Directory.CreateDirectory(Path.Combine(Upstream, "scripts/checks"))
+        File.WriteAllText(Path.Combine(Upstream, "scripts/verify.sh"), "test -f result.txt\n")
+        File.WriteAllText(Path.Combine(Upstream, "scripts/checks/original"), "original\n")
+        File.WriteAllText(Path.Combine(Upstream, "ordinary-source"), "ordinary\n")
+        File.WriteAllText(Path.Combine(Upstream, "é-🛠"), "unicode\n")
+        File.WriteAllText(Path.Combine(Upstream, "e\u0301-quoted\"\n "), "raw name\n")
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let policy = Check.Json(File.ReadAllText(path))
+        policy["verification"] = Check.Json("[[\"/bin/sh\",\"scripts/verify.sh\"]]")
+        policy["protected_paths"] = Check.Json(empty ? "[]": "[\"scripts/verify.sh\",\"scripts/checks/\"]")
+        File.WriteAllText(path, policy.ToJsonString())
+        Commit("Explicit protected paths fixture")
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func ProtectedEntrypoint() {
+        ProtectedPolicy()
+        Approve()
+        let run = Claim()
+        Mode("protected_entrypoint")
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "protected owner path")
+        Check.That(File.ReadAllText(Path.Combine(run, "checkout/scripts/verify.sh")) == "exit 0\n", "Donor work lost")
+        Check.Contains(File.ReadAllText(Path.Combine(run, "candidate.patch")), "+exit 0")
+        Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Replaced verifier executed")
+        NoPr()
+    }
+
+    internal func ProtectedRecovery() {
+        ProtectedPolicy()
+        Approve()
+        let run = Claim()
+        Mode("verification_fail")
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+        let evidence = File.ReadAllText(Path.Combine(run, "verification.json"))
+        File.WriteAllText(Path.Combine(run, "checkout/scripts/verify.sh"), "exit 0\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "protected owner path")
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "verification.json")) == evidence,
+            "Recovery lost failed check evidence"
+        )
+        let archives = Directory.GetDirectories(run, "recovery-*")
+        Check.That(archives.Length == 1, "Recovery failure was not archived")
+        Check.That(
+            File.ReadAllText(Path.Combine(archives[0], "verification.json")) == evidence,
+            "Archive lost failure evidence"
+        )
+        Reload()
+        Check.That(Check.Text(State["exec_count"]) == "1", "Recovery reran inference")
+        NoPr()
+    }
+
+    internal func EmptyProtectedPaths() {
+        ProtectedPolicy(true)
+        Approve()
+        let run = Claim()
+        Mode("protected_entrypoint")
+        Call([]string{"work", "--run", run})
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+    }
+
+    internal func ProtectedPolicyFreshness() {
+        Approve()
+        let run = Claim()
+        let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+        ProtectedPolicy()
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "policy or template changed")
+        Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == saved, "Old approval was reinterpreted")
+        NoInference()
+        NoPr()
+    }
+
+    internal func ProtectedPublication() {
+        for committed in[]bool{false, true} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.ProtectedPolicy()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("protected_entrypoint")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let checkout = Path.Combine(run, "checkout")
+            let path = Path.Combine(run, "run.json")
+            let saved = Check.Json(File.ReadAllText(path))
+            saved["state"] = JsonValue.Create("generated")
+            saved["verification"] = Check.Json("[{\"command\":[\"/bin/sh\",\"scripts/verify.sh\"],\"exit_code\":0}]")
+            File.WriteAllText(
+                Path.Combine(run, "changes.patch"),
+                flow.Git("-C", checkout, "diff", "--cached", "--binary", Check.Text(saved["base"])) + "\n"
+            )
+            if committed {
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "-c",
+                    "user.name=Fixture",
+                    "-c",
+                    "user.email=fixture@example.test",
+                    "commit",
+                    "-m",
+                    "Claimed success"
+                )
+                saved["commit"] = JsonValue.Create(flow.Git("-C", checkout, "rev-parse", "HEAD"))
+            }
+            File.WriteAllText(path, saved.ToJsonString())
+            Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "protected owner path")
+            Check.That(
+                flow.Git(
+                    "-C",
+                    Path.Combine(flow.Bin, "fork"),
+                    "rev-parse",
+                    "refs/heads/" + Check.Text(saved["branch"])
+                ) == Check.Text(saved["base"]),
+                "Protected head was pushed"
+            )
+            flow.NoPr()
+        }
+    }
+
+    internal func DiffFault(key string, value string) {
+        Reload()
+        State[key] = JsonValue.Create(value)
+        Save()
+    }
+
+    internal func MetadataOnly() {
+        File.WriteAllText(Path.Combine(Bin, "git"), "#!/bin/sh\necho unexpected-local-git >&2\nexit 91\n")
+        File.SetUnixFileMode(
+            Path.Combine(Bin, "git"),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        )
+    }
+
+    internal func ReceiptEvidence() {
+        ProtectedPolicy()
+        Approve()
+        let run = Claim()
+        Call([]string{"work", "--run", run})
+        MetadataOnly()
+        for fault in[]string{
+            "missing-files",
+            "truncated-files",
+            "wrong-base",
+            "wrong-head",
+            "missing-previous",
+            "omitted-file",
+            "missing-status",
+            "missing-commits",
+            "truncated-commits"
+        } {
+            DiffFault("diff_fault", fault)
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+        }
+        DiffFault("diff_fault", "")
+        for fault in[]string{"missing", "truncated", "wrong-sha", "omitted", "mode"} {
+            DiffFault("tree_fault", fault)
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+        }
+        DiffFault("tree_fault", "")
+        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+        let checkout = Path.Combine(run, "checkout")
+        let old = Git("-C", checkout, "rev-parse", "HEAD")
+        let marker = Path.Combine(checkout, "receipt-code-ran")
+        File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "touch '" + marker + "'\nexit 0\n")
+        Git("-C", checkout, "add", "-A")
+        Git(
+            "-C",
+            checkout,
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "commit",
+            "-m",
+            "Forged success"
+        )
+        let head = Git("-C", checkout, "rev-parse", "HEAD")
+        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+        Git("-C", checkout, "push", Path.Combine(Bin, "fork"), "HEAD:refs/heads/" + Check.Text(saved["branch"]))
+        Reload()
+        let pull = State["pulls"]?[0] ?? throw Exception("Missing pull")
+        let prHead = pull["head"] ?? throw Exception("Missing head")
+        prHead["sha"] = JsonValue.Create(head)
+        pull["body"] = JsonValue.Create(Check.Text(pull["body"]).Replace(old, head, StringComparison.Ordinal))
+        Save()
+        Check.Contains(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
+            "protected owner path"
+        )
+        DiffFault("diff_fault", "hidden-path")
+        Check.Contains(
+            Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
+            "protected owner path"
+        )
+        Reload()
+        for call in State["api_calls"]?.AsArray() ?? throw Exception("Missing API evidence") {
+            if Check.Text(call["path"]).Contains("/compare/") {
+                Check.Contains(Check.Text(call["path"]), Check.Text(saved["base"]) + "...")
+            }
+        }
+        Check.That(Check.Text(State["exec_count"]) == "1", "Read-only validation ran inference")
+        Check.That(!File.Exists(marker), "Read-only validation executed PR code")
+    }
+
+    internal func GitEvidence() {
+        for fault in[]string{"missing-nul", "invalid-utf8", "truncated"} {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.DiffFault("git_diff_fault", fault)
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Git path evidence")
+            flow.NoPr()
+        }
     }
 
     internal func RepositoryConfig() {
@@ -603,7 +819,7 @@ internal class NativeFlow : IDisposable {
             flow.ResetTraffic()
             flow.Call([]string{"publish", "--run", run}, traffic: true)
             if mode == "pr_fail_after_create" {
-                flow.Traffic(9, 0, 0, 0)
+                flow.Traffic(12, 0, 0, 0)
             } else {
                 flow.Traffic(18, 1, 8, 0)
             }
@@ -733,7 +949,7 @@ internal class NativeFlow : IDisposable {
         Check.That(Check.Text(State["exec_count"]) == "1", "Publishing repeated inference")
         ResetTraffic()
         let repeated = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(9, 0, 0, 0, repeated)
+        Traffic(12, 0, 0, 0, repeated)
         Reload()
         Check.That(
             State["pulls"]?.AsArray().Count == 1 && Check.Text(State["exec_count"]) == "1",
@@ -898,7 +1114,7 @@ internal class NativeFlow : IDisposable {
             flow.Traffic(18, 1, 8, 0, published)
             flow.ResetTraffic()
             let repeated = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(9, 0, 0, 0, repeated)
+            flow.Traffic(12, 0, 0, 0, repeated)
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Equivalent ETags repeated inference")
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Equivalent ETags duplicated publication")
@@ -1298,6 +1514,13 @@ internal class NativeFlow : IDisposable {
                 "FalseSuccess",
                 "PolicyEdit",
                 "WorkflowEdit",
+                "ProtectedEntrypoint",
+                "ProtectedRecovery",
+                "ProtectedPublication",
+                "ProtectedPolicyFreshness",
+                "EmptyProtectedPaths",
+                "ReceiptEvidence",
+                "GitEvidence",
                 "RepositoryConfig",
                 "NoPatch",
                 "TemporaryIsolation",
@@ -1378,6 +1601,27 @@ internal class NativeFlow : IDisposable {
                     }
                     case "WorkflowEdit" {
                         flow.WorkflowEdit()
+                    }
+                    case "ProtectedEntrypoint" {
+                        flow.ProtectedEntrypoint()
+                    }
+                    case "ProtectedRecovery" {
+                        flow.ProtectedRecovery()
+                    }
+                    case "ProtectedPublication" {
+                        flow.ProtectedPublication()
+                    }
+                    case "ProtectedPolicyFreshness" {
+                        flow.ProtectedPolicyFreshness()
+                    }
+                    case "EmptyProtectedPaths" {
+                        flow.EmptyProtectedPaths()
+                    }
+                    case "ReceiptEvidence" {
+                        flow.ReceiptEvidence()
+                    }
+                    case "GitEvidence" {
+                        flow.GitEvidence()
                     }
                     case "RepositoryConfig" {
                         flow.RepositoryConfig()

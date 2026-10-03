@@ -49,6 +49,10 @@ func Main(args[]string) int32 {
             ProcessChecks.All()
             return 0
         }
+        if args.Length == 1 && args[0] == "--protected-paths" {
+            ProtectedPathChecks.All()
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
@@ -75,6 +79,7 @@ func Main(args[]string) int32 {
             return 0
         }
         ProcessChecks.All()
+        ProtectedPathChecks.All()
         CliDiscovery.All(binary)
         NativeFlow.All(binary)
         CoordinationFlow.All(binary)

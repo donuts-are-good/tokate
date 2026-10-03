@@ -197,10 +197,17 @@ internal class V2Contribution {
                 throw Exception("Fetched commit differs from exact declaration")
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
-            ProtectedDiff(checkout, run.Text("base"), commit)
+            run.Fields["commit"] = commit
+            try {
+                ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), commit)
+            } catch (error Exception) {
+                run.Fields["state"] = "failed"
+                run.Fields["error"] = error.Message
+                run.Save(directory)
+                throw error
+            }
             let timer = Stopwatch.StartNew()
             run.Fields["state"] = "verifying"
-            run.Fields["commit"] = commit
             run.Save(directory)
             let results = List[Object]()
             for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
@@ -237,18 +244,6 @@ internal class V2Contribution {
             Terminal.Message("Exact external commit passed independent verification. Use submit --run " + directory)
         }
 
-        private func ProtectedDiff(checkout string, base string, commit string) {
-            let files = Commands.Git(checkout, "diff", "--name-only", base, commit)
-            if files == "" {
-                throw Exception("Contribution must change the approved base")
-            }
-            for file in files.Split('\n') {
-                if file.StartsWith(".github/workflows/") || file.StartsWith(".github/tokate") {
-                    throw Exception("Contribution changes protected owner policy or workflows")
-                }
-            }
-        }
-
         internal func Commit(directory string) {
             using let lease = File.Open(
                 Path.Combine(directory, ".lock"),
@@ -262,6 +257,10 @@ internal class V2Contribution {
                 throw Exception("Expected successfully verified Tokate execution")
             }
             let checkout = Path.Combine(directory, "checkout")
+            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+                throw Exception("Saved checkout HEAD changed")
+            }
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
             let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
@@ -279,6 +278,7 @@ internal class V2Contribution {
                 J.Text(J.Get(record, "issue"), "title")
             )
             run.Fields["commit"] = Commands.Git(checkout, "rev-parse", "HEAD")
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
             run.Fields["verification_provenance"] = "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
@@ -319,6 +319,7 @@ internal class V2Contribution {
             ) != "" {
                 throw Exception("Verified checkout changed")
             }
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
                 Commands.Git(
@@ -412,6 +413,13 @@ internal class V2Contribution {
                 throw Exception("PR receipt lacks current exact-commit coordination authority")
             }
             Policy(J.Write(J.Get(record, "policy"))).ValidateTools(J.Get(metadata, "tools"))
+            ProtectedPaths.Remote(
+                repo,
+                J.Get(record, "policy"),
+                J.Text(J.Get(record, "approval"), "base"),
+                J.Text(metadata, "fork"),
+                J.Text(metadata, "head")
+            )
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo

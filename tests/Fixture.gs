@@ -102,6 +102,21 @@ internal class Fixture {
         return Check.Success(Check.Run("/usr/bin/git", all.ToArray(), Env, input))
     }
 
+    internal func GitRaw(repo string, args[]string) string {
+        let all = List[string]{"-C", Path.Combine(Root, repo)}
+        all.AddRange(args)
+        let result = Check.Run("/usr/bin/git", all.ToArray(), Env)
+        Check.That(result.Code == 0, result.Error)
+        return result.Output
+    }
+
+    internal func CommitMetadata(repo string, sha string) JsonNode -> Check.Map(
+        "sha",
+        sha,
+        "commit",
+        Check.Map("tree", Check.Map("sha", Git(repo, []string{"rev-parse", sha + "^{tree}"})))
+    )
+
     internal func Codex(args[]string) int32 {
         Check.That(
             Environment.GetEnvironmentVariable("CODEX_HOME") == Path.Combine(
@@ -221,6 +236,9 @@ internal class Fixture {
         if mode == "workflow" {
             Directory.CreateDirectory(Path.Combine(checkout, ".github/workflows"))
             File.WriteAllText(Path.Combine(checkout, ".github/workflows/verify.yml"), "tampered")
+        }
+        if mode == "protected_entrypoint" {
+            File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "exit 0\n")
         }
         if mode == "output_boundary" {
             Check.Contains(File.ReadAllText(Path.Combine(checkout, ".env")), "synthetic-repository-secret")
@@ -372,14 +390,78 @@ internal class Fixture {
             let comparison = tail.Substring(8).Split("...")
             let sha = comparison[1].Split(':')[1]
             Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
-            let names = Git("upstream", []string{"diff", "--name-only", comparison[0], sha})
+            let names = GitRaw("upstream", []string{"diff", "--name-status", "-z", "-M", comparison[0], sha}).Split(
+                '\0'
+            )
             let files = JsonArray()
-            for file in names.Split('\n') {
-                if file != "" {
-                    files.Add(Check.Map("filename", file))
+            var i int32
+            while i < names.Length - 1 {
+                let status = names[i++]
+                let path = names[i++]
+                if status.StartsWith("R") {
+                    files.Add(Check.Map("filename", names[i++], "previous_filename", path, "status", "renamed"))
+                } else {
+                    files.Add(
+                        Check.Map(
+                            "filename",
+                            path,
+                            "status",
+                            status == "A" ? "added":
+                            (status == "D" ? "removed": (status == "T" ? "changed": "modified"))
+                        )
+                    )
                 }
             }
-            return Answer(Check.Map("status", "ahead", "files", files))
+            let commits = JsonArray()
+            for commit in Git("upstream", []string{"rev-list", "--reverse", comparison[0] + ".." + sha}).Split('\n') {
+                if commit != "" {
+                    commits.Add(CommitMetadata("upstream", commit))
+                }
+            }
+            let value = Check.Map(
+                "status",
+                "ahead",
+                "files",
+                files,
+                "commits",
+                commits,
+                "ahead_by",
+                commits.Count,
+                "behind_by",
+                0,
+                "total_commits",
+                commits.Count,
+                "base_commit",
+                CommitMetadata("upstream", comparison[0]),
+                "merge_base_commit",
+                Check.Map("sha", Git("upstream", []string{"merge-base", comparison[0], sha}))
+            )
+            let fault = Check.Text(State["diff_fault"])
+            if fault == "missing-files" {
+                value.AsObject().Remove("files")
+            } else if fault == "truncated-files" {
+                while files.Count < 300 {
+                    files.Add(Check.Map("filename", "extra-" + files.Count.ToString(), "status", "added"))
+                }
+                value["files"] = files.DeepClone()
+            } else if fault == "wrong-base" {
+                value["base_commit"] = Check.Map("sha", String('a', 40))
+            } else if fault == "wrong-head" {
+                value["commits"] = Check.Json("[{\"sha\":\"" + String('a', 40) + "\"}]")
+            } else if fault == "missing-previous" {
+                value["files"] = Check.Json("[{\"filename\":\"result.txt\",\"status\":\"renamed\"}]")
+            } else if fault == "hidden-path" {
+                value["files"] = Check.Json("[{\"filename\":\"result.txt\",\"status\":\"modified\"}]")
+            } else if fault == "omitted-file" {
+                value["files"] = Check.Json("[{\"filename\":\"ordinary-source\",\"status\":\"modified\"}]")
+            } else if fault == "missing-status" {
+                value["files"] = Check.Json("[{\"filename\":\"result.txt\"}]")
+            } else if fault == "missing-commits" {
+                value.AsObject().Remove("commits")
+            } else if fault == "truncated-commits" {
+                value["total_commits"] = JsonValue.Create(commits.Count + 1)
+            }
+            return Answer(value)
         }
         if tail.StartsWith("commits/") {
             return Answer(Check.Map("sha", Git(folder, []string{"rev-parse", tail.Substring(8)})))
@@ -470,6 +552,35 @@ internal class Fixture {
                     parents
                 )
             )
+        }
+        if tail.StartsWith("git/trees/") {
+            let sha = tail.Substring(10).Split('?')[0]
+            let entries = JsonArray()
+            for line in GitRaw(folder, []string{"ls-tree", "-r", "-t", "-z", sha}).Split('\0') {
+                if line == "" {
+                    continue
+                }
+                let tab = line.IndexOf('\t')
+                let fields = line.Substring(0, tab).Split(' ')
+                entries.Add(
+                    Check.Map("mode", fields[0], "type", fields[1], "sha", fields[2], "path", line.Substring(tab + 1))
+                )
+            }
+            let value = Check.Map("sha", sha, "truncated", false, "tree", entries)
+            let fault = Check.Text(State["tree_fault"])
+            if fault == "truncated" {
+                value["truncated"] = JsonValue.Create(true)
+            } else if fault == "missing" {
+                value.AsObject().Remove("tree")
+            } else if fault == "wrong-sha" {
+                value["sha"] = JsonValue.Create(String('a', 40))
+            } else if fault == "omitted" {
+                value["tree"]?.AsArray().RemoveAt(entries.Count - 1)
+            } else if fault == "mode" {
+                let entry = value["tree"]?[entries.Count - 1] ?? throw Exception("Missing tree entry")
+                entry["mode"] = JsonValue.Create("100755")
+            }
+            return Answer(value)
         }
         if tail == "git/trees" {
             Env["GIT_INDEX_FILE"] = Path.Combine(Root, "tree.index")
@@ -607,6 +718,22 @@ internal class Fixture {
             return Codex(args)
         }
         if name == "git" {
+            let pathFault = Check.Text(State["git_diff_fault"])
+            if pathFault != "" && Array.IndexOf(args, "--name-only") >= 0 && Array.IndexOf(args, "-z") >= 0 {
+                if pathFault == "missing-nul" {
+                    Console.Write("result.txt")
+                } else if pathFault == "invalid-utf8" {
+                    using let output = Console.OpenStandardOutput()
+                    output.WriteByte(255)
+                    output.WriteByte(0)
+                } else if pathFault == "truncated" {
+                    let chunk = String('x', 8191) + "\0"
+                    for i in 0 ... 4097 {
+                        Console.Write(chunk)
+                    }
+                }
+                return 0
+            }
             let command = List[string]()
             for arg in args {
                 if arg == "https://github.com/owner/project.git" {

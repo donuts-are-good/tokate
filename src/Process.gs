@@ -12,6 +12,8 @@ internal class CommandResult {
     internal var Code int32
     internal var Output string = ""
     internal var Error string = ""
+    internal var Truncated bool
+    internal var ReadFailed bool
 }
 
 @DllImport("libc", EntryPoint: "kill")
@@ -19,18 +21,21 @@ func KillGroup(pid int32, signal int32) int32;
 
 internal class Commands {
     shared {
-        internal func Read(reader StreamReader, output Chan[string]) {
+        internal func Read(reader StreamReader, output Chan[string], result CommandResult) {
             try {
                 let text = StringBuilder()
                 let buffer = [8192]char
                 var count int32
                 while (count = reader.Read(buffer, 0, buffer.Length)) > 0 {
-                    if text.Length < 32 * 1024 * 1024 {
+                    if text.Length + count <= 32 * 1024 * 1024 {
                         text.Append(buffer, 0, count)
+                    } else {
+                        result.Truncated = true
                     }
                 }
                 output <- text.ToString()
             } catch (error Exception) {
+                result.ReadFailed = true
                 output <- error.Message
             }
         }
@@ -75,7 +80,8 @@ internal class Commands {
             github bool = false,
             isolated bool = false,
             milliseconds int32 = 0,
-            cancellation Chan[bool]? = nil
+            cancellation Chan[bool]? = nil,
+            strictOutput bool = false
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             info.ArgumentList.Add(exe)
@@ -133,6 +139,11 @@ internal class Commands {
             let allowance = TimeSpan.FromMilliseconds(milliseconds > 0 ? milliseconds: seconds * 1000)
             let clock = Stopwatch.StartNew()
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
+            using let outputReader = strictOutput ? StreamReader(
+                process.StandardOutput.BaseStream,
+                UTF8Encoding(false, true),
+                false
+            ): process.StandardOutput
             using let deadline = after(
                 TimeSpan.FromMilliseconds(Math.Max(0.0, (allowance - clock.Elapsed).TotalMilliseconds))
             )
@@ -142,8 +153,9 @@ internal class Commands {
             let exited = Chan[Exception?](1)
             let cancelled = cancellation ?? Chan[bool](1)
             go Commands.Write(process.StandardInput, input, stdin)
-            go Commands.Read(process.StandardOutput, stdout)
-            go Commands.Read(process.StandardError, stderr)
+            let result = CommandResult()
+            go Commands.Read(outputReader, stdout, result)
+            go Commands.Read(process.StandardError, stderr, result)
             go Commands.Wait(process, exited)
             let onCancel = ConsoleCancelEventHandler(
                 (sender Object?, event ConsoleCancelEventArgs) -> {
@@ -162,7 +174,6 @@ internal class Commands {
             var outputDone bool
             var errorDone bool
             var exitDone bool
-            let result = CommandResult()
             try {
                 while !inputDone || !outputDone || !errorDone || !exitDone {
                     if clock.Elapsed >= allowance {
@@ -258,7 +269,7 @@ internal class Commands {
             return result.Output.Trim()
         }
 
-        internal func Git(cwd string, args ...string) string {
+        internal func GitResult(cwd string, args[]string, raw bool = false) CommandResult {
             let all = List[string]{
                 "-c",
                 "core.hooksPath=/dev/null",
@@ -270,12 +281,31 @@ internal class Commands {
                 "protocol.ext.allow=never"
             }
             all.AddRange(args)
-            return Checked(
+            return Run(
                 "git",
                 all.ToArray(),
                 cwd,
-                github: Array.IndexOf(args, "credential.helper=!gh auth git-credential") >= 0
+                github: Array.IndexOf(args, "credential.helper=!gh auth git-credential") >= 0,
+                strictOutput: raw
             )
+        }
+
+        internal func Git(cwd string, args ...string) string {
+            let result = GitResult(cwd, args)
+            if result.Code != 0 {
+                throw Exception("git failed: " + result.Error + result.Output)
+            }
+            return result.Output.Trim()
+        }
+
+        internal func GitRaw(cwd string, args[]string) string {
+            let result = GitResult(cwd, args, true)
+            if result.Code != 0 || result.Truncated || result.ReadFailed || Encoding.UTF8.GetByteCount(
+                result.Output
+            ) > 32 * 1024 * 1024 {
+                throw Exception("Cannot read complete Git path evidence: " + result.Error)
+            }
+            return result.Output
         }
     }
 }

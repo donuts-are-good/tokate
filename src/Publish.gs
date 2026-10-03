@@ -79,6 +79,13 @@ internal class Publication {
                 ) {
                     throw Exception("Another PR or commit already owns this branch")
                 }
+                ProtectedPaths.Remote(
+                    run.Text("repo"),
+                    J.Get(record, "policy"),
+                    run.Text("base"),
+                    run.Text("head_repo"),
+                    run.Text("commit")
+                )
                 SavePr(directory, run, existing)
                 return
             }
@@ -88,6 +95,7 @@ internal class Publication {
                     throw Exception("Saved checkout HEAD changed")
                 }
                 Commands.Git(checkout, "add", "-A")
+                ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"))
                 Commands.Git(checkout, "diff", "--cached", "--check")
                 let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
                 if patch == "" || patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
@@ -116,6 +124,7 @@ internal class Publication {
             ) != "" {
                 throw Exception("Saved commit or checkout changed")
             }
+            ProtectedPaths.Local(checkout, J.Get(record, "policy"), run.Text("base"), run.Text("commit"))
             let receipt = J.Map(
                 "version",
                 1,
@@ -250,6 +259,13 @@ internal class Publication {
                 J.Text(receipt, "effort"),
                 J.Number(receipt, "seconds"),
                 J.Bool(receipt, "network")
+            )
+            ProtectedPaths.Remote(
+                repo,
+                J.Get(record, "policy"),
+                J.Text(approval, "base"),
+                Data.Repo(J.Text(J.Get(head, "repo"), "full_name")),
+                J.Text(head, "sha")
             )
             let run = Data()
             run.Fields["repo"] = repo
