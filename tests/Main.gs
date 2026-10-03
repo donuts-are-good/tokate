@@ -57,6 +57,10 @@ func Main(args[]string) int32 {
             CliDiscovery.All(binary)
             return 0
         }
+        if args.Length == 2 && args[0] == "--cli-shell" {
+            CliDiscovery.All(binary, args[1])
+            return 0
+        }
         if args.Length == 2 && args[0] == "--shell" {
             Installer.Lifecycle(project, binary, args[1])
             Console.WriteLine("PASS installer lifecycle for " + args[1])

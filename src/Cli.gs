@@ -1,9 +1,7 @@
 package Tokate
 
 import System
-import System.Collections.Generic
 import System.ComponentModel
-import System.Diagnostics
 import System.IO
 import System.Text
 import System.Text.RegularExpressions
@@ -220,6 +218,19 @@ internal class Cli {
             return "Usage: tokate <command> [options]\nRun tokate --help for commands."
         }
 
+        private func OptionHelp(text StringBuilder, label string, description string) {
+            text.AppendLine("  " + label)
+            var line = "    "
+            for word in description.Split(' ', StringSplitOptions.RemoveEmptyEntries) {
+                if line.Length > 4 && line.Length + word.Length + 1 > 78 {
+                    text.AppendLine(line)
+                    line = "    "
+                }
+                line += (line.Length == 4 ? "": " ") + word
+            }
+            text.AppendLine(line)
+        }
+
         internal func Help(name string = "") string {
             let text = StringBuilder()
             if name == "" {
@@ -243,10 +254,12 @@ internal class Cli {
                     if !command.Has(option.Name) {
                         continue
                     }
-                    let required = command.Needs(option.Name) ? " (required)": ""
-                    text.AppendLine(
-                        "  " + ("--" + option.Name + (option.Value == "" ? "": " " + option.Value)).PadRight(24) +
-                            option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")") + required
+                    let required = command.Needs(option.Name) && option.Name != "repo" ?
+                    (name == "work" || name == "checks" ? ". Required unless --run is used.": ". Required."): ""
+                    OptionHelp(
+                        text,
+                        "--" + option.Name + (option.Value == "" ? "": " " + option.Value),
+                        option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")") + required
                     )
                 }
                 if command.Has("issue") {
@@ -261,7 +274,8 @@ internal class Cli {
                 }
                 if name == "work" || name == "checks" {
                     text.AppendLine(
-                        "--run is an alternative to repository/issue/model/effort or repository/pr inputs; do not combine them."
+                        name == "work" ? "Use --run DIR alone to execute a saved claim.":
+                        "Use --run DIR instead of --repo/--pr to check a saved run."
                     )
                 }
                 text.AppendLine("\nExample: tokate " + command.Example)
@@ -325,7 +339,6 @@ internal class Cli {
             if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
                 return
             }
-            // Validate all explicit inputs before consulting local Git or checking tools.
             for option in Options {
                 if command.Needs(option.Name) && option.Name != "repo" {
                     args.Need(option.Name)
@@ -340,14 +353,6 @@ internal class Cli {
 
 internal class RepositoryInput {
     shared {
-        private func StartLocal(info ProcessStartInfo) Process {
-            try {
-                return Process.Start(info) ?? throw Exception("Use --repo OWNER/REPO; local Git is unavailable")
-            } catch (error Win32Exception) {
-                throw Exception("Local Git is unavailable; use --repo OWNER/REPO")
-            }
-        }
-
         internal func Repo(value string) string {
             var normalized = value
             if value.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) {
@@ -406,34 +411,21 @@ internal class RepositoryInput {
         }
 
         internal func Local() string {
-            // Local config only: no GitHub CLI, fetch, credential helper, hooks or inference.
-            let info = ProcessStartInfo("git")
-            info.UseShellExecute = false
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.Environment.Clear()
-            info.Environment["PATH"] = Environment.GetEnvironmentVariable("PATH") ?? ""
-            for arg in[]string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "remote", "-v"} {
-                info.ArgumentList.Add(arg)
+            var result CommandResult
+            try {
+                result = Commands.Run(
+                    "git",
+                    []string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "remote", "-v"},
+                    seconds: 5
+                )
+            } catch (error Win32Exception) {
+                throw Exception("Local Git is unavailable; use --repo OWNER/REPO")
             }
-            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1"
-            info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
-            info.Environment["GH_HOST"] = "github.com"
-            info.Environment["GH_PROMPT_DISABLED"] = "1"
-            info.Environment["GIT_TERMINAL_PROMPT"] = "0"
-            using let process = StartLocal(info)
-            let output = process.StandardOutput.ReadToEndAsync()
-            let error = process.StandardError.ReadToEndAsync()
-            if !process.WaitForExit(5000) {
-                process.Kill(true)
-                process.WaitForExit()
-                throw Exception("Local repository discovery timed out; use --repo OWNER/REPO")
-            }
-            if process.ExitCode != 0 {
+            if result.Code != 0 {
                 throw Exception("Cannot determine a local repository; use --repo OWNER/REPO")
             }
             var repo string = ""
-            for line in output.GetAwaiter().GetResult().Split('\n', StringSplitOptions.RemoveEmptyEntries) {
+            for line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) {
                 let fields = line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)
                 let url = fields.Length >= 2 ? fields[1]: ""
                 let match = Regex.Match(

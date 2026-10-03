@@ -312,6 +312,10 @@ install -m 755 artifacts/linux-x64/tokate ~/.local/bin/tokate
 scripts/verify.sh
 ```
 
+Completion checks use Bash by default. Optional checks require only the shell
+being tested: `artifacts/tests/tokate-tests --cli-shell zsh` or
+`artifacts/tests/tokate-tests --cli-shell fish`. Tokate does not require these shells.
+
 The pinned public G# SDK is 0.4.1150. Verification uses the pinned SDK formatter,
 builds and publishes NativeAOT with warnings as errors, and runs a G# end-to-end
 harness against the actual binary. It uses two simulated GitHub identities, real

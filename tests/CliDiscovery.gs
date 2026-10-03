@@ -1,7 +1,7 @@
 package TokateTests
 
 import System
-import System.Collections.Generic
+import System.Diagnostics
 import System.IO
 import Tokate
 
@@ -14,7 +14,8 @@ internal class CliDiscovery {
             return result
         }
 
-        internal func All(binary string) {
+        internal func All(binary string, shell string = "bash") {
+            Check.That(shell == "bash" || shell == "zsh" || shell == "fish", "Choose bash, zsh or fish")
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")
             let log = Path.Combine(temp.Root, "calls")
@@ -52,7 +53,7 @@ internal class CliDiscovery {
             Check.Contains(work, "inference")
             Check.Contains(work, "publish a draft PR")
             Check.Contains(work, "default: min(3600, owner limit)")
-            Check.Contains(work, "(required)")
+            Check.Contains(work, "Required unless --run is used.")
             Check.That(!work.Contains("tokate doctor"), "Work help repeats global help")
             Check.Contains(Call(binary, []string{"recover", "-h"}, temp).Output, "default: 300")
 
@@ -98,7 +99,7 @@ internal class CliDiscovery {
             Check.Contains(Call(binary, []string{"status", "--run=" + saved}, temp).Output, "claimed")
             Check.That(!File.Exists(log), "Help or invalid inputs invoked a tool")
 
-            for shell in[]string{"bash", "zsh", "fish"} {
+            {
                 let script = Call(binary, []string{"completion", shell}, temp).Output
                 let path = Path.Combine(temp.Root, "completion." + shell)
                 File.WriteAllText(path, script)
@@ -159,7 +160,6 @@ internal class CliDiscovery {
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "use --repo OWNER/REPO")
             temp.Env["PATH"] = originalPath
 
-            // Check normalization separately, then exercise accepted URL inputs through the binary.
             let input = Args(
                 []string{
                     "revoke",
@@ -185,6 +185,11 @@ internal class CliDiscovery {
                 Check.That(!result.Error.Contains("Usage:"), "Valid URL input rejected")
                 File.Delete(log)
             }
+            File.WriteAllText(Path.Combine(bin, "git"), "#!/bin/sh\n/bin/sleep 30 &\nexit 0\n")
+            let deadline = Stopwatch.StartNew()
+            Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "No GitHub remote")
+            Check.That(deadline.Elapsed.TotalSeconds < 7, "Repository discovery waited for a detached pipe holder")
+            Check.That(!File.Exists(log), "Failed repository discovery invoked GitHub")
             File.Delete(Path.Combine(bin, "git"))
             File.CreateSymbolicLink(Path.Combine(bin, "git"), "/usr/bin/git")
             Check.Success(Check.Run("/usr/bin/git", []string{"init", "-b", "main", temp.Root}, temp.Env))
@@ -228,7 +233,6 @@ internal class CliDiscovery {
             )
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "Ambiguous local remotes")
             Check.That(!File.Exists(log), "Ambiguous remotes invoked GitHub")
-            // A positional issue URL overrides ambiguous local remotes without an explicit --repo.
             let urlOverride = Check.Run(
                 binary,
                 []string{"work", "https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},

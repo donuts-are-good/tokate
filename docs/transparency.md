@@ -81,7 +81,6 @@ infer harness defaults. Donors choose model and effort explicitly.
 | Process | Inherited requirements |
 | --- | --- |
 | Ordinary host commands, including local Git and tool version checks | `PATH`, `HOME`, `LANG` |
-| Local repository context probe (`git remote -v`) | `PATH` only |
 | Native Codex login, version, execution, and sandbox invocations | The ordinary requirements plus `CODEX_HOME` when set |
 | GitHub CLI commands and Git push with `gh auth git-credential` | The ordinary requirements plus `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` when set |
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
