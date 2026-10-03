@@ -68,8 +68,6 @@ signature and grants no authority. Write permission, canonical comment actor
 and numeric identity, reservation ownership, scope approval, and receipt checks
 remain authoritative. Donor attribution and receipt/provenance meanings are
 unchanged; existing commits and records remain valid under their current rules.
-After acceptance, inspect the next routine automated commit using only author
-and committer noreply booleans, without printing contact values.
 
 The API boundary invokes sanitized `gh api --include` commands. It reads response
 status and allowlisted nonsecret ETag, Retry-After, rate-limit remaining/reset,
