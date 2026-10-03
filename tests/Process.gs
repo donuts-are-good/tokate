@@ -12,6 +12,7 @@ internal class ProcessChecks {
             Success()
             InputDeadline()
             Cancellation()
+            CancellationLifetime()
             Failures()
             OutputLimit()
         }
@@ -114,6 +115,68 @@ internal class ProcessChecks {
             Console.WriteLine(
                 "PASS blocked-input and pre-start cancellation retain their exception and collect descendants"
             )
+        }
+
+        private func CancellationLifetime() {
+            for supplied in[]bool{false, true} {
+                using let temp = Temp()
+                let info = ProcessStartInfo("/usr/bin/setsid")
+                info.WorkingDirectory = temp.Root
+                for arg in[]string{"/bin/sh", "-c", "echo $$$$ > ready; exec /usr/bin/sleep 120"} {
+                    info.ArgumentList.Add(arg)
+                }
+                using let process = Process.Start(info) ?? throw Exception("Cannot start cancellation lifetime fixture")
+                let signal = Chan[bool](1)
+                let callback = CommandCancellation(process, supplied ? signal: nil)
+                let retained = Action(callback.Cancel)
+                var disposed bool
+                try {
+                    let ready = Path.Combine(temp.Root, "ready")
+                    for i in 0 ... 500 {
+                        if File.Exists(ready) && File.ReadAllText(ready).Trim() == process.Id.ToString() {
+                            break
+                        }
+                        select {
+                            case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                        }
+                    }
+                    Check.That(
+                        File.Exists(ready) && File.ReadAllText(ready).Trim() == process.Id.ToString(),
+                        "Cancellation lifetime fixture did not become a process group leader"
+                    )
+                    retained()
+                    Check.That(process.WaitForExit(5000), "Live cancellation callback did not stop the subprocess")
+                    Check.That(process.ExitCode != 0, "Live cancellation callback turned cancellation into success")
+                    var signalled bool
+                    select {
+                        case let value = <- signal {
+                            signalled = value
+                        }
+                        default { }
+                    }
+                    Check.That(signalled == supplied, "Live cancellation callback changed cancellation signalling")
+                    callback.Stop()
+                    process.Dispose()
+                    disposed = true
+                    retained()
+                    select {
+                        case <- signal {
+                            throw Exception("Retired cancellation callback signalled after teardown")
+                        }
+                        default { }
+                    }
+                } finally {
+                    callback.Stop()
+                    if !disposed {
+                        if !process.HasExited {
+                            process.Kill(true)
+                        }
+                        process.WaitForExit()
+                    }
+                    process.Dispose()
+                }
+            }
+            Console.WriteLine("PASS retained cancellation callbacks stay safe after subprocess disposal")
         }
 
         private func Failures() {
