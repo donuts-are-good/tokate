@@ -48,27 +48,22 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
-            CliOption("repo", "OWNER/REPO", "GitHub repository; default: issue URL or unique local remote"),
-            CliOption("issue", "N|URL", "Positive issue number or https://github.com/OWNER/REPO/issues/N"),
-            CliOption("donor", "LOGIN", "Assigned GitHub donor; @me selects the signed-in account"),
-            CliOption("model", "MODEL", "Model name allowed by owner policy"),
-            CliOption(
-                "effort",
-                "EFFORT",
-                "Reasoning effort; must match policy",
-                "minimal low medium high xhigh max ultra"
-            ),
-            CliOption("seconds", "N", "Time budget, 1..86400 seconds; default: {{seconds}}"),
-            CliOption("fork", "LOGIN/REPO", "Writable donor fork; default: signed-in login/upstream name"),
+            CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
+            CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
+            CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
+            CliOption("model", "MODEL", "Owner-approved model"),
+            CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra"),
+            CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
+            CliOption("fork", "LOGIN/REPO", "Donor fork; default: your login/upstream name"),
             CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
             CliOption("run", "DIR", "Saved run directory"),
-            CliOption("allow-network", "", "Allow task network only when owner permits it; default: off"),
+            CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
             CliOption("pr", "N", "Positive pull request number"),
             CliOption("watch", "", "Wait for checks; default: off"),
             CliOption("timeout", "N", "Check wait limit, 1..86400 seconds; default: 1200"),
-            CliOption("help", "", "Show help without tool checks, network or inference (-h)"),
-            CliOption("traffic", "", "Print numeric Tokate API counts on stderr; default: off"),
+            CliOption("help", "", "Show help (-h); no tools, network or inference"),
+            CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
         }
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand("doctor", "", "", "Check tools and sandbox locally; no inference.", "", "doctor"),
@@ -119,16 +114,16 @@ internal class Cli {
                 "repo,issue,model,effort,seconds,fork,runs,allow-network",
                 "repo,issue,model,effort",
                 "Reserve a GitHub branch and save a claim locally; no inference or PR publication.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --model MODEL --effort EFFORT [options]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
             ),
             CliCommand(
                 "work",
                 "repo,issue,model,effort,seconds,fork,runs,allow-network,run",
                 "repo,issue,model,effort",
-                "Spend your Codex usage on inference, verify, push and publish a draft PR.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --model MODEL --effort EFFORT [options]\n       tokate work --run DIR",
-                "work https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
+                "Use your Codex allowance for inference, verify and publish a draft PR.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       --model MODEL --effort EFFORT [options]\n       tokate work --run DIR",
+                "work --repo owner/project --issue 42 --model MODEL --effort high"
             ),
             CliCommand(
                 "recover",
@@ -229,6 +224,7 @@ internal class Cli {
                 line += (line.Length == 4 ? "": " ") + word
             }
             text.AppendLine(line)
+            text.AppendLine()
         }
 
         internal func Help(name string = "") string {
@@ -254,31 +250,23 @@ internal class Cli {
                     if !command.Has(option.Name) {
                         continue
                     }
-                    let required = command.Needs(option.Name) && option.Name != "repo" ?
-                    (name == "work" || name == "checks" ? ". Required unless --run is used.": ". Required."): ""
+                    let required = command.Needs(option.Name) && option.Name != "repo" ? " (required)": ""
                     OptionHelp(
                         text,
-                        "--" + option.Name + (option.Value == "" ? "": " " + option.Value),
-                        option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")") + required
+                        "--" + option.Name + (option.Value == "" ? "": " " + option.Value) + required,
+                        option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")")
                     )
                 }
                 if command.Has("issue") {
-                    text.AppendLine(
-                        "\nAn issue URL may be positional or passed to --issue; matching explicit inputs are allowed."
-                    )
-                }
-                if command.Needs("repo") {
-                    text.AppendLine(
-                        "Repository required: explicit --repo, issue URL, or all local remotes identifying one GitHub repo."
-                    )
+                    text.AppendLine("An issue URL can replace --repo and --issue.")
                 }
                 if name == "work" || name == "checks" {
                     text.AppendLine(
-                        name == "work" ? "Use --run DIR alone to execute a saved claim.":
+                        name == "work" ? "For a saved claim, use --run DIR instead of required inputs.":
                         "Use --run DIR instead of --repo/--pr to check a saved run."
                     )
                 }
-                text.AppendLine("\nExample: tokate " + command.Example)
+                text.AppendLine("\nExample:\n  tokate " + command.Example)
             }
             return text.ToString().TrimEnd()
         }

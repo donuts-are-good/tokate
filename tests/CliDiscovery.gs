@@ -53,7 +53,8 @@ internal class CliDiscovery {
             Check.Contains(work, "inference")
             Check.Contains(work, "publish a draft PR")
             Check.Contains(work, "default: min(3600, owner limit)")
-            Check.Contains(work, "Required unless --run is used.")
+            Check.Contains(work, "(required)")
+            Check.Contains(work, "use --run DIR instead of required inputs")
             Check.That(!work.Contains("tokate doctor"), "Work help repeats global help")
             Check.Contains(Call(binary, []string{"recover", "-h"}, temp).Output, "default: 300")
 
