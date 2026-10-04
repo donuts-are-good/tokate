@@ -108,6 +108,10 @@ func Main(args[]string) int32 {
             CliDiscovery.Structured(binary)
             return 0
         }
+        if args.Length == 1 && args[0] == "--progress" {
+            ProgressChecks.All(binary)
+            return 0
+        }
         if args.Length == 1 && args[0] == "--terminal" {
             TerminalOutput.All(binary)
             return 0

@@ -521,13 +521,14 @@ internal class Correction {
                     }
                     correction.Fields["verification"] = results
                     Save(directory, correction)
-                    let result = Verification.Check(
+                    let result = Terminal.Verify(
                         attempt,
                         results,
                         command,
                         checkout,
                         run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                        remaining
+                        remaining,
+                        progressBudget: RuntimeBudget(timer, seconds)
                     )
                     correction.Fields["verification"] = results
                     File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")

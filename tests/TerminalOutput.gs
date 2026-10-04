@@ -207,6 +207,7 @@ internal class TerminalOutput {
             let flags = Args([]string{"checks", "--run", "saved", "--plain", "--ascii", "--watch"})
             Cli.Validate(flags)
             Checks(binary)
+            ProgressChecks.All(binary)
             Console.WriteLine(
                 "PASS terminal output: 40/80/120 columns, light/dark, plain/ASCII/NO_COLOR/dumb/redirected/JSON, full identities/URLs and untrusted controls"
             )

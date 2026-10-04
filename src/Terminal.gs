@@ -1,11 +1,73 @@
 package Tokate
 
+import Gsharp.Concurrency
 import Spectre.Console
 import System
+import System.Collections.Generic
+import System.Diagnostics
 import System.Globalization
+import System.IO
 import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
+
+internal class TerminalProgress : IDisposable {
+    private let Stop Chan[bool] = Chan[bool](1)
+    private let Finished Chan[bool] = Chan[bool](1)
+    private let Phase string
+    private let Budget RuntimeBudget
+    private let Total RuntimeBudget?
+    private let Interactive bool
+
+    internal init(phase string, budget RuntimeBudget, total RuntimeBudget? = nil) {
+        Phase = Terminal.Clean(phase).Replace('\n', ' ')
+        Budget = budget
+        Total = total
+        Interactive = Terminal.Rich(true) && Terminal.Width(true) >= 80
+        Draw()
+        go Update()
+    }
+
+    private func Draw() {
+        let value = Phase + ": " + Budget.Status() + (Total == nil ? "": "; total " + (Total?.Left() ?? "") + " left")
+        if Interactive {
+            let width = Terminal.Width(true) - 1
+            Console.Error.Write("\r\x1b[2K" + value.Substring(0, Math.Min(width, value.Length)))
+        } else {
+            Terminal.Message(value, "cyan", true)
+        }
+    }
+
+    private func Update() {
+        try {
+            var interval int32 = 5
+            while true {
+                using let tick = after(TimeSpan.FromSeconds(interval))
+                select {
+                    case <- Stop {
+                        return
+                    }
+                    case <- tick {
+                        Draw()
+                        if !Interactive {
+                            interval = Math.Min(86400, interval * 2)
+                        }
+                    }
+                }
+            }
+        } catch (error Exception) { } finally {
+            Finished <- true
+        }
+    }
+
+    public func Dispose() {
+        Stop <- true
+        <-Finished
+        if Interactive {
+            Console.Error.Write("\r\x1b[2K")
+        }
+    }
+}
 
 internal class Terminal {
     shared {
@@ -125,7 +187,7 @@ internal class Terminal {
                 let prefix = source.Substring(0, indent)
                 var remaining = source.Substring(indent)
                 while width > indent && remaining.Length + indent > width && !source.Contains(" Run: ") &&
-                    !remaining.StartsWith("tokate ") && !remaining.StartsWith("gh ") {
+                    !source.StartsWith("Next: ") && !remaining.StartsWith("tokate ") && !remaining.StartsWith("gh ") {
                     var split = remaining.LastIndexOf(' ', Math.Min(remaining.Length - 1, width - indent))
                     if split <= 0 {
                         split = remaining.IndexOf(' ', Math.Min(remaining.Length - 1, width - indent))
@@ -140,7 +202,105 @@ internal class Terminal {
             }
         }
 
-        internal func Step(text string) -> Message(text, "cyan")
+        internal func Foreground() bool -> Array.IndexOf(
+            []string{"work", "recover", "external", "amend", "publish", "submit"},
+            PublicOutput.Command
+        ) >= 0
+
+        internal func Step(text string) -> Message(text, "cyan", Foreground())
+
+        internal func Command(command JsonElement) string {
+            let words = StringBuilder()
+            for item in J.Items(command) {
+                if words.Length > 0 {
+                    words.Append(' ')
+                }
+                let word = item.ToString()
+                words.Append(
+                    Regex.IsMatch(word, "^[A-Za-z0-9_./:-]+$") ? word:
+                    "'" + word.Replace("'", "'\"'\"'") + "'"
+                )
+            }
+            return Clean(words.ToString()).Replace('\n', ' ')
+        }
+
+        internal func Verify(
+            storage string,
+            results List[Object],
+            command JsonElement,
+            directory string,
+            network bool,
+            seconds int32,
+            budget RuntimeBudget? = nil,
+            progressBudget RuntimeBudget? = nil
+        ) CommandResult {
+            let name = "Verification " + (results.Count + 1).ToString() + ": " + PublicOutput.Prose(Command(command))
+            let timing = progressBudget ?? budget ?? RuntimeBudget(Stopwatch.StartNew(), seconds)
+            try {
+                var result CommandResult
+                Message(name, "cyan", true)
+                {
+                    using let progress = TerminalProgress(
+                        "Owner verification " + (results.Count + 1).ToString(),
+                        timing
+                    )
+                    result = Verification.Check(storage, results, command, directory, network, seconds, budget)
+                }
+                Message(
+                    name + " - " + (result.Code == 0 ? "passed": "failed") + " (exit " + result.Code.ToString() +
+                        "); " +
+                        timing.Status(),
+                    result.Code == 0 ? "green": "red",
+                    true
+                )
+                return result
+            } catch (error Exception) {
+                Message(
+                    name + " - interrupted or failed; verification_failed. Details: " + Path.Combine(
+                        storage,
+                        "verification.json"
+                    ),
+                    "red",
+                    true
+                )
+                throw error
+            }
+        }
+
+        internal func RunOutcome(exitCode int32, code string) {
+            if PublicOutput.RunDirectory == "" || !Foreground() {
+                return
+            }
+            try {
+                let run = Data.Load(PublicOutput.RunDirectory)
+                let stage = code == "inference_failed" ? "Inference": (
+                    code == "verification_failed" ?
+                    "Verification": (run.Text("state") == "generated" && exitCode != 0 ? "Publication": "Run")
+                )
+                Message(
+                    stage +
+                        (exitCode == 0 ? " completed": " failed (" + code + ")") +
+                        ". Run: " +
+                        PublicOutput.RunDirectory,
+                    exitCode == 0 ? "green": "red",
+                    true
+                )
+                let summary = RunSummaryArtifacts(PublicOutput.RunDirectory)
+                Message("Saved artifacts: " + summary, "default", true)
+                for action in PublicOutput.Actions {
+                    Message("Next: " + Command(J.Parse(J.Write(action))), "default", true)
+                }
+            } catch (error Exception) { }
+        }
+
+        private func RunSummaryArtifacts(directory string) string {
+            let summary = J.Parse(J.Write(PublicOutput.RunSummary(directory)))
+            let names = List[string]()
+            for artifact in J.Get(summary, "artifacts").EnumerateObject() {
+                names.Add(artifact.Name)
+            }
+            return String.Join(", ", names)
+        }
 
         internal func Heading(title string, error bool = false) {
             if Rich(error) {

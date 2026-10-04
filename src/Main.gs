@@ -72,8 +72,13 @@ func Main(args[]string) int32 {
             ApiTransport.Report()
         }
     }
-    if PublicOutput.Enabled {
+    if PublicOutput.Enabled || (PublicOutput.RunDirectory != "" && Terminal.Foreground()) {
         PublicOutput.Next(options, code)
+        if options?.Help != true {
+            Terminal.RunOutcome(exitCode, code)
+        }
+    }
+    if PublicOutput.Enabled {
         return PublicOutput.Emit(exitCode, code, message)
     }
     return exitCode

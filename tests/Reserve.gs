@@ -115,7 +115,7 @@ internal class ReserveChecks {
             let result = flow.Call([]string{"work", "--run", run}, mode == "success" ? 0: 1)
             flow.Reload()
             let elapsed = Stopwatch.GetElapsedTime(Int64.Parse(Check.Text(flow.State["exec_start"])))
-            Check.Contains(result.Output, "total allowance 8s, coding allowance 6s, verification reserve 2s")
+            Check.Contains(result.Error, "total allowance 8s, coding allowance 6s, verification reserve 2s")
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.Contains(
                 Check.Text(flow.State["prompts"]?[0]),

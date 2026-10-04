@@ -1456,7 +1456,8 @@ internal class NativeFlow : IDisposable {
                 "If-None-Match",
                 "Acceptance criteria"
             } {
-                Check.That(!result.Error.Contains(secret), "Diagnostics exposed private data")
+                let output = secret == Temp.Root ? line: result.Error
+                Check.That(!output.Contains(secret), "Diagnostics exposed private data")
             }
         }
         Console.WriteLine(

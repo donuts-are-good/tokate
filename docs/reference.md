@@ -177,6 +177,11 @@ with `--runs`). Keep raw events, reports, patches, logs and publication previews
 private; they may contain secrets. Editing previews does not change requests.
 Quiet output is not a reason to restart.
 
+Foreground runs show phase, elapsed time and remaining allowance on stderr.
+Plain, redirected and JSON output uses increasingly spaced updates. Raw output
+stays in private artifacts. Progress does not prove agent activity or extend the
+budget.
+
 ## Recover or correct work
 
 Inspect `status` and private evidence first. No recovery command starts inference.
