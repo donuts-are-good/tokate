@@ -240,7 +240,7 @@ internal class PublicOutput {
             return result
         }
 
-        private func Artifacts(directory string) Object {
+        internal func Artifacts(directory string) Dictionary[string, Object?] {
             let artifacts = J.Map()
             for name in[]string{
                 "run.json",
@@ -252,8 +252,7 @@ internal class PublicOutput {
                 "changes.patch",
                 "pr-body.md",
                 "publication.json",
-                "checks.json"
-                ,
+                "checks.json",
                 "record.json",
                 "correction.json"
             } {
@@ -291,10 +290,8 @@ internal class PublicOutput {
             result["verification"] = Rows(checks, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(checks).Count
             let reason = change.Text("failure_reason")
-            if change.Text("state") == "failed" || reason != "" || change.Fields.ContainsKey("error") ||
-                change
-                .Fields
-                .ContainsKey("publication_error") {
+            let failed = change.Text("state") == "failed" || reason != ""
+            if failed || change.Fields.ContainsKey("error") || change.Fields.ContainsKey("publication_error") {
                 let code = KnownReason(reason) ? reason: (
                     reason == "publication_interrupted" ? "command_failed": "invalid_state"
                 )
@@ -359,9 +356,9 @@ internal class PublicOutput {
                         Actions.Add([]string{"tokate", "work", "--run", RunDirectory, "--json"})
                     }
                     if code != "stale_approval" && code != "invalid_state" {
-                        if Recovery.Eligible(run) && !File.Exists(Path.Combine(RunDirectory, "correction.json")) &&
-                            !Directory
-                            .Exists(Path.Combine(RunDirectory, "original-evidence")) {
+                        let correction = Path.Combine(RunDirectory, "correction.json")
+                        let original = Path.Combine(RunDirectory, "original-evidence")
+                        if Recovery.Eligible(run) && !File.Exists(correction) && !Directory.Exists(original) {
                             Actions.Add([]string{"tokate", "recover", "--run", RunDirectory, "--json"})
                         } else if run.Text("state") == "generated" && run.Number("version") == 1 {
                             Actions.Add([]string{"tokate", "publish", "--run", RunDirectory, "--json"})
@@ -381,10 +378,7 @@ internal class PublicOutput {
                 Actions.Add(known ? []string{"tokate", "help", Command, "--json"}: []string{"tokate", "help", "--json"})
             } else if code == "missing_tools" {
                 if Command != "doctor" {
-                    let diagnostic = Command == "work" ||
-                        Command == "select" ||
-                        Command == "claim" ||
-                        (Command == "prepare" && options?.Get("source") == "tokate") ? "--managed": (
+                    let diagnostic = Startup.NeedsCatalog(Command, options) ? "--managed": (
                         Command == "external" ||
                             Command == "amend" ||
                             Command == "recover" ||

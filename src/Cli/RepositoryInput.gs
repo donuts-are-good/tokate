@@ -50,7 +50,6 @@ internal class RepositoryInput {
             }
             args.Values["--repo"] = repo
             args.Values["--issue"] = number
-            args.Number("issue")
         }
 
         internal func Issue(args Args) {

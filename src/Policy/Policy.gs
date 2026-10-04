@@ -227,6 +227,20 @@ internal class Policy {
         }
         return false
     }
+
+    internal func ValidateEditingTools(tools JsonElement, failure string) {
+        if J.Number(Value, "version") == 2 {
+            ValidateTools(tools)
+            return
+        }
+        for tool in J.Items(tools) {
+            if J.Text(tool, "harness") != "codex" || J.Text(tool, "provider") != "openai" {
+                throw Exception(failure)
+            }
+            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
+        }
+    }
+
     shared {
         internal func Load(repo string, revision string) Policy -> Policy(
             GitHub.FileAt(repo, ".github/tokate.json", revision)

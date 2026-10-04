@@ -13,7 +13,7 @@ internal class CoordinatorSetup {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let requested = Path.GetFullPath(args.Need("output"))
             let output = Path.Combine(
-                Worker.CanonicalPath(
+                LocalPaths.CanonicalPath(
                     Path.GetDirectoryName(requested) ?? throw Exception("Output needs a parent directory")
                 ),
                 Path.GetFileName(requested)
@@ -91,8 +91,8 @@ internal class CoordinatorSetup {
                 if FileInfo(binary).LinkTarget != nil || HashFile(binary) != HashFile(Environment.ProcessPath ?? "") {
                     throw Exception("Running binary does not match the released archive member")
                 }
-                let yaml = ApplicationInfo
-                    .Resource("coordinator.yml")
+                let template = ApplicationInfo.Resource("coordinator.yml")
+                let yaml = template
                     .Replace("@ARCHIVE_URL@", archiveUrl)
                     .Replace("@ARCHIVE_SHA256@", hash)
                     .Replace("@MEMBER@", member)

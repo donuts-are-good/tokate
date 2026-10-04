@@ -47,17 +47,20 @@ internal class CommitChecks {
                             J.Text(check, "status") == "completed" ?
                             J.Text(check, "conclusion"): J.Text(check, "status")
                         ): J.Text(check, "state")
-                        let bucket = state == "success" ? "pass":
-                        (
-                            state == "failure" ||
-                                state == "error" ||
-                                state == "timed_out" ||
-                                state == "action_required" ||
-                                state == "startup_failure" ? "fail": (
-                                state == "cancelled" ? "cancel":
-                                (state == "skipped" || state == "neutral" ? "skipping": "pending")
-                            )
-                        )
+                        var bucket = "pending"
+                        if state == "success" {
+                            bucket = "pass"
+                        } else if state == "failure" ||
+                            state == "error" ||
+                            state == "timed_out" ||
+                            state == "action_required" ||
+                            state == "startup_failure" {
+                            bucket = "fail"
+                        } else if state == "cancelled" {
+                            bucket = "cancel"
+                        } else if state == "skipped" || state == "neutral" {
+                            bucket = "skipping"
+                        }
                         rows.Add(
                             J.Map(
                                 "name",

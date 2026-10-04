@@ -7,7 +7,7 @@ import System.Text.Json
 internal class AccessState {
     internal var Sha string = ""
     internal var RepoId int64
-    internal let Members List[Object] = List[Object]()
+    internal let Members List[JsonElement] = List[JsonElement]()
     internal func Value() JsonElement -> J.Parse(J.Write(J.Map("version", 1, "repo_id", RepoId, "members", Members)))
 
     internal func Write(repo string, expected string) {
@@ -63,18 +63,14 @@ internal class AccessState {
                 return false
             }
             RequestData.Parse(J.Write(approval), 1024 * 1024)
+            let eligibility = J.Text(approval, "eligibility")
+            let donor = J.Get(approval, "donor")
             if J.Number(approval, "version") != 2 || J.Text(approval, "approval_scope") != "task" ||
-                (
-                J.Text(approval, "eligibility") != "open" && J.Text(approval, "eligibility") != "trusted" && J.Text(
-                    approval,
-                    "eligibility"
-                ) != "manual"
-            ) ||
-                J
-                .Get(approval, "donor").ValueKind != JsonValueKind.Undefined {
+                (eligibility != "open" && eligibility != "trusted" && eligibility != "manual") ||
+                donor.ValueKind != JsonValueKind.Undefined {
                 throw CliFailure("stale_approval", "Malformed or contradictory task eligibility approval")
             }
-            RequestData.PositiveId(identity)
+            RepositoryIdentity.PositiveId(identity)
             return true
         }
 
@@ -90,17 +86,15 @@ internal class AccessState {
             result.Sha = RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
             let value = RequestData.Parse(GitHub.FileAt(repo, "access.json", result.Sha), 65536)
             RequestData.Keys(value, "version,repo_id,members")
-            if J.Number(value, "version") != 1 || RequestData.PositiveId(J.Get(value, "repo_id")) != repoId || J.Get(
-                value,
-                "members"
-            )
-                .ValueKind != JsonValueKind.Array {
+            let members = J.Get(value, "members")
+            if J.Number(value, "version") != 1 || RepositoryIdentity.PositiveId(J.Get(value, "repo_id")) != repoId ||
+                members.ValueKind != JsonValueKind.Array {
                 throw Exception("Invalid donor access repository identity or membership")
             }
             let actors = HashSet[int64]()
-            for member in J.Items(J.Get(value, "members")) {
+            for member in J.Items(members) {
                 RequestData.Keys(member, "actor,trusted,denied,issues")
-                let actor = RequestData.PositiveId(J.Get(member, "actor"))
+                let actor = RepositoryIdentity.PositiveId(J.Get(member, "actor"))
                 if !actors.Add(actor) || J.Get(member, "issues").ValueKind != JsonValueKind.Array {
                     throw Exception("Invalid or duplicate donor access membership")
                 }
@@ -112,7 +106,7 @@ internal class AccessState {
                 }
                 let issues = HashSet[int64]()
                 for issue in J.Items(J.Get(member, "issues")) {
-                    let id = RequestData.PositiveId(issue)
+                    let id = RepositoryIdentity.PositiveId(issue)
                     if id > Int32.MaxValue || !issues.Add(id) {
                         throw Exception("Invalid or duplicate issue grant")
                     }
@@ -130,24 +124,34 @@ internal class AccessState {
                 return
             }
             PublicOutput.ResultData = J.Map("repo", repo, "issue", issue, "eligible", false, "authority", "unknown")
+            let recovery = []string{
+                "tokate",
+                "access",
+                "--repo",
+                repo,
+                "--operation",
+                "check",
+                "--issue",
+                issue.ToString(),
+                "--json"
+            }
             try {
-                let id = RequestData.PositiveId(actor)
+                let id = RepositoryIdentity.PositiveId(actor)
                 let info = GitHub.Api("repos/" + repo)
-                let repoId = RequestData.PositiveId(J.Get(info, "id"))
-                if repoId != RequestData.PositiveId(J.Get(approval, "repo_id")) {
+                let repoId = RepositoryIdentity.PositiveId(J.Get(info, "id"))
+                if repoId != RepositoryIdentity.PositiveId(J.Get(approval, "repo_id")) {
                     throw Exception("Task repository numeric identity changed")
                 }
                 let access = Load(repo, repoId)
                 var trusted bool
                 var denied bool
                 var granted bool
-                for item in access.Members {
-                    let member = J.Parse(J.Write(item))
-                    if RequestData.PositiveId(J.Get(member, "actor")) == id {
+                for member in access.Members {
+                    if RepositoryIdentity.PositiveId(J.Get(member, "actor")) == id {
                         trusted = J.Bool(member, "trusted")
                         denied = J.Bool(member, "denied")
                         for number in J.Items(J.Get(member, "issues")) {
-                            granted = granted || RequestData.PositiveId(number) == issue
+                            granted = granted || RepositoryIdentity.PositiveId(number) == issue
                         }
                     }
                 }
@@ -171,17 +175,7 @@ internal class AccessState {
                     throw CliFailure(
                         "invalid_state",
                         "Current donor access does not permit this task. The owner must restore access or grant the required membership.",
-                        []string{
-                            "tokate",
-                            "access",
-                            "--repo",
-                            repo,
-                            "--operation",
-                            "check",
-                            "--issue",
-                            issue.ToString(),
-                            "--json"
-                        }
+                        recovery
                     )
                 }
             } catch (error CliFailure) {
@@ -191,17 +185,7 @@ internal class AccessState {
                 throw CliFailure(
                     "invalid_state",
                     "Donor access authority is unavailable or malformed. Inspect owner-controlled access before proceeding.",
-                    []string{
-                        "tokate",
-                        "access",
-                        "--repo",
-                        repo,
-                        "--operation",
-                        "check",
-                        "--issue",
-                        issue.ToString(),
-                        "--json"
-                    }
+                    recovery
                 )
             }
         }
@@ -214,7 +198,7 @@ internal class AccessState {
                     throw Exception("Access check uses the authenticated donor")
                 }
                 let viewer = GitHub.Api("user")
-                RequestData.PositiveId(J.Get(viewer, "id"))
+                RepositoryIdentity.PositiveId(J.Get(viewer, "id"))
                 let issue = args.Number("issue")
                 let state = CoordinationState.Load(repo, issue)
                 let record = state.Check(
@@ -246,9 +230,9 @@ internal class AccessState {
             ) < 0 {
                 throw Exception("Unknown access operation")
             }
-            RequestData.PositiveId(J.Get(GitHub.Api("user"), "id"))
+            RepositoryIdentity.PositiveId(J.Get(GitHub.Api("user"), "id"))
             let info = RepositoryAccess.RequireOwner(repo)
-            let repoId = RequestData.PositiveId(J.Get(info, "id"))
+            let repoId = RepositoryIdentity.PositiveId(J.Get(info, "id"))
             let single = operation == "grant" || operation == "remove"
             if (single && args.Get("issue") == "") ||
                 (!single && args.Get("issue") != "") ||
@@ -264,19 +248,19 @@ internal class AccessState {
                 }
             } else {
                 let donor = RepositoryIdentity.Login(args.Need("donor"))
-                actor = RequestData.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
+                actor = RepositoryIdentity.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
                 var trusted bool
                 var denied bool
                 let issues = SortedSet[int64]()
                 var index int32 = -1
                 for i in 0 ... access.Members.Count {
-                    let member = J.Parse(J.Write(access.Members[i]))
-                    if RequestData.PositiveId(J.Get(member, "actor")) == actor {
+                    let member = access.Members[i]
+                    if RepositoryIdentity.PositiveId(J.Get(member, "actor")) == actor {
                         index = i
                         trusted = J.Bool(member, "trusted")
                         denied = J.Bool(member, "denied")
                         for issue in J.Items(J.Get(member, "issues")) {
-                            issues.Add(RequestData.PositiveId(issue))
+                            issues.Add(RepositoryIdentity.PositiveId(issue))
                         }
                     }
                 }
@@ -307,7 +291,9 @@ internal class AccessState {
                     access.Members.RemoveAt(index)
                 }
                 if trusted || denied || issues.Count > 0 {
-                    access.Members.Add(J.Map("actor", actor, "trusted", trusted, "denied", denied, "issues", issues))
+                    access.Members.Add(
+                        J.Parse(J.Write(J.Map("actor", actor, "trusted", trusted, "denied", denied, "issues", issues)))
+                    )
                 }
             }
             access.Write(repo, expected)

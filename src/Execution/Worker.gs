@@ -14,23 +14,6 @@ internal class Worker {
             args.Add(key + "=" + value)
         }
 
-        internal func CanonicalPath(path string, depth int32 = 0) string {
-            if depth > 40 {
-                throw Exception("Too many executable path symlinks")
-            }
-            let absolute = Path.GetFullPath(path)
-            var result = Path.GetPathRoot(absolute) ?? "/"
-            for part in absolute.Substring(result.Length).Split(Path.DirectorySeparatorChar) {
-                let candidate = Path.Combine(result, part)
-                if let link = File.ResolveLinkTarget(candidate, true) {
-                    result = CanonicalPath(link.FullName, depth + 1)
-                } else {
-                    result = candidate
-                }
-            }
-            return result
-        }
-
         internal func CodexPath() string {
             for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
                 if !Path.IsPathFullyQualified(entry) {
@@ -38,7 +21,7 @@ internal class Worker {
                 }
                 let path = Path.Combine(entry, "codex")
                 if File.Exists(path) {
-                    return CanonicalPath(path)
+                    return LocalPaths.CanonicalPath(path)
                 }
             }
             throw Exception("Install the Codex CLI first")
@@ -52,9 +35,10 @@ internal class Worker {
             capture bool = false,
             budget RuntimeBudget? = nil
         ) CommandResult {
+            let codex = CodexPath()
             for path in[]string{
                 directory,
-                CodexPath(),
+                codex,
                 Environment.GetEnvironmentVariable("HOME") ?? "",
                 Environment.GetEnvironmentVariable("CODEX_HOME") ?? "",
                 Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? ""
@@ -62,7 +46,7 @@ internal class Worker {
                 if path == "" || !Path.IsPathFullyQualified(path) {
                     continue
                 }
-                let canonical = CanonicalPath(path)
+                let canonical = path == codex ? codex: LocalPaths.CanonicalPath(path)
                 if canonical == "/tmp" || canonical.StartsWith("/tmp/") {
                     throw CliFailure(
                         "verification_failed",
@@ -82,7 +66,7 @@ internal class Worker {
                 "--dir",
                 "/tmp/tokate-home"
             }
-            wrapper.AddRange([]string{"--chdir", directory, "--", CodexPath()})
+            wrapper.AddRange([]string{"--chdir", directory, "--", codex})
             wrapper.AddRange(args)
             let cancellation Chan[bool]? = capture ? Chan[bool](1): nil
             return Commands.Run(

@@ -204,30 +204,6 @@ internal class ProtectedPaths {
             }
         }
 
-        internal func Ancestor(repo string, base string, fork string, head string) {
-            RepositoryIdentity.Repo(repo)
-            RepositoryIdentity.Repo(fork)
-            RepositoryIdentity.CommitSha(base)
-            RepositoryIdentity.CommitSha(head)
-            let value = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
-            let commits = J.Items(J.Get(value, "commits"))
-            if J.Text(J.Get(value, "base_commit"), "sha") != base || J.Text(
-                J.Get(value, "merge_base_commit"),
-                "sha"
-            ) != base ||
-                J
-                .Get(value, "behind_by").ValueKind != JsonValueKind.Number || J.Number(value, "behind_by") != 0 ||
-                (
-                base == head ? J.Text(value, "status") != "identical":
-                J.Text(value, "status") != "ahead" || commits.Count == 0 || J.Text(
-                    commits[commits.Count - 1],
-                    "sha"
-                ) != head
-            ) {
-                throw Exception("Missing or mismatched synchronization ancestry evidence")
-            }
-        }
-
         internal func Local(
             checkout string,
             policy JsonElement,

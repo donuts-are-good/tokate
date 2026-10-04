@@ -9,6 +9,13 @@ import System.Text.RegularExpressions
 
 internal class RequestData {
     shared {
+        internal func Same(left JsonElement, right JsonElement) bool {
+            if left.ValueKind == JsonValueKind.Undefined || right.ValueKind == JsonValueKind.Undefined {
+                return left.ValueKind == right.ValueKind
+            }
+            return RequestData.Canonical(left) == RequestData.Canonical(right)
+        }
+
         internal func Parse(text string, limit int32 = 8192) JsonElement {
             if Encoding.UTF8.GetByteCount(text) > limit {
                 throw Exception("Coordination data exceeds its byte limit")
@@ -112,14 +119,12 @@ internal class RequestData {
                 for name in[]string{"harness", "provider", "model", "effort"} {
                     Token(J.Text(tool, name))
                 }
-                for name in[]string{"coding_seconds"} {
-                    let number = J.Get(tool, name)
-                    var count int64
-                    if number.ValueKind != JsonValueKind.Undefined &&
-                        number.ValueKind != JsonValueKind.Null &&
-                        (!number.TryGetInt64(out count) || count < 0 || count > 86400 * 365) {
-                        throw Exception("Invalid donor-reported coding time")
-                    }
+                let number = J.Get(tool, "coding_seconds")
+                var seconds int64
+                if number.ValueKind != JsonValueKind.Undefined &&
+                    number.ValueKind != JsonValueKind.Null &&
+                    (!number.TryGetInt64(out seconds) || seconds < 0 || seconds > 86400 * 365) {
+                    throw Exception("Invalid donor-reported coding time")
                 }
                 let usage = J.Get(tool, "usage")
                 if usage.ValueKind != JsonValueKind.Undefined && usage.ValueKind != JsonValueKind.Null {
@@ -175,47 +180,23 @@ internal class RequestData {
             if J.Items(tools).Count > 0 {
                 RequestData.Tools(tools)
                 let owner = Policy(J.Write(policy))
-                if J.Number(policy, "version") == 2 {
-                    owner.ValidateTools(tools)
-                } else {
-                    for tool in J.Items(tools) {
-                        if J.Text(tool, "harness") != "codex" || J.Text(tool, "provider") != "openai" {
-                            throw Exception("Version-1 owner policy permits only codex/openai correction tools")
-                        }
-                        owner.Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
-                    }
-                }
+                owner.ValidateEditingTools(tools, "Version-1 owner policy permits only codex/openai correction tools")
             }
-        }
-
-        internal func PositiveId(value JsonElement) int64 {
-            var id int64
-            if !value.TryGetInt64(out id) || id < 1 {
-                throw Exception("Expected a positive numeric GitHub identity")
-            }
-            return id
         }
 
         internal func Binding(actor JsonElement, request JsonElement) string {
-            PositiveId(actor)
-            return Data.Hash(
-                Canonical(
-                    J.Parse(
-                        J.Write(
-                            J.Map(
-                                "actor",
-                                actor,
-                                "expected",
-                                J.Text(request, "expected"),
-                                "approval",
-                                J.Text(request, "approval"),
-                                "request",
-                                request
-                            )
-                        )
-                    )
-                )
+            RepositoryIdentity.PositiveId(actor)
+            let binding = J.Map(
+                "actor",
+                actor,
+                "expected",
+                J.Text(request, "expected"),
+                "approval",
+                J.Text(request, "approval"),
+                "request",
+                request
             )
+            return Data.Hash(Canonical(J.Parse(J.Write(binding))))
         }
 
         internal func Recorded(state JsonElement, actor JsonElement, request JsonElement) JsonElement {
@@ -241,12 +222,11 @@ internal class RequestData {
         internal func Request(value JsonElement) {
             Keys(value, "uuid,expected,approval,action,metadata")
             var uuid Guid
-            if !Guid.TryParseExact(J.Text(value, "uuid"), "D", out uuid) || uuid.ToString("D") != J.Text(
-                value,
-                "uuid"
-            ) ||
-                !Regex
-                .IsMatch(J.Text(value, "approval"), "^[0-9a-f]{64}$") {
+            let requestId = J.Text(value, "uuid")
+            if !Guid.TryParseExact(requestId, "D", out uuid) || uuid.ToString("D") != requestId || !Regex.IsMatch(
+                J.Text(value, "approval"),
+                "^[0-9a-f]{64}$"
+            ) {
                 throw Exception("Request needs a canonical UUID and approval identity")
             }
             RepositoryIdentity.CommitSha(J.Text(value, "expected"))

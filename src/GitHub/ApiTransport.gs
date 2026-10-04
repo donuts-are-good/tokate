@@ -37,14 +37,6 @@ internal class ApiResponse {
                 continue
             }
             let name = lines[i].Substring(0, colon).ToLowerInvariant()
-            if name != "etag" &&
-                name != "retry-after" &&
-                name != "x-ratelimit-remaining" &&
-                name != "x-ratelimit-reset" &&
-                name != "date" &&
-                name != "x-poll-interval" {
-                continue
-            }
             let value = lines[i].Substring(colon + 1).Trim()
             switch name {
                 case "etag" {
@@ -235,14 +227,9 @@ internal class ApiTransport {
             "No automatic retry was made. The outcome may be uncertain; inspect remote state before retrying. For publication, use tokate publish --run with the saved run."
             if delay > 0 {
                 let bounded = Math.Min(delay, (DateTimeOffset.MaxValue - DateTimeOffset.UtcNow).TotalSeconds - 1.0)
-                message += " Retry at or after " +
-                    DateTimeOffset
-                    .UtcNow
-                    .AddSeconds(bounded)
-                    .ToString("u", CultureInfo.InvariantCulture) +
-                    " (in " +
-                    Math
-                    .Ceiling(delay).ToString(CultureInfo.InvariantCulture) + " seconds)."
+                let retry = DateTimeOffset.UtcNow.AddSeconds(bounded).ToString("u", CultureInfo.InvariantCulture)
+                let seconds = Math.Ceiling(delay).ToString(CultureInfo.InvariantCulture)
+                message += " Retry at or after " + retry + " (in " + seconds + " seconds)."
             }
             return CliFailure(
                 status == 401 ? "authentication_required": "command_failed",
@@ -324,6 +311,7 @@ internal class ApiTransport {
                     NextMutation = Clock.Elapsed.TotalSeconds + 1.0
                 }
                 let response = ApiResponse(result.Output)
+                let limited = response.RateLimited()
                 if read {
                     var poll double
                     if Double.TryParse(
@@ -335,13 +323,13 @@ internal class ApiTransport {
                         Double.IsFinite(poll) && poll >= 0 {
                         NextPoll = Math.Max(NextPoll, Clock.Elapsed.TotalSeconds + poll)
                     }
-                    NextPoll = Math.Max(NextPoll, Clock.Elapsed.TotalSeconds + response.Delay(response.RateLimited()))
+                    NextPoll = Math.Max(NextPoll, Clock.Elapsed.TotalSeconds + response.Delay(limited))
                 }
-                if response.RateLimited() || response.Remaining == "0" || response.RetryAfter != "" {
-                    NextRead = Math.Max(NextRead, Clock.Elapsed.TotalSeconds + response.Delay(response.RateLimited()))
+                if limited || response.Remaining == "0" || response.RetryAfter != "" {
+                    NextRead = Math.Max(NextRead, Clock.Elapsed.TotalSeconds + response.Delay(limited))
                 }
                 if timer.Elapsed.TotalSeconds >= 60.0 {
-                    throw Failure(response.Status, read, response.Delay(response.RateLimited()))
+                    throw Failure(response.Status, read, response.Delay(limited))
                 }
                 if response.Status == 304 {
                     ConditionalResponses++
@@ -356,12 +344,8 @@ internal class ApiTransport {
                     Cache.Remove(key)
                     return JsonElement{}
                 }
-                if response.Status >= 200 &&
-                    response.Status < 300 &&
-                    result.Code == 0 &&
-                    !result.Truncated &&
-                    !result
-                    .ReadFailed {
+                let success = response.Status >= 200 && response.Status < 300
+                if success && result.Code == 0 && !result.Truncated && !result.ReadFailed {
                     var value JsonElement
                     try {
                         value = response.Body.Trim() == "" ? JsonElement{}: J.Parse(response.Body)
@@ -376,7 +360,6 @@ internal class ApiTransport {
                     }
                     return value
                 }
-                let limited = response.RateLimited()
                 let retryable = response.Status == 0 ||
                     (response.Status >= 200 && response.Status < 300) ||
                     response.Status >= 500 ||

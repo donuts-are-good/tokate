@@ -64,19 +64,7 @@ internal class ContributionClaim {
             run.Fields["network"] = network
             run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
             run.Fields["state"] = "preparing"
-            let root = Path.GetFullPath(
-                args.Get(
-                    "runs",
-                    Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".local",
-                        "state",
-                        "tokate",
-                        "runs"
-                    )
-                )
-            )
-            let directory = Path.Combine(root, run.Text("id"))
+            let directory = Preparation.RunDirectory(args, run.Text("id"))
             PublicOutput.RunDirectory = directory
             Preparation.Select(run, args.Get("fork"))
             Directory.CreateDirectory(
@@ -157,7 +145,7 @@ internal class ContributionClaim {
                 throw CliFailure("stale_approval", "Saved run has stale coordination authority")
             }
             if AccessState.Task(J.Get(value, "approval")) {
-                RequestData.PositiveId(J.Get(saved, "donor_id"))
+                RepositoryIdentity.PositiveId(J.Get(saved, "donor_id"))
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))

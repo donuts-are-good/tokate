@@ -73,9 +73,9 @@ internal class Startup {
                 tool.Path = name.StartsWith("/") ? (File.Exists(name) ? name: ""): Find(name)
                 if tool.Path != "" {
                     tool.Status = "found"
-                    tool.Detail = name.StartsWith(
-                        "/"
-                    ) ? "Found at the required path; execution has not been checked.": "Found on PATH; execution has not been checked."
+                    tool.Detail = name.StartsWith("/") ?
+                    "Found at the required path; execution has not been checked.":
+                    "Found on PATH; execution has not been checked."
                 } else {
                     tool.Detail = tool.Hint
                 }
@@ -84,16 +84,18 @@ internal class Startup {
             return tools
         }
 
+        internal func NeedsCatalog(command string, options Args?) bool -> command == "select" ||
+            command == "claim" ||
+            command == "work" ||
+            (command == "prepare" && options?.Get("source") == "tokate")
+
         private func Requirements(options Args)[]string {
             let command = options.Command
             if command == "init" || command == "status" || command == "defaults" {
                 return []string{}
             }
             let names = List[string]{"setsid", "gh"}
-            let catalog = command == "select" ||
-                command == "claim" ||
-                command == "work" ||
-                (command == "prepare" && options.Get("source") == "tokate")
+            let catalog = NeedsCatalog(command, options)
             if catalog {
                 names.Add("codex")
                 names.Add("/usr/bin/env")

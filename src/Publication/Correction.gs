@@ -14,13 +14,6 @@ func EvidenceOpen(path string, flags int32) int32;
 
 internal class Correction {
     shared {
-        internal func Same(left JsonElement, right JsonElement) bool {
-            if left.ValueKind == JsonValueKind.Undefined || right.ValueKind == JsonValueKind.Undefined {
-                return left.ValueKind == right.ValueKind
-            }
-            return RequestData.Canonical(left) == RequestData.Canonical(right)
-        }
-
         internal func Save(directory string, correction Data) {
             let current = Path.Combine(directory, "correction.json")
             if File.Exists(current) {
@@ -33,26 +26,28 @@ internal class Correction {
             correction.Write(Path.Combine(directory, "correction-" + correction.Text("uuid"), "record.json"))
         }
 
-        internal func GitRaw(checkout string, args ...string) string -> Commands.GitRaw(checkout, args)
-
-        internal func Patch(checkout string, base string, commit string) string -> GitRaw(
+        internal func Patch(checkout string, base string, commit string) string -> Commands.GitRaw(
             checkout,
-            "diff",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--binary",
-            "--full-index",
-            "--find-renames=100%",
-            base,
-            commit,
-            "--"
+            []string{
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                "--full-index",
+                "--find-renames=100%",
+                base,
+                commit,
+                "--"
+            }
         )
 
         internal func Candidate(checkout string, run Data, commit string, record JsonElement) string {
             Verification.Candidate(checkout)
             RepositoryIdentity.CommitSha(commit)
-            if Commands.Git(checkout, "rev-parse", "HEAD") != commit ||
-                GitRaw(checkout, "status", "--porcelain=v1", "--untracked-files=all") != "" {
+            if Commands.Git(checkout, "rev-parse", "HEAD") != commit || Commands.GitRaw(
+                checkout,
+                []string{"status", "--porcelain=v1", "--untracked-files=all"}
+            ) != "" {
                 throw Exception("Correction requires a clean checkout at the declared exact commit")
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), commit)
@@ -64,30 +59,28 @@ internal class Correction {
         internal func Exact(directory string, run Data, correction Data, record JsonElement) {
             let checkout = Path.Combine(directory, "checkout")
             let patch = Candidate(checkout, run, correction.Text("commit"), record)
+            let patchPath = Path.Combine(directory, "correction-" + correction.Text("uuid"), "candidate.patch")
             if Commands.Git(checkout, "rev-parse", "HEAD^{tree}") != correction.Text("tree") || Data.Hash(
                 patch
-            ) != correction.Text("patch_sha256") || patch != File.ReadAllText(
-                Path.Combine(directory, "correction-" + correction.Text("uuid"), "candidate.patch")
-            ) {
+            ) != correction.Text("patch_sha256") || patch != File.ReadAllText(patchPath) {
                 throw Exception("Corrected head, tree or complete patch changed")
             }
         }
 
         internal func Completed(directory string, run Data) Dictionary[string, Object?] {
-            if (run.Number("version") != 1 && run.Number("version") != 2) ||
-                (run.Number("version") == 2 && run.Text("source") != "tokate") {
+            let version = run.Number("version")
+            if (version != 1 && version != 2) || (version == 2 && run.Text("source") != "tokate") {
                 throw Exception("Correction requires native v1 or managed v2 work; external work is excluded")
             }
-            if run.Number("pr") != 0 || run.Text("state") == "published" {
+            let state = run.Text("state")
+            if run.Number("pr") != 0 || state == "published" {
                 throw Exception("Contribution already published; correction recovery is only before first publication")
             }
-            if (run.Text("state") != "failed" && run.Text("state") != "generated") || run.Text(
-                "failure_reason"
-            ) == "inference_failed" ||
-                run.Text("failure_reason") == "inference_interrupted" || run.Flag("output_truncated") || run.Text(
-                "error"
-            )
-                .StartsWith("Codex failed.") ||
+            let reason = run.Text("failure_reason")
+            if (state != "failed" && state != "generated") ||
+                reason == "inference_failed" ||
+                reason == "inference_interrupted" ||
+                run.Flag("output_truncated") || run.Text("error").StartsWith("Codex failed.") ||
                 (run.Fields.ContainsKey("inference_exit_code") && run.Number("inference_exit_code") != 0) {
                 throw Exception("incomplete_turn: correction requires a completed successful inference turn")
             }
@@ -100,14 +93,14 @@ internal class Correction {
 
         internal func Fork(run Data) {
             let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("head_repo")))
-            if !J.Bool(J.Get(info, "permissions"), "push") || J.Get(J.Get(info, "owner"), "id").ToString() != J.Get(
-                run.Element(),
-                "donor_id"
-            )
-                .ToString() ||
+            let owner = J.Get(J.Get(info, "owner"), "id").ToString()
+            let donor = J.Get(run.Element(), "donor_id").ToString()
+            let parent = J.Text(J.Get(info, "parent"), "full_name")
+            if !J.Bool(J.Get(info, "permissions"), "push") ||
+                owner != donor ||
                 (
                 run.Text("head_repo") != run.Text("repo") && !String.Equals(
-                    J.Text(J.Get(info, "parent"), "full_name"),
+                    parent,
                     run.Text("repo"),
                     StringComparison.OrdinalIgnoreCase
                 )
@@ -167,7 +160,7 @@ internal class Correction {
                 "inference_exit_code",
                 "turn_completed"
             } {
-                if !Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
+                if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
                     throw Exception("Saved original authority or execution attribution changed: " + key)
                 }
             }
@@ -299,35 +292,39 @@ internal class Correction {
                 File.WriteAllText(Path.Combine(temporary, "approval.json"), J.Write(record) + "\n")
                 File.WriteAllText(
                     Path.Combine(temporary, "staged.patch"),
-                    GitRaw(
+                    Commands.GitRaw(
                         checkout,
-                        "diff",
-                        "--cached",
-                        "--no-ext-diff",
-                        "--no-textconv",
-                        "--binary",
-                        "--full-index",
-                        "--find-renames=100%",
-                        run.Text("base"),
-                        "--"
+                        []string{
+                            "diff",
+                            "--cached",
+                            "--no-ext-diff",
+                            "--no-textconv",
+                            "--binary",
+                            "--full-index",
+                            "--find-renames=100%",
+                            run.Text("base"),
+                            "--"
+                        }
                     )
                 )
                 File.WriteAllText(
                     Path.Combine(temporary, "unstaged.patch"),
-                    GitRaw(
+                    Commands.GitRaw(
                         checkout,
-                        "diff",
-                        "--no-ext-diff",
-                        "--no-textconv",
-                        "--binary",
-                        "--full-index",
-                        "--find-renames=100%",
-                        "--"
+                        []string{
+                            "diff",
+                            "--no-ext-diff",
+                            "--no-textconv",
+                            "--binary",
+                            "--full-index",
+                            "--find-renames=100%",
+                            "--"
+                        }
                     )
                 )
                 File.WriteAllText(
                     Path.Combine(temporary, "status.txt"),
-                    GitRaw(checkout, "status", "--porcelain=v1", "--untracked-files=all")
+                    Commands.GitRaw(checkout, []string{"status", "--porcelain=v1", "--untracked-files=all"})
                 )
                 CopyTree(checkout, Path.Combine(temporary, "checkout"), links)
                 File.WriteAllText(
@@ -365,7 +362,7 @@ internal class Correction {
         }
 
         internal func Original(directory string) Data {
-            let archive = Verification.DirectoryPath(Path.Combine(directory, "original-evidence"))
+            let archive = LocalPaths.DirectoryPath(Path.Combine(directory, "original-evidence"))
             let manifest = File.ReadAllText(Path.Combine(archive, "manifest.json")).TrimEnd('\n')
             let seal = Data.Read(Path.Combine(archive, "seal.json"))
             let inventory = Inventory(archive)

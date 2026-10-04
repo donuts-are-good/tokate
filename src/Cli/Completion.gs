@@ -13,8 +13,9 @@ internal class Completion {
                 }
                 text.Append("--help -h")
             } else {
+                let selected = Cli.Find(command)
                 for option in Cli.Options {
-                    if Cli.Find(command).Has(option.Name) {
+                    if selected.Has(option.Name) {
                         text.Append("--" + option.Name + " ")
                     }
                 }

@@ -1,10 +1,47 @@
 package Tokate
 
 import System
+import System.Collections.Generic
 import System.Text.Json
+import System.Text.RegularExpressions
 
 internal class PrBody {
     shared {
+        internal func Render(template string, values Dictionary[string, string]) string ->
+        Regex.Replace(template, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
+
+        internal func OriginalReport(metadata JsonElement) string {
+            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
+                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                let tools = J.Get(correction, "tools")
+                let editing = J.Items(tools).Count == 0 ? "manual/unknown editing": "donor-reported tools " + J.Write(
+                    tools
+                )
+                let seconds = J.Number(correction, "seconds").ToString()
+                report += " Explicit correction " + J.Text(correction, "uuid") +
+                    ": " +
+                    editing +
+                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
+                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
+                    seconds +
+                    " seconds."
+            }
+            return report
+        }
+
+        internal func VerificationReport(run Data, record JsonElement) string {
+            let count = Verification.Results(run, record)
+            let recovery = run.Flag(
+                "recovered"
+            ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
+            return recovery +
+                "Generated a patch for the approved issue. Independent owner verification: " +
+                count.ToString() + "/" + count.ToString() +
+                " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+        }
+
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))
 
         internal func ReceiptText(

@@ -6,8 +6,6 @@ import System.Globalization
 import System.Text.Json
 import System.Text.RegularExpressions
 
-// GitHub's non-forced ref update is the compare-and-swap. Every proposed state
-// commit has exactly the expected predecessor as its only parent.
 internal class CoordinationState {
     internal var Sha string = ""
     internal let Fields Dictionary[string, Object?] = Dictionary[string, Object?]()
@@ -94,13 +92,11 @@ internal class CoordinationState {
         let value = Value()
         let reservation = J.Get(value, "reservation")
         if AccessState.Task(J.Get(value, "approval")) {
-            RequestData.PositiveId(actor)
-            RequestData.PositiveId(J.Get(reservation, "actor"))
+            RepositoryIdentity.PositiveId(actor)
+            RepositoryIdentity.PositiveId(J.Get(reservation, "actor"))
         }
-        if J.Get(reservation, "actor").ToString() != actor.ToString() ||
-            Unix(reservation, "expires") <= DateTimeOffset
-            .UtcNow
-            .ToUnixTimeSeconds() {
+        let replaced = J.Get(reservation, "actor").ToString() != actor.ToString()
+        if replaced || Unix(reservation, "expires") <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() {
             throw CliFailure("stale_approval", "Reservation expired or belongs to a replaced donor")
         }
     }

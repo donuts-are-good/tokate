@@ -8,6 +8,29 @@ import System.Text.Json
 
 internal class Verification {
     shared {
+        internal func Results(run Data, record JsonElement) int32 {
+            let checks = J.Items(J.Get(run.Element(), "verification"))
+            let commands = J.Items(J.Get(J.Get(record, "policy"), "verification"))
+            if checks.Count == 0 || checks.Count != commands.Count {
+                throw Exception("Missing independent verification results")
+            }
+            for i in 0 ... checks.Count {
+                var code int32
+                let check = checks[i]
+                let exitCode = J.Get(check, "exit_code")
+                let state = J.Text(check, "state")
+                if (state != "" && state != "completed") ||
+                    exitCode.ValueKind != JsonValueKind.Number ||
+                    !exitCode.TryGetInt32(out code) || code != 0 {
+                    throw Exception("Owner verification did not pass")
+                }
+                if J.Write(J.Get(check, "command")) != J.Write(commands[i]) {
+                    throw Exception("Owner verification did not pass")
+                }
+            }
+            return checks.Count
+        }
+
         internal func Doctor() bool {
             let root = Path.Combine("/tmp", "tokate-doctor-verification-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
@@ -62,18 +85,6 @@ internal class Verification {
             }
         }
 
-        internal func DirectoryPath(path string) string {
-            let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))
-            var current = Path.GetPathRoot(absolute) ?? "/"
-            for part in absolute.Substring(current.Length).Split(Path.DirectorySeparatorChar) {
-                current = Path.Combine(current, part)
-                if FileInfo(current).LinkTarget != nil || !Directory.Exists(current) {
-                    throw Exception("Verification requires real directories without checkout/Git symlinks: " + current)
-                }
-            }
-            return absolute
-        }
-
         private func GitDirectory(path string, budget RuntimeBudget? = nil) {
             for entry in Directory.EnumerateFileSystemEntries(path) {
                 budget?.Remaining()
@@ -91,7 +102,7 @@ internal class Verification {
             if absolute == "/tmp/tokate-home" || absolute.StartsWith("/tmp/tokate-home/") {
                 throw Exception("Unsupported verification checkout layout: " + absolute)
             }
-            let checkout = DirectoryPath(directory)
+            let checkout = LocalPaths.DirectoryPath(directory)
             for root in[]string{"/home", "/run", "/var", "/tmp"} {
                 if checkout == root {
                     throw Exception("Unsupported verification checkout layout: " + checkout)
@@ -102,7 +113,7 @@ internal class Verification {
                     throw Exception("Unsupported verification checkout layout: " + checkout)
                 }
             }
-            let git = DirectoryPath(Path.Combine(checkout, ".git"))
+            let git = LocalPaths.DirectoryPath(Path.Combine(checkout, ".git"))
             GitDirectory(git, budget)
             for file in[]string{"commondir", "objects/info/alternates", "objects/info/http-alternates", "info/grafts"} {
                 if File.Exists(Path.Combine(git, file)) || Directory.Exists(Path.Combine(git, file)) {
@@ -213,8 +224,8 @@ internal class Verification {
             seconds int32,
             budget RuntimeBudget? = nil
         ) CommandResult {
-            let checkout = DirectoryPath(directory)
-            let root = DirectoryPath(storage)
+            let checkout = LocalPaths.DirectoryPath(directory)
+            let root = LocalPaths.DirectoryPath(storage)
             if root == checkout || root.StartsWith(checkout + "/") {
                 throw Exception("Verification evidence must be outside the checkout")
             }
@@ -293,7 +304,7 @@ internal class Verification {
             let checkout = Validate(directory, budget)
             for path in[]string{outputPath, errorPath} {
                 if path != "" {
-                    let parent = DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
+                    let parent = LocalPaths.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
                     if parent == checkout || parent.StartsWith(checkout + "/") {
                         throw Exception("Verification evidence must be outside the checkout")
                     }
@@ -366,7 +377,7 @@ internal class Verification {
                 let storage = RuntimeStorage()
                 var result CommandResult
                 try {
-                    let runtimeStorage = DirectoryPath(storage.FullName)
+                    let runtimeStorage = LocalPaths.DirectoryPath(storage.FullName)
                     if runtimeStorage == checkout || runtimeStorage.StartsWith(checkout + "/") {
                         throw Exception("Verification runtime storage must be outside the checkout: " + runtimeStorage)
                     }

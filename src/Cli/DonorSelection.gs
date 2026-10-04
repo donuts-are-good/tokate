@@ -113,14 +113,15 @@ internal class DonorSelection {
                 var rejection = "Incomplete donor model/effort choice."
                 if model != "" && effort != "" {
                     var supported HashSet[string]
-                    rejection = !policy.ManagedPair(model, effort) ?
-                    "Tokate-managed execution requires a known model and supported effort control.":
-                    !policy.Allows(model, effort) ? "Model/effort pair is not allowed by the repository policy.":
-                    (
-                        !capabilities.TryGetValue(model, out supported) || !supported.Contains(effort) ?
-                        "Model/effort capability is not advertised by the offline native Codex catalog; availability is unknown.":
-                        "Model is donor-reported unavailable."
-                    )
+                    if !policy.ManagedPair(model, effort) {
+                        rejection = "Tokate-managed execution requires a known model and supported effort control."
+                    } else if !policy.Allows(model, effort) {
+                        rejection = "Model/effort pair is not allowed by the repository policy."
+                    } else if !capabilities.TryGetValue(model, out supported) || !supported.Contains(effort) {
+                        rejection = "Model/effort capability is not advertised by the offline native Codex catalog; availability is unknown."
+                    } else {
+                        rejection = "Model is donor-reported unavailable."
+                    }
                 }
                 if explicitPair && model != "" && effort != "" {
                     throw Exception(
@@ -191,23 +192,18 @@ internal class DonorSelection {
             if args.Get("yes") == "true" || source == "explicit invocation" || source == "saved donor default" {
                 return
             }
+            let pair = J.Text(selection, "model") + " / " + J.Text(selection, "effort")
             if !Interactive(args) {
                 throw Exception(
-                    "Inference confirmation required for " + J.Text(selection, "model") + " / " + J.Text(
-                        selection,
-                        "effort"
-                    ) +
-                        ": pass --yes explicitly. No inference started."
+                    "Inference confirmation required for " + pair + ": pass --yes explicitly. No inference started."
                 )
             }
             Console.Error.Write(
                 "Use your Codex allowance with " + J.Text(selection, "harness") + "/" + J.Text(selection, "provider") +
                     ": " +
-                    J.Text(selection, "model") + " / " + J.Text(selection, "effort") + " (" + J.Text(
-                    selection,
-                    "availability"
-                ) +
-                    ")? [y/N] "
+                    pair +
+                    " (" +
+                    J.Text(selection, "availability") + ")? [y/N] "
             )
             if !String.Equals(Console.ReadLine(), "y", StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Inference was not confirmed. No inference started.")

@@ -218,9 +218,8 @@ internal class ReceiptVerification {
                 if donor != J.Text(contribution, "donor") {
                     throw CliFailure("stale_approval", "Receipt donor differs from the canonical contribution actor")
                 }
-                Coordinator.ValidateFork(
+                RepositoryAccess.ValidateFork(
                     repo,
-                    donor,
                     J.Parse(
                         J.Write(
                             J.Map(
@@ -250,26 +249,30 @@ internal class ReceiptVerification {
                 if PrBody.ReportText(J.Text(pull, "body"), report) != report {
                     throw Exception("PR amendment report differs from coordination authority")
                 }
+                let failure = "Amendment receipt differs from current coordination record"
                 if J.Text(amendment, "id") != J.Text(current, "request") || J.Text(amendment, "previous") != J.Text(
                     current,
                     "previous"
                 ) ||
-                    J.Number(amendment, "seconds") != J.Number(current, "seconds") || RequestData.Canonical(
-                    J.Get(amendment, "tools")
-                ) != RequestData
-                    .Canonical(J.Get(current, "tools")) {
-                    throw Exception("Amendment receipt differs from current coordination record")
+                    J.Number(amendment, "seconds") != J.Number(current, "seconds") {
+                    throw Exception(failure)
+                }
+                if RequestData.Canonical(J.Get(amendment, "tools")) != RequestData.Canonical(J.Get(current, "tools")) {
+                    throw Exception(failure)
                 }
             } else if amendment.ValueKind != JsonValueKind.Undefined {
                 throw Exception("Receipt claims an amendment without coordination authority")
             }
             let history = Synchronization.History(receipt)
-            if J.Text(amendment, "sync") != J.Text(current, "sync") || RequestData.Canonical(history) != RequestData
-                .Canonical(Synchronization.History(current)) {
-                throw Exception("Synchronization receipt differs from authoritative coordination history")
+            let synchronizationFailure = "Synchronization receipt differs from authoritative coordination history"
+            if J.Text(amendment, "sync") != J.Text(current, "sync") {
+                throw Exception(synchronizationFailure)
+            }
+            if RequestData.Canonical(history) != RequestData.Canonical(Synchronization.History(current)) {
+                throw Exception(synchronizationFailure)
             }
             let correction = J.Get(receipt, "correction")
-            if !Tokate.Correction.Same(correction, J.Get(metadata, "correction")) {
+            if !RequestData.Same(correction, J.Get(metadata, "correction")) {
                 throw Exception("Correction receipt differs from authoritative publication metadata")
             }
             if correction.ValueKind != JsonValueKind.Undefined {

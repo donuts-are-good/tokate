@@ -39,15 +39,11 @@ internal class GitHub {
             return Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(result, "content")))
         }
 
-        internal func Branch(repo string, branch string) string -> RepositoryIdentity.CommitSha(
-            J.Text(
-                J.Get(
-                    Api("repos/" + repo + "/git/ref/heads/" + Uri.EscapeDataString(RepositoryIdentity.Branch(branch))),
-                    "object"
-                ),
-                "sha"
-            )
-        )
+        internal func Branch(repo string, branch string) string {
+            let name = Uri.EscapeDataString(RepositoryIdentity.Branch(branch))
+            let reference = Api("repos/" + repo + "/git/ref/heads/" + name)
+            return RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
+        }
 
         internal func Issue(repo string, number int32) JsonElement {
             let issue = Api("repos/" + repo + "/issues/" + number.ToString())

@@ -7,6 +7,7 @@ import System.Diagnostics
 import System.IO
 import System.Runtime.InteropServices
 import System.Text
+import System.Text.Json
 
 internal class CommandResult {
     internal var Code int32?
@@ -111,13 +112,8 @@ internal class RuntimeBudget {
         return Convert.ToInt32(remaining)
     }
 
-    internal func Git(checkout string, args ...string) string {
-        let result = Commands.GitResult(checkout, args, budget: this)
-        if result.Code != 0 {
-            throw Exception("git failed: " + result.Error + result.Output)
-        }
-        return result.Output.Trim()
-    }
+    internal func Git(checkout string, args ...string) string ->
+    Commands.GitOutput(Commands.GitResult(checkout, args, budget: this))
 
     shared {
         internal func Reserve(args Args, seconds int32) int32 {
@@ -131,13 +127,9 @@ internal class RuntimeBudget {
         internal func Validate(run Data) {
             let field = J.Get(run.Element(), "verification_reserve")
             var reserve int32
-            if field.ValueKind != System
-                .Text
-                .Json
-                .JsonValueKind
-                .Undefined &&
+            if field.ValueKind != JsonValueKind.Undefined &&
                 (
-                field.ValueKind != System.Text.Json.JsonValueKind.Number || !field.TryGetInt32(out reserve) ||
+                field.ValueKind != JsonValueKind.Number || !field.TryGetInt32(out reserve) ||
                     reserve < 1 ||
                     reserve >= run.Number("seconds")
             ) {
@@ -145,12 +137,13 @@ internal class RuntimeBudget {
             }
         }
 
-        internal func Description(run Data) string -> "total allowance " + run.Number("seconds").ToString() +
-            "s, coding allowance " +
-            (run.Number("seconds") - run.Number("verification_reserve")).ToString() +
-            "s, verification reserve " +
-            run
-            .Number("verification_reserve").ToString() + "s"
+        internal func Description(run Data) string {
+            let total = run.Number("seconds")
+            let reserve = run.Number("verification_reserve")
+            return "total allowance " + total.ToString() + "s, coding allowance " + (total - reserve).ToString() +
+                "s, verification reserve " +
+                reserve.ToString() + "s"
+        }
     }
 }
 
@@ -160,7 +153,7 @@ internal class Commands {
             if path == "" {
                 return nil
             }
-            Verification.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
+            LocalPaths.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
             return FileStream(
                 path,
                 FileStreamOptions{
@@ -544,8 +537,9 @@ internal class Commands {
             )
         }
 
-        internal func Git(cwd string, args ...string) string {
-            let result = GitResult(cwd, args)
+        internal func Git(cwd string, args ...string) string -> GitOutput(GitResult(cwd, args))
+
+        internal func GitOutput(result CommandResult) string {
             if result.Code != 0 {
                 throw Exception("git failed: " + result.Error + result.Output)
             }

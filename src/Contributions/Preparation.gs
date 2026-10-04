@@ -8,6 +8,22 @@ import System.Text.Json
 
 internal class Preparation {
     shared {
+        internal func RunDirectory(args Args, id string) string {
+            let root = Path.GetFullPath(
+                args.Get(
+                    "runs",
+                    Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        ".local",
+                        "state",
+                        "tokate",
+                        "runs"
+                    )
+                )
+            )
+            return Path.Combine(root, id)
+        }
+
         private func Identity(run Data) string -> Data.Hash(
             J.Write(
                 J.Map(
@@ -74,7 +90,7 @@ internal class Preparation {
         }
 
         internal func Lease(directory string) FileStream {
-            Verification.DirectoryPath(directory)
+            LocalPaths.DirectoryPath(directory)
             let path = Path.Combine(directory, ".lock")
             if FileInfo(path).LinkTarget != nil || FileInfo(Path.Combine(directory, "run.json")).LinkTarget != nil ||
                 FileInfo(Path.Combine(directory, "run.json.tmp")).LinkTarget != nil {
@@ -119,7 +135,7 @@ internal class Preparation {
                 .ToString() {
                 throw Exception("Selected upstream repository identity changed")
             }
-            run.Fields["preparation_repo_id"] = RequestData.PositiveId(J.Get(upstream, "id"))
+            run.Fields["preparation_repo_id"] = RepositoryIdentity.PositiveId(J.Get(upstream, "id"))
             run.Save(directory)
             Fork(directory, run, upstream)
             Branch(directory, run)
@@ -153,9 +169,9 @@ internal class Preparation {
         internal func Select(run Data, requested string) {
             let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")))
             var head = requested
-            if head == "" && RequestData.PositiveId(J.Get(J.Get(upstream, "owner"), "id")) == RequestData.PositiveId(
-                J.Get(run.Element(), "donor_id")
-            ) {
+            if head == "" && RepositoryIdentity.PositiveId(
+                J.Get(J.Get(upstream, "owner"), "id")
+            ) == RepositoryIdentity.PositiveId(J.Get(run.Element(), "donor_id")) {
                 head = run.Text("repo")
             }
             if head == "" {
@@ -170,9 +186,12 @@ internal class Preparation {
                         if items.ValueKind != JsonValueKind.Array {
                             throw Exception("Incomplete fork discovery; select --fork DONOR/NAME explicitly")
                         }
-                        for item in J.Items(items) {
-                            if !J.Bool(item, "fork") || RequestData.PositiveId(J.Get(J.Get(item, "owner"), "id")) !=
-                            RequestData.PositiveId(J.Get(run.Element(), "donor_id")) {
+                        let pageItems = J.Items(items)
+                        for item in pageItems {
+                            if !J.Bool(item, "fork") || RepositoryIdentity.PositiveId(
+                                J.Get(J.Get(item, "owner"), "id")
+                            ) !=
+                            RepositoryIdentity.PositiveId(J.Get(run.Element(), "donor_id")) {
                                 continue
                             }
                             let candidate = RepositoryIdentity.Repo(J.Text(item, "full_name"))
@@ -194,7 +213,7 @@ internal class Preparation {
                                 }
                             }
                         }
-                        if J.Items(items).Count < 100 {
+                        if pageItems.Count < 100 {
                             complete = true
                             break
                         }
@@ -214,7 +233,7 @@ internal class Preparation {
             }
             run.Fields["preparation_head"] = RepositoryIdentity.Repo(head)
             run.Fields["head_repo"] = head
-            run.Fields["preparation_repo_id"] = RequestData.PositiveId(J.Get(upstream, "id"))
+            run.Fields["preparation_repo_id"] = RepositoryIdentity.PositiveId(J.Get(upstream, "id"))
         }
 
         private func Fork(directory string, run Data, upstream JsonElement) {
@@ -224,9 +243,13 @@ internal class Preparation {
             }
             var info = GitHub.Api("repos/" + head, missing: true)
             if info.ValueKind == JsonValueKind.Undefined && !run.Flag("fork_creation_attempted") {
-                if !String.Equals(head.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
-                    String
-                    .Equals(head, run.Text("repo"), StringComparison.OrdinalIgnoreCase) {
+                let donor = run.Text("donor")
+                let repo = run.Text("repo")
+                if !String.Equals(head.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) || String.Equals(
+                    head,
+                    repo,
+                    StringComparison.OrdinalIgnoreCase
+                ) {
                     throw Exception("A missing fork must belong to the authenticated donor")
                 }
                 run.Fields["fork_creation_attempted"] = true
@@ -240,7 +263,7 @@ internal class Preparation {
                         created,
                         upstream: upstream
                     )
-                    run.Fields["preparation_head_id"] = RequestData.PositiveId(J.Get(created, "id"))
+                    run.Fields["preparation_head_id"] = RepositoryIdentity.PositiveId(J.Get(created, "id"))
                     run.Save(directory)
                 } catch (error Exception) {
                     run.Fields["fork_creation_error"] = error.Message
@@ -269,7 +292,7 @@ internal class Preparation {
                         .ToString() {
                         throw Exception("Saved fork identity changed; inspect the original fork")
                     }
-                    run.Fields["preparation_head_id"] = RequestData.PositiveId(J.Get(info, "id"))
+                    run.Fields["preparation_head_id"] = RepositoryIdentity.PositiveId(J.Get(info, "id"))
                     run.Save(directory)
                     if run.Flag("fork_creation_attempted") {
                         let branch = RepositoryIdentity.Branch(J.Text(info, "default_branch"))
@@ -363,8 +386,8 @@ internal class Preparation {
         )
 
         private func Owned(checkout string, run Data) {
-            Verification.DirectoryPath(checkout)
-            Verification.DirectoryPath(Path.Combine(checkout, ".git"))
+            LocalPaths.DirectoryPath(checkout)
+            LocalPaths.DirectoryPath(Path.Combine(checkout, ".git"))
             let marker = Path.Combine(checkout, ".git/tokate-preparation.json")
             if FileInfo(marker).LinkTarget != nil || !File.Exists(marker) || File.ReadAllText(marker) != Marker(run) {
                 Reject(checkout)

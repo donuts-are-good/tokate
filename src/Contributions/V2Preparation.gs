@@ -6,8 +6,6 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json
 
-// Donor-side operations: credentials remain with gh/the harness. Verification
-// executes only inside the existing unprivileged independent verifier.
 internal class V2Preparation {
     shared {
         internal func Prepare(args Args) {
@@ -97,25 +95,14 @@ internal class V2Preparation {
             policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             run.Fields["state"] = "claimed"
             if source == "tokate" {
-                run.Fields["model"] = J.Text(J.Items(tools)[0], "model")
-                run.Fields["effort"] = J.Text(J.Items(tools)[0], "effort")
+                let declared = J.Items(tools)[0]
+                run.Fields["model"] = J.Text(declared, "model")
+                run.Fields["effort"] = J.Text(declared, "effort")
                 run.Fields["harness"] = J.Text(selection, "harness")
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
             }
-            let root = Path.GetFullPath(
-                args.Get(
-                    "runs",
-                    Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".local",
-                        "state",
-                        "tokate",
-                        "runs"
-                    )
-                )
-            )
-            let directory = Path.Combine(root, run.Text("id"))
+            let directory = Preparation.RunDirectory(args, run.Text("id"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")

@@ -9,35 +9,6 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
-        internal func VerificationReport(run Data, record JsonElement) string {
-            let checks = J.Items(J.Get(run.Element(), "verification"))
-            let commands = J.Items(J.Get(J.Get(record, "policy"), "verification"))
-            if checks.Count == 0 || checks.Count != commands.Count {
-                throw Exception("Missing independent verification results")
-            }
-            for i in 0 ... checks.Count {
-                var code int32
-                let check = checks[i]
-                if (J.Text(check, "state") != "" && J.Text(check, "state") != "completed") || J.Get(check, "exit_code")
-                    .ValueKind != JsonValueKind.Number ||
-                    !J
-                    .Get(check, "exit_code").TryGetInt32(out code) || code != 0 || J.Write(
-                    J.Get(check, "command")
-                ) != J.Write(commands[i]) {
-                    throw Exception("Owner verification did not pass")
-                }
-            }
-            let recovery = run.Flag(
-                "recovered"
-            ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
-            return recovery +
-                "Generated a patch for the approved issue. Independent owner verification: " +
-                checks
-                .Count
-                .ToString() + "/" + checks.Count.ToString() +
-                " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
-        }
-
         internal func Usage(run Data) string {
             let usage = J.Get(run.Element(), "usage")
             let counts = Dictionary[string, Object?]()
@@ -147,7 +118,7 @@ internal class Publication {
             let receipt = ContributionReceipt.Native(run, run.Text("commit"))
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            values["report"] = PrBody.Report(VerificationReport(run, record))
+            values["report"] = PrBody.Report(PrBody.VerificationReport(run, record))
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
@@ -160,7 +131,7 @@ internal class Publication {
             values["usage"] = Usage(run)
             values["receipt"] = marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
             var body = J.Text(record, "template")
-            body = Regex.Replace(body, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
+            body = PrBody.Render(body, values)
             File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
             let publication = J.Map(
                 "title",
@@ -204,26 +175,6 @@ internal class Publication {
             run.Fields["state"] = "published"
             run.Save(directory)
             Terminal.Message("Draft PR: " + run.Text("pr_url"))
-        }
-
-        internal func OriginalReport(metadata JsonElement) string {
-            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
-                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
-            let correction = J.Get(metadata, "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                report += " Explicit correction " + J.Text(correction, "uuid") +
-                    ": " +
-                    (
-                    J.Items(J.Get(correction, "tools"))
-                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
-                        J.Write(J.Get(correction, "tools"))
-                ) +
-                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
-                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
-                    J
-                    .Number(correction, "seconds").ToString() + " seconds."
-            }
-            return report
         }
     }
 }

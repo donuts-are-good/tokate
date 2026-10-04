@@ -6,8 +6,6 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json
 
-// Donor-side operations: credentials remain with gh/the harness. Verification
-// executes only inside the existing unprivileged independent verifier.
 internal class Submission {
     shared {
         internal func Commit(directory string) {
@@ -61,7 +59,7 @@ internal class Submission {
         }
 
         internal func Posted(repo string, issue int32, actor JsonElement, request JsonElement) bool {
-            RequestData.PositiveId(actor)
+            RepositoryIdentity.PositiveId(actor)
             var count int32
             for page in 1 ... 21 {
                 let response = GitHub.Api(
@@ -88,20 +86,20 @@ internal class Submission {
                     if J.Text(candidate, "uuid") != J.Text(request, "uuid") {
                         continue
                     }
-                    let id = RequestData.PositiveId(J.Get(row, "id"))
+                    let id = RepositoryIdentity.PositiveId(J.Get(row, "id"))
                     let canonical = GitHub.Api("repos/" + repo + "/issues/comments/" + id.ToString())
-                    if RequestData.PositiveId(J.Get(canonical, "id")) != id || RequestData.PositiveId(
-                        J.Get(J.Get(canonical, "user"), "id")
-                    ) != RequestData.PositiveId(actor) || J.Text(
-                        canonical,
-                        "issue_url"
-                    ) != "https://api.github.com/repos/" +
-                        repo +
-                        "/issues/" +
-                        issue.ToString() || J.Text(canonical, "body") != body || RequestData.Canonical(
-                        candidate
-                    ) != RequestData.Canonical(request) {
-                        throw Exception("Request UUID has changed actor, contents, repository or issue evidence")
+                    let failure = "Request UUID has changed actor, contents, repository or issue evidence"
+                    if RepositoryIdentity.PositiveId(J.Get(canonical, "id")) != id {
+                        throw Exception(failure)
+                    }
+                    let author = J.Get(J.Get(canonical, "user"), "id")
+                    if RepositoryIdentity.PositiveId(author) != RepositoryIdentity.PositiveId(actor) {
+                        throw Exception(failure)
+                    }
+                    let issueUrl = "https://api.github.com/repos/" + repo + "/issues/" + issue.ToString()
+                    if J.Text(canonical, "issue_url") != issueUrl || J.Text(canonical, "body") != body ||
+                        RequestData.Canonical(candidate) != RequestData.Canonical(request) {
+                        throw Exception(failure)
                     }
                     count++
                 }
@@ -124,11 +122,11 @@ internal class Submission {
             if !String.Equals(repo, args.Need("repo"), StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Canonical request repository differs from command")
             }
-            RequestData.PositiveId(J.Get(info, "id"))
+            RepositoryIdentity.PositiveId(J.Get(info, "id"))
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
             let actor = J.Get(viewer, "id")
-            RequestData.PositiveId(actor)
+            RepositoryIdentity.PositiveId(actor)
             let binding = RequestData.Binding(actor, value)
             let journal = path + ".posting.json"
             if FileInfo(journal).LinkTarget != nil {
@@ -136,11 +134,13 @@ internal class Submission {
             }
             if File.Exists(journal) {
                 let saved = RequestData.FileData(journal, 16384)
+                let failure = "Saved request UUID binding changed; use a new file and UUID for new work"
                 if J.Text(saved, "repo") != repo || J.Number(saved, "issue") != issue || J.Get(saved, "actor")
-                    .ToString() != actor.ToString() || J.Text(saved, "binding") != binding || RequestData.Canonical(
-                    J.Get(saved, "request")
-                ) != RequestData.Canonical(value) {
-                    throw Exception("Saved request UUID binding changed; use a new file and UUID for new work")
+                    .ToString() != actor.ToString() || J.Text(saved, "binding") != binding {
+                    throw Exception(failure)
+                }
+                if RequestData.Canonical(J.Get(saved, "request")) != RequestData.Canonical(value) {
+                    throw Exception(failure)
                 }
             }
             let state = CoordinationState.Load(repo, issue)
@@ -196,17 +196,20 @@ internal class Submission {
                     J.Map("body", "/tokate " + RequestData.Canonical(value)),
                     expires: expires
                 )
-                if J.Text(posted, "issue_url") != "https://api.github.com/repos/" +
-                    repo +
-                    "/issues/" +
-                    issue.ToString() || RequestData.PositiveId(
-                    J.Get(J.Get(posted, "user"), "id")
-                ) != RequestData.PositiveId(actor) || J.Text(posted, "body") != "/tokate " + RequestData.Canonical(
-                    value
-                ) {
-                    throw Exception("Comment write response lacks exact request evidence")
+                let failure = "Comment write response lacks exact request evidence"
+                let issueUrl = "https://api.github.com/repos/" + repo + "/issues/" + issue.ToString()
+                if J.Text(posted, "issue_url") != issueUrl {
+                    throw Exception(failure)
                 }
-                RequestData.PositiveId(J.Get(posted, "id"))
+                let author = J.Get(J.Get(posted, "user"), "id")
+                if RepositoryIdentity.PositiveId(author) != RepositoryIdentity.PositiveId(actor) || J.Text(
+                    posted,
+                    "body"
+                ) != "/tokate " +
+                    RequestData.Canonical(value) {
+                    throw Exception(failure)
+                }
+                RepositoryIdentity.PositiveId(J.Get(posted, "id"))
             } catch (error Exception) {
                 let latest = CoordinationState.Load(repo, issue)
                 if RequestData.Recorded(latest.Value(), actor, value)
@@ -298,7 +301,7 @@ internal class Submission {
             if run.Text("state") != "generated" || run.Text("commit") == "" {
                 throw Exception("Only an independently verified exact commit can be submitted")
             }
-            Publication.VerificationReport(run, record)
+            Verification.Results(run, record)
             let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("commit") || Commands.Git(
                 checkout,

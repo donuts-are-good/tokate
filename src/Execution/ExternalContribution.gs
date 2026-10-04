@@ -6,8 +6,6 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json
 
-// Donor-side operations: credentials remain with gh/the harness. Verification
-// executes only inside the existing unprivileged independent verifier.
 internal class ExternalContribution {
     shared {
         internal func External(args Args) {
@@ -27,7 +25,7 @@ internal class ExternalContribution {
             let metadata = J.Parse(
                 J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", commit))
             )
-            Coordinator.ValidateFork(run.Text("repo"), run.Text("donor"), metadata, J.Get(run.Element(), "donor_id"))
+            RepositoryAccess.ValidateFork(run.Text("repo"), metadata, J.Get(run.Element(), "donor_id"))
             let checkout = Path.Combine(directory, "checkout")
             if Directory.Exists(checkout) {
                 throw Exception("External checkout already exists; interrupted verification requires inspection")

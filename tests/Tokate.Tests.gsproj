@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../src/Execution/Verification.gs" />
+    <Compile Include="../src/Execution/LocalPaths.gs" />
     <Compile Include="../src/Execution/Process.gs" />
     <Compile Include="../src/Cli/Args.gs" />
     <Compile Include="../src/Cli/ApplicationInfo.gs" />

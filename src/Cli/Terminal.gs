@@ -209,7 +209,7 @@ internal class Terminal {
 
         internal func Step(text string) -> Message(text, "cyan", Foreground())
 
-        internal func Command(command JsonElement) string {
+        internal func Command(command JsonElement, flatten bool = true) string {
             let words = StringBuilder()
             for item in J.Items(command) {
                 if words.Length > 0 {
@@ -221,7 +221,8 @@ internal class Terminal {
                     "'" + word.Replace("'", "'\"'\"'") + "'"
                 )
             }
-            return Clean(words.ToString()).Replace('\n', ' ')
+            let text = Clean(words.ToString())
+            return flatten ? text.Replace('\n', ' '): text
         }
 
         internal func Verify(
@@ -273,10 +274,14 @@ internal class Terminal {
             }
             try {
                 let run = Data.Load(PublicOutput.RunDirectory)
-                let stage = code == "inference_failed" ? "Inference": (
-                    code == "verification_failed" ?
-                    "Verification": (run.Text("state") == "generated" && exitCode != 0 ? "Publication": "Run")
-                )
+                var stage = "Run"
+                if code == "inference_failed" {
+                    stage = "Inference"
+                } else if code == "verification_failed" {
+                    stage = "Verification"
+                } else if run.Text("state") == "generated" && exitCode != 0 {
+                    stage = "Publication"
+                }
                 Message(
                     stage +
                         (exitCode == 0 ? " completed": " failed (" + code + ")") +
@@ -293,14 +298,10 @@ internal class Terminal {
             } catch (error Exception) { }
         }
 
-        private func RunSummaryArtifacts(directory string) string {
-            let summary = J.Parse(J.Write(PublicOutput.RunSummary(directory)))
-            let names = List[string]()
-            for artifact in J.Get(summary, "artifacts").EnumerateObject() {
-                names.Add(artifact.Name)
-            }
-            return String.Join(", ", names)
-        }
+        private func RunSummaryArtifacts(directory string) string -> String.Join(
+            ", ",
+            PublicOutput.Artifacts(directory).Keys
+        )
 
         internal func Heading(title string, error bool = false) {
             if Rich(error) {
@@ -350,19 +351,8 @@ internal class Terminal {
                 } else if field.Value.ValueKind == JsonValueKind.Array {
                     let items = J.Items(field.Value)
                     if field.Name == "command" {
-                        let words = StringBuilder()
-                        for item in items {
-                            if words.Length > 0 {
-                                words.Append(' ')
-                            }
-                            let word = item.ToString()
-                            words.Append(
-                                Regex.IsMatch(word, "^[A-Za-z0-9_./:-]+$") ? word:
-                                "'" + word.Replace("'", "'\"'\"'") + "'"
-                            )
-                        }
                         Message(label + ":", "default")
-                        Line(Clean(words.ToString()), "default", false)
+                        Line(Command(field.Value, false), "default", false)
                         continue
                     }
                     Message(label + ":" + (items.Count == 0 ? " none": ""), "default")

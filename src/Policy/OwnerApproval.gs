@@ -43,7 +43,7 @@ internal class OwnerApproval {
                 if args.Get("donor") != "" || args.Command == "assign" {
                     throw Exception("Task-scoped approval cannot assign a donor")
                 }
-                AccessState.Load(repo, RequestData.PositiveId(J.Get(info, "id")))
+                AccessState.Load(repo, RepositoryIdentity.PositiveId(J.Get(info, "id")))
             } else {
                 let donorArg = args.Need("donor")
                 donor = RepositoryIdentity.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
@@ -126,7 +126,7 @@ internal class OwnerApproval {
                     approval.Remove("donor")
                     approval["approval_scope"] = "task"
                     approval["eligibility"] = policy.Eligibility
-                    approval["repo_id"] = RequestData.PositiveId(J.Get(info, "id"))
+                    approval["repo_id"] = RepositoryIdentity.PositiveId(J.Get(info, "id"))
                 }
                 CoordinationState.Approve(repo, number, approval)
                 GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))

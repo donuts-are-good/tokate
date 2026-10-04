@@ -44,9 +44,8 @@ internal class Recovery {
             }
             if Directory.Exists(scratch) {
                 let exclude = Path.Combine(checkout, ".git/info/exclude")
-                if Commands.Git(checkout, "ls-files", "--", ".tokate-scratch") != "" || !File.Exists(exclude) ||
-                    !File
-                    .ReadAllText(exclude).Contains("\n.tokate-scratch/\n") {
+                let tracked = Commands.Git(checkout, "ls-files", "--", ".tokate-scratch") != ""
+                if tracked || !File.Exists(exclude) || !File.ReadAllText(exclude).Contains("\n.tokate-scratch/\n") {
                     throw Exception("Refusing to move repository-owned scratch files")
                 }
                 Directory.Move(scratch, Path.Combine(archive, "legacy-scratch"))
@@ -68,14 +67,16 @@ internal class Recovery {
             }
         }
 
-        internal func Eligible(run Data) bool -> run.Number("version") == 1 && run.Text("state") == "failed" &&
-            (
-            run.Text("failure_reason") == "verification_failed" ||
+        internal func Eligible(run Data) bool {
+            let reason = run.Text("failure_reason")
+            return run.Number("version") == 1 && run.Text("state") == "failed" &&
                 (
-                run.Text("failure_reason") == "" && run.Text(
-                    "error"
-                ) == "Owner verification failed. See verification.json. No PR will be opened."
+                reason == "verification_failed" ||
+                    (
+                    reason == "" && run.Text("error") ==
+                    "Owner verification failed. See verification.json. No PR will be opened."
+                )
             )
-        )
+        }
     }
 }

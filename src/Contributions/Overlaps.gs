@@ -9,6 +9,7 @@ internal class OverlapContribution {
     internal let Number int32
     internal let Facts Dictionary[string, Object?]
     internal var Identity string = ""
+    internal var Target string = ""
     internal var Binding Data? = nil
     internal var Files HashSet[string]? = nil
     internal var Stable bool
@@ -28,6 +29,14 @@ internal class OverlapContribution {
             "dependency_gate",
             "unknown"
         )
+    }
+
+    internal func Invalidate() {
+        Facts["diff_status"] = "unknown"
+        Facts["checks_status"] = "unknown"
+        Facts["dependency_gate"] = "unknown"
+        Facts["dependencies_status"] = "unknown"
+        Files = nil
     }
 }
 
@@ -174,8 +183,9 @@ internal class Overlaps {
                 facts["head"] = RepositoryIdentity.CommitSha(J.Text(head, "sha"))
                 facts["head_branch"] = J.Text(head, "ref")
                 facts["head_repo"] = RepositoryIdentity.Repo(J.Text(J.Get(head, "repo"), "full_name"))
-                facts["target_branch"] = RepositoryIdentity.Branch(J.Text(J.Get(pull, "base"), "ref"))
-                let branch = J.Text(J.Get(pull, "base"), "ref")
+                let branch = RepositoryIdentity.Branch(J.Text(J.Get(pull, "base"), "ref"))
+                item.Target = branch
+                facts["target_branch"] = branch
                 if !targets.ContainsKey(branch) {
                     try {
                         targets[branch] = GitHub.Branch(repo, branch)
@@ -222,15 +232,13 @@ internal class Overlaps {
                     facts["checks_status"] = "complete"
                     facts["checks_output_complete"] = rows.Count == checks.GetArrayLength()
                     facts["checks_head"] = binding.Text("commit")
+                    let names = J.Items(J.Get(J.Get(binding.Element(), "policy"), "required_checks"))
                     let required = List[Object]()
-                    for name in J.Items(J.Get(J.Get(binding.Element(), "policy"), "required_checks")) {
+                    for name in names {
                         Retain(required, name)
                     }
                     facts["required_checks"] = required
-                    facts["required_check_count"] = J.Items(
-                        J.Get(J.Get(binding.Element(), "policy"), "required_checks")
-                    )
-                        .Count
+                    facts["required_check_count"] = names.Count
                 } catch (error Exception) {
                     Failure(facts, "checks", error)
                 }
@@ -261,18 +269,10 @@ internal class Overlaps {
                     }
                     if let binding = item.Binding {
                         let live = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
-                        if J.Write(
-                            PublicOutput.Select(
-                                live.Element(),
-                                "version,issue,approval,authority_revision,base,base_branch,commit"
-                            )
-                        ) != J
-                            .Write(
-                            PublicOutput.Select(
-                                binding.Element(),
-                                "version,issue,approval,authority_revision,base,base_branch,commit"
-                            )
-                        ) {
+                        let fields = "version,issue,approval,authority_revision,base,base_branch,commit"
+                        let current = J.Write(PublicOutput.Select(live.Element(), fields))
+                        let original = J.Write(PublicOutput.Select(binding.Element(), fields))
+                        if current != original {
                             throw Exception("Contribution binding changed during evidence collection")
                         }
                     }
@@ -281,11 +281,7 @@ internal class Overlaps {
                 } catch (error Exception) {
                     Failure(item.Facts, "identity", error)
                     item.Facts["binding_status"] = "unknown"
-                    item.Facts["diff_status"] = "unknown"
-                    item.Facts["checks_status"] = "unknown"
-                    item.Facts["dependency_gate"] = "unknown"
-                    item.Facts["dependencies_status"] = "unknown"
-                    item.Files = nil
+                    item.Invalidate()
                 }
             }
             for target in targets {
@@ -294,7 +290,7 @@ internal class Overlaps {
                     current = GitHub.Branch(repo, target.Key)
                 } catch (error Exception) { }
                 for item in items {
-                    if J.Text(J.Parse(J.Write(item.Facts)), "target_branch") != target.Key {
+                    if item.Target != target.Key {
                         continue
                     }
                     let stable = target.Value != "" && current == target.Value
@@ -304,15 +300,9 @@ internal class Overlaps {
                         item.Facts[
                             "target_error"
                         ] = "Target evidence unavailable or changed during collection; owner review required."
-                    }
-                    if !stable {
                         item.Stable = false
                         item.Facts["identity_status"] = "unknown"
-                        item.Facts["diff_status"] = "unknown"
-                        item.Facts["checks_status"] = "unknown"
-                        item.Facts["dependency_gate"] = "unknown"
-                        item.Facts["dependencies_status"] = "unknown"
-                        item.Files = nil
+                        item.Invalidate()
                     }
                 }
             }
@@ -321,12 +311,7 @@ internal class Overlaps {
                 for j in i + 1 ... items.Count {
                     let left = items[i]
                     let right = items[j]
-                    let a = J.Parse(J.Write(left.Facts))
-                    let b = J.Parse(J.Write(right.Facts))
-                    let same = J.Text(a, "target_branch") != "" && J.Text(a, "target_branch") == J.Text(
-                        b,
-                        "target_branch"
-                    )
+                    let same = left.Target != "" && left.Target == right.Target
                     let paths = List[Object]()
                     var count int32
                     let known = same && left.Stable && right.Stable && left.Files != nil && right.Files != nil
@@ -340,10 +325,10 @@ internal class Overlaps {
                             }
                         }
                     }
-                    let status = !left.Stable || !right.Stable || J.Text(a, "target_branch") == "" || J.Text(
-                        b,
-                        "target_branch"
-                    ) == "" ? "unknown": (
+                    let status = !left.Stable ||
+                        !right.Stable ||
+                        left.Target == "" ||
+                        right.Target == "" ? "unknown": (
                         !same ? "different_targets": (
                             !known ? "unknown": (count > 0 ? "overlap": "no_filename_overlap")
                         )
@@ -357,7 +342,7 @@ internal class Overlaps {
                             "status",
                             status,
                             "target_branch",
-                            same ? J.Text(a, "target_branch"): "",
+                            same ? left.Target: "",
                             "paths",
                             paths,
                             "overlap_count",

@@ -67,7 +67,7 @@ internal class CorrectionPublication {
             let receiptFailure = "interrupted_publication: physical PR receipt differs from the saved correction"
             let receipt = RequestData.Parse(PrBody.ReceiptText(body, receiptFailure, receiptFailure))
             let expected = J.Parse(J.Write(Receipt(run, correction)))
-            if !Correction.Same(receipt, expected) {
+            if !RequestData.Same(receipt, expected) {
                 throw Exception(receiptFailure)
             }
             let head = J.Get(pull, "head")
@@ -110,15 +110,17 @@ internal class CorrectionPublication {
         private func CheckSaved(directory string, run Data, correction Data) JsonElement {
             let original = Correction.OriginalRun(directory, run)
             Correction.Completed(Path.Combine(directory, "original-evidence"), original)
-            if correction.Text("state") != "verified" || run.Text("commit") != correction.Text("commit") ||
-                !Correction
-                .Same(J.Get(run.Element(), "correction"), Correction.Provenance(correction)) {
-                throw Exception("Only the saved verified exact correction can be published")
+            let failure = "Only the saved verified exact correction can be published"
+            if correction.Text("state") != "verified" || run.Text("commit") != correction.Text("commit") {
+                throw Exception(failure)
+            }
+            if !RequestData.Same(J.Get(run.Element(), "correction"), Correction.Provenance(correction)) {
+                throw Exception(failure)
             }
             let record = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             Correction.Exact(directory, run, correction, record)
-            Publication.VerificationReport(run, record)
-            if !Correction.Same(J.Get(run.Element(), "verification"), J.Get(correction.Element(), "verification")) {
+            Verification.Results(run, record)
+            if !RequestData.Same(J.Get(run.Element(), "verification"), J.Get(correction.Element(), "verification")) {
                 throw Exception("Correction verification results changed")
             }
             return record
@@ -150,7 +152,7 @@ internal class CorrectionPublication {
             }
             if File.Exists(path) {
                 let value = File.ReadAllText(path)
-                if json ? !Correction.Same(J.Parse(value), J.Parse(expected)): value != expected {
+                if json ? !RequestData.Same(J.Parse(value), J.Parse(expected)): value != expected {
                     throw Exception("Saved publication preview differs from exact intent")
                 }
             } else {
@@ -164,6 +166,7 @@ internal class CorrectionPublication {
             "donor-reported correction tools: " + J.Write(tools)
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
+            let seconds = correction.Number("seconds").ToString()
             values["report"] = "Explicit donor correction " + correction.Text("uuid") +
                 ": " +
                 editing +
@@ -171,8 +174,9 @@ internal class CorrectionPublication {
                 "Tokate observed independent verification locally on exact corrected commit " +
                 correction.Text("commit") + ", tree " + correction.Text("tree") +
                 ". Separate verification budget: " +
-                correction
-                .Number("seconds").ToString() + " seconds.\n\n" + Publication.VerificationReport(run, record)
+                seconds +
+                " seconds.\n\n" +
+                PrBody.VerificationReport(run, record)
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
@@ -190,11 +194,7 @@ internal class CorrectionPublication {
             values["usage"] = Publication.Usage(run)
             values["receipt"] = "<!-- tokate-run:" + run.Text("id") + " -->\n<!-- tokate-receipt:" + J.Write(receipt) +
                 " -->"
-            return Regex.Replace(
-                J.Text(record, "template"),
-                "\\{\\{([a-z_]+)\\}\\}",
-                (match Match) -> values[match.Groups[1].Value]
-            )
+            return PrBody.Render(J.Text(record, "template"), values)
         }
 
         internal func Publish(directory string) {
@@ -245,7 +245,7 @@ internal class CorrectionPublication {
                     intent = J.Get(correction.Element(), "publication")
                     File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
                     File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(request) + "\n")
-                } else if !Correction.Same(J.Get(intent, "receipt"), expectedReceipt) {
+                } else if !RequestData.Same(J.Get(intent, "receipt"), expectedReceipt) {
                     throw Exception("Saved publication intent changed; no silent regeneration is allowed")
                 }
                 Preview(Path.Combine(directory, "publication.json"), J.Write(J.Get(intent, "request")) + "\n")
@@ -368,7 +368,7 @@ internal class CorrectionPublication {
             let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), actor)
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
-                if !Correction.Same(J.Get(record, key), J.Get(pinned, key)) {
+                if !RequestData.Same(J.Get(record, key), J.Get(pinned, key)) {
                     throw CliFailure("stale_approval", "Original pinned approval, policy or template changed")
                 }
             }
@@ -411,7 +411,7 @@ internal class CorrectionPublication {
             var outcome bool
             for old in J.Items(J.Get(value, "outcomes")) {
                 if J.Text(old, "uuid") == correction.Text("publication_uuid") && J.Text(old, "binding") == binding &&
-                    Correction.Same(J.Get(old, "outcome"), contributionOutcome) {
+                    RequestData.Same(J.Get(old, "outcome"), contributionOutcome) {
                     outcome = true
                 }
             }
@@ -420,7 +420,7 @@ internal class CorrectionPublication {
             if parents.Count != 1 || J.Text(parents[0], "sha") != expected {
                 throw CliFailure("stale_approval", failure)
             }
-            if !Correction.Same(request, Request(run, correction)) {
+            if !RequestData.Same(request, Request(run, correction)) {
                 throw CliFailure("stale_approval", failure)
             }
             let publicationId = correction.Text("publication_uuid")
@@ -429,7 +429,7 @@ internal class CorrectionPublication {
                 contributor != actor.ToString() {
                 throw CliFailure("stale_approval", failure)
             }
-            if !Correction.Same(J.Get(contribution, "metadata"), J.Get(request, "metadata")) || !outcome {
+            if !RequestData.Same(J.Get(contribution, "metadata"), J.Get(request, "metadata")) || !outcome {
                 throw CliFailure("stale_approval", failure)
             }
             return state
@@ -468,7 +468,7 @@ internal class CorrectionPublication {
                     intent = J.Get(correction.Element(), "publication")
                     File.WriteAllText(Path.Combine(directory, "request.json"), J.Write(request) + "\n")
                     File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(request) + "\n")
-                } else if !Correction.Same(J.Get(intent, "request"), Request(run, correction)) {
+                } else if !RequestData.Same(J.Get(intent, "request"), Request(run, correction)) {
                     throw Exception("Saved version-2 publication intent changed")
                 }
                 Preview(Path.Combine(directory, "request.json"), J.Write(J.Get(intent, "request")) + "\n")

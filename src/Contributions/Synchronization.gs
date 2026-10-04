@@ -7,6 +7,31 @@ import System.Text.RegularExpressions
 
 internal class Synchronization {
     shared {
+        private func Ancestor(repo string, base string, fork string, head string) {
+            RepositoryIdentity.Repo(repo)
+            RepositoryIdentity.Repo(fork)
+            RepositoryIdentity.CommitSha(base)
+            RepositoryIdentity.CommitSha(head)
+            let value = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
+            let commits = J.Items(J.Get(value, "commits"))
+            let failure = "Missing or mismatched synchronization ancestry evidence"
+            let baseCommit = J.Text(J.Get(value, "base_commit"), "sha")
+            let mergeBase = J.Text(J.Get(value, "merge_base_commit"), "sha")
+            if baseCommit != base || mergeBase != base || J.Get(value, "behind_by")
+                .ValueKind != JsonValueKind.Number ||
+                J.Number(value, "behind_by") != 0 {
+                throw Exception(failure)
+            }
+            let status = J.Text(value, "status")
+            if base == head {
+                if status != "identical" {
+                    throw Exception(failure)
+                }
+            } else if status != "ahead" || commits.Count == 0 || J.Text(commits[commits.Count - 1], "sha") != head {
+                throw Exception(failure)
+            }
+        }
+
         internal func History(value JsonElement) JsonElement {
             let history = J.Get(value, "synchronizations")
             if history.ValueKind == JsonValueKind.Undefined {
@@ -68,12 +93,13 @@ internal class Synchronization {
                 "version,id,repo,repository_id,issue,pr,approval_version,approval,base,target,upstream,previous,candidate,expected,fork,branch,receipt"
             )
             var id Guid
+            let approvalVersion = J.Number(value, "approval_version")
             if J.Number(value, "version") != 1 || !Guid.TryParseExact(J.Text(value, "id"), "D", out id) || J.Text(
                 value,
                 "repo"
             ) != repo ||
                 J.Number(value, "issue") < 1 || J.Number(value, "pr") < 1 ||
-                (J.Number(value, "approval_version") != 1 && J.Number(value, "approval_version") != 2) ||
+                (approvalVersion != 1 && approvalVersion != 2) ||
                 J
                 .Get(value, "receipt").ValueKind != JsonValueKind.Object {
                 throw Exception("Invalid owner synchronization grant")
@@ -268,11 +294,11 @@ internal class Synchronization {
                 let previous = J.Text(value, "previous")
                 let upstream = J.Text(value, "upstream")
                 let candidate = J.Text(value, "candidate")
-                ProtectedPaths.Ancestor(repo, base, fork, previous)
-                ProtectedPaths.Ancestor(repo, base, repo, upstream)
-                ProtectedPaths.Ancestor(repo, predecessor, fork, previous)
-                ProtectedPaths.Ancestor(repo, previous, fork, candidate)
-                ProtectedPaths.Ancestor(repo, upstream, fork, candidate)
+                Ancestor(repo, base, fork, previous)
+                Ancestor(repo, base, repo, upstream)
+                Ancestor(repo, predecessor, fork, previous)
+                Ancestor(repo, previous, fork, candidate)
+                Ancestor(repo, upstream, fork, candidate)
                 ProtectedPaths.EqualTrees(
                     policy,
                     approval,
@@ -288,7 +314,7 @@ internal class Synchronization {
                 baseline = upstream
                 predecessor = candidate
             }
-            ProtectedPaths.Ancestor(repo, predecessor, fork, head)
+            Ancestor(repo, predecessor, fork, head)
             ProtectedPaths.EqualTrees(
                 policy,
                 approval,
@@ -309,20 +335,19 @@ internal class Synchronization {
             ReceiptVerification.Verify(repo, pr, false)
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + pr.ToString())
             Open(pull)
-            if J.Text(J.Get(pull, "head"), "sha") != J.Text(value, "previous") || RequestData.Canonical(
+            let head = J.Get(pull, "head")
+            if J.Text(head, "sha") != J.Text(value, "previous") || RequestData.Canonical(
                 PrBody.Receipt(J.Text(pull, "body"))
-            ) != RequestData
-                .Canonical(J.Get(value, "receipt")) {
+            ) !=
+            RequestData.Canonical(J.Get(value, "receipt")) {
                 throw Exception("Published head or receipt changed during synchronization authorization")
             }
             let reference = GitHub.Api("repos/" + J.Text(value, "fork") + "/git/ref/heads/" + J.Text(value, "branch"))
-            if J.Text(J.Get(reference, "object"), "sha") != J.Text(value, "previous") || J.Text(
-                J.Get(pull, "head"),
-                "ref"
-            ) != J.Text(value, "branch") || J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name") != J.Text(
+            if J.Text(J.Get(reference, "object"), "sha") != J.Text(value, "previous") || J.Text(head, "ref") != J.Text(
                 value,
-                "fork"
-            ) {
+                "branch"
+            ) ||
+                J.Text(J.Get(head, "repo"), "full_name") != J.Text(value, "fork") {
                 throw Exception("Canonical published donor branch changed during grant creation")
             }
             Target(repo, approval, J.Text(value, "target"), J.Text(value, "upstream"))
@@ -361,8 +386,8 @@ internal class Synchronization {
             let previous = J.Text(J.Get(pull, "head"), "sha")
             let fork = RepositoryIdentity.Repo(J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"))
             Target(repo, approval, target, upstream)
-            ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), fork, previous)
-            ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), repo, upstream)
+            Ancestor(repo, J.Text(approval, "base"), fork, previous)
+            Ancestor(repo, J.Text(approval, "base"), repo, upstream)
             let value = J.Parse(
                 J.Write(
                     J.Map(

@@ -27,22 +27,15 @@ func Main(args[]string) int32 {
             PublicOutput.RunDirectory = Path.GetFullPath(options.Need("run"))
             PublicOutput.FailureCode = "invalid_state"
         }
-        PublicOutput.ResultData = PublicOutput.Select(
-            J.Parse(
-                J.Write(
-                    J.Map(
-                        "repo",
-                        options.Get("repo"),
-                        "issue",
-                        options.Get("issue"),
-                        "donor",
-                        options.Get("donor"),
-                        "pr",
-                        options.Get("pr")
-                    )
-                )
-            ),
-            "repo,issue,donor,pr"
+        PublicOutput.ResultData = J.Map(
+            "repo",
+            options.Get("repo"),
+            "issue",
+            options.Get("issue"),
+            "donor",
+            options.Get("donor"),
+            "pr",
+            options.Get("pr")
         )
         exitCode = Dispatch(options)
         if exitCode == 1 {

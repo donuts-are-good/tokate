@@ -18,13 +18,15 @@ internal class Decree {
         internal func CaptureTree(repo string, treeSha string) JsonElement {
             RepositoryIdentity.CommitSha(treeSha)
             let tree = GitHub.Api("repos/" + repo + "/git/trees/" + treeSha)
-            if J.Get(tree, "truncated").ValueKind != JsonValueKind.False || J.Get(tree, "tree")
-                .ValueKind != JsonValueKind.Array ||
+            let entries = J.Get(tree, "tree")
+            if J.Get(tree, "truncated")
+                .ValueKind != JsonValueKind.False ||
+                entries.ValueKind != JsonValueKind.Array ||
                 J.Text(tree, "sha") != treeSha {
                 throw Exception("DECREE.md discovery is unreadable or truncated")
             }
             var entry JsonElement
-            for item in J.Items(J.Get(tree, "tree")) {
+            for item in J.Items(entries) {
                 if J.Text(item, "path") == "DECREE.md" {
                     if entry.ValueKind != JsonValueKind.Undefined {
                         throw Exception("Ambiguous root DECREE.md")
@@ -41,8 +43,9 @@ internal class Decree {
                     "DECREE.md must be a regular Git blob (100644 or 100755); links, directories and submodules are unsupported"
                 )
             }
+            let sourceSize = J.Get(entry, "size")
             var size int32
-            if J.Get(entry, "size").ValueKind != JsonValueKind.Number || !J.Get(entry, "size").TryGetInt32(out size) ||
+            if sourceSize.ValueKind != JsonValueKind.Number || !sourceSize.TryGetInt32(out size) ||
                 size < 0 ||
                 size > 65536 {
                 throw Exception("DECREE.md must be at most 64 KiB of source bytes")
@@ -56,19 +59,18 @@ internal class Decree {
             } catch (error Exception) {
                 throw Exception("DECREE.md blob is unreadable. " + error.Message)
             }
+            let content = J.Get(blob, "content")
+            let declaredSize = J.Get(blob, "size")
             var blobSize int32
-            if J.Text(blob, "sha") != sha || J.Text(blob, "encoding") != "base64" || J.Get(blob, "content")
-                .ValueKind != JsonValueKind.String ||
-                J
-                .Get(blob, "size").ValueKind != JsonValueKind.Number || !J.Get(blob, "size").TryGetInt32(
-                out blobSize
-            ) ||
-                blobSize != size {
+            if J.Text(blob, "sha") != sha || J.Text(blob, "encoding") != "base64" ||
+                content.ValueKind != JsonValueKind.String ||
+                declaredSize.ValueKind != JsonValueKind.Number ||
+                !declaredSize.TryGetInt32(out blobSize) || blobSize != size {
                 throw Exception("DECREE.md blob is unreadable or incomplete")
             }
             var bytes[]byte
             try {
-                bytes = Convert.FromBase64String(J.Text(blob, "content"))
+                bytes = Convert.FromBase64String(content.GetString() ?? "")
             } catch {
                 throw Exception("DECREE.md blob is not readable base64")
             }
@@ -103,14 +105,12 @@ internal class Decree {
         internal func Validate(snapshot JsonElement) JsonElement {
             RequestData.Keys(snapshot, "present,sha256,text")
             let present = J.Get(snapshot, "present")
-            if (present.ValueKind != JsonValueKind.True && present.ValueKind != JsonValueKind.False) || J.Get(
-                snapshot,
-                "text"
-            )
-                .ValueKind != JsonValueKind.String {
+            let approvedText = J.Get(snapshot, "text")
+            if (present.ValueKind != JsonValueKind.True && present.ValueKind != JsonValueKind.False) ||
+                approvedText.ValueKind != JsonValueKind.String {
                 throw Exception("Invalid approved DECREE.md snapshot")
             }
-            let text = J.Text(snapshot, "text")
+            let text = approvedText.GetString() ?? ""
             if !J.Bool(snapshot, "present") {
                 if J.Get(snapshot, "sha256").ValueKind != JsonValueKind.Null || text != "" {
                     throw Exception("Invalid absent DECREE.md snapshot")
