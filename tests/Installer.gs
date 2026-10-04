@@ -27,6 +27,10 @@ internal class Installer {
         }
 
         internal func Fixture(args[]string, root string) int32 {
+            if args.Length == 1 && args[0] == "--version" {
+                Console.WriteLine("curl fixture")
+                return 0
+            }
             let statePath = Path.Combine(root, "state.json")
             let state = Check.Json(File.ReadAllText(statePath))
             if Check.Text(state["coordinator_download"]) == "true" {

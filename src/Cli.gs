@@ -73,8 +73,13 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
+            CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
+            CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
+            CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
+            CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
+            CliOption("operation", "ACTION", "Access operation", "init trust untrust grant remove deny restore check"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption(
                 "base-branch",
@@ -105,6 +110,7 @@ internal class Cli {
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
             CliOption("pr", "N", "Positive pull request number"),
+            CliOption("prs", "N,N", "Explicit selection of 2 to 16 unique positive PR numbers"),
             CliOption("watch", "", "Wait for checks; default: off"),
             CliOption("timeout", "N", "Check wait limit, 1..86400 seconds; default: 1200"),
             CliOption("state", "SHA", "Exact coordination-state commit"),
@@ -127,10 +133,10 @@ internal class Cli {
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "doctor",
+                "owner,managed,external,auth,non-interactive",
                 "",
-                "",
-                "Check tools and sandbox locally; no inference.",
-                "",
+                "Check the selected role locally; no login required unless --auth, no inference.",
+                "[--owner|--managed|--external] [--auth] [--non-interactive]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -189,6 +195,15 @@ internal class Cli {
                 "coordinator-setup --repo owner/project --output coordinator.yml"
                 ,
                 effects: "local_read local_write github_read"
+            ),
+            CliCommand(
+                "access",
+                "repo,donor,issue,operation",
+                "repo,operation",
+                "Owner: mutate numeric donor membership, or check current task eligibility; no inference.",
+                "--repo OWNER/REPO --operation ACTION [--donor LOGIN] [--issue N]",
+                "access --repo owner/project --operation trust --donor donor",
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "coordination",
@@ -290,9 +305,9 @@ internal class Cli {
             CliCommand(
                 "approve",
                 "repo,issue,donor,base-branch",
-                "repo,issue,donor",
-                "Write GitHub approval, assignment and label; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
+                "repo,issue",
+                "Write GitHub task approval and label; legacy scope also requires one donor assignment.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH]",
                 "approve https://github.com/owner/project/issues/42 --donor donor"
                 ,
                 effects: "local_read github_read github_write"
@@ -375,6 +390,15 @@ internal class Cli {
                 "[--repo OWNER/REPO] --pr N",
                 "verify-pr --repo owner/project --pr 10"
                 ,
+                effects: "local_read github_read"
+            ),
+            CliCommand(
+                "overlaps",
+                "repo,prs",
+                "repo,prs",
+                "Read selected contribution filename overlap and native issue dependencies; advisory only.",
+                "--repo OWNER/REPO --prs N,N",
+                "overlaps --repo owner/project --prs 12,34",
                 effects: "local_read github_read"
             ),
             CliCommand(
@@ -605,8 +629,38 @@ internal class Cli {
             return text.ToString().TrimEnd()
         }
 
+        internal func PullNumbers(value string) List[int32] {
+            let parts = value.Split(',')
+            if parts.Length < 2 || parts.Length > 16 {
+                throw Exception("--prs requires 2 to 16 unique positive PR numbers")
+            }
+            let numbers = List[int32]()
+            let seen = HashSet[int32]()
+            for part in parts {
+                var number int32
+                if !Regex.IsMatch(part, "^[0-9]+\\z") || !Int32.TryParse(part, out number) || number < 1 || !seen.Add(
+                    number
+                ) {
+                    throw Exception("--prs requires 2 to 16 unique positive PR numbers")
+                }
+                numbers.Add(number)
+            }
+            return numbers
+        }
+
         internal func Validate(args Args) {
             let command = Find(args.Command)
+            if args.Command == "doctor" {
+                var scopes int32
+                for key in[]string{"owner", "managed", "external"} {
+                    if args.Get(key) == "true" {
+                        scopes++
+                    }
+                }
+                if scopes > 1 {
+                    throw Exception("Choose one doctor scope: --owner, --managed or --external")
+                }
+            }
             if args.Command == "recover" {
                 if args.Get("prepare") == "true" &&
                     (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {
@@ -631,6 +685,9 @@ internal class Cli {
             }
             if args.Get("verification-reserve") != "" && args.Command == "prepare" && args.Get("source") != "tokate" {
                 throw Exception("--verification-reserve requires --source tokate")
+            }
+            if args.Get("prs") != "" {
+                PullNumbers(args.Get("prs"))
             }
             for key in[]string{"seconds", "verification-reserve", "timeout", "pr"} {
                 if args.Get(key) != "" {

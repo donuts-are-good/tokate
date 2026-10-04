@@ -118,10 +118,10 @@ func Dispatch(options Args) int32 {
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
-        Startup.Check(options.Command)
+        Startup.Check(options)
     }
     if options.Command == "doctor" {
-        return Startup.Doctor()
+        return Startup.Doctor(options)
     } else if options.Command == "defaults" {
         let value = DonorDefaults.Run(options)
         if PublicOutput.Enabled {
@@ -155,6 +155,8 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "coordinator-setup" {
         CoordinatorSetup.Run(options)
         PublicOutput.ResultData = J.Map("repo", options.Get("repo"), "output", Path.GetFullPath(options.Need("output")))
+    } else if options.Command == "access" {
+        AccessState.Run(options)
     } else if options.Command == "coordinate" {
         Coordinator.Run(options)
     } else if options.Command == "coordination" {
@@ -208,6 +210,8 @@ func Dispatch(options Args) int32 {
         }
     } else if options.Command == "publish" {
         Publication.Publish(Path.GetFullPath(options.Need("run")))
+    } else if options.Command == "overlaps" {
+        Overlaps.Run(options)
     } else if options.Command == "checks" {
         return Publication.Checks(options)
     } else if options.Command == "policy" {

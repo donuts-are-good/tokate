@@ -245,7 +245,7 @@ internal class Amendment {
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(J.Get(viewer, "id"))
-            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"))
+            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
             let value = state.Value()
             let original = J.Get(value, "contribution")
             let metadata = J.Get(original, "metadata")
@@ -742,6 +742,12 @@ internal class Amendment {
                 ) != snapshot {
                     throw Exception("Amendment checkout changed before push")
                 }
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 Commands.Git(
                     checkout,
                     "-c",
