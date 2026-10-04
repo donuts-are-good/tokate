@@ -152,8 +152,9 @@ internal class Diagnostics {
                     tools
                 },
                 "error",
-                "command_failed"
+                "missing_tools"
             )
+            Check.That(Check.Text(Row(external, "git")["status"]) == "missing", "External preparation omitted Git")
             Check.That(!File.ReadAllText(calls).Contains("codex"), "External preparation needed Codex")
             let managed = Call(
                 binary,
