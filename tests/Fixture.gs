@@ -567,36 +567,40 @@ internal class Fixture {
         }
         let parts = path.Split('/')
         Check.That(parts[0] == "repos", "Expected repository API")
-        let repo = parts[1] + "/" + parts[2]
-        let folder = repo == "owner/project" ? "upstream": "fork"
+        let repo = (parts[1] + "/" + parts[2]).ToLowerInvariant()
+        let folder = State["repository_folders"]?[repo] == nil ? (repo == "owner/project" ? "upstream": "fork"):
+        Check.Text(State["repository_folders"]?[repo])
         let tail = String.Join("/", parts, 3, parts.Length - 3)
         if tail == "" {
             if folder == "fork" && Check.Text(State["missing_fork"]) == "true" {
                 return Response(404)
             }
-            return Answer(
+            let info = Check.Map(
+                "default_branch",
+                State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
+                "id",
+                folder == "fork" ? 2: (State["repo_id"] ?? JsonValue.Create(1) as JsonNode),
+                "full_name",
+                repo,
+                "owner",
                 Check.Map(
-                    "default_branch",
-                    State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
+                    "login",
+                    parts[1],
                     "id",
-                    folder == "fork" ? 2: (State["repo_id"] ?? JsonValue.Create(1) as JsonNode),
-                    "full_name",
-                    repo,
-                    "owner",
-                    Check.Map(
-                        "login",
-                        parts[1],
-                        "id",
-                        folder == "fork" ? (
-                            State["fork_owner_id"] ?? JsonValue.Create(123) as JsonNode
-                        ): JsonValue.Create(1)
-                    ),
-                    "permissions",
-                    Check.Map("push", actor == parts[1]),
-                    "parent",
-                    Check.Map("full_name", "owner/project")
-                )
+                    folder == "fork" ? (State["fork_owner_id"] ?? JsonValue.Create(123) as JsonNode): JsonValue.Create(
+                        1
+                    )
+                ),
+                "permissions",
+                Check.Map("push", String.Equals(actor, parts[1], StringComparison.OrdinalIgnoreCase))
             )
+            if folder == "fork" {
+                info["parent"] = Check.Map(
+                    "full_name",
+                    State["fork_parent"] ?? JsonValue.Create("owner/project") as JsonNode
+                )
+            }
+            return Answer(info)
         }
         if tail.StartsWith("issues/comments/") {
             return Answer(
@@ -1268,9 +1272,13 @@ internal class Fixture {
             }
             let command = List[string]()
             for arg in args {
-                if arg == "https://github.com/owner/project.git" {
+                if String.Equals(arg, "https://github.com/owner/project.git", StringComparison.OrdinalIgnoreCase) {
                     command.Add(Path.Combine(Root, "upstream"))
-                } else if arg == "https://github.com/donor/project.git" {
+                } else if String.Equals(
+                    arg,
+                    "https://github.com/donor/project.git",
+                    StringComparison.OrdinalIgnoreCase
+                ) {
                     command.Add(Path.Combine(Root, "fork"))
                 } else {
                     command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)

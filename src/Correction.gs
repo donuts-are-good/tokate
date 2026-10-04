@@ -119,7 +119,7 @@ internal class Correction {
             )
                 .ToString() ||
                 (
-                run.Text("head_repo") != run.Text("repo") && !String.Equals(
+                !Data.SameRepo(run.Text("head_repo"), run.Text("repo")) && !String.Equals(
                     J.Text(J.Get(info, "parent"), "full_name"),
                     run.Text("repo"),
                     StringComparison.OrdinalIgnoreCase
@@ -180,7 +180,11 @@ internal class Correction {
                 "inference_exit_code",
                 "turn_completed"
             } {
-                if !Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
+                if key == "repo" || key == "head_repo" {
+                    if !Data.SameRepo(original.Text(key), run.Text(key)) {
+                        throw Exception("Saved original authority changed: " + key)
+                    }
+                } else if !Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
                     throw Exception("Saved original authority or execution attribution changed: " + key)
                 }
             }

@@ -51,7 +51,7 @@ internal class V2Contribution {
             }
             let fork = Data.Repo(run.Text("head_repo"))
             if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
-                fork == repo {
+                Data.SameRepo(fork, repo) {
                 throw Exception("Use a donor-owned upstream fork")
             }
             if run.Number("seconds") < 1 || run.Number("seconds") > J.Number(policy.Value, "max_seconds") ||
@@ -387,15 +387,14 @@ internal class V2Contribution {
                     let canonical = GitHub.Api("repos/" + repo + "/issues/comments/" + id.ToString())
                     if RequestData.PositiveId(J.Get(canonical, "id")) != id || RequestData.PositiveId(
                         J.Get(J.Get(canonical, "user"), "id")
-                    ) != RequestData.PositiveId(actor) || J.Text(
-                        canonical,
-                        "issue_url"
-                    ) != "https://api.github.com/repos/" +
-                        repo +
-                        "/issues/" +
-                        issue.ToString() || J.Text(canonical, "body") != body || RequestData.Canonical(
-                        candidate
-                    ) != RequestData.Canonical(request) {
+                    ) != RequestData.PositiveId(actor) || !GitHub.IsIssueUrl(
+                        J.Text(canonical, "issue_url"),
+                        repo,
+                        issue
+                    ) ||
+                        J.Text(canonical, "body") != body || RequestData.Canonical(candidate) != RequestData.Canonical(
+                        request
+                    ) {
                         throw Exception("Request UUID has changed actor, contents, repository or issue evidence")
                     }
                     count++
@@ -431,7 +430,10 @@ internal class V2Contribution {
             }
             if File.Exists(journal) {
                 let saved = RequestData.FileData(journal, 16384)
-                if J.Text(saved, "repo") != repo || J.Number(saved, "issue") != issue || J.Get(saved, "actor")
+                if !Data.SameRepo(J.Text(saved, "repo"), repo) || J.Number(saved, "issue") != issue || J.Get(
+                    saved,
+                    "actor"
+                )
                     .ToString() != actor.ToString() || J.Text(saved, "binding") != binding || RequestData.Canonical(
                     J.Get(saved, "request")
                 ) != RequestData.Canonical(value) {
@@ -491,10 +493,7 @@ internal class V2Contribution {
                     J.Map("body", "/tokate " + RequestData.Canonical(value)),
                     expires: expires
                 )
-                if J.Text(posted, "issue_url") != "https://api.github.com/repos/" +
-                    repo +
-                    "/issues/" +
-                    issue.ToString() || RequestData.PositiveId(
+                if !GitHub.IsIssueUrl(J.Text(posted, "issue_url"), repo, issue) || RequestData.PositiveId(
                     J.Get(J.Get(posted, "user"), "id")
                 ) != RequestData.PositiveId(actor) || J.Text(posted, "body") != "/tokate " + RequestData.Canonical(
                     value
@@ -681,19 +680,20 @@ internal class V2Contribution {
                 .Text(receipt, "expected") {
                 throw CliFailure("stale_approval", "Receipt does not match the authoritative contribution revision")
             }
-            if J.Text(receipt, "repo") != repo || J.Text(receipt, "approval") != J.Text(state.Value(), "approval_id") ||
+            if !Data.SameRepo(J.Text(receipt, "repo"), repo) || J.Text(receipt, "approval") != J.Text(
+                state.Value(),
+                "approval_id"
+            ) ||
                 J.Text(receipt, "reservation") != J.Text(J.Get(state.Value(), "reservation"), "reservation") ||
                 J.Number(J.Get(current, "outcome"), "pr") != number || J.Text(receipt, "head") != exactHead || J.Text(
                 J.Get(pull, "head"),
                 "sha"
             ) != exactHead ||
-                J.Text(J.Get(pull, "head"), "ref") != J.Text(metadata, "branch") || J.Text(
-                J.Get(J.Get(pull, "head"), "repo"),
-                "full_name"
-            ) != J.Text(metadata, "fork") || J.Text(J.Get(pull, "base"), "ref") != J.Text(
-                J.Get(record, "approval"),
-                "base_branch"
-            ) {
+                J.Text(J.Get(pull, "head"), "ref") != J.Text(metadata, "branch") || !Data.SameRepo(
+                J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"),
+                J.Text(metadata, "fork")
+            ) ||
+                J.Text(J.Get(pull, "base"), "ref") != J.Text(J.Get(record, "approval"), "base_branch") {
                 throw CliFailure("stale_approval", "PR receipt lacks current exact-commit coordination authority")
             }
             if AccessState.Task(J.Get(record, "approval")) {

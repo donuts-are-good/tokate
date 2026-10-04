@@ -162,6 +162,12 @@ internal class Data {
             return value
         }
 
+        internal func SameRepo(left string, right string) bool -> String.Equals(
+            left,
+            right,
+            StringComparison.OrdinalIgnoreCase
+        )
+
         internal func CommitSha(value string) string {
             if value.Length != 40 || !Regex.IsMatch(value, "^[0-9a-f]{40}$") {
                 throw Exception("Expected an exact 40-character Git commit SHA")
@@ -193,6 +199,16 @@ internal class Data {
 
 internal class GitHub {
     shared {
+        internal func IsIssueUrl(value string, repo string, number int32) bool {
+            let prefix = "https://api.github.com/repos/"
+            let suffix = "/issues/" + number.ToString()
+            return value.Length > prefix.Length + suffix.Length && value.StartsWith(prefix, StringComparison.Ordinal) &&
+                value.EndsWith(suffix, StringComparison.Ordinal) && Data.SameRepo(
+                value.Substring(prefix.Length, value.Length - prefix.Length - suffix.Length),
+                repo
+            )
+        }
+
         internal func AutomationCommit(message string, tree string, parents IEnumerable[string]) Object {
             let identity = J.Map("name", "Tokate", "email", "tokate@users.noreply.github.com")
             return J.Map(

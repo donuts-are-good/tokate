@@ -68,11 +68,11 @@ internal class Synchronization {
                 "version,id,repo,repository_id,issue,pr,approval_version,approval,base,target,upstream,previous,candidate,expected,fork,branch,receipt"
             )
             var id Guid
-            if J.Number(value, "version") != 1 || !Guid.TryParseExact(J.Text(value, "id"), "D", out id) || J.Text(
+            if J.Number(value, "version") != 1 || !Guid.TryParseExact(J.Text(value, "id"), "D", out id) ||
+                !Data.SameRepo(J.Text(value, "repo"), repo) || J.Number(value, "issue") < 1 || J.Number(
                 value,
-                "repo"
-            ) != repo ||
-                J.Number(value, "issue") < 1 || J.Number(value, "pr") < 1 ||
+                "pr"
+            ) < 1 ||
                 (J.Number(value, "approval_version") != 1 && J.Number(value, "approval_version") != 2) ||
                 J
                 .Get(value, "receipt").ValueKind != JsonValueKind.Object {
@@ -158,7 +158,7 @@ internal class Synchronization {
                     approved,
                     "base_branch"
                 ) ||
-                    J.Text(value, "fork") != fork || J.Text(value, "branch") != branch || J.Text(
+                    !Data.SameRepo(J.Text(value, "fork"), fork) || J.Text(value, "branch") != branch || J.Text(
                     item,
                     "candidate"
                 ) != J.Text(value, "candidate") || J.Text(item, "upstream") != J.Text(value, "upstream") || J.Text(
@@ -167,7 +167,7 @@ internal class Synchronization {
                 ) != J.Text(value, "previous") || J.Text(receipt, "approval") != approval || J.Number(
                     receipt,
                     "version"
-                ) != J.Number(value, "approval_version") || J.Text(receipt, "repo") != repo || J.Number(
+                ) != J.Number(value, "approval_version") || !Data.SameRepo(J.Text(receipt, "repo"), repo) || J.Number(
                     receipt,
                     "issue"
                 ) != J.Number(value, "issue") || J.Text(receipt, "donor") != J.Text(approved, "donor") ||
@@ -316,9 +316,9 @@ internal class Synchronization {
             if J.Text(J.Get(reference, "object"), "sha") != J.Text(value, "previous") || J.Text(
                 J.Get(pull, "head"),
                 "ref"
-            ) != J.Text(value, "branch") || J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name") != J.Text(
-                value,
-                "fork"
+            ) != J.Text(value, "branch") || !Data.SameRepo(
+                J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"),
+                J.Text(value, "fork")
             ) {
                 throw Exception("Canonical published donor branch changed during grant creation")
             }

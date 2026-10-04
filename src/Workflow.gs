@@ -243,12 +243,12 @@ internal class Workflow {
             if J.Number(approval, "version") != 1 {
                 throw Exception("Version-1 operations require a version-1 approval")
             }
-            if J.Text(approval, "repo") != repo || J.Number(approval, "issue") != number || !String.Equals(
-                J.Text(approval, "donor"),
-                donor,
-                StringComparison.OrdinalIgnoreCase
-            ) ||
-                J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
+            if !Data.SameRepo(J.Text(approval, "repo"), repo) || J.Number(approval, "issue") != number ||
+                !String.Equals(J.Text(approval, "donor"), donor, StringComparison.OrdinalIgnoreCase) || J.Text(
+                approval,
+                "issue_hash"
+            ) != GitHub
+                .Fingerprint(issue) {
                 throw CliFailure("stale_approval", "Issue or assignment changed. The owner must approve again.")
             }
             let configuration = ApprovalBase.Check(repo, approval, 1)
@@ -310,7 +310,7 @@ internal class Workflow {
             let headInfo = GitHub.Api("repos/" + head, missing: true)
             if !J.Bool(J.Get(headInfo, "permissions"), "push") ||
                 (
-                head != repo && !String.Equals(
+                !Data.SameRepo(head, repo) && !String.Equals(
                     J.Text(J.Get(headInfo, "parent"), "full_name"),
                     repo,
                     StringComparison.OrdinalIgnoreCase

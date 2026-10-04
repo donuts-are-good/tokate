@@ -24,7 +24,7 @@ internal class Coordinator {
                 .ValueKind != JsonValueKind.Undefined {
                 throw Exception("Expected a created issue_comment /tokate request")
             }
-            if J.Text(J.Get(event, "repository"), "full_name") != repo {
+            if !Data.SameRepo(J.Text(J.Get(event, "repository"), "full_name"), repo) {
                 throw Exception("Event repository does not match coordinator repository")
             }
             let number = J.Number(J.Get(event, "issue"), "number")
@@ -36,14 +36,15 @@ internal class Coordinator {
             let info = Workflow.RequireOwner(repo)
             if number < 1 || J.Get(J.Get(event, "repository"), "id").ToString() != J.Get(info, "id").ToString() ||
                 J
-                .Get(canonical, "id").ToString() != commentId.ToString() || J.Text(
+                .Get(canonical, "id").ToString() != commentId.ToString() || !GitHub.IsIssueUrl(
+                J.Text(canonical, "issue_url"),
+                repo,
+                number
+            ) ||
+                actor.ToString() != J.Get(J.Get(J.Get(event, "comment"), "user"), "id").ToString() || J.Text(
                 canonical,
-                "issue_url"
-            ) != "https://api.github.com/repos/" +
-                repo +
-                "/issues/" +
-                number.ToString() || actor.ToString() != J.Get(J.Get(J.Get(event, "comment"), "user"), "id")
-                .ToString() || J.Text(canonical, "body") != J.Text(J.Get(event, "comment"), "body") {
+                "body"
+            ) != J.Text(J.Get(event, "comment"), "body") {
                 throw Exception("Comment author, content, repository or issue identity changed")
             }
             let text = J.Text(canonical, "body")
@@ -318,13 +319,13 @@ internal class Coordinator {
                 .ToString() != actor.ToString() || J.Text(metadata, "previous") != Amendment.Head(value) || J.Number(
                 metadata,
                 "pr"
-            ) != J.Number(J.Get(current, "outcome"), "pr") || J.Text(metadata, "fork") != J.Text(old, "fork") || J.Text(
-                metadata,
-                "branch"
-            ) != J.Text(old, "branch") || J.Text(metadata, "branch") != "tokate/v2-" + J.Text(
-                J.Get(value, "reservation"),
-                "reservation"
-            ) {
+            ) != J.Number(J.Get(current, "outcome"), "pr") || !Data.SameRepo(
+                J.Text(metadata, "fork"),
+                J.Text(old, "fork")
+            ) ||
+                J.Text(metadata, "branch") != J.Text(old, "branch") || J.Text(metadata, "branch") != "tokate/v2-" +
+                J
+                .Text(J.Get(value, "reservation"), "reservation") {
                 throw Exception("Amendment differs from current published contribution authority")
             }
             ValidateFork(repo, donor, metadata, actor)
@@ -556,7 +557,10 @@ internal class Coordinator {
 
         internal func ValidateFork(repo string, donor string, metadata JsonElement, actor JsonElement) {
             let fork = Data.Repo(J.Text(metadata, "fork"))
-            if !String.Equals(fork.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) || fork == repo {
+            if !String.Equals(fork.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) || Data.SameRepo(
+                fork,
+                repo
+            ) {
                 throw Exception("Use a donor-owned fork")
             }
             let info = GitHub.Api("repos/" + fork)

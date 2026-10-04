@@ -193,15 +193,16 @@ internal class Amendment {
                 .ValueKind != JsonValueKind.Undefined &&
                 J
                 .Get(pull, "merged_at").ValueKind != JsonValueKind.Null || !J.Text(pull, "body").Contains(marker) ||
-                J.Text(head, "ref") != run.Text("branch") || J.Text(J.Get(head, "repo"), "full_name") != run.Text(
-                "head_repo"
+                J.Text(head, "ref") != run.Text("branch") || !Data.SameRepo(
+                J.Text(J.Get(head, "repo"), "full_name"),
+                run.Text("head_repo")
             ) ||
                 J.Text(J.Get(pull, "base"), "ref") != run.Text("base_branch") ||
                 (
-                J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name") != "" && J.Text(
-                    J.Get(J.Get(pull, "base"), "repo"),
-                    "full_name"
-                ) != run.Text("repo")
+                J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name") != "" && !Data.SameRepo(
+                    J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name"),
+                    run.Text("repo")
+                )
             ) ||
                 (J.Text(head, "sha") != previous && J.Text(head, "sha") != candidate) {
                 throw Exception("Existing PR changed, closed or merged; saved amendment retained")
@@ -223,7 +224,7 @@ internal class Amendment {
                 let info = GitHub.Api("repos/" + Data.Repo(run.Text("head_repo")))
                 if !J.Bool(J.Get(info, "permissions"), "push") ||
                     (
-                    run.Text("head_repo") != run.Text("repo") && !String.Equals(
+                    !Data.SameRepo(run.Text("head_repo"), run.Text("repo")) && !String.Equals(
                         J.Text(J.Get(info, "parent"), "full_name"),
                         run.Text("repo"),
                         StringComparison.OrdinalIgnoreCase
@@ -253,17 +254,15 @@ internal class Amendment {
             if J.Text(value, "approval_id") != run.Text("approval") || J.Text(
                 J.Get(value, "reservation"),
                 "reservation"
-            ) != run.Text("id") || J.Get(original, "actor").ToString() != J.Get(viewer, "id").ToString() || J.Text(
+            ) != run.Text("id") || J.Get(original, "actor").ToString() != J.Get(viewer, "id").ToString() ||
+                !Data.SameRepo(J.Text(metadata, "fork"), run.Text("head_repo")) || J.Text(
                 metadata,
-                "fork"
-            ) != run.Text("head_repo") || J.Text(metadata, "branch") != run.Text("branch") || run.Text(
                 "branch"
-            ) != "tokate/v2-" +
-                run.Text("id") || run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
-                approval,
-                "base_branch"
-            ) ||
-                run.Text("policy_hash") != J.Text(approval, "policy_hash") {
+            ) != run.Text("branch") || run.Text("branch") != "tokate/v2-" + run.Text("id") || run.Text(
+                "base"
+            ) != J.Text(approval, "base") || run.Text("base_branch") != J.Text(approval, "base_branch") || run.Text(
+                "policy_hash"
+            ) != J.Text(approval, "policy_hash") {
                 throw CliFailure("stale_approval", "Published contribution authority changed")
             }
             if amendment != nil && state.Sha != amendment.Text("expected") {

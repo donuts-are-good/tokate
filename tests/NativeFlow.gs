@@ -2241,6 +2241,7 @@ internal class NativeFlow : IDisposable {
                 "CanonicalVerification",
                 "CanonicalPublication",
                 "SelfOwnedFlow",
+                "RepositoryIdentity",
                 "PublicationRevocation",
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
@@ -2399,6 +2400,9 @@ internal class NativeFlow : IDisposable {
                     }
                     case "CanonicalPublication" {
                         flow.CanonicalPublication()
+                    }
+                    case "RepositoryIdentity" {
+                        RepositoryIdentityChecks.All(binary)
                     }
                     case "SelfOwnedFlow" {
                         flow.SelfOwnedFlow()

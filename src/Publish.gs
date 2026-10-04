@@ -245,7 +245,7 @@ internal class Publication {
             if J.Number(receipt, "version") == 2 {
                 return V2Contribution.VerifyReceipt(repo, number, pull, receipt, ready, paths)
             }
-            if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
+            if J.Number(receipt, "version") != 1 || !Data.SameRepo(J.Text(receipt, "repo"), repo) || J.Text(
                 J.Get(pull, "user"),
                 "login"
             ) != J.Text(receipt, "donor") {

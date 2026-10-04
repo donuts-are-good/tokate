@@ -112,10 +112,8 @@ internal class CorrectionPublication {
                 "<!-- tokate-receipt:",
                 StringComparison.Ordinal
             ) ||
-                J.Text(head, "sha") != correction.Text("commit") || J.Text(head, "ref") != run.Text("branch") || J.Text(
-                J.Get(head, "repo"),
-                "full_name"
-            ) != run.Text("head_repo") || !String.Equals(
+                J.Text(head, "sha") != correction.Text("commit") || J.Text(head, "ref") != run.Text("branch") ||
+                !Data.SameRepo(J.Text(J.Get(head, "repo"), "full_name"), run.Text("head_repo")) || !String.Equals(
                 J.Text(J.Get(pull, "user"), "login"),
                 run.Text("donor"),
                 StringComparison.OrdinalIgnoreCase

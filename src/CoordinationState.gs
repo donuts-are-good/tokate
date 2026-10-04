@@ -123,7 +123,10 @@ internal class CoordinationState {
             }
             result.Sha = Data.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
             let value = RequestData.Parse(GitHub.FileAt(repo, "state.json", result.Sha), 1024 * 1024)
-            if J.Number(value, "version") != 2 || J.Text(value, "repo") != repo || J.Number(value, "issue") != issue {
+            if J.Number(value, "version") != 2 || !Data.SameRepo(J.Text(value, "repo"), repo) || J.Number(
+                value,
+                "issue"
+            ) != issue {
                 throw Exception("Invalid version-2 coordination state")
             }
             for field in value.EnumerateObject() {
