@@ -26,7 +26,7 @@ effort explicitly or explicitly save Tokate-owned defaults.
   `global.json` SDK/MSBuild startup; this does not validate dependency restore
   or builds. Tool startup, PATH, login and catalogs do not prove model access
   or remaining subscription allowance. See the
-  [observed Linux matrix and limits](reference.md#linux-compatibility).
+  [Linux support limits](reference.md#install-and-check-support).
 - Only explicit doctor `--auth` requests `gh auth status --hostname github.com`
   and (for managed donors) `codex login status`. Diagnostics report sanitized
   statuses and repair actions, never raw tool authentication output. Tokate
@@ -72,7 +72,7 @@ Shell setup appends a guarded PATH hook without reading existing shell startup
 contents. Installer-owned files under `~/.local/share/tokate` record setup state.
 Fish gets a dedicated configuration snippet. No shell configuration contents are
 uploaded. Uninstall preserves saved work and credentials. See
-[installation details](reference.md#installation) for retained setup markers.
+[installation details](reference.md#install-and-check-support) for retained setup markers.
 
 Source: [install.sh](../site/install.sh), [Installation.gs](../src/Installation.gs).
 
@@ -102,7 +102,7 @@ Response headers, bodies and gh stderr are not persisted as diagnostics or
 copied into errors. `--traffic`
 reports only numeric attempted reads, mutations, live 304s and retries on stderr;
 it excludes unseen GitHub CLI/Git requests and workflow executions. See
-[API bounds and recovery](reference.md#commands-and-recovery) and
+[API output and retry limits](reference.md#automate-commands) and
 [ApiTransport.gs](../src/ApiTransport.gs).
 
 Version-2 `request --file FILE` writes a local posting intent and lock beside the
