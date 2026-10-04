@@ -69,6 +69,10 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
+            CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
+            CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
+            CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
+            CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
@@ -121,10 +125,10 @@ internal class Cli {
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "doctor",
+                "owner,managed,external,auth,non-interactive",
                 "",
-                "",
-                "Check tools and sandbox locally; no inference.",
-                "",
+                "Check the selected role locally; no login required unless --auth, no inference.",
+                "[--owner|--managed|--external] [--auth] [--non-interactive]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -593,6 +597,17 @@ internal class Cli {
 
         internal func Validate(args Args) {
             let command = Find(args.Command)
+            if args.Command == "doctor" {
+                var scopes int32
+                for key in[]string{"owner", "managed", "external"} {
+                    if args.Get(key) == "true" {
+                        scopes++
+                    }
+                }
+                if scopes > 1 {
+                    throw Exception("Choose one doctor scope: --owner, --managed or --external")
+                }
+            }
             if args.Command == "recover" {
                 if args.Get("prepare") == "true" &&
                     (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {

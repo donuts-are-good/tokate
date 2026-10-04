@@ -110,10 +110,10 @@ func Dispatch(options Args) int32 {
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
-        Startup.Check(options.Command)
+        Startup.Check(options)
     }
     if options.Command == "doctor" {
-        return Startup.Doctor()
+        return Startup.Doctor(options)
     } else if options.Command == "defaults" {
         let value = DonorDefaults.Run(options)
         if PublicOutput.Enabled {

@@ -438,7 +438,14 @@ internal class CliDiscovery {
             let log = Path.Combine(temp.Root, "calls")
             for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
                 let tool = Path.Combine(bin, name)
-                File.WriteAllText(tool, "#!/bin/sh\nprintf '%s\\n' '" + name + "' \"$$@\" >> '" + log + "'\nexit 17\n")
+                File.WriteAllText(
+                    tool,
+                    "#!/bin/sh\nprintf '%s\\n' '" +
+                        name +
+                        "' \"$$@\" >> '" +
+                        log +
+                        "'\ntest \"$1\" = --version && exit 0\nexit 17\n"
+                )
                 File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             }
             for argv in[][]string{[]string{}, []string{"--help"}, []string{"-h"}, []string{"help"}} {
