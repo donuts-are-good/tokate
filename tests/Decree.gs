@@ -206,19 +206,47 @@ internal class DecreeFlow : IDisposable {
         }
 
         internal func Replacement(binary string, version int32) {
-            using let test = Create(binary, version)
-            test.Text(Exact)
-            test.Flow.Approve()
-            let run = test.Start()
-            test.Flow.Reload()
-            test.Flow.State["decree_checkout_replacement"] = JsonValue.Create("Donor-controlled replacement")
-            test.Flow.Save()
-            Check.Contains(
-                test.Flow.Call([]string{"work", "--run", run}, 1).Error,
-                "Contribution changes approved root DECREE.md"
-            )
-            test.Prompt(Exact, true)
-            test.Flow.NoPr()
+            for legacy in[]bool{false, true} {
+                using let test = Create(binary, version)
+                test.Text(Exact)
+                test.Flow.Approve()
+                var run = test.Start()
+                let path = Path.Combine(run, "run.json")
+                let saved = File.ReadAllText(path)
+                if legacy {
+                    let record = Check.Json(saved)
+                    record.AsObject().Remove("preparation_version")
+                    record.AsObject().Remove("preparation_identity")
+                    run = Path.Combine(test.Flow.Temp.Root, "legacy-run")
+                    Directory.CreateDirectory(run)
+                    File.WriteAllText(Path.Combine(run, "run.json"), record.ToJsonString())
+                    test.Flow.Reload()
+                    test.Flow.State["decree_checkout_replacement"] = JsonValue.Create("Donor-controlled replacement")
+                } else {
+                    let decree = Path.Combine(run, "checkout/DECREE.md")
+                    File.WriteAllText(decree, "Donor-controlled replacement")
+                    Check.Contains(
+                        test.Flow.Call([]string{"work", "--run", run}, 1).Error,
+                        "Preserved unidentified, dirty or divergent preparation"
+                    )
+                    test.Flow.NoInference()
+                    test.Flow.NoPr()
+                    Check.That(
+                        File.ReadAllText(decree) == "Donor-controlled replacement" && File.ReadAllText(path) == saved,
+                        "Rejected preparation changed donor work or its saved run"
+                    )
+                    File.WriteAllBytes(decree, Encoding.UTF8.GetBytes(Exact))
+                    test.Flow.Reload()
+                    test.Flow.State["decree_donor_change"] = JsonValue.Create(true)
+                }
+                test.Flow.Save()
+                Check.Contains(
+                    test.Flow.Call([]string{"work", "--run", run}, 1).Error,
+                    "Contribution changes approved root DECREE.md"
+                )
+                test.Prompt(Exact, true)
+                test.Flow.NoPr()
+            }
         }
 
         internal func Freshness(binary string, version int32) {
