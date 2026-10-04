@@ -403,7 +403,7 @@ internal class CorrectionPublication {
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(J.Get(viewer, "id"))
-            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"))
+            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
                 if !Correction.Same(J.Get(record, key), J.Get(pinned, key)) {
@@ -525,6 +525,12 @@ internal class CorrectionPublication {
                 }
                 if remote != correction.Text("commit") {
                     SetStage(directory, correction, "push_pending")
+                    AccessState.Check(
+                        run.Text("repo"),
+                        run.Number("issue"),
+                        J.Get(record, "approval"),
+                        J.Get(run.Element(), "donor_id")
+                    )
                     Push(directory, run, correction)
                     remote = Remote(run, correction)
                     if remote != correction.Text("commit") {
@@ -546,6 +552,12 @@ internal class CorrectionPublication {
                 }
                 Correction.Exact(directory, run, correction, record)
                 let latest = V2Authority(directory, run, correction)
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 SetStage(directory, correction, "request_pending")
                 try {
                     GitHub.Api(

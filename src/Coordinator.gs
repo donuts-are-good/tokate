@@ -60,6 +60,9 @@ internal class Coordinator {
                     if J.Text(old, "binding") != binding {
                         throw Exception("UUID replay changed actor or request contents")
                     }
+                    if AccessState.Task(J.Get(state.Value(), "approval")) {
+                        state.Check(repo, number, donor, actor)
+                    }
                     if J.Text(request, "action") == "amend" {
                         Publication.Verify(repo, J.Number(J.Get(old, "outcome"), "pr"))
                     }
@@ -73,7 +76,7 @@ internal class Coordinator {
             ) {
                 throw CliFailure("stale_approval", "Stale state or approval; evicted requests cannot repeat effects")
             }
-            let record = state.Check(repo, number, donor)
+            let record = state.Check(repo, number, donor, actor)
             var outcome Object = J.Map()
             if J.Text(request, "action") == "claim" {
                 let reservation = J.Get(state.Value(), "reservation")
@@ -172,6 +175,7 @@ internal class Coordinator {
                 Revalidate(repo, number, state, actor, donor)
                 ValidateFork(repo, donor, metadata, actor)
                 if pull.ValueKind == JsonValueKind.Undefined {
+                    AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                     pull = GitHub.Api(
                         "repos/" + repo + "/pulls",
                         J.Map(
@@ -235,6 +239,13 @@ internal class Coordinator {
                 Revalidate(repo, number, state, actor, donor)
                 SyncProof(repo, record, state.Value(), J.Get(request, "metadata"), J.Text(request, "expected"))
             }
+            if AccessState.Task(J.Get(state.Value(), "approval")) {
+                let live = CoordinationState.Load(repo, number)
+                if live.Sha != state.Sha {
+                    throw CliFailure("stale_approval", "Coordination changed before reservation update")
+                }
+                AccessState.Check(repo, number, J.Get(live.Value(), "approval"), actor)
+            }
             try {
                 state.Write(
                     repo,
@@ -248,6 +259,17 @@ internal class Coordinator {
                         "\nPR and coordination writes are not atomic. A physical PR may lack valid authority; inspect verify-pr and redeliver the same saved UUID request only after reading current state.",
                     error
                 )
+            }
+            if AccessState.Task(J.Get(state.Value(), "approval")) {
+                let acquired = CoordinationState.Load(repo, number)
+                if acquired.Sha != state.Sha {
+                    throw CliFailure(
+                        "stale_approval",
+                        "Coordination changed after reservation update; inspect current state"
+                    )
+                }
+                acquired.Check(repo, number, donor, actor)
+                acquired.Reservation(actor)
             }
             if J.Text(request, "action") == "amend" {
                 Publication.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
@@ -387,6 +409,7 @@ internal class Coordinator {
                 if J.Text(fresh, "body") != body {
                     throw Exception("PR body changed before amendment write")
                 }
+                AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                 GitHub.Api(
                     "repos/" + repo + "/pulls/" + J.Number(metadata, "pr").ToString(),
                     J.Map("body", updated),
@@ -527,7 +550,7 @@ internal class Coordinator {
             if live.Sha != state.Sha {
                 throw CliFailure("stale_approval", "Coordination revision changed during publication")
             }
-            live.Check(repo, issue, donor)
+            live.Check(repo, issue, donor, actor)
             live.Reservation(actor)
         }
 
@@ -538,8 +561,7 @@ internal class Coordinator {
             }
             let info = GitHub.Api("repos/" + fork)
             if !String.Equals(J.Text(J.Get(info, "parent"), "full_name"), repo, StringComparison.OrdinalIgnoreCase) ||
-                J
-                .Get(J.Get(info, "owner"), "id").ToString() != actor.ToString() {
+                RequestData.PositiveId(J.Get(J.Get(info, "owner"), "id")) != RequestData.PositiveId(actor) {
                 throw Exception("Fork ownership or upstream identity differs")
             }
             let reference = GitHub.Api("repos/" + fork + "/git/ref/heads/" + J.Text(metadata, "branch"))

@@ -93,7 +93,8 @@ tokate checks --run DIR [--watch] [--timeout 1200]
 
 `work` starts inference and verifies the result. Version 1 then pushes and
 publishes a draft PR. Version 2 saves a verified commit for `submit`.
-See [version-2 commands and coordination](coordination-v2.md). `recover`, `publish` and `amend` can push and publish without inference.
+See [version-2 commands and coordination](coordination-v2.md), including the opt-in
+[independent task eligibility operations](coordination-v2.md#independent-task-eligibility-022). `recover`, `publish` and `amend` can push and publish without inference.
 `claim` writes a reservation branch and local run but starts no inference.
 Owner approval commands write to GitHub. `policy`, `verify-pr` and `checks` read
 GitHub; saved-run checks also write local results. `status`, help and completion

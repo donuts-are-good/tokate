@@ -314,6 +314,9 @@ internal class Worker {
                 Config(args, "features." + feature, "false")
             }
             args.Add("-")
+            if run.Number("version") == 2 && AccessState.Task(J.Get(record, "approval")) {
+                Workflow.Recheck(run)
+            }
             run.Fields["state"] = "running"
             run.Fields["failure_stage"] = "inference"
             run.Fields["failure_reason"] = "inference_failed"

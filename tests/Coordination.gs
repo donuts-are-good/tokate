@@ -1359,6 +1359,15 @@ internal class CoordinationFlow : IDisposable {
         internal func All(binary string, selected string = "") {
             var matched bool
             for name in[]string{
+                "EligibilityTraffic",
+                "EligibilityRaces",
+                "EligibilityLatePublication",
+                "EligibilityDeclarations",
+                "EligibilityModes",
+                "EligibilityRevocation",
+                "EligibilityAuthority",
+                "EligibilityTransport",
+                "EligibilityConcurrency",
                 "SimultaneousClaims",
                 "SimultaneousClaimsMissingParticipant",
                 "ReplayAndInterruptedState",
@@ -1389,6 +1398,10 @@ internal class CoordinationFlow : IDisposable {
                     continue
                 }
                 matched = true
+                if name.StartsWith("Eligibility", StringComparison.Ordinal) {
+                    EligibilityChecks.All(binary, name)
+                    continue
+                }
                 using let test = CoordinationFlow(binary)
                 test.Initialize()
                 switch name {

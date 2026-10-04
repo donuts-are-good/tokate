@@ -25,8 +25,11 @@ internal class V2Contribution {
             ) != run.Text("id") {
                 throw CliFailure("stale_approval", "Saved run has stale coordination authority")
             }
+            if AccessState.Task(J.Get(state.Value(), "approval")) {
+                RequestData.PositiveId(J.Get(run.Element(), "donor_id"))
+            }
             state.Reservation(J.Get(viewer, "id"))
-            let record = state.Check(repo, run.Number("issue"), run.Text("donor"))
+            let record = state.Check(repo, run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
             let approval = J.Get(record, "approval")
             if run.Text("base") != J.Text(approval, "base") || run.Text("policy_hash") != J.Text(
                 approval,
@@ -68,7 +71,7 @@ internal class V2Contribution {
                 throw CliFailure("stale_approval", "Stale coordination revision")
             }
             state.Reservation(J.Get(viewer, "id"))
-            let record = state.Check(repo, issue, donor)
+            let record = state.Check(repo, issue, donor, J.Get(viewer, "id"))
             let source = args.Need("source")
             if source != "external" && source != "tokate" {
                 throw Exception("source must be external or tokate")
@@ -435,6 +438,9 @@ internal class V2Contribution {
                 }
             }
             let state = CoordinationState.Load(repo, issue)
+            if AccessState.Task(J.Get(state.Value(), "approval")) {
+                state.Check(repo, issue, Data.Login(J.Text(viewer, "login")), actor)
+            }
             let outcome = RequestData.Recorded(state.Value(), actor, value)
             if outcome.ValueKind != JsonValueKind.Undefined {
                 Terminal.Json(outcome, "Recorded request outcome; no comment posted")
@@ -455,7 +461,7 @@ internal class V2Contribution {
             ) {
                 throw Exception("Stale state or approval; no request posted")
             }
-            state.Check(repo, issue, Data.Login(J.Text(viewer, "login")))
+            state.Check(repo, issue, Data.Login(J.Text(viewer, "login")), J.Get(viewer, "id"))
             var expires int64
             if J.Text(value, "action") != "claim" {
                 state.Reservation(actor)
@@ -572,7 +578,12 @@ internal class V2Contribution {
                         throw Exception("Saved publication has stale coordination authority")
                     }
                     state.Reservation(J.Get(viewer, "id"))
-                    state.Check(Data.Repo(run.Text("repo")), run.Number("issue"), run.Text("donor"))
+                    state.Check(
+                        Data.Repo(run.Text("repo")),
+                        run.Number("issue"),
+                        run.Text("donor"),
+                        J.Get(viewer, "id")
+                    )
                     Terminal.Json(outcome, "Recorded publication outcome; no comment posted")
                     return
                 }
@@ -601,6 +612,12 @@ internal class V2Contribution {
             )
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 Commands.Git(
                     checkout,
                     "-c",
@@ -651,7 +668,7 @@ internal class V2Contribution {
             let current = Amendment.Current(state.Value())
             let exactHead = Amendment.Head(state.Value())
             let donor = Data.Login(J.Text(receipt, "donor"))
-            let record = state.Check(repo, J.Number(receipt, "issue"), donor)
+            let record = state.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
             state.Reservation(J.Get(contribution, "actor"))
             let stateCommit = GitHub.Api("repos/" + repo + "/git/commits/" + state.Sha)
             let parents = J.Items(J.Get(stateCommit, "parents"))
@@ -676,6 +693,28 @@ internal class V2Contribution {
                 "base_branch"
             ) {
                 throw CliFailure("stale_approval", "PR receipt lacks current exact-commit coordination authority")
+            }
+            if AccessState.Task(J.Get(record, "approval")) {
+                if donor != J.Text(contribution, "donor") {
+                    throw CliFailure("stale_approval", "Receipt donor differs from the canonical contribution actor")
+                }
+                Coordinator.ValidateFork(
+                    repo,
+                    donor,
+                    J.Parse(
+                        J.Write(
+                            J.Map(
+                                "fork",
+                                J.Text(metadata, "fork"),
+                                "branch",
+                                J.Text(metadata, "branch"),
+                                "head",
+                                exactHead
+                            )
+                        )
+                    ),
+                    J.Get(contribution, "actor")
+                )
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
@@ -752,7 +791,7 @@ internal class V2Contribution {
                 if live.Sha != state.Sha {
                     throw Exception("Coordination authority changed during receipt validation")
                 }
-                live.Check(repo, J.Number(receipt, "issue"), donor)
+                live.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
                 live.Reservation(J.Get(contribution, "actor"))
                 Synchronization.Live(
                     repo,
@@ -764,6 +803,14 @@ internal class V2Contribution {
                     J.Text(metadata, "branch"),
                     exactHead,
                     ready: ready
+                )
+            }
+            if AccessState.Task(J.Get(record, "approval")) {
+                AccessState.Check(
+                    repo,
+                    J.Number(receipt, "issue"),
+                    J.Get(record, "approval"),
+                    J.Get(contribution, "actor")
                 )
             }
             let run = Data()

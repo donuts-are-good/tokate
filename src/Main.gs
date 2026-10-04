@@ -150,6 +150,8 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "coordinator-setup" {
         CoordinatorSetup.Run(options)
         PublicOutput.ResultData = J.Map("repo", options.Get("repo"), "output", Path.GetFullPath(options.Need("output")))
+    } else if options.Command == "access" {
+        AccessState.Run(options)
     } else if options.Command == "coordinate" {
         Coordinator.Run(options)
     } else if options.Command == "coordination" {
