@@ -11,6 +11,7 @@ internal class CoordinationFlow : IDisposable {
     internal let Flow NativeFlow
     internal let Tools string
     internal var Comment int32 = 10
+    internal var Issue int32 = 1
 
     internal init(binary string) {
         Flow = NativeFlow(binary)
@@ -40,7 +41,7 @@ internal class CoordinationFlow : IDisposable {
     public func Dispose() -> Flow.Dispose()
 
     internal func State() JsonNode -> Check.Json(
-        Flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1"}).Output
+        Flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", Issue.ToString()}).Output
     )
 
     internal func ClaimRequest() JsonNode {
@@ -70,7 +71,7 @@ internal class CoordinationFlow : IDisposable {
             "user",
             Check.Map("id", actor, "login", login),
             "issue_url",
-            "https://api.github.com/repos/owner/project/issues/1"
+            "https://api.github.com/repos/owner/project/issues/" + Issue.ToString()
         )
         Flow.Reload()
         if Flow.State["comments"] == nil {
@@ -88,7 +89,7 @@ internal class CoordinationFlow : IDisposable {
                 "repository",
                 Check.Map("full_name", "owner/project", "id", 1),
                 "issue",
-                Check.Map("number", 1),
+                Check.Map("number", Issue),
                 "comment",
                 comment
             )

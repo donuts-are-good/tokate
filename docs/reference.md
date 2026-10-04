@@ -86,6 +86,7 @@ tokate recover --run DIR --commit SHA --seconds N [--tools FILE]
 tokate publish --run DIR
 tokate amend --run DIR --commit SHA --seconds N [--tools FILE] [--sync G]
 tokate status --run DIR
+tokate overlaps --repo OWNER/REPO --prs 12,34 [--json]
 tokate verify-pr --repo OWNER/REPO --pr 10
 tokate checks --repo OWNER/REPO --pr 10 [--watch] [--timeout 1200]
 tokate checks --run DIR [--watch] [--timeout 1200]
@@ -95,7 +96,7 @@ tokate checks --run DIR [--watch] [--timeout 1200]
 publishes a draft PR. Version 2 saves a verified commit for `submit`.
 See [version-2 commands and coordination](coordination-v2.md). `recover`, `publish` and `amend` can push and publish without inference.
 `claim` writes a reservation branch and local run but starts no inference.
-Owner approval commands write to GitHub. `policy`, `verify-pr` and `checks` read
+Owner approval commands write to GitHub. `policy`, `overlaps`, `verify-pr` and `checks` read
 GitHub; saved-run checks also write local results. `status`, help and completion
 are local. `update` downloads and replaces Tokate; `uninstall` removes it offline.
 `doctor` probes tools and the sandbox without inference.
@@ -251,6 +252,42 @@ runs without a reason retain an explicit compatibility path for the former exact
 verification-failure sentence. Both paths preserve all recovery checks and perform
 no additional inference. No approval/run/receipt version or original execution
 provenance is migrated or reinterpreted.
+
+### Selected contribution overlap and dependencies
+
+`tokate overlaps --repo OWNER/REPO --prs 12,34` reads only explicitly selected
+contributions. Supply 2 to 16 unique positive PR numbers from one repository;
+invalid selections fail before remote reads. Repository read access is sufficient.
+The command never executes PR code or requires a donor's saved run directory.
+`--json` uses the existing schema-version-1 envelope and next actions.
+
+Each contribution reports receipt/issue/approval bindings, the exact observed PR
+head, the original approved base, the selected target and its current revision,
+and named exact-head check facts. Heads, target identities and receipt bindings
+are rechecked around collection. A changing or unavailable identity invalidates
+that contribution's evidence while unrelated selections remain inspectable.
+Target movement preserves the original approved base and receipt meaning.
+
+Pairs on the same target show advisory filename intersections, including both
+rename endpoints, from bounded complete approved-base-to-head comparisons. Missing,
+mismatched or capped diff evidence reports unknown rather than disjoint files.
+Different targets remain distinct. Filename overlap never blocks work or determines
+merge order; disjoint files and clean merge metadata do not prove compatibility.
+
+Validated task issues use GitHub's native `blocked_by` relationships one hop,
+limited to 10 pages of 100 entries. A full final page leaves completeness unknown.
+Native states, state reasons and available resolution metadata are reported;
+prose declarations are ignored. Open dependencies block the dependency gate.
+Closed-completed removes only that gate. Not-planned, duplicate or unknown
+resolutions need owner review; API failures and incomplete evidence remain unknown.
+Known open dependencies still block when other evidence is incomplete.
+
+Rows and filename samples share a bounded output budget, with complete counts,
+explicit output-completeness fields and the envelope's `truncated` indicator.
+There is no overall acceptance or ready-to-merge flag. Owners retain merge order
+and final acceptance; single-contribution `verify-pr` and fresh exact-head `checks`
+remain separate next actions. Earlier checks or owner review never prove a new
+head or target compatible.
 
 ### Issue URLs and local repository context
 

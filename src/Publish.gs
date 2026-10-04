@@ -229,7 +229,7 @@ internal class Publication {
             Terminal.Message("Draft PR: " + run.Text("pr_url"))
         }
 
-        internal func Verify(repo string, number int32, ready bool = true) Data {
+        internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data {
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
             let body = J.Text(pull, "body")
             let prefix = "<!-- tokate-receipt:"
@@ -243,7 +243,7 @@ internal class Publication {
             }
             let receipt = J.Parse(body.Substring(start + prefix.Length, end - start - prefix.Length))
             if J.Number(receipt, "version") == 2 {
-                return V2Contribution.VerifyReceipt(repo, number, pull, receipt, ready)
+                return V2Contribution.VerifyReceipt(repo, number, pull, receipt, ready, paths)
             }
             if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
                 J.Get(pull, "user"),
@@ -302,16 +302,18 @@ internal class Publication {
                     J.Text(head, "sha"),
                     ready: ready
                 )
-                Synchronization.Remote(
-                    repo,
-                    J.Get(record, "policy"),
-                    J.Get(record, "approval"),
-                    J.Text(approval, "base"),
-                    history,
-                    fork,
-                    J.Text(head, "sha")
-                )
-            } else {
+                if paths {
+                    Synchronization.Remote(
+                        repo,
+                        J.Get(record, "policy"),
+                        J.Get(record, "approval"),
+                        J.Text(approval, "base"),
+                        history,
+                        fork,
+                        J.Text(head, "sha")
+                    )
+                }
+            } else if paths {
                 ProtectedPaths.Remote(
                     repo,
                     J.Get(record, "policy"),
@@ -375,10 +377,21 @@ internal class Publication {
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["commit"] = J.Text(head, "sha")
             run.Fields["policy"] = J.Get(record, "policy")
+            Binding(run, receipt, approval, J.Text(record, "sha"))
             return run
         }
 
-        private func CheckRows(repo string, head string) JsonElement {
+        internal func Binding(run Data, receipt JsonElement, approval JsonElement, revision string) {
+            for key in[]string{"version", "issue", "approval", "donor"} {
+                run.Fields[key] = J.Get(receipt, key)
+            }
+            for key in[]string{"base", "base_branch"} {
+                run.Fields[key] = J.Get(approval, key)
+            }
+            run.Fields["authority_revision"] = revision
+        }
+
+        internal func CheckRows(repo string, head string) JsonElement {
             let rows = List[Object]()
             let prefix = "repos/" + repo + "/commits/" + head
             for kind in[]string{"check-runs", "status"} {
@@ -386,6 +399,12 @@ internal class Publication {
                 var inspected int32
                 while page <= 10 {
                     let response = GitHub.Api(prefix + "/" + kind + "?per_page=100&page=" + page.ToString())
+                    if kind == "status" && J.Get(response, "sha").ValueKind != JsonValueKind.Undefined && J.Text(
+                        response,
+                        "sha"
+                    ) != head {
+                        throw Exception("Commit status belongs to a different head")
+                    }
                     let items = J.Get(response, kind == "check-runs" ? "check_runs": "statuses")
                     if items.ValueKind != JsonValueKind.Array {
                         throw Exception("Cannot read complete commit checks")
@@ -404,6 +423,11 @@ internal class Publication {
                         }
                     }
                     for check in checks {
+                        if kind == "check-runs" && J.Get(check, "head_sha")
+                            .ValueKind != JsonValueKind.Undefined &&
+                            J.Text(check, "head_sha") != head {
+                            throw Exception("Commit check belongs to a different head")
+                        }
                         let state = kind == "check-runs" ? (
                             J.Text(check, "status") == "completed" ?
                             J.Text(check, "conclusion"): J.Text(check, "status")

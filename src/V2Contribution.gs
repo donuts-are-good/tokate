@@ -639,7 +639,8 @@ internal class V2Contribution {
             number int32,
             pull JsonElement,
             receipt JsonElement,
-            ready bool = true
+            ready bool = true,
+            paths bool = true
         ) Data {
             RequestData.Keys(
                 receipt,
@@ -727,7 +728,7 @@ internal class V2Contribution {
                 exactHead,
                 ready: ready
             )
-            if history.GetArrayLength() > 0 {
+            if paths && history.GetArrayLength() > 0 {
                 Synchronization.Remote(
                     repo,
                     policy.Value,
@@ -737,7 +738,7 @@ internal class V2Contribution {
                     J.Text(metadata, "fork"),
                     exactHead
                 )
-            } else {
+            } else if paths {
                 ProtectedPaths.Remote(
                     repo,
                     J.Get(record, "policy"),
@@ -773,6 +774,7 @@ internal class V2Contribution {
             run.Fields["commit"] = exactHead
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["policy"] = J.Get(record, "policy")
+            Publication.Binding(run, receipt, J.Get(record, "approval"), state.Sha)
             return run
         }
     }

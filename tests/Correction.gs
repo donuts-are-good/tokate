@@ -347,7 +347,7 @@ internal class CorrectionChecks {
                             "ref",
                             Check.Text(Read(run)["branch"]),
                             "repo",
-                            Check.Map("full_name", "donor/project")
+                            Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor", "id", 123))
                         )
                     )
                 )

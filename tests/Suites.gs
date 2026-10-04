@@ -180,6 +180,9 @@ internal class SuiteDriver {
                 case "Decree" {
                     DecreeFlow.All(binary)
                 }
+                case "Overlaps" {
+                    OverlapChecks.All(binary)
+                }
                 case "Targets" {
                     TargetBranches.All(binary)
                 }
@@ -226,7 +229,8 @@ internal class SuiteDriver {
                     Job("Correction"),
                     Job("Amendment"),
                     Job("Decree"),
-                    Job("Targets")
+                    Job("Targets"),
+                    Job("Overlaps")
                 }
                 SuiteDriver(data.Root, jobs).Run(report)
                 let installer = report.Serial()
