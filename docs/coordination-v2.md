@@ -43,7 +43,7 @@ retains the original contribution and adds UUID-bound amendment history under
 the current published coordination revision.
 
 Synchronization amendments additionally require Tokate **0.2.21** on both donor
-and coordinator. [The synchronization commands](reference.md#synchronize-an-already-published-contribution)
+and coordinator. [The synchronization commands](reference.md#synchronize-with-upstream)
 use a separate live owner ref, bound to exact candidate C, upstream U, previous
 published H and current coordination state S. They keep the original approval,
 reservation and contribution intact. The coordinator authenticates the grant,
@@ -98,7 +98,7 @@ Extend the existing policy explicitly, for example:
 Use your project's actual checks. Reservations default to 24 hours, bounded
 between 300 and 604800 seconds. They are separate from the compute/verification
 budget. Every declared tool must match an allowed harness/provider pair. The
-[model policy](reference.md) defaults to the existing exact model/effort whitelist;
+[model policy](reference.md#set-owner-policy-and-approve) defaults to the existing exact model/effort whitelist;
 explicit `model_policy: "unrestricted"` permits any valid declared pair and requires
 omitted or empty `models`. External unknown model/effort values retain their legacy
 meaning and need an exact whitelist allowance when filtering is enabled. Under
@@ -108,7 +108,7 @@ or absent controls. Never substitute a declaration to satisfy policy.
 Guided setup, access requests/history, pause/handoff/renewal and expanded readiness
 remain #12, #14, #27 and #28.
 
-Both policy versions support optional [`protected_paths`](reference.md#commands-and-recovery)
+Both policy versions support optional [`protected_paths`](reference.md#set-owner-policy-and-approve)
 with at most 64 literal paths, each at most 512 characters. Owners adopt it under
 fresh approval and explicitly select any tools or inputs beyond the entrypoint.
 
@@ -258,9 +258,9 @@ verification, not independently unobservable external coding time.
 For Tokate-launched execution, prepare with `--source tokate` and exactly one
 `codex`/`openai` tool declaration, then `work --run RUN_DIR` and `submit --run
 RUN_DIR`. Omitting `--tools` uses explicit selection arguments or an eligible
-Tokate-owned donor default; see [donor selection](reference.md#explicit-donor-defaults-and-selection).
+Tokate-owned donor default; see [donor selection](reference.md#prepare-donor-tools-and-defaults).
 Optional `--verification-reserve N` allocates a positive part of the unchanged
-total budget to independent verification; see [the command reference](reference.md).
+total budget to independent verification; see [budgets](reference.md#allocate-time-and-network-consent).
 The saved allocation is reused by `work --run` and cannot be overridden there.
 An explicit declaration must match invocation choices. Tokate records its observed invocation/requested model and effort and
 tool-reported usage locally. This still does not cryptographically attest model
@@ -319,7 +319,7 @@ head locally. Interrupted push/body/state responses are resolved by reading save
 previous/candidate state; applied writes are skipped. Changed authority, expired
 reservations and ambiguous physical states require inspection, not a new attempt.
 Exact-head CI and owner acceptance remain required. See [amendment recovery and
-local evidence](reference.md#commands-and-recovery).
+local evidence](reference.md#amend-a-published-pr).
 
 ## Traffic and validation
 
