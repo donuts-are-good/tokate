@@ -2,7 +2,7 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.21 discovers tools, handles data, and
+This document describes how Tokate 0.2.22 discovers tools, handles data, and
 delegates authentication. Source links support the behavior described below.
 
 ## Current harness discovery and settings
@@ -15,15 +15,22 @@ effort explicitly or explicitly save Tokate-owned defaults.
   fail before prerequisite checks and workflow actions. When needed, repository
   discovery reads local `git remote -v` output and requires one unambiguous
   GitHub repository; it never fetches or calls a credential helper.
-- Startup looks for `git`, `gh`, `codex`, `setsid`, and `bwrap` in absolute directories
-  listed in `PATH`. It checks file existence and executable permissions. It does
-  not recursively search the home directory or open harness configuration files.
-- `tokate doctor` invokes `--version` on discovered tools and runs a local
-  real sandbox probe. From a repository root containing `global.json`, it copies
-  that file into the probe checkout and starts the selected system .NET
-  SDK/MSBuild under the same filesystem policy. It does not run inference, check
-  authentication, or validate dependency restore/build success. See the
+- Startup selects tools from the accepted command path, locates them in absolute
+  `PATH` directories (or at the independent verifier's pinned system location),
+  and executes version checks before actions. Help, completion, version, local
+  status, defaults and init do not probe unrelated tools or authentication.
+  Tokate does not recursively search homes or open harness configuration files.
+- `tokate doctor --owner|--managed|--external` checks only the selected role's
+  tools. No flags retains the local managed probe without login. Managed and
+  external scopes probe their respective real sandboxes and applicable pinned
+  `global.json` SDK/MSBuild startup; this does not validate dependency restore
+  or builds. Tool startup, PATH, login and catalogs do not prove model access
+  or remaining subscription allowance. See the
   [observed Linux matrix and limits](reference.md#linux-compatibility).
+- Only explicit doctor `--auth` requests `gh auth status --hostname github.com`
+  and (for managed donors) `codex login status`. Diagnostics report sanitized
+  statuses and repair actions, never raw tool authentication output. Tokate
+  never opens authentication storage, installs tools or runs diagnostic inference.
 - Starting work invokes `codex login status` and checks the output for a ChatGPT
   login. Codex handles access to its own authentication storage. Tokate does not
   open that storage or request the credential value.

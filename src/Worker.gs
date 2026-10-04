@@ -64,7 +64,8 @@ internal class Worker {
                 }
                 let canonical = CanonicalPath(path)
                 if canonical == "/tmp" || canonical.StartsWith("/tmp/") {
-                    throw Exception(
+                    throw CliFailure(
+                        "verification_failed",
                         "Managed runs, harness homes, and tools must be outside /tmp. Move them before starting work."
                     )
                 }
@@ -122,19 +123,33 @@ internal class Worker {
                     "TMPDIR=/tmp/tokate-home",
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && { test ! -f global.json || dotnet msbuild -nologo -version; }",
+                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\"",
                     "probe",
                     sentinel
                 }
             )
             let result = Run(directory, args.ToArray())
             File.Delete(sentinel)
-            if result.Code != 0 {
-                throw Exception(
-                    "Sandbox preflight failed. Check bubblewrap user namespaces, kernel/security policy, and native Codex permission profiles. If global.json is present, install its required .NET SDK in a standard system path; home-directory tools are unavailable: " +
-                        result.Error +
-                        result.Output
+            if result.Code != 0 || result.Truncated || result.ReadFailed {
+                throw CliFailure(
+                    "verification_failed",
+                    "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
                 )
+            }
+            if File.Exists(Path.Combine(checkout, "global.json")) {
+                args[args.Count - 3] = "dotnet msbuild -nologo -version"
+                args[args.Count - 2] = "toolchain"
+                try {
+                    let toolchain = Run(directory, args.ToArray())
+                    if toolchain.Code != 0 || toolchain.Truncated || toolchain.ReadFailed {
+                        throw Exception("Pinned SDK startup failed")
+                    }
+                } catch (error Exception) {
+                    throw CliFailure(
+                        "missing_tools",
+                        "Pinned SDK/MSBuild startup failed. Install the global.json SDK in a standard system path; home-directory tools are unavailable."
+                    )
+                }
             }
         }
 
@@ -146,8 +161,9 @@ internal class Worker {
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                 )
             } catch (error Exception) {
-                throw Exception(
-                    "Cannot prepare the sandbox probe. Ensure /var/tmp exists and is writable: " + error.Message
+                throw CliFailure(
+                    "verification_failed",
+                    "Cannot prepare the sandbox probe. Ensure /var/tmp exists and is writable."
                 )
             }
             let checkout = Path.Combine(root, "checkout")
@@ -156,7 +172,10 @@ internal class Worker {
                 File.WriteAllText(Path.Combine(checkout, ".git", "config"), "private")
                 let global = Path.Combine(Directory.GetCurrentDirectory(), "global.json")
                 if FileInfo(global).LinkTarget != nil {
-                    throw Exception("Repository global.json must be a regular file, not a symbolic link.")
+                    throw CliFailure(
+                        "verification_failed",
+                        "Repository global.json must be a regular file, not a symbolic link."
+                    )
                 }
                 let pinned = File.Exists(global)
                 if pinned {
