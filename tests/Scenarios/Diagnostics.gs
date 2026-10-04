@@ -26,7 +26,7 @@ internal class Diagnostics {
                 !(result.Output + result.Error).Contains("synthetic-auth-secret"),
                 "Raw tool or authentication output leaked"
             )
-            return CliDiscovery.Envelope(result, words[0], status, code)
+            return Check.Envelope(result, words[0], status, code)
         }
 
         private func Row(value JsonNode, name string) JsonNode {
@@ -199,7 +199,7 @@ internal class Diagnostics {
             )
         }
 
-        private func FixedCall(binary string, flow NativeFlow, helper string, words[]string) Result {
+        private func FixedCall(binary string, flow NativeFixture, helper string, words[]string) Result {
             let args = List[string]{
                 "--ro-bind",
                 "/",
@@ -225,15 +225,15 @@ internal class Diagnostics {
         }
 
         private func Fixed(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let runner = Path.Combine(flow.Bin, "setsid")
             File.Copy("/usr/bin/setsid", runner)
             File.SetUnixFileMode(runner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             File.WriteAllText(Path.Combine(flow.Temp.Root, "broken-helper"), "")
             for helper in[]string{"/usr/bin/env", "/usr/bin/setsid"} {
-                CliDiscovery.Envelope(FixedCall(binary, flow, helper, []string{"doctor", "--owner"}), "doctor", "ok")
-                let selection = CliDiscovery.Envelope(
+                Check.Envelope(FixedCall(binary, flow, helper, []string{"doctor", "--owner"}), "doctor", "ok")
+                let selection = Check.Envelope(
                     FixedCall(binary, flow, helper, []string{"select", "--repo", "owner/project", "--non-interactive"}),
                     "select",
                     "error",
@@ -244,7 +244,7 @@ internal class Diagnostics {
                     "Broken fixed catalog helper accepted"
                 )
                 let doctorScope = helper == "/usr/bin/setsid" ? "--external": "--managed"
-                let doctor = CliDiscovery.Envelope(
+                let doctor = Check.Envelope(
                     FixedCall(binary, flow, helper, []string{"doctor", doctorScope}),
                     "doctor",
                     "error",
@@ -262,7 +262,7 @@ internal class Diagnostics {
                         external.Code == 0,
                         "Independent diagnostics failed without env:\n" + external.Output + external.Error
                     )
-                    CliDiscovery.Envelope(external, "doctor", "ok")
+                    Check.Envelope(external, "doctor", "ok")
                 }
             }
             flow.NoInference()
@@ -272,7 +272,7 @@ internal class Diagnostics {
         }
 
         private func Sandboxes(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let managed = TestProcess.Run(
                 binary,
@@ -280,7 +280,7 @@ internal class Diagnostics {
                 flow.Temp.Env,
                 cwd: flow.Upstream
             )
-            CliDiscovery.Envelope(managed, "doctor", "ok")
+            Check.Envelope(managed, "doctor", "ok")
             flow.Reload()
             Check.That(
                 flow.State["login_count"] == nil && flow.State["exec_count"] == nil,
@@ -294,7 +294,7 @@ internal class Diagnostics {
                 flow.Temp.Env,
                 cwd: flow.Upstream
             )
-            let failure = CliDiscovery.Envelope(failed, "doctor", "error", "verification_failed")
+            let failure = Check.Envelope(failed, "doctor", "error", "verification_failed")
             Check.That(Check.Text(Row(failure, "sandbox")["status"]) == "failed", "Failed managed sandbox passed")
             File.Delete(Path.Combine(flow.Bin, "codex"))
             let external = TestProcess.Run(
@@ -303,13 +303,13 @@ internal class Diagnostics {
                 flow.Temp.Env,
                 cwd: flow.Upstream
             )
-            let verification = CliDiscovery.Envelope(external, "doctor", "ok")
+            let verification = Check.Envelope(external, "doctor", "ok")
             Check.That(
                 Check.Text(Row(verification, "sandbox")["status"]) == "ready",
                 "Independent verification probe did not pass"
             )
             flow.Temp.Env["TMPDIR"] = Path.Combine(flow.Temp.Root, "unavailable-temporary-storage")
-            let unavailable = CliDiscovery.Envelope(
+            let unavailable = Check.Envelope(
                 TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "error",
@@ -324,7 +324,7 @@ internal class Diagnostics {
                 Path.Combine(Directory.GetCurrentDirectory(), "global.json"),
                 Path.Combine(flow.Upstream, "global.json")
             )
-            CliDiscovery.Envelope(
+            Check.Envelope(
                 TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "ok"
@@ -333,7 +333,7 @@ internal class Diagnostics {
                 Path.Combine(flow.Upstream, "global.json"),
                 "{\"sdk\":{\"version\":\"99.0.100\",\"rollForward\":\"disable\"}}"
             )
-            let pinned = CliDiscovery.Envelope(
+            let pinned = Check.Envelope(
                 TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "error",

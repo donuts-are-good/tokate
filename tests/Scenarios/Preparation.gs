@@ -1,25 +1,26 @@
 package TokateTests
 
 import System
+import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
 
 internal class PreparationChecks {
     shared {
-        private func RunPath(flow NativeFlow) string {
+        private func RunPath(flow NativeFixture) string {
             let directories = Directory.GetDirectories(Path.Combine(flow.Temp.Root, "runs"))
             Check.That(directories.Length == 1, "Preparation did not retain exactly one saved run")
             return directories[0]
         }
 
-        private func Resume(flow NativeFlow, run string, code int32 = 0) Result -> flow.Call(
+        private func Resume(flow NativeFixture, run string, code int32 = 0) Result -> flow.Call(
             []string{"prepare", "--run", run},
             code
         )
 
         private func Creation(binary string) {
             for mode in[]string{"", "lost_fork_response", "lost_branch_response", "pending"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 Directory.Delete(Path.Combine(flow.Bin, "fork"), true)
@@ -61,7 +62,7 @@ internal class PreparationChecks {
                 "parent",
                 "permission"
             } {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 flow.Reload()
@@ -111,7 +112,7 @@ internal class PreparationChecks {
                 }
                 flow.State["fork_discovery"] = discovery
                 flow.Save()
-                let args = []string{
+                let args = List[string]{
                     "claim",
                     "--repo",
                     "owner/project",
@@ -120,32 +121,14 @@ internal class PreparationChecks {
                     "--model",
                     "gpt-6.1-sol",
                     "--effort",
-                    "high",
-                    "--runs",
-                    Path.Combine(flow.Temp.Root, "runs")
+                    "high"
                 }
                 let success = mode == "renamed" || mode == "explicit"
                 if mode == "explicit" {
-                    flow.Call(
-                        []string{
-                            "claim",
-                            "--repo",
-                            "owner/project",
-                            "--issue",
-                            "1",
-                            "--model",
-                            "gpt-6.1-sol",
-                            "--effort",
-                            "high",
-                            "--fork",
-                            "donor/custom",
-                            "--runs",
-                            Path.Combine(flow.Temp.Root, "runs")
-                        }
-                    )
-                } else {
-                    flow.Call(args, success ? 0: 1)
+                    args.AddRange([]string{"--fork", "donor/custom"})
                 }
+                args.AddRange([]string{"--runs", Path.Combine(flow.Temp.Root, "runs")})
+                flow.Call(args.ToArray(), success ? 0: 1)
                 if success {
                     let saved = Check.Json(File.ReadAllText(Path.Combine(RunPath(flow), "run.json")))
                     Check.That(
@@ -172,7 +155,7 @@ internal class PreparationChecks {
 
         private func Interruptions(binary string) {
             for phase in[]string{"init", "fetch", "checkout"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 flow.Reload()
@@ -191,7 +174,7 @@ internal class PreparationChecks {
         }
 
         private func Preservation(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             File.WriteAllText(Path.Combine(flow.Upstream, "donor-dirty.txt"), "private donor work")
@@ -284,7 +267,7 @@ internal class PreparationChecks {
         }
 
         private func Ownership(binary string) {
-            using let v1 = NativeFlow(binary)
+            using let v1 = NativeFixture(binary)
             v1.Initialize()
             v1.ApproveSelf()
             let claimed = v1.SameRepositoryClaim()
@@ -377,7 +360,7 @@ internal class PreparationChecks {
         }
 
         private func Authority(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             flow.Reload()

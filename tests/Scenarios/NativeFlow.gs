@@ -15,17 +15,6 @@ import Tokate
 internal partial class NativeFlow : NativeFixture {
     internal init(binary string) : base(binary) { }
 
-    internal func AutomationAttribution() {
-        Reload()
-        for commit in State["api_commits"]?.AsArray() ?? JsonArray() {
-            for field in[]string{"author", "committer"} {
-                let identity = commit["request"]?[field] ?? throw Exception("Missing explicit " + field)
-                Check.That(identity.AsObject().Count == 2 && identity["date"] == nil, "API must supply timestamps")
-            }
-            CommitIdentity(Upstream, Check.Text(commit["sha"]), "Tokate", "tokate@users.noreply.github.com")
-        }
-    }
-
     internal func HelpAndArguments() {
         Check.Contains(Call([]string{"--help"}).Output, "toh-KAH-teh")
         Call([]string{"nonsense"}, 1)
@@ -110,56 +99,35 @@ internal partial class NativeFlow : NativeFixture {
             []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor", "--json"},
             owner: true
         )
-        CliDiscovery.Envelope(approval, "approve", "ok")
+        Check.Envelope(approval, "approve", "ok")
         let policy = Call([]string{"policy", "--repo", "owner/project", "--json"})
-        let value = CliDiscovery.Envelope(policy, "policy", "ok")
+        let value = Check.Envelope(policy, "policy", "ok")
         Check.That(Check.Text(value["data"]?["policy"]?["version"]) == "1", "Missing projected policy")
         let legacy = Check.Json(Call([]string{"policy", "--repo", "owner/project"}).Output)
         Check.That(
             legacy["schema_version"] == nil && Check.Text(legacy["version"]) == "1",
             "Legacy piped policy changed"
         )
-        let claim = CliDiscovery.Envelope(
-            Call(
-                []string{
-                    "claim",
-                    "--repo",
-                    "owner/project",
-                    "--issue",
-                    "1",
-                    "--model",
-                    "gpt-6.1-sol",
-                    "--effort",
-                    "high",
-                    "--seconds",
-                    "30",
-                    "--runs",
-                    Path.Combine(Temp.Root, "runs"),
-                    "--json"
-                }
-            ),
-            "claim",
-            "ok"
-        )
+        let claim = Check.Envelope(Call(ClaimArgs(json: true)), "claim", "ok")
         let run = Check.Text(claim["data"]?["run"])
         Check.That(Path.IsPathFullyQualified(run), "Claim omitted executable run path")
         NoInference()
         let work = Call([]string{"work", "--run", run, "--json", "--traffic"})
-        CliDiscovery.Envelope(work, "work", "ok")
+        Check.Envelope(work, "work", "ok")
         Check.Contains(work.Error, "Running gpt-6.1-sol")
         Check.Contains(work.Error, "Tokate API traffic:")
         Check.That(
             !work.Output.Contains("synthetic-raw") && !work.Output.Contains("synthetic-usage-secret"),
             "Inference output leaked"
         )
-        CliDiscovery.Envelope(Call([]string{"publish", "--run", run, "--json"}), "publish", "ok")
-        CliDiscovery.Envelope(
+        Check.Envelope(Call([]string{"publish", "--run", run, "--json"}), "publish", "ok")
+        Check.Envelope(
             Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
             "verify-pr",
             "ok"
         )
-        CliDiscovery.Envelope(Call([]string{"checks", "--run", run, "--json"}, 8), "checks", "pending")
-        CliDiscovery.Envelope(
+        Check.Envelope(Call([]string{"checks", "--run", run, "--json"}, 8), "checks", "pending")
+        Check.Envelope(
             Call([]string{"checks", "--run", run, "--watch", "--timeout", "1", "--json"}, 8),
             "checks",
             "pending"
@@ -174,7 +142,7 @@ internal partial class NativeFlow : NativeFixture {
                 []string{"checks", "--repo", "owner/project", "--pr", "10", "--json"},
                 outcome == "pass" ? 0: 1
             )
-            let check = CliDiscovery.Envelope(
+            let check = Check.Envelope(
                 result,
                 "checks",
                 outcome == "pass" ? "ok": "error",
@@ -187,13 +155,13 @@ internal partial class NativeFlow : NativeFixture {
             Path.Combine(Bin, "codex-impl"),
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
         )
-        CliDiscovery.Envelope(Call([]string{"work", "--run", run, "--json"}, 1), "work", "error", "invalid_state")
+        Check.Envelope(Call([]string{"work", "--run", run, "--json"}, 1), "work", "error", "invalid_state")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "JSON or suggestions spent extra inference")
         Approve()
         Reload()
         let originalPulls = State["pulls"]?.ToJsonString() ?? ""
-        CliDiscovery.Envelope(
+        Check.Envelope(
             Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, 1, owner: true),
             "verify-pr",
             "error",
@@ -203,12 +171,7 @@ internal partial class NativeFlow : NativeFixture {
         Check.That(Check.Text(State["exec_count"]) == "1", "Receipt rejection spent inference")
         Check.That((State["pulls"]?.ToJsonString() ?? "") == originalPulls, "Receipt rejection changed the PR")
         Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
-        CliDiscovery.Envelope(
-            Call([]string{"publish", "--run", run, "--json"}, 1),
-            "publish",
-            "error",
-            "stale_approval"
-        )
+        Check.Envelope(Call([]string{"publish", "--run", run, "--json"}, 1), "publish", "error", "stale_approval")
     }
 
     internal func StructuredFailures() {
@@ -220,7 +183,7 @@ internal partial class NativeFlow : NativeFixture {
             if scenario == "authentication" {
                 File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
                 let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                let value = CliDiscovery.Envelope(failure, "work", "error", "authentication_required")
+                let value = Check.Envelope(failure, "work", "error", "authentication_required")
                 Check.That(
                     Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
                         value["next_actions"]?[0]?[1]
@@ -231,7 +194,7 @@ internal partial class NativeFlow : NativeFixture {
             } else {
                 flow.Mode("timeout")
                 let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                CliDiscovery.Envelope(failure, "work", "error", "inference_failed")
+                Check.Envelope(failure, "work", "error", "inference_failed")
                 flow.Reload()
                 Check.That(Check.Text(flow.State["exec_count"]) == "1", "Inference failure retried")
             }
@@ -474,21 +437,7 @@ internal partial class NativeFlow : NativeFixture {
             Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
         }
         Approve()
-        let result = Call(
-            []string{
-                "claim",
-                "--repo",
-                "owner/project",
-                "--issue",
-                "1",
-                "--model",
-                "gpt-6.1-sol",
-                "--effort",
-                "high",
-                "--runs",
-                Path.Combine(Temp.Root, "runs")
-            }
-        )
+        let result = Call(ClaimArgs(seconds: nil))
         let run = result.Output.Substring(result.Output.LastIndexOf("Run: ") + 5).Trim()
         Check.That(
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == expectedSeconds,
@@ -584,10 +533,8 @@ internal partial class NativeFlow : NativeFixture {
                 File.ReadAllText(Path.Combine(run, "checkout/partial.txt")) == "partial-edit",
                 "Cancelled edit lost"
             )
-            let child = File.ReadAllText(Path.Combine(Bin, "child.pid"))
-            let status = "/proc/" + child + "/stat"
-            Check.That(
-                !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
+            TestProcess.Collected(
+                File.ReadAllText(Path.Combine(Bin, "child.pid")),
                 "Managed descendant survived cancellation"
             )
             Call([]string{"work", "--run", run}, 1)
@@ -623,9 +570,7 @@ internal partial class NativeFlow : NativeFixture {
         NoPr()
         Call([]string{"recover", "--run", run, "--seconds", "1"}, 1)
         Call([]string{"publish", "--run", run}, 1)
-        let pid = File.ReadAllText(Path.Combine(Bin, "child.pid"))
-        let status = "/proc/" + pid + "/stat"
-        Check.That(!File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z", "Descendant survived timeout")
+        TestProcess.Collected(File.ReadAllText(Path.Combine(Bin, "child.pid")), "Descendant survived timeout")
         Call([]string{"work", "--run", run}, 1)
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Failed run retried inference")
@@ -672,22 +617,6 @@ internal partial class NativeFlow : NativeFixture {
         Mode("workflow")
         Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "protected owner configuration")
         NoPr()
-    }
-
-    internal func ProtectedPolicy(empty bool = false) {
-        Directory.CreateDirectory(Path.Combine(Upstream, "scripts/checks"))
-        File.WriteAllText(Path.Combine(Upstream, "scripts/verify.sh"), "test -f result.txt\n")
-        File.WriteAllText(Path.Combine(Upstream, "scripts/checks/original"), "original\n")
-        File.WriteAllText(Path.Combine(Upstream, "ordinary-source"), "ordinary\n")
-        File.WriteAllText(Path.Combine(Upstream, "é-🛠"), "unicode\n")
-        File.WriteAllText(Path.Combine(Upstream, "e\u0301-quoted\"\n "), "raw name\n")
-        let path = Path.Combine(Upstream, ".github/tokate.json")
-        let policy = Check.Json(File.ReadAllText(path))
-        policy["verification"] = Check.Json("[[\"/bin/sh\",\"scripts/verify.sh\"]]")
-        policy["protected_paths"] = Check.Json(empty ? "[]": "[\"scripts/verify.sh\",\"scripts/checks/\"]")
-        File.WriteAllText(path, policy.ToJsonString())
-        Commit("Explicit protected paths fixture")
-        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
     }
 
     internal func ProtectedEntrypoint() {
@@ -791,14 +720,6 @@ internal partial class NativeFlow : NativeFixture {
             )
             flow.NoPr()
         }
-    }
-
-    internal func MetadataOnly() {
-        File.WriteAllText(Path.Combine(Bin, "git"), "#!/bin/sh\necho unexpected-local-git >&2\nexit 91\n")
-        File.SetUnixFileMode(
-            Path.Combine(Bin, "git"),
-            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-        )
     }
 
     internal func ReceiptEvidence() {
@@ -1213,24 +1134,7 @@ internal partial class NativeFlow : NativeFixture {
         )
         Traffic(9, 5, 0, 0, approval)
         ResetTraffic()
-        let claimed = Call(
-            []string{
-                "claim",
-                "--repo",
-                "owner/project",
-                "--issue",
-                "1",
-                "--model",
-                "gpt-6.1-sol",
-                "--effort",
-                "high",
-                "--seconds",
-                "30",
-                "--runs",
-                Path.Combine(Temp.Root, "runs")
-            },
-            traffic: true
-        )
+        let claimed = Call(ClaimArgs(), traffic: true)
         Traffic(33, 1, 21, 0, claimed)
         let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
         Mode("push_fail")
@@ -1564,12 +1468,7 @@ internal partial class NativeFlow : NativeFixture {
         let run = Claim()
         Mode("background")
         Call([]string{"work", "--run", run})
-        let pid = File.ReadAllText(Path.Combine(Bin, "child.pid"))
-        let status = "/proc/" + pid + "/stat"
-        Check.That(
-            !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
-            "Descendant survived normal completion"
-        )
+        TestProcess.Collected(File.ReadAllText(Path.Combine(Bin, "child.pid")), "Descendant survived normal completion")
     }
 
     internal func UnsupportedSandbox() {
@@ -1751,7 +1650,7 @@ internal partial class NativeFlow : NativeFixture {
         let run = Claim()
         Mode("verification_recovery")
         let failure = Call([]string{"work", "--run", run, "--json"}, 1)
-        CliDiscovery.Envelope(failure, "work", "error", "verification_failed")
+        Check.Envelope(failure, "work", "error", "verification_failed")
         let runPath = Path.Combine(run, "run.json")
         let failed = Check.Json(File.ReadAllText(runPath))
         Check.That(Check.Text(failed["failure_reason"]) == "verification_failed", "New failure omitted stable reason")
@@ -1828,7 +1727,7 @@ internal partial class NativeFlow : NativeFixture {
             File.ReadAllText(Path.Combine(run, "verification.json")) == original,
             "Rejected recovery reran verification"
         )
-        CliDiscovery.Envelope(Call([]string{"recover", "--run", run, "--json"}), "recover", "ok")
+        Check.Envelope(Call([]string{"recover", "--run", run, "--json"}), "recover", "ok")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")
         Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "verification-only recovery")

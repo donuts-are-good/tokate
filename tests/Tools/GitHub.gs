@@ -12,46 +12,37 @@ import System.Text.Json.Nodes
 
 internal partial class Fixture {
     internal func Answer(value JsonNode) int32 {
-        if Include {
-            let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
-            let initial = State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
-            Check.Text(State["etag_initial"])
-            let returned = State["etag_returned"] == nil ? Check.Text(State["etag_returned_prefix"]) + etag:
-            Check.Text(State["etag_returned"])
-            let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic records")
-            var reads int32
-            for call in calls {
-                if Check.Text(call["method"]) == "GET" && Check.Text(call["path"]) == ApiPath {
-                    reads++
-                }
+        let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
+        let initial = State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
+        Check.Text(State["etag_initial"])
+        let returned = State["etag_returned"] == nil ? Check.Text(State["etag_returned_prefix"]) + etag:
+        Check.Text(State["etag_returned"])
+        let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic records")
+        var reads int32
+        for call in calls {
+            if Check.Text(call["method"]) == "GET" && Check.Text(call["path"]) == ApiPath {
+                reads++
             }
-            let unchanged = Verb == "GET" &&
-                (
-                Conditional == "If-None-Match: " +
-                    initial ||
-                    (Check.Text(State["etag_force_304"]) == "true" && reads > 1)
-            )
-            if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
-                let issue = State["issue"] ?? throw Exception("Missing issue")
-                if Check.Text(State["mode"]) == "after_304_edit" {
-                    issue["title"] = JsonValue.Create("Edited after live revalidation")
-                } else {
-                    issue["labels"] = JsonArray()
-                }
-                State["mode"] = JsonValue.Create("")
-            }
-            let validator = unchanged ? returned: initial
-            let current = calls[calls.Count - 1] ?? throw Exception("Missing traffic entry")
-            current["etag"] = JsonValue.Create(validator)
-            return Response(
-                unchanged ? 304: 200,
-                unchanged ? nil: value,
-                validator == "" ? "": "ETag: " + validator + "\r\n"
-            )
         }
-        Save()
-        Console.WriteLine(value.ToJsonString())
-        return 0
+        let unchanged = Verb == "GET" &&
+            (Conditional == "If-None-Match: " + initial || (Check.Text(State["etag_force_304"]) == "true" && reads > 1))
+        if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
+            let issue = State["issue"] ?? throw Exception("Missing issue")
+            if Check.Text(State["mode"]) == "after_304_edit" {
+                issue["title"] = JsonValue.Create("Edited after live revalidation")
+            } else {
+                issue["labels"] = JsonArray()
+            }
+            State["mode"] = JsonValue.Create("")
+        }
+        let validator = unchanged ? returned: initial
+        let current = calls[calls.Count - 1] ?? throw Exception("Missing traffic entry")
+        current["etag"] = JsonValue.Create(validator)
+        return Response(
+            unchanged ? 304: 200,
+            unchanged ? nil: value,
+            validator == "" ? "": "ETag: " + validator + "\r\n"
+        )
     }
 
     internal func Response(status int32, value JsonNode? = nil, headers string = "") int32 {
@@ -88,8 +79,10 @@ internal partial class Fixture {
         using let lease = ApiLease()
         State = Check.Json(File.ReadAllText(StatePath))
         let token = Environment.GetEnvironmentVariable("GH_TOKEN") ?? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-        let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR") ??
+        let config = Environment.GetEnvironmentVariable("GH_CONFIG_DIR")
+        if config == nil {
             throw Exception("GitHub CLI configuration home was lost")
+        }
         Check.That(
             config == Path.Combine(Path.GetDirectoryName(Root) ?? "", "gh-home"),
             "Unexpected GitHub CLI configuration home"
@@ -125,16 +118,8 @@ internal partial class Fixture {
             Console.Write("username=fixture\npassword=synthetic-gh-credential\n\n")
             return 0
         }
-        if args[0] == "pr" && args[1] == "checks" {
-            if Check.Text(State["check_change"]) == "base" {
-                let target = State["pulls"]?[0]?["base"] ?? throw Exception("Missing base")
-                target["ref"] = JsonValue.Create("main")
-            }
-            return Answer(State["checks"] ?? JsonArray())
-        }
         Check.That(args[0] == "api", "Expected GitHub API")
-        Include = Array.IndexOf(args, "--include") >= 0
-        Check.That(Include, "API must include response status and headers")
+        Check.That(Array.IndexOf(args, "--include") >= 0, "API must include response status and headers")
         let method = args[Array.IndexOf(args, "--method") + 1]
         let path = args[Array.IndexOf(args, "--method") + 2]
         ApiPath = path
@@ -314,16 +299,14 @@ internal partial class Fixture {
             )
         }
         if tail.StartsWith("issues/comments/") {
-            return Answer(
-                State["canonical_comment_override"] ??
-                    State["comments"]?[tail.Substring(16)] ??
-                    throw Exception("Missing canonical comment")
-            )
+            let comment = State["canonical_comment_override"] ?? State["comments"]?[tail.Substring(16)]
+            return Answer(comment ?? throw Exception("Missing canonical comment"))
         }
         if tail.StartsWith("compare/") {
             let comparison = tail.Substring(8).Split("...")
-            let sha = comparison[1].Split(':')[1]
-            if comparison[1].Split(':')[0] != "owner" {
+            let comparisonHead = comparison[1].Split(':')
+            let sha = comparisonHead[1]
+            if comparisonHead[0] != "owner" {
                 Git("upstream", []string{"fetch", Path.Combine(Root, "fork"), sha})
             }
             let names = GitRaw("upstream", []string{"diff", "--name-status", "-z", "-M", comparison[0], sha}).Split(
@@ -790,17 +773,10 @@ internal partial class Fixture {
             return Answer(Check.Json("{}"))
         }
         if tail.StartsWith("pulls?") {
-            let filter = Array.Find(
-                tail.Substring(tail.IndexOf('?') + 1).Split('&'),
-                field -> field.StartsWith("base=", StringComparison.Ordinal)
-            ) ??
-                ""
+            let query = tail.Substring(tail.IndexOf('?') + 1).Split('&')
+            let filter = Array.Find(query, field -> field.StartsWith("base=", StringComparison.Ordinal)) ?? ""
             let target = filter == "" ? "": Uri.UnescapeDataString(filter.Substring(5))
-            let headFilter = Array.Find(
-                tail.Substring(tail.IndexOf('?') + 1).Split('&'),
-                field -> field.StartsWith("head=", StringComparison.Ordinal)
-            ) ??
-                ""
+            let headFilter = Array.Find(query, field -> field.StartsWith("head=", StringComparison.Ordinal)) ?? ""
             let head = headFilter == "" ? "": Uri.UnescapeDataString(headFilter.Substring(5))
             let pulls = JsonArray()
             for pull in(State["pulls"] ?? JsonArray()).AsArray() {
@@ -844,8 +820,9 @@ internal partial class Fixture {
             if Check.Text(State["mode"]) == "pr_fail" {
                 return Response(500)
             }
-            let headLogin = Check.Text(body["head"]).Split(':')[0]
-            let branch = Check.Text(body["head"]).Split(':')[1]
+            let headParts = Check.Text(body["head"]).Split(':')
+            let headLogin = headParts[0]
+            let branch = headParts[1]
             let number = Check.Text(State["multiple_pulls"]) == "true" ? 9 + count: 10
             body["number"] = JsonValue.Create(number)
             body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/" + number.ToString())
@@ -875,6 +852,17 @@ internal partial class Fixture {
             return Answer(body)
         }
         throw Exception("Unhandled fixture API: " + path)
+    }
+
+    internal func DenyAccess() {
+        let reference = "refs/heads/tokate/access"
+        let previous = Git("upstream", []string{"rev-parse", reference})
+        let access = Check.Json(Git("upstream", []string{"show", previous + ":access.json"}))
+        access["members"] = Check.Json("[{\"actor\":123,\"trusted\":true,\"denied\":true,\"issues\":[1]}]")
+        let blob = Git("upstream", []string{"hash-object", "-w", "--stdin"}, access.ToJsonString())
+        let tree = Git("upstream", []string{"mktree"}, "100644 blob " + blob + "\taccess.json\n")
+        let next = Git("upstream", []string{"commit-tree", tree, "-p", previous}, "Concurrent owner denial")
+        Git("upstream", []string{"update-ref", reference, next, previous})
     }
 
     internal func ClaimRendezvous(args[]string, body JsonNode) {

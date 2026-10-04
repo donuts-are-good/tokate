@@ -1,13 +1,14 @@
 package TokateTests
 
 import System
+import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
 
 internal class EligibilityChecks {
     shared {
         private func Access(
-            test CoordinationFlow,
+            test CoordinationFixture,
             operation string,
             donor string = "donor",
             issue string = "",
@@ -15,10 +16,7 @@ internal class EligibilityChecks {
             owner bool = true,
             traffic bool = false
         ) Result {
-            let args = System
-                .Collections
-                .Generic
-                .List[string]{"access", "--repo", "owner/project", "--operation", operation}
+            let args = List[string]{"access", "--repo", "owner/project", "--operation", operation}
             if operation != "init" && operation != "check" {
                 args.Add("--donor")
                 args.Add(donor)
@@ -30,7 +28,7 @@ internal class EligibilityChecks {
             return test.Flow.Call(args.ToArray(), code, owner, traffic)
         }
 
-        private func Policy(test CoordinationFlow, mode string) {
+        private func Policy(test CoordinationFixture, mode string) {
             let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(path))
             policy["approval_scope"] = JsonValue.Create("task")
@@ -39,7 +37,7 @@ internal class EligibilityChecks {
             test.Flow.Commit("Owner task eligibility " + mode)
         }
 
-        private func Setup(test CoordinationFlow, mode string) {
+        private func Setup(test CoordinationFixture, mode string) {
             Access(test, "init")
             Policy(test, mode)
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
@@ -58,7 +56,7 @@ internal class EligibilityChecks {
             test.Flow.Save()
         }
 
-        private func Claim(test CoordinationFlow, code int32 = 0, actor int32 = 123) JsonNode {
+        private func Claim(test CoordinationFixture, code int32 = 0, actor int32 = 123) JsonNode {
             let request = test.ClaimRequest()
             test.Coordinate(test.Event(request, actor), code)
             return request
@@ -66,7 +64,7 @@ internal class EligibilityChecks {
 
         private func Modes(binary string) {
             for mode in[]string{"open", "trusted", "manual"} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, mode)
                 Access(test, "check", issue: "1", code: mode == "open" ? 0: 1, owner: false)
@@ -119,7 +117,7 @@ internal class EligibilityChecks {
 
         private func Revocation(binary string) {
             for operation in[]string{"remove", "untrust", "deny"} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, operation == "untrust" ? "trusted": "manual")
                 Access(test, operation == "untrust" ? "trust": "grant", issue: operation == "untrust" ? "": "1")
@@ -139,7 +137,7 @@ internal class EligibilityChecks {
                 test.Flow.NoInference()
                 test.Flow.NoPr()
             }
-            using let publication = CoordinationFlow(binary)
+            using let publication = CoordinationFixture(binary)
             publication.Initialize()
             Setup(publication, "manual")
             Access(publication, "grant", issue: "1")
@@ -157,7 +155,7 @@ internal class EligibilityChecks {
 
         private func Authority(binary string) {
             for fault in[]string{"missing", "unavailable", "repo", "actor", "malformed", "task", "policy"} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, "open")
                 Claim(test)
@@ -198,7 +196,7 @@ internal class EligibilityChecks {
         }
 
         private func Transport(binary string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             Setup(test, "open")
             Access(test, "trust", code: 1, owner: false)
@@ -207,14 +205,8 @@ internal class EligibilityChecks {
             let mutation = Access(test, "trust", traffic: true)
             test.Flow.Traffic(7, 3, 0, 0, mutation)
             let reference = test.Flow.Git("-C", test.Flow.Upstream, "rev-parse", "refs/heads/tokate/access")
-            Check.That(
-                test
-                    .Flow
-                    .Git("-C", test.Flow.Upstream, "rev-list", "--parents", "-n", "1", reference)
-                    .Split(' ')
-                    .Length == 2,
-                "Access write lacks single parent"
-            )
+            let parents = test.Flow.Git("-C", test.Flow.Upstream, "rev-list", "--parents", "-n", "1", reference)
+            Check.That(parents.Split(' ').Length == 2, "Access write lacks single parent")
             test.Flow.ResetTraffic()
             let gate = Access(test, "check", issue: "1", owner: false, traffic: true)
             test.Flow.Traffic(11, 0, 1, 0, gate)
@@ -222,7 +214,7 @@ internal class EligibilityChecks {
             let request = Claim(test, 1)
             let sha = Check.Text(test.State()["sha"])
             test.Coordinate(test.Event(request))
-            let output = CliDiscovery.Envelope(
+            let output = Check.Envelope(
                 test.Flow.Call(
                     []string{"access", "--repo", "owner/project", "--operation", "check", "--issue", "1", "--json"}
                 ),
@@ -236,7 +228,7 @@ internal class EligibilityChecks {
                 "Eligibility JSON lost bounded gate result"
             )
             Check.That(Check.Text(test.State()["sha"]) == sha, "Duplicate claim repeated effects")
-            let denied = CliDiscovery.Envelope(
+            let denied = Check.Envelope(
                 test.Flow.Call(
                     []string{"access", "--repo", "owner/project", "--operation", "deny", "--donor", "donor", "--json"},
                     owner: true
@@ -245,7 +237,7 @@ internal class EligibilityChecks {
                 "ok"
             )
             Check.That(Check.Text(denied["data"]?["actor"]) == "123", "Owner JSON lacks numeric actor")
-            let rejected = CliDiscovery.Envelope(
+            let rejected = Check.Envelope(
                 test.Flow.Call(
                     []string{"access", "--repo", "owner/project", "--operation", "check", "--issue", "1", "--json"},
                     1
@@ -264,7 +256,7 @@ internal class EligibilityChecks {
         }
 
         private func Traffic(binary string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             Setup(test, "trusted")
             test.Flow.ResetTraffic()
@@ -290,7 +282,7 @@ internal class EligibilityChecks {
 
         private func LatePublication(binary string) {
             for amend in[]bool{true, false} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, "open")
                 let claim = Claim(test)
@@ -394,7 +386,7 @@ internal class EligibilityChecks {
             }
         }
 
-        private func RevokeAt(test CoordinationFlow, read int32) {
+        private func RevokeAt(test CoordinationFixture, read int32) {
             test.Flow.Reload()
             test.Flow.State["access_reads"] = JsonValue.Create(0)
             test.Flow.State["access_revoke_at"] = JsonValue.Create(read)
@@ -403,7 +395,7 @@ internal class EligibilityChecks {
 
         private func Races(binary string) {
             for read in[]int32{2, 3} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, "open")
                 RevokeAt(test, read)
@@ -412,7 +404,7 @@ internal class EligibilityChecks {
                 test.Flow.NoInference()
                 test.Flow.NoPr()
             }
-            using let execution = CoordinationFlow(binary)
+            using let execution = CoordinationFixture(binary)
             execution.Initialize()
             Setup(execution, "open")
             Claim(execution)
@@ -422,7 +414,7 @@ internal class EligibilityChecks {
             execution.Flow.NoInference()
             execution.Flow.NoPr()
             for read in[]int32{2, 4} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize()
                 Setup(test, "open")
                 let claim = Claim(test)
@@ -446,7 +438,7 @@ internal class EligibilityChecks {
                 Check.That(test.State()["state"]?["contribution"] == nil, "Revoked access authorized publication")
                 test.Flow.NoInference()
             }
-            using let conflict = CoordinationFlow(binary)
+            using let conflict = CoordinationFixture(binary)
             conflict.Initialize()
             Setup(conflict, "trusted")
             conflict.Flow.Mode("access_conflict")
@@ -464,7 +456,7 @@ internal class EligibilityChecks {
         }
 
         private func Declarations(binary string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             Access(test, "init")
             let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")

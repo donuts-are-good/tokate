@@ -114,6 +114,41 @@ internal open class NativeFixture : IDisposable {
         Check.That(identity[1] == email && identity[3] == email, "Unexpected author or committer email")
     }
 
+    internal func AutomationAttribution() {
+        Reload()
+        for commit in State["api_commits"]?.AsArray() ?? JsonArray() {
+            for field in[]string{"author", "committer"} {
+                let identity = commit["request"]?[field] ?? throw Exception("Missing explicit " + field)
+                Check.That(identity.AsObject().Count == 2 && identity["date"] == nil, "API must supply timestamps")
+            }
+            CommitIdentity(Upstream, Check.Text(commit["sha"]), "Tokate", "tokate@users.noreply.github.com")
+        }
+    }
+
+    internal func ProtectedPolicy(empty bool = false) {
+        Directory.CreateDirectory(Path.Combine(Upstream, "scripts/checks"))
+        File.WriteAllText(Path.Combine(Upstream, "scripts/verify.sh"), "test -f result.txt\n")
+        File.WriteAllText(Path.Combine(Upstream, "scripts/checks/original"), "original\n")
+        File.WriteAllText(Path.Combine(Upstream, "ordinary-source"), "ordinary\n")
+        File.WriteAllText(Path.Combine(Upstream, "é-🛠"), "unicode\n")
+        File.WriteAllText(Path.Combine(Upstream, "e\u0301-quoted\"\n "), "raw name\n")
+        let path = Path.Combine(Upstream, ".github/tokate.json")
+        let policy = Check.Json(File.ReadAllText(path))
+        policy["verification"] = Check.Json("[[\"/bin/sh\",\"scripts/verify.sh\"]]")
+        policy["protected_paths"] = Check.Json(empty ? "[]": "[\"scripts/verify.sh\",\"scripts/checks/\"]")
+        File.WriteAllText(path, policy.ToJsonString())
+        Commit("Explicit protected paths fixture")
+        Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func MetadataOnly() {
+        File.WriteAllText(Path.Combine(Bin, "git"), "#!/bin/sh\necho unexpected-local-git >&2\nexit 91\n")
+        File.SetUnixFileMode(
+            Path.Combine(Bin, "git"),
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+        )
+    }
+
     internal func Claim(
         seconds string = "30",
         model string = "gpt-6.1-sol",
@@ -122,30 +157,39 @@ internal open class NativeFixture : IDisposable {
         effort string = "high",
         reserve string = ""
     ) string {
-        let args = List[string]{
-            "claim",
-            "--repo",
-            "owner/project",
-            "--issue",
-            "1",
-            "--model",
-            model,
-            "--effort",
-            effort,
-            "--seconds",
-            seconds,
-            "--runs",
-            Path.Combine(Temp.Root, "runs")
+        let result = Call(ClaimArgs(seconds, model, effort, reserve, network), code)
+        let index = result.Output.LastIndexOf("Run: ")
+        return index < 0 ? "": result.Output.Substring(index + 5).Trim()
+    }
+
+    internal func ClaimArgs(
+        seconds string? = "30",
+        model string = "gpt-6.1-sol",
+        effort string = "high",
+        reserve string = "",
+        network bool = false,
+        fork string = "",
+        json bool = false
+    )[]string {
+        let args = List[string]{"claim", "--repo", "owner/project", "--issue", "1"}
+        if fork != "" {
+            args.AddRange([]string{"--fork", fork})
         }
+        args.AddRange([]string{"--model", model, "--effort", effort})
+        if let budget = seconds {
+            args.AddRange([]string{"--seconds", budget})
+        }
+        args.AddRange([]string{"--runs", Path.Combine(Temp.Root, "runs")})
         if reserve != "" {
             args.AddRange([]string{"--verification-reserve", reserve})
         }
         if network {
             args.Add("--allow-network")
         }
-        let result = Call(args.ToArray(), code)
-        let index = result.Output.LastIndexOf("Run: ")
-        return index < 0 ? "": result.Output.Substring(index + 5).Trim()
+        if json {
+            args.Add("--json")
+        }
+        return args.ToArray()
     }
 
     internal func Mode(value string) {
@@ -279,23 +323,7 @@ internal open class NativeFixture : IDisposable {
     )
 
     internal func SameRepositoryClaim(code int32 = 0) Result -> Call(
-        []string{
-            "claim",
-            "--repo",
-            "owner/project",
-            "--issue",
-            "1",
-            "--fork",
-            "owner/project",
-            "--model",
-            "gpt-6.1-sol",
-            "--effort",
-            "high",
-            "--seconds",
-            "30",
-            "--runs",
-            Path.Combine(Temp.Root, "runs")
-        },
+        ClaimArgs(fork: "owner/project"),
         code,
         owner: true,
         traffic: true

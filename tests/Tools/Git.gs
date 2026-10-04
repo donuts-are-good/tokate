@@ -46,17 +46,6 @@ internal partial class Fixture {
         return bytes.ToArray()
     }
 
-    internal func DenyAccess() {
-        let reference = "refs/heads/tokate/access"
-        let previous = Git("upstream", []string{"rev-parse", reference})
-        let access = Check.Json(Git("upstream", []string{"show", previous + ":access.json"}))
-        access["members"] = Check.Json("[{\"actor\":123,\"trusted\":true,\"denied\":true,\"issues\":[1]}]")
-        let blob = Git("upstream", []string{"hash-object", "-w", "--stdin"}, access.ToJsonString())
-        let tree = Git("upstream", []string{"mktree"}, "100644 blob " + blob + "\taccess.json\n")
-        let next = Git("upstream", []string{"commit-tree", tree, "-p", previous}, "Concurrent owner denial")
-        Git("upstream", []string{"update-ref", reference, next, previous})
-    }
-
     internal func RunGit(args[]string) int32 {
         let pathFault = Check.Text(State["git_diff_fault"])
         if pathFault != "" && Array.IndexOf(args, "--name-only") >= 0 && Array.IndexOf(args, "-z") >= 0 {

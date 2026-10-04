@@ -40,7 +40,7 @@ internal class ReserveChecks {
         }
 
         private func Invalid(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             for reserve in[]string{"0", "-1", "1.5", "bad", "2147483648", "30", "31", "+1", " 1", "1\n"} {
@@ -146,16 +146,7 @@ internal class ReserveChecks {
                 Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "partial-secret")
                 Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-partial-stderr-secret")
                 let pid = File.ReadAllText(Path.Combine(flow.Bin, "child.pid"))
-                let status = "/proc/" + pid + "/stat"
-                try {
-                    Check.That(File.ReadAllText(status).Split(' ')[2] == "Z", "Timeout descendant survived")
-                } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
-                    error IOException
-                ) {
-                    if error.HResult != 3 {
-                        rethrow
-                    }
-                }
+                TestProcess.Collected(pid, "Timeout descendant survived")
                 flow.Call([]string{"recover", "--run", run}, 1)
                 flow.Call([]string{"publish", "--run", run}, 1)
             } else {
@@ -179,7 +170,7 @@ internal class ReserveChecks {
         }
 
         private func Legacy(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -201,7 +192,7 @@ internal class ReserveChecks {
         }
 
         private func LowerLimit(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let path = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(path))
@@ -238,7 +229,7 @@ internal class ReserveChecks {
         }
 
         private func Recovery(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
             flow.Approve()
@@ -256,7 +247,7 @@ internal class ReserveChecks {
         }
 
         private func NewWork(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let result = flow.Call(

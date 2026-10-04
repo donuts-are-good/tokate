@@ -7,34 +7,9 @@ import System.Text.Json.Nodes
 
 internal class SynchronizationChecks {
     shared {
-        internal func SetupOwner(flow NativeFlow) {
-            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(policyPath))
-            policy["protected_paths"] = Check.Json("[\"protected/\",\"guard/missing\",\"new-parent/missing\"]")
-            policy["verification"] = Check.Json(
-                "[[\"/bin/sh\",\"-c\",\"test -f result.txt\"],[\"/bin/sh\",\"-c\",\"test -s result.txt && ! grep -q BAD result.txt\"]]"
-            )
-            File.WriteAllText(policyPath, policy.ToJsonString())
-            Write(flow.Upstream, ".github/workflows/verify.yml", "timeout-minutes: 15\n")
-            Write(flow.Upstream, ".github/workflows/old.yml", "old workflow\n")
-            Write(flow.Upstream, "protected/content", "owner data\n")
-            Write(flow.Upstream, "protected/gone", "remove upstream\n")
-            Write(flow.Upstream, "protected/link", "regular upstream\n")
-            Write(flow.Upstream, "guard/other", "nonprotected sibling\n")
-            Write(flow.Upstream, "DECREE.md", "Approved owner instructions\n")
-            Write(flow.Upstream, "shared.txt", "original shared line\n")
-            flow.Commit("Approved protected fixtures")
-        }
-
-        private func Write(root string, path string, text string) {
-            let file = Path.Combine(root, path)
-            Directory.CreateDirectory(Path.GetDirectoryName(file) ?? root)
-            File.WriteAllText(file, text)
-        }
-
         private func Saved(run string) JsonNode -> Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
 
-        private func Commit(flow NativeFlow, checkout string, message string) string {
+        private func Commit(flow NativeFixture, checkout string, message string) string {
             flow.Git("-C", checkout, "add", "-A")
             flow.Git(
                 "-C",
@@ -50,11 +25,11 @@ internal class SynchronizationChecks {
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
-        private func Upstream(flow NativeFlow, ordinary bool = false, conflict bool = false) string {
+        private func Upstream(flow NativeFixture, ordinary bool = false, conflict bool = false) string {
             if ordinary {
-                Write(flow.Upstream, "upstream.txt", "ordinary upstream change\n")
+                PublishedContribution.Write(flow.Upstream, "upstream.txt", "ordinary upstream change\n")
             } else {
-                Write(flow.Upstream, ".github/workflows/verify.yml", "timeout-minutes: 30\n")
+                PublishedContribution.Write(flow.Upstream, ".github/workflows/verify.yml", "timeout-minutes: 30\n")
                 flow.Git("-C", flow.Upstream, "mv", ".github/workflows/old.yml", ".github/workflows/renamed.yml")
                 File.Delete(Path.Combine(flow.Upstream, "protected/gone"))
                 File.SetUnixFileMode(
@@ -63,20 +38,20 @@ internal class SynchronizationChecks {
                 )
                 File.Delete(Path.Combine(flow.Upstream, "protected/link"))
                 File.CreateSymbolicLink(Path.Combine(flow.Upstream, "protected/link"), "content")
-                Write(flow.Upstream, "protected/new", "owner addition\n")
-                Write(flow.Upstream, "guard/other", "owner sibling change\n")
+                PublishedContribution.Write(flow.Upstream, "protected/new", "owner addition\n")
+                PublishedContribution.Write(flow.Upstream, "guard/other", "owner sibling change\n")
             }
             if conflict {
-                Write(flow.Upstream, "shared.txt", "owner shared resolution input\n")
+                PublishedContribution.Write(flow.Upstream, "shared.txt", "owner shared resolution input\n")
             }
             flow.Commit("Owner trusted target")
             return flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
         }
 
-        private func Candidate(flow NativeFlow, run string, upstream string, conflict bool = false) string {
+        private func Candidate(flow NativeFixture, run string, upstream string, conflict bool = false) string {
             let checkout = Path.Combine(run, "checkout")
             if conflict {
-                Write(checkout, "shared.txt", "donor conflicting line\n")
+                PublishedContribution.Write(checkout, "shared.txt", "donor conflicting line\n")
                 Commit(flow, checkout, "Donor conflict input")
             }
             flow.Git("-C", checkout, "fetch", flow.Upstream, upstream)
@@ -102,7 +77,7 @@ internal class SynchronizationChecks {
             )
             if conflict {
                 Check.That(merged.Code == 1 && merged.Output.Contains("CONFLICT"), "Missing actual textual conflict")
-                Write(checkout, "shared.txt", "Explicit owner-reviewed nonprotected resolution\n")
+                PublishedContribution.Write(checkout, "shared.txt", "Explicit owner-reviewed nonprotected resolution\n")
                 return Commit(flow, checkout, "Owner-reviewed conflict resolution")
             }
             Check.Success(merged)
@@ -110,7 +85,7 @@ internal class SynchronizationChecks {
         }
 
         private func Grant(
-            flow NativeFlow,
+            flow NativeFixture,
             candidate string,
             upstream string,
             code int32 = 0,
@@ -153,7 +128,7 @@ internal class SynchronizationChecks {
             return grant
         }
 
-        private func Amend(flow NativeFlow, run string, candidate string, grant string = "", code int32 = 0) Result {
+        private func Amend(flow NativeFixture, run string, candidate string, grant string = "", code int32 = 0) Result {
             let args = List[string]{"amend", "--run", run, "--commit", candidate, "--seconds", "30"}
             if grant != "" {
                 args.AddRange([]string{"--sync", grant})
@@ -161,7 +136,7 @@ internal class SynchronizationChecks {
             return flow.Call(args.ToArray(), code)
         }
 
-        private func Revoke(flow NativeFlow, grant string) {
+        private func Revoke(flow NativeFixture, grant string) {
             let result = flow.Call(
                 []string{"revoke-sync", "--repo", "owner/project", "--grant", grant, "--json"},
                 owner: true
@@ -178,7 +153,7 @@ internal class SynchronizationChecks {
             Check.Contains(flow.Git("-C", flow.Upstream, "show", grant + ":synchronization.json"), "candidate")
         }
 
-        private func Mutate(flow NativeFlow, run string, mode string) string {
+        private func Mutate(flow NativeFixture, run string, mode string, candidate string) string {
             let checkout = Path.Combine(run, "checkout")
             let content = Path.Combine(checkout, "protected/content")
             switch mode {
@@ -193,7 +168,7 @@ internal class SynchronizationChecks {
                     File.CreateSymbolicLink(content, "new")
                 }
                 case "addition" {
-                    Write(checkout, ".github/workflows/donor.yml", "donor workflow\n")
+                    PublishedContribution.Write(checkout, ".github/workflows/donor.yml", "donor workflow\n")
                 }
                 case "deletion" {
                     File.Delete(content)
@@ -205,7 +180,7 @@ internal class SynchronizationChecks {
                     flow.Git("-C", checkout, "mv", "result.txt", "protected/donor.txt")
                 }
                 case "absence" {
-                    Write(checkout, "guard/missing", "donor addition at previously absent path\n")
+                    PublishedContribution.Write(checkout, "guard/missing", "donor addition at previously absent path\n")
                 }
                 case "ancestor" {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
@@ -213,7 +188,7 @@ internal class SynchronizationChecks {
                 }
                 case "ancestor-file" {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
-                    Write(checkout, "guard", "donor ancestor file\n")
+                    PublishedContribution.Write(checkout, "guard", "donor ancestor file\n")
                 }
                 case "ancestor-submodule" {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
@@ -221,19 +196,22 @@ internal class SynchronizationChecks {
                     flow.Git("clone", flow.Upstream, Path.Combine(checkout, "guard"))
                 }
                 case "sibling-creation" {
-                    Write(checkout, "new-parent/public", "unrelated sibling\n")
+                    PublishedContribution.Write(checkout, "new-parent/public", "unrelated sibling\n")
                 }
                 case "sibling-removal" {
                     Directory.Delete(Path.Combine(checkout, "guard"), true)
                 }
                 case "decree", "decree-coordinator" {
-                    Write(checkout, "DECREE.md", "Unapproved donor instructions\n")
+                    PublishedContribution.Write(checkout, "DECREE.md", "Unapproved donor instructions\n")
                 }
                 case "reversion" {
-                    Write(checkout, ".github/workflows/verify.yml", "timeout-minutes: 15\n")
+                    PublishedContribution.Write(checkout, ".github/workflows/verify.yml", "timeout-minutes: 15\n")
                 }
                 case "semantic" {
-                    Write(checkout, "result.txt", "")
+                    PublishedContribution.Write(checkout, "result.txt", "")
+                }
+                default {
+                    return candidate
                 }
             }
             return Commit(flow, checkout, "Exact candidate with " + mode)
@@ -275,25 +253,7 @@ internal class SynchronizationChecks {
             if mode == "unresolved" {
                 File.WriteAllText(Path.Combine(run, "checkout/.git/MERGE_HEAD"), upstream + "\n")
             }
-            if mode == "blob" ||
-                mode == "mode" ||
-                mode == "type" ||
-                mode == "addition" ||
-                mode == "deletion" ||
-                mode == "rename-from" ||
-                mode == "rename-to" ||
-                mode == "absence" ||
-                mode == "ancestor" ||
-                mode == "ancestor-file" ||
-                mode == "ancestor-submodule" ||
-                mode == "sibling-creation" ||
-                mode == "sibling-removal" ||
-                mode == "decree" ||
-                mode == "decree-coordinator" ||
-                mode == "reversion" ||
-                mode == "semantic" {
-                candidate = Mutate(flow, run, mode)
-            }
+            candidate = Mutate(flow, run, mode, candidate)
             if mode == "ancestor-submodule" {
                 Check.That(
                     flow.Git("-C", Path.Combine(run, "checkout"), "ls-tree", candidate, "--", "guard").StartsWith(
@@ -371,7 +331,7 @@ internal class SynchronizationChecks {
                     flow.Git("-C", flow.Upstream, "update-ref", reference, upstream)
                 }
             } else if mode == "stale-target" {
-                Write(flow.Upstream, "movement.txt", "target advanced\n")
+                PublishedContribution.Write(flow.Upstream, "movement.txt", "target advanced\n")
                 flow.Commit("Target moved after grant")
             } else if mode == "policy" || mode == "template" {
                 File.AppendAllText(
@@ -380,7 +340,7 @@ internal class SynchronizationChecks {
                 )
                 flow.Commit("Owner scope changed")
             } else if mode == "substitution" {
-                Write(Path.Combine(run, "checkout"), "another.txt", "different candidate\n")
+                PublishedContribution.Write(Path.Combine(run, "checkout"), "another.txt", "different candidate\n")
                 candidate = Commit(flow, Path.Combine(run, "checkout"), "Candidate substitution")
             } else if mode.StartsWith("tree-") {
                 flow.Reload()
@@ -512,7 +472,11 @@ internal class SynchronizationChecks {
             )
             Check.Contains(flow.Git("-C", Path.Combine(flow.Bin, "fork"), "show", h + ":result.txt"), "")
             if mode == "decree-after-sync" {
-                Write(Path.Combine(run, "checkout"), "DECREE.md", "Unapproved later instructions\n")
+                PublishedContribution.Write(
+                    Path.Combine(run, "checkout"),
+                    "DECREE.md",
+                    "Unapproved later instructions\n"
+                )
                 let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment changes DECREE")
                 let rejected = Amend(flow, run, next, code: 1)
                 Check.Contains(
@@ -521,7 +485,7 @@ internal class SynchronizationChecks {
                 )
                 return
             }
-            Write(Path.Combine(run, "checkout"), "followup.txt", "ordinary review correction\n")
+            PublishedContribution.Write(Path.Combine(run, "checkout"), "followup.txt", "ordinary review correction\n")
             let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment after synchronization")
             Amend(flow, run, next)
             if v2 {
@@ -540,7 +504,7 @@ internal class SynchronizationChecks {
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
             flow.Save()
             flow.Call([]string{"checks", "--run", run}, owner: true)
-            Write(flow.Upstream, "later-target.txt", "acceptance must recheck target\n")
+            PublishedContribution.Write(flow.Upstream, "later-target.txt", "acceptance must recheck target\n")
             flow.Commit("Target moved before final acceptance")
             flow.Call([]string{"checks", "--run", run}, 1, owner: true)
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)

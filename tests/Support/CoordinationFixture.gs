@@ -8,13 +8,13 @@ import System.IO
 import System.Text.Json.Nodes
 
 internal open class CoordinationFixture : IDisposable {
-    internal let Flow NativeFlow
+    internal let Flow NativeFixture
     internal let Tools string
     internal var Comment int32 = 10
     internal var Issue int32 = 1
 
     internal init(binary string) {
-        Flow = NativeFlow(binary)
+        Flow = NativeFixture(binary)
         Tools = Path.Combine(Flow.Temp.Root, "tools.json")
     }
 

@@ -7,87 +7,6 @@ import System.Text.Json.Nodes
 
 internal class Installer {
     shared {
-        internal func Hash(path string) string -> Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))
-            .ToLowerInvariant()
-
-        internal func ShellFixture(name string, args[]string, root string) int32 {
-            if name == "id" {
-                Check.That(args.Length == 1 && args[0] == "-u", "Unexpected account identity lookup")
-                Console.WriteLine("12345")
-                return 0
-            }
-            Check.That(
-                args.Length == 2 && args[0] == "passwd" && args[1] == "12345",
-                "Shell detection must query only the current account"
-            )
-            File.AppendAllText(Path.Combine(root, "shell-lookups"), "lookup\n")
-            let shell = File.ReadAllText(Path.Combine(root, "account-shell"))
-            if shell == "" {
-                return 2
-            }
-            Console.WriteLine("fixture:x:12345:12345::/unused:" + (shell == "empty" ? "": shell))
-            return 0
-        }
-
-        internal func PlatformFixture(name string, args[]string, root string) int32 {
-            let state = Check.Json(File.ReadAllText(Path.Combine(root, "platform.json")))
-            if name == "uname" {
-                Check.That(args.Length == 1 && (args[0] == "-s" || args[0] == "-m"), "Unexpected uname arguments")
-                Console.WriteLine(Check.Text(state[args[0] == "-s" ? "os": "arch"]))
-                return 0
-            }
-            Check.That(args.Length == 1 && args[0] == "GNU_LIBC_VERSION", "Unexpected getconf arguments")
-            let libc = Check.Text(state["libc"])
-            if libc == "" {
-                return 1
-            }
-            Console.WriteLine(libc)
-            return 0
-        }
-
-        internal func Fixture(args[]string, root string) int32 {
-            if args.Length == 1 && args[0] == "--version" {
-                Console.WriteLine("curl fixture")
-                return 0
-            }
-            let statePath = Path.Combine(root, "state.json")
-            let state = Check.Json(File.ReadAllText(statePath))
-            if Check.Text(state["coordinator_download"]) == "true" {
-                return CoordinationFlow.ReleaseDownload(args, root)
-            }
-            Check.That(args[0] == "-q", "curl must ignore user configuration")
-            Check.That(Array.IndexOf(args, "--proto") >= 0 && Array.IndexOf(args, "=https") >= 0, "HTTPS required")
-            if Check.Text(state["clean"]) == "true" {
-                Check.That(Environment.GetEnvironmentVariable("GH_TOKEN") == nil, "GitHub credential inherited")
-                Check.That(Environment.GetEnvironmentVariable("OPENAI_API_KEY") == nil, "API credential inherited")
-            }
-            if Check.Text(state["mode"]) == "download-fail" {
-                return 22
-            }
-            let url = args[args.Length - 1]
-            let tag = Check.Text(state["tag"])
-            if url.EndsWith("/latest") {
-                Console.Write("https://github.com/obselate/tokate/releases/tag/" + tag)
-                return 0
-            }
-            let output = args[Array.IndexOf(args, "--output") + 1]
-            let archive = Path.Combine(root, "release.tar.gz")
-            if url.EndsWith(".sha256") {
-                let hash = Check.Text(state["mode"]) == "checksum-fail" ? String('0', 64): Hash(archive)
-                File.WriteAllText(output, hash + "  tokate-" + tag.Substring(1) + "-linux-x64.tar.gz\n")
-            } else {
-                Check.That(
-                    url == "https://github.com/obselate/tokate/releases/download/" + tag + "/tokate-" + tag.Substring(
-                        1
-                    ) +
-                        "-linux-x64.tar.gz",
-                    "Unexpected release URL"
-                )
-                File.Copy(archive, output, true)
-            }
-            return 0
-        }
-
         internal func Lifecycle(project string, binary string, shell string = "/bin/bash", accountShell string? = nil) {
             using let temp = Temp()
             temp.Env["SHELL"] = shell
@@ -137,7 +56,7 @@ internal class Installer {
                 }
             }
             let output = Check.Success(TestProcess.Run("/bin/sh", []string{script}, temp.Env))
-            Check.That(Hash(installed) == Hash(binary), "Installed binary differs")
+            Check.That(Check.Hash(installed) == Check.Hash(binary), "Installed binary differs")
             if unresolved {
                 Check.Contains(output, "Add ~/.local/bin to PATH in your shell startup file.")
                 Check.Contains(output, ". \"$$HOME/.local/share/tokate/env\"")
@@ -183,7 +102,7 @@ internal class Installer {
             temp.Env["OPENAI_API_KEY"] = "fixture-secret"
             state["clean"] = JsonValue.Create(true)
             File.WriteAllText(statePath, state.ToJsonString())
-            CliDiscovery.Envelope(TestProcess.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
+            Check.Envelope(TestProcess.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
             Check.That(File.ReadAllText(profile) == hook, "Update duplicated shell setup")
             if loginHook != "" {
                 Check.That(File.ReadAllText(bashProfile) == loginHook, "Update duplicated login shell setup")
@@ -193,8 +112,8 @@ internal class Installer {
                 File.WriteAllText(statePath, state.ToJsonString())
                 let failure = TestProcess.Run(installed, []string{"update", "--json"}, temp.Env)
                 Check.That(failure.Code != 0, "Update should fail: " + mode)
-                CliDiscovery.Envelope(failure, "update", "error", "command_failed")
-                Check.That(Hash(installed) == Hash(binary), "Failed update changed binary")
+                Check.Envelope(failure, "update", "error", "command_failed")
+                Check.That(Check.Hash(installed) == Check.Hash(binary), "Failed update changed binary")
             }
             Check.Success(TestProcess.Run(installed, []string{"uninstall", "--help"}, temp.Env))
             Check.That(File.Exists(installed), "Help removed the binary")
@@ -202,11 +121,7 @@ internal class Installer {
             Directory.CreateDirectory(Path.GetDirectoryName(saved) ?? "")
             File.WriteAllText(saved, "keep")
             File.Delete(Path.Combine(tools, "curl"))
-            CliDiscovery.Envelope(
-                TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env),
-                "uninstall",
-                "ok"
-            )
+            Check.Envelope(TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
             Check.That(!File.Exists(installed), "Uninstall left binary")
             Check.That(File.Exists(saved), "Uninstall removed saved work")
             if fish {
@@ -325,7 +240,10 @@ internal class Installer {
                         Check.Contains(result.Error, cases[i * 3 + 2])
                         Check.That(!result.Output.Contains("Downloading"), "Unsupported platform reached downloads")
                         if existing {
-                            Check.That(Hash(installed) == Hash(binary), "Platform refusal changed existing binary")
+                            Check.That(
+                                Check.Hash(installed) == Check.Hash(binary),
+                                "Platform refusal changed existing binary"
+                            )
                             Check.That(
                                 File.ReadAllText(Path.Combine(data, "installed")) == "keep-marker",
                                 "Install marker changed"
@@ -345,11 +263,7 @@ internal class Installer {
                     }
                 }
             }
-            CliDiscovery.Envelope(
-                TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env),
-                "uninstall",
-                "ok"
-            )
+            Check.Envelope(TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
             Check.That(!File.Exists(installed), "Unsupported libc blocked offline removal")
         }
     }

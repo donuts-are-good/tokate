@@ -8,6 +8,12 @@ import System.IO
 import System.Text.Json.Nodes
 
 internal partial class CoordinationFlow : CoordinationFixture {
+    shared {
+        internal func Concurrent(binary string, path string, env Dictionary[string, string], output Chan[Result]) {
+            output <- TestProcess.Run(binary, []string{"coordinate", "--repo", "owner/project", "--event", path}, env)
+        }
+    }
+
     internal init(binary string) : base(binary) { }
 
     internal func ReplayAndInterruptedState() {
@@ -197,7 +203,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
             "newline",
             "permitted"
         } {
-            using let test = CoordinationFlow(Flow.Binary)
+            using let test = CoordinationFixture(Flow.Binary)
             test.Initialize()
             test.Flow.ProtectedPolicy()
             test.Flow.Approve()
@@ -344,7 +350,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let claim = Claim()
         let run = Prepare()
         let commit = Candidate(claim)
-        // No Codex binary or ChatGPT login is available for this path.
         File.Delete(Path.Combine(Flow.Bin, "codex"))
         Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1)
         Flow.Call([]string{"external", "--run", run, "--commit", commit})
@@ -465,32 +470,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let run = Prepare()
         Expire()
         Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1)
-        let expired = State()
-        let publication = Check.Map(
-            "uuid",
-            Guid.NewGuid().ToString("D"),
-            "expected",
-            Check.Text(expired["sha"]),
-            "approval",
-            Check.Text(expired["state"]?["approval_id"]),
-            "action",
-            "publish",
-            "metadata",
-            Check.Map(
-                "fork",
-                "donor/project",
-                "branch",
-                "tokate/v2-" + Check.Text(original["uuid"]),
-                "head",
-                String('a', 40),
-                "source",
-                "external",
-                "tools",
-                Check.Json(File.ReadAllText(Tools)),
-                "verification",
-                "donor-reported-pass"
-            )
-        )
+        let publication = PublishRequest(original, String('a', 40))
         Coordinate(Event(publication), 1)
         let late = ClaimRequest()
         Claim()
@@ -675,7 +655,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.Call(args, owner: true)
         let yaml = File.ReadAllText(output)
         Check.Contains(yaml, "https://api.github.com/repos/obselate/tokate/releases/assets/41")
-        Check.Contains(yaml, Installer.Hash(archive))
+        Check.Contains(yaml, Check.Hash(archive))
         Check.Contains(yaml, bundle + "/tokate")
         Check.That(
             !yaml.Contains("@ARCHIVE") && !yaml.Contains("actions/checkout"),
@@ -1008,7 +988,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
 
     internal func ModelPolicyAuthority() {
         for mode in[]string{"whitelist", "unrestricted"} {
-            using let test = CoordinationFlow(Flow.Binary)
+            using let test = CoordinationFixture(Flow.Binary)
             test.Initialize()
             test.Claim()
             let run = test.Prepare()
@@ -1033,7 +1013,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
     }
 
     internal func Compatibility() {
-        using let old = NativeFlow(Flow.Binary)
+        using let old = NativeFixture(Flow.Binary)
         old.Initialize()
         old.Approve()
         let run = old.Claim()

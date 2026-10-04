@@ -8,12 +8,12 @@ import Tokate
 
 internal class OverlapFlow : IDisposable {
     internal let Test CoordinationFlow
-    internal let Flow NativeFlow
+    internal let Flow NativeFixture
     internal let Version int32
     internal let Heads List[string] = List[string]()
     internal let Bases List[string] = List[string]()
 
-    internal init(binary string, version int32, layout string = "overlap") {
+    internal init(binary string, version int32) {
         Test = CoordinationFlow(binary)
         Flow = Test.Flow
         Version = version
@@ -203,7 +203,7 @@ internal class OverlapFlow : IDisposable {
             ?.ToJsonString()
         Flow.ResetTraffic()
         let result = Flow.Call([]string{"overlaps", "--repo", "owner/project", "--prs", prs, "--json"})
-        let envelope = CliDiscovery.Envelope(result, "overlaps", "ok")
+        let envelope = Check.Envelope(result, "overlaps", "ok")
         Check.That(
             envelope["data"]?["accepted"] == nil && envelope["data"]?["ready_to_merge"] == nil,
             "Overlap report grants acceptance"
@@ -262,7 +262,7 @@ internal class OverlapChecks {
         )
 
         private func Inputs(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             let invalid = List[string]{
                 "1",
                 "0,2",
@@ -283,7 +283,7 @@ internal class OverlapChecks {
             }
             invalid.Add(String.Join(",", many))
             for prs in invalid {
-                CliDiscovery.Envelope(
+                Check.Envelope(
                     flow.Call([]string{"overlaps", "--repo", "owner/project", "--prs=" + prs, "--json"}, 1),
                     "overlaps",
                     "error",
@@ -295,11 +295,11 @@ internal class OverlapChecks {
                 []string{"overlaps", "--repo", "bad", "--prs", "1,2", "--json"},
                 []string{"overlaps", "--repo", "owner/project", "--prs", "1,2", "--prs", "3,4", "--json"}
             } {
-                CliDiscovery.Envelope(flow.Call(argv, 1), "overlaps", "error", "invalid_arguments")
+                Check.Envelope(flow.Call(argv, 1), "overlaps", "error", "invalid_arguments")
             }
             flow.Reload()
             Check.That(flow.State["api_calls"] == nil, "Invalid selection made remote reads")
-            let help = CliDiscovery.Envelope(flow.Call([]string{"overlaps", "--help", "--json"}), "overlaps", "ok")
+            let help = Check.Envelope(flow.Call([]string{"overlaps", "--help", "--json"}), "overlaps", "ok")
             let effects = help["data"]?["commands"]?[0]?["effects"]
             Check.That(
                 Check.Text(effects?["github_read"]) == "true" && Check.Text(effects?["github_write"]) == "false" &&
@@ -382,11 +382,12 @@ internal class OverlapChecks {
                 test.Flow.State["overlap_diff_fault_head"] = JsonValue.Create(test.Heads[0])
                 test.Flow.Save()
                 let data = test.Report()["data"]
+                let contributions = data?["contributions"]
                 Check.That(
                     Check.Text(data?["pairs"]?[0]?["status"]) == "unknown" && Check.Text(
-                        data?["contributions"]?[0]?["diff_status"]
+                        contributions?[0]?["diff_status"]
                     ) == "unknown" &&
-                        Check.Text(data?["contributions"]?[1]?["diff_status"]) == "complete",
+                        Check.Text(contributions?[1]?["diff_status"]) == "complete",
                     "Incomplete diff affected unrelated contribution"
                 )
             }
@@ -394,11 +395,8 @@ internal class OverlapChecks {
             test.Flow.State["diff_fault"] = nil
             test.Flow.State["check_runs"] = Check.Map("total_count", 2, "check_runs", JsonArray())
             test.Flow.Save()
-            let incomplete = test.Report()["data"]
-            Check.That(
-                Check.Text(incomplete?["contributions"]?[0]?["checks_status"]) == "unknown",
-                "Incomplete check evidence passed"
-            )
+            let incomplete = test.Report()["data"]?["contributions"]?[0]
+            Check.That(Check.Text(incomplete?["checks_status"]) == "unknown", "Incomplete check evidence passed")
             test.Flow.Reload()
             test.Flow.State["check_runs"] = Check.Map(
                 "total_count",
@@ -418,38 +416,35 @@ internal class OverlapChecks {
                 )
             )
             test.Flow.Save()
-            let staleChecks = test.Report()["data"]
-            Check.That(
-                Check.Text(staleChecks?["contributions"]?[0]?["checks_status"]) == "unknown",
-                "Stale check head passed"
-            )
+            let staleChecks = test.Report()["data"]?["contributions"]?[0]
+            Check.That(Check.Text(staleChecks?["checks_status"]) == "unknown", "Stale check head passed")
             test.Flow.Reload()
             test.Flow.State["check_runs"] = nil
             test.Flow.State["checks"] = JsonArray()
             test.Flow.Save()
-            let missing = test.Report()["data"]
+            let missing = test.Report()["data"]?["contributions"]?[0]
             Check.That(
-                Check.Text(missing?["contributions"]?[0]?["check_count"]) == "0" &&
-                    missing?["contributions"]?[0]?["required_checks"]
-                    ?.ToJsonString().Contains("verify") == true,
+                Check.Text(missing?["check_count"]) == "0" && missing?["required_checks"]?.ToJsonString().Contains(
+                    "verify"
+                ) == true,
                 "Missing exact-head checks hidden"
             )
             test.Flow.Faults(
                 "repos/owner/project/issues/1/dependencies/blocked_by?per_page=100&page=1",
                 Check.Json("[{\"status\":404}]")
             )
-            let failed = test.Report()["data"]
+            let failed = test.Report()["data"]?["contributions"]
             Check.That(
-                Check.Text(failed?["contributions"]?[0]?["dependency_gate"]) == "unknown" && Check.Text(
-                    failed?["contributions"]?[1]?["dependencies_status"]
+                Check.Text(failed?[0]?["dependency_gate"]) == "unknown" && Check.Text(
+                    failed?[1]?["dependencies_status"]
                 ) == "complete",
                 "Dependency API failure lost unrelated contribution"
             )
             test.Flow.Faults("repos/owner/project/pulls/10", Check.Json("[{\"status\":404}]"))
-            let unavailable = test.Report()["data"]
+            let unavailable = test.Report()["data"]?["contributions"]
             Check.That(
-                Check.Text(unavailable?["contributions"]?[0]?["binding_status"]) == "unknown" && Check.Text(
-                    unavailable?["contributions"]?[1]?["binding_status"]
+                Check.Text(unavailable?[0]?["binding_status"]) == "unknown" && Check.Text(
+                    unavailable?[1]?["binding_status"]
                 ) == "validated",
                 "PR API failure aborted report"
             )
@@ -477,22 +472,22 @@ internal class OverlapChecks {
                     )
                 }
                 test.Dependencies(JsonArray(dependency))
-                let data = test.Report()["data"]
+                let contributions = test.Report()["data"]?["contributions"]
                 let expected = state == "open" ? "blocked": (
                     state == "completed" ? "no_open_dependencies": "owner_review"
                 )
                 Check.That(
-                    Check.Text(data?["contributions"]?[0]?["dependency_gate"]) == expected,
+                    Check.Text(contributions?[0]?["dependency_gate"]) == expected,
                     "Wrong native dependency gate for " + state
                 )
                 Check.That(
-                    Check.Text(data?["contributions"]?[1]?["dependency_gate"]) == "no_open_dependencies",
+                    Check.Text(contributions?[1]?["dependency_gate"]) == "no_open_dependencies",
                     "Parsed dependency prose or traversed graph"
                 )
                 if state == "duplicate" {
                     Check.That(
                         Check.Text(
-                            data?["contributions"]?[0]?["dependencies"]?[0]?["resolution"]?["duplicate_of"]?["number"]
+                            contributions?[0]?["dependencies"]?[0]?["resolution"]?["duplicate_of"]?["number"]
                         ) == "9",
                         "Native duplicate metadata lost"
                     )
@@ -510,11 +505,12 @@ internal class OverlapChecks {
             test.Flow.State["dependency_pages"] = Check.Map("1", pages)
             test.Flow.Save()
             let bounded = test.Report()
+            let contribution = bounded["data"]?["contributions"]?[0]
             Check.That(
                 Check.Text(bounded["truncated"]) == "true" && Check.Text(
-                    bounded["data"]?["contributions"]?[0]?["dependencies_status"]
+                    contribution?["dependencies_status"]
                 ) == "incomplete" &&
-                    Check.Text(bounded["data"]?["contributions"]?[0]?["dependency_gate"]) == "unknown",
+                    Check.Text(contribution?["dependency_gate"]) == "unknown",
                 "Dependency cap claimed completeness"
             )
             test.Flow.Reload()
@@ -562,27 +558,28 @@ internal class OverlapChecks {
                 }
             }
             flow.ResetTraffic()
-            let result = CliDiscovery.Envelope(
+            let result = Check.Envelope(
                 flow.Call([]string{"overlaps", "--repo", "owner/project", "--prs", "10,11", "--json"}),
                 "overlaps",
                 "ok"
             )
             let data = result["data"]
+            let contributions = data?["contributions"]
             Check.That(
-                Check.Text(data?["contributions"]?[1]?["identity_status"]) == "stable",
+                Check.Text(contributions?[1]?["identity_status"]) == "stable",
                 "Movement hid unrelated contribution"
             )
             if change == "moved-before" {
                 Check.That(
-                    Check.Text(data?["contributions"]?[0]?["binding"]?["base"]) == test.Bases[0] && Check.Text(
-                        data?["contributions"]?[0]?["target_revision"]
+                    Check.Text(contributions?[0]?["binding"]?["base"]) == test.Bases[0] && Check.Text(
+                        contributions?[0]?["target_revision"]
                     ) != test.Bases[0] &&
-                        Check.Text(data?["contributions"]?[0]?["binding_status"]) == "validated",
+                        Check.Text(contributions?[0]?["binding_status"]) == "validated",
                     "Target movement rewrote approved identity"
                 )
             } else {
                 Check.That(
-                    Check.Text(data?["contributions"]?[0]?["diff_status"]) == "unknown",
+                    Check.Text(contributions?[0]?["diff_status"]) == "unknown",
                     "Changing/stale identity retained overlap evidence"
                 )
                 Check.That(
@@ -591,10 +588,10 @@ internal class OverlapChecks {
                 )
                 if change == "retarget" {
                     Check.That(
-                        Check.Text(data?["contributions"]?[0]?["target_branch"]) == "main" && Check.Text(
-                            data?["contributions"]?[0]?["target_branch_after"]
+                        Check.Text(contributions?[0]?["target_branch"]) == "main" && Check.Text(
+                            contributions?[0]?["target_branch_after"]
                         ) == "release" &&
-                            Check.Text(data?["contributions"]?[0]?["identity_status"]) == "unknown",
+                            Check.Text(contributions?[0]?["identity_status"]) == "unknown",
                         "Fixture did not retarget the PR during collection"
                     )
                 }

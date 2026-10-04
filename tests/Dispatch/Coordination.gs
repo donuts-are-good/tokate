@@ -9,35 +9,6 @@ import System.Text.Json.Nodes
 
 internal partial class CoordinationFlow : CoordinationFixture {
     shared {
-        internal func ReleaseDownload(args[]string, root string) int32 {
-            let state = Check.Json(File.ReadAllText(Path.Combine(root, "state.json")))
-            Check.That(
-                Environment.GetEnvironmentVariable("GH_TOKEN") == nil && Environment.GetEnvironmentVariable(
-                    "GITHUB_TOKEN"
-                ) == nil,
-                "Coordination credentials reached release download"
-            )
-            let url = args[args.Length - 1]
-            let output = args[Array.IndexOf(args, "--output") + 1]
-            if url.EndsWith("/41") {
-                File.Copy(Path.Combine(root, "release.tar.gz"), output)
-            } else {
-                Check.That(url.EndsWith("/42"), "Unexpected immutable release asset URL")
-                File.WriteAllText(
-                    output,
-                    Installer.Hash(Path.Combine(root, "release.tar.gz")) + "  tokate-" + Check.Text(
-                        state["release_version"]
-                    ) +
-                        "-linux-x64.tar.gz\n"
-                )
-            }
-            return 0
-        }
-
-        internal func Concurrent(binary string, path string, env Dictionary[string, string], output Chan[Result]) {
-            output <- TestProcess.Run(binary, []string{"coordinate", "--repo", "owner/project", "--event", path}, env)
-        }
-
         internal func All(binary string, selected string = "") {
             var matched bool
             for name in[]string{

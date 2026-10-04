@@ -8,7 +8,7 @@ import System.Text.Json.Nodes
 internal class DonorSelectionChecks {
     shared {
         private func Set(
-            flow NativeFlow,
+            flow NativeFixture,
             model string = "gpt-6.1-sol",
             effort string = "high",
             harness string = "codex",
@@ -30,7 +30,7 @@ internal class DonorSelectionChecks {
             )
         }
 
-        private func Select(flow NativeFlow, extra[]string, code int32 = 0) JsonNode {
+        private func Select(flow NativeFixture, extra[]string, code int32 = 0) JsonNode {
             let args = List[string]{"select", "--repo", "owner/project", "--non-interactive"}
             args.AddRange(extra)
             let result = flow.Call(args.ToArray(), code)
@@ -42,12 +42,12 @@ internal class DonorSelectionChecks {
             return Check.Json(result.Output)
         }
 
-        private func Settings(flow NativeFlow) string -> Path.Combine(
+        private func Settings(flow NativeFixture) string -> Path.Combine(
             flow.Temp.Env["HOME"],
             ".local/state/tokate/donor-defaults.json"
         )
 
-        private func ExpandPolicy(flow NativeFlow, alternative bool = false) {
+        private func ExpandPolicy(flow NativeFixture, alternative bool = false) {
             let path = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(path))
             policy["models"] = Check.Json(
@@ -61,7 +61,7 @@ internal class DonorSelectionChecks {
         }
 
         private func LocalSettings(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Temp.Env["PATH"] = "/empty"
             let read = flow.Call([]string{"defaults", "read"})
             Check.That(Check.Json(read.Output)["default"] == nil, "Missing defaults were fabricated")
@@ -91,7 +91,7 @@ internal class DonorSelectionChecks {
         }
 
         private func Choices(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             ExpandPolicy(flow, true)
             Select(flow, []string{}, 1)
@@ -164,7 +164,7 @@ internal class DonorSelectionChecks {
 
         private func AuthorizedChoices(binary string) {
             for source in[]string{"explicit invocation", "saved donor default"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let args = List[string]{
@@ -194,7 +194,7 @@ internal class DonorSelectionChecks {
         }
 
         private func ConfirmationAndRuns(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             Set(flow)
@@ -235,7 +235,7 @@ internal class DonorSelectionChecks {
         }
 
         private func LegacyRun(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -259,7 +259,7 @@ internal class DonorSelectionChecks {
         }
 
         private func InteractiveChoices(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             ExpandPolicy(flow)
             let command = "'" + binary + "' select --repo owner/project"
@@ -392,7 +392,7 @@ internal class DonorSelectionChecks {
 
         private func ModelPolicy(binary string) {
             for omitted in[]bool{true, false} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 let path = Path.Combine(flow.Upstream, ".github/tokate.json")
                 let policy = Check.Json(File.ReadAllText(path))
@@ -447,12 +447,12 @@ internal class DonorSelectionChecks {
         }
 
         private func Structured(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             let path = flow.Temp.Env["PATH"]
             flow.Temp.Env["PATH"] = "/empty"
-            let missing = CliDiscovery.Envelope(flow.Call([]string{"defaults", "read", "--json"}), "defaults", "ok")
+            let missing = Check.Envelope(flow.Call([]string{"defaults", "read", "--json"}), "defaults", "ok")
             Check.That(missing["data"]?["default"] == nil, "Missing JSON defaults fabricated")
-            let saved = CliDiscovery.Envelope(
+            let saved = Check.Envelope(
                 flow.Call(
                     []string{
                         "defaults",
@@ -475,7 +475,7 @@ internal class DonorSelectionChecks {
             flow.Temp.Env["PATH"] = path
             flow.Initialize()
             for availability in[]string{"unknown", "available"} {
-                let selected = CliDiscovery.Envelope(
+                let selected = Check.Envelope(
                     flow.Call([]string{"select", "--repo", "owner/project", "--availability", availability, "--json"}),
                     "select",
                     "ok"
@@ -487,7 +487,7 @@ internal class DonorSelectionChecks {
                     "JSON selection dropped evidence"
                 )
             }
-            CliDiscovery.Envelope(
+            Check.Envelope(
                 flow.Call(
                     []string{
                         "select",
@@ -507,7 +507,7 @@ internal class DonorSelectionChecks {
                 "error",
                 "command_failed"
             )
-            let removed = CliDiscovery.Envelope(flow.Call([]string{"defaults", "remove", "--json"}), "defaults", "ok")
+            let removed = Check.Envelope(flow.Call([]string{"defaults", "remove", "--json"}), "defaults", "ok")
             Check.That(Check.Text(removed["data"]?["removed"]) == "true", "JSON defaults removal missing")
             let command = "'" + binary + "' select --repo owner/project --json 2> '" + Path.Combine(
                 flow.Temp.Root,
@@ -519,7 +519,7 @@ internal class DonorSelectionChecks {
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 flow.Temp.Env
             )
-            CliDiscovery.Envelope(terminal, "select", "error", "command_failed")
+            Check.Envelope(terminal, "select", "error", "command_failed")
             Check.That(!terminal.Output.Contains("Choice number"), "JSON terminal selection prompted")
             flow.NoInference()
         }

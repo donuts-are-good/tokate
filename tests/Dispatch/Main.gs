@@ -8,14 +8,14 @@ func Main(args[]string) int32 {
     try {
         let exe = Environment.ProcessPath ?? throw Exception("Missing process path")
         if Path.GetFileName(exe) == "curl" {
-            return Installer.Fixture(args, Path.GetDirectoryName(exe) ?? "")
+            return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
         if name == "id" || name == "getent" {
-            return Installer.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
+            return ReleaseTools.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
         if name == "uname" || name == "getconf" {
-            return Installer.PlatformFixture(name, args, Path.GetDirectoryName(exe) ?? "")
+            return ReleaseTools.PlatformFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
         if name == "git" || name == "gh" || name.StartsWith("codex") {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
@@ -96,7 +96,7 @@ func Main(args[]string) int32 {
             "artifacts/linux-x64/tokate"
         )
         if args.Length == 2 && args[0] == "--suite" {
-            SuiteDriver.Select(binary, args[1])
+            SuiteCatalog.Select(binary, args[1])
             return 0
         }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--diagnostics" {
@@ -177,7 +177,7 @@ func Main(args[]string) int32 {
             return 0
         }
         Check.That(args.Length == 0, "Unknown test arguments: " + String.Join(" ", args))
-        SuiteDriver.All(project, binary)
+        SuiteCatalog.All(project, binary)
         return 0
     } catch (error Exception) {
         Console.Error.WriteLine(error.ToString())

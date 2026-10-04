@@ -50,36 +50,18 @@ internal class ProcessChecks {
             }
         }
 
-        private func Fields(stat string)[]string -> stat.Substring(stat.LastIndexOf(')') + 2).Split(
-            ' ',
-            StringSplitOptions.RemoveEmptyEntries
-        )
-
-        private func Status(path string) string? {
-            try {
-                return File.ReadAllText(path)
-            } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
-                error IOException
-            ) {
-                if error.HResult != 3 {
-                    rethrow
-                }
-            }
-            return nil
-        }
-
         private func Collect(root string, name string, observed Chan[bool]? = nil, milliseconds int32 = 1000) {
             let path = Path.Combine(root, name)
             Check.That(File.Exists(path), "Process fixture did not start: " + name)
-            let identity = Fields(File.ReadAllText(path + ".stat"))[19]
+            let identity = TestProcess.Fields(File.ReadAllText(path + ".stat"))[19]
             let status = "/proc/" + File.ReadAllText(path).Trim() + "/stat"
             let clock = Stopwatch.StartNew()
             while true {
-                let stat = Status(status)
+                let stat = TestProcess.Status(status)
                 if stat == nil {
                     return
                 }
-                let fields = Fields(stat)
+                let fields = TestProcess.Fields(stat)
                 if fields[19] != identity || fields[0] == "Z" {
                     return
                 }
@@ -213,7 +195,7 @@ internal class ProcessChecks {
                 }
                 let pid = File.ReadAllText(Path.Combine(temp.Root, "child.pid")).Trim()
                 let stat = File.ReadAllText("/proc/" + pid + "/stat")
-                Check.That(Fields(stat)[0] == "t", "Exit fixture did not expose the non-zombie snapshot")
+                Check.That(TestProcess.Fields(stat)[0] == "t", "Exit fixture did not expose the non-zombie snapshot")
                 go ProcessChecks.ExitCollected(temp.Root, observed, collected)
                 collectorStarted = true
                 select {

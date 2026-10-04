@@ -10,7 +10,7 @@ import System.Text.Json.Nodes
 internal class CommandTrafficChecks {
     shared {
         private func Budgets(
-            flow NativeFlow,
+            flow NativeFixture,
             result Result,
             reads int32,
             writes int32,
@@ -37,7 +37,7 @@ internal class CommandTrafficChecks {
         }
 
         private func Request(
-            flow CoordinationFlow,
+            flow CoordinationFixture,
             request JsonNode,
             code int32 = 0,
             file string = "request-input.json"
@@ -52,7 +52,7 @@ internal class CommandTrafficChecks {
         }
 
         private func RequestReuse(binary string) {
-            using let flow = CoordinationFlow(binary)
+            using let flow = CoordinationFixture(binary)
             flow.Initialize()
             let request = flow.ClaimRequest()
             flow.Flow.ResetTraffic()
@@ -83,7 +83,7 @@ internal class CommandTrafficChecks {
 
         private func JournalSafety(binary string) {
             for kind in[]string{"link", "dangling", "existing", "partial", "race", "race-link"} {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let request = flow.ClaimRequest()
                 let path = Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")
@@ -138,7 +138,7 @@ internal class CommandTrafficChecks {
         }
 
         private func SameFileRequest(binary string) {
-            using let flow = CoordinationFlow(binary)
+            using let flow = CoordinationFixture(binary)
             flow.Initialize()
             let path = Path.Combine(flow.Flow.Temp.Root, "request-input.json")
             let request = flow.ClaimRequest()
@@ -197,7 +197,7 @@ internal class CommandTrafficChecks {
                 "request_fail_before_write",
                 "request_ambiguous_after_write"
             } {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let request = flow.ClaimRequest()
                 flow.Flow.Mode(mode)
@@ -245,7 +245,7 @@ internal class CommandTrafficChecks {
 
         private func CanonicalRequest(binary string) {
             for fault in[]string{"other-author", "issue", "repository", "actor", "changed-payload", "string-actor"} {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let request = flow.ClaimRequest()
                 let eventPath = flow.Event(request, fault == "other-author" ? 124: 123)
@@ -280,7 +280,7 @@ internal class CommandTrafficChecks {
         }
 
         private func SubmitReuse(binary string) {
-            using let flow = CoordinationFlow(binary)
+            using let flow = CoordinationFixture(binary)
             flow.Initialize()
             let claim = flow.Claim()
             let run = flow.Prepare()
@@ -310,7 +310,7 @@ internal class CommandTrafficChecks {
             )
         }
 
-        private func Published(flow NativeFlow, decree string = "") string {
+        private func Published(flow NativeFixture, decree string = "") string {
             flow.Initialize()
             if decree != "" {
                 File.WriteAllText(Path.Combine(flow.Upstream, "DECREE.md"), decree)
@@ -324,7 +324,7 @@ internal class CommandTrafficChecks {
             return run
         }
 
-        private func Watch(flow NativeFlow, run string, timeout string, code int32 = 8) Result -> flow.Call(
+        private func Watch(flow NativeFixture, run string, timeout string, code int32 = 8) Result -> flow.Call(
             []string{"checks", "--run", run, "--watch", "--timeout", timeout},
             code,
             traffic: true
@@ -339,7 +339,7 @@ internal class CommandTrafficChecks {
                 "rate-reset",
                 "poll-delay"
             } {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 let run = Published(flow)
                 let commit = Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"])
                 let path = kind == "initial-authority" ? "repos/owner/project/pulls/10":
@@ -393,7 +393,7 @@ internal class CommandTrafficChecks {
 
         private func MovedDecreeDeadline(binary string) {
             for kind in[]string{"tree", "blob"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 let run = Published(flow, "Owner instructions\n")
                 File.WriteAllText(Path.Combine(flow.Upstream, "later.txt"), "Unrelated target change\n")
                 flow.Commit("Advance target with unchanged instructions")
@@ -425,17 +425,13 @@ internal class CommandTrafficChecks {
         }
 
         private func WatchStructured(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             let run = Published(flow)
-            let pending = CliDiscovery.Envelope(
-                flow.Call([]string{"checks", "--run", run, "--json"}, 8),
-                "checks",
-                "pending"
-            )
+            let pending = Check.Envelope(flow.Call([]string{"checks", "--run", run, "--json"}, 8), "checks", "pending")
             Check.That(Check.Text(pending["data"]?["checks_status"]) == "pending", "Pending check projection missing")
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
             flow.Save()
-            let passed = CliDiscovery.Envelope(flow.Call([]string{"checks", "--run", run, "--json"}), "checks", "ok")
+            let passed = Check.Envelope(flow.Call([]string{"checks", "--run", run, "--json"}), "checks", "ok")
             Check.That(
                 Check.Text(passed["data"]?["checks_status"]) == "passed" && Check.Text(
                     passed["data"]?["check_count"]
@@ -447,7 +443,7 @@ internal class CommandTrafficChecks {
             )
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"fail\"}]")
             flow.Save()
-            CliDiscovery.Envelope(
+            Check.Envelope(
                 flow.Call([]string{"checks", "--run", run, "--json"}, 1),
                 "checks",
                 "error",
@@ -456,7 +452,7 @@ internal class CommandTrafficChecks {
         }
 
         private func WatchTraffic(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             let run = Published(flow)
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
@@ -472,8 +468,8 @@ internal class CommandTrafficChecks {
             Budgets(flow, result, 66, 0, 0, 54)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
-            let times = flow.State["check_state_times"]?.AsArray() ??
-                throw Exception("Missing local state observations")
+            let observations = flow.State["check_state_times"]
+            let times = observations?.AsArray() ?? throw Exception("Missing local state observations")
             Check.That(
                 times.Count == 3 && Check.Text(times[0]) == Check.Text(times[1]) && Check.Text(times[1]) == Check.Text(
                     times[2]
@@ -484,7 +480,7 @@ internal class CommandTrafficChecks {
 
         private func WatchChanges(binary string) {
             for kind in[]string{"head", "approval"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 let run = Published(flow)
                 flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
                 flow.State["check_read_effect"] = JsonValue.Create(kind)

@@ -11,18 +11,18 @@ internal class CorrectionChecks {
             File.ReadAllText(Path.Combine(run, file))
         )
 
-        private func Once(flow NativeFlow, prs int32 = 0) {
+        private func Once(flow NativeFixture, prs int32 = 0) {
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Correction repeated inference")
             Check.That((flow.State["pulls"]?.AsArray().Count ?? 0) == prs, "Unexpected or duplicate PR")
         }
 
-        private func Correct(flow NativeFlow, run string, text string = "Explicit donor correction\n") string {
+        private func Correct(flow NativeFixture, run string, text string = "Explicit donor correction\n") string {
             File.WriteAllText(Path.Combine(run, "checkout/result.txt"), text)
             return Commit(flow, run)
         }
 
-        private func Commit(flow NativeFlow, run string) string {
+        private func Commit(flow NativeFixture, run string, message string = "Explicit correction") string {
             let checkout = Path.Combine(run, "checkout")
             flow.Git("-C", checkout, "add", "-A")
             flow.Git(
@@ -35,13 +35,13 @@ internal class CorrectionChecks {
                 "commit",
                 "--allow-empty",
                 "-m",
-                "Explicit correction"
+                message
             )
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
         private func Recover(
-            flow NativeFlow,
+            flow NativeFixture,
             run string,
             commit string,
             code int32 = 0,
@@ -55,7 +55,7 @@ internal class CorrectionChecks {
             return flow.Call(args.ToArray(), code)
         }
 
-        private func Prepared(flow NativeFlow, run string) string {
+        private func Prepared(flow NativeFixture, run string) string {
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let failed = File.Exists(Path.Combine(run, "verification.json")) ? File.ReadAllText(
                 Path.Combine(run, "verification.json")
@@ -85,7 +85,7 @@ internal class CorrectionChecks {
         }
 
         private func Whitespace(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -153,7 +153,7 @@ internal class CorrectionChecks {
             Once(flow, 1)
         }
 
-        private func Reconstruct(flow NativeFlow, run string, patch string, tree string, name string) {
+        private func Reconstruct(flow NativeFixture, run string, patch string, tree string, name string) {
             let replay = Path.Combine(flow.Temp.Root, name)
             flow.Git("clone", "--no-local", Path.Combine(run, "checkout"), replay)
             flow.Git("-C", replay, "checkout", "--detach", Check.Text(Read(run)["base"]))
@@ -162,7 +162,7 @@ internal class CorrectionChecks {
         }
 
         private func BinaryRename(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let asset = [14 * 1024 * 1024]byte
             Random(91).NextBytes(asset)
@@ -220,7 +220,7 @@ internal class CorrectionChecks {
         }
 
         private func FirstVerification(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy("test -f result.txt", second: "printf second-original-check")
             flow.Approve()
@@ -233,20 +233,7 @@ internal class CorrectionChecks {
             let checkout = Path.Combine(run, "checkout")
             let bad = Correct(flow, run, "")
             File.Delete(Path.Combine(checkout, "result.txt"))
-            flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "Still fails"
-            )
-            let failing = flow.Git("-C", checkout, "rev-parse", "HEAD")
+            let failing = Commit(flow, run, "Still fails")
             Check.Contains(Recover(flow, run, failing, 1).Error, "verification_failed")
             let attempt = Read(run, "correction.json")
             Check.That(
@@ -276,7 +263,7 @@ internal class CorrectionChecks {
         }
 
         private func OriginalTimeout(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy(
                 "printf synthetic-verifier-prefix; printf synthetic-verifier-error >&2; sleep 12 && test -f result.txt"
@@ -319,7 +306,7 @@ internal class CorrectionChecks {
 
         private func WrongTarget(binary string) {
             for stage in[]string{"recover", "prepare"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -367,7 +354,7 @@ internal class CorrectionChecks {
 
         private func Tools(binary string) {
             for declared in[]bool{false, true} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -404,7 +391,7 @@ internal class CorrectionChecks {
         }
 
         private func Refusals(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -449,7 +436,7 @@ internal class CorrectionChecks {
 
         private func Incomplete(binary string) {
             for mode in[]string{"incomplete_turn", "incomplete_tail", "failed_turn", "inference_exit_failure"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -471,7 +458,7 @@ internal class CorrectionChecks {
 
         private func ProtectedAndExact(binary string) {
             for rename in[]bool{false, true} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.ProtectedPolicy()
                 flow.Approve()
@@ -495,7 +482,7 @@ internal class CorrectionChecks {
                 Once(flow)
             }
             for flag in[]string{"--assume-unchanged", "--skip-worktree"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -514,7 +501,7 @@ internal class CorrectionChecks {
                 Once(flow)
             }
             for rename in[]bool{false, true} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -540,7 +527,7 @@ internal class CorrectionChecks {
                 Check.That(Read(run, "correction.json")["verification"] == nil, "Protected rename reached verification")
                 Once(flow)
             }
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy("test -f result.txt && printf changed >> result.txt")
             flow.Approve()
@@ -559,7 +546,7 @@ internal class CorrectionChecks {
 
         private func InterruptedNative(binary string) {
             for mode in[]string{"push_fail_after_write", "pr_fail_after_create", "pr_fail"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -615,7 +602,7 @@ internal class CorrectionChecks {
         }
 
         private func InterruptedVerification(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy(
                 "printf completed-first-check",
@@ -652,7 +639,7 @@ internal class CorrectionChecks {
 
         private func ChangedCandidate(binary string) {
             for mode in[]string{"change_checked_head", "change_checked_tree", "change_checked_patch"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -677,7 +664,7 @@ internal class CorrectionChecks {
         }
 
         private func LegacyAndArchive(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -706,7 +693,7 @@ internal class CorrectionChecks {
             Recover(flow, run, commit)
             Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "unknown (original runtime not recorded)")
             Once(flow, 1)
-            using let compatibility = NativeFlow(binary)
+            using let compatibility = NativeFixture(binary)
             compatibility.Initialize()
             compatibility.Approve()
             let failed = compatibility.Claim()
@@ -732,7 +719,7 @@ internal class CorrectionChecks {
 
         private func AuthorityChanges(binary string) {
             for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
-                using let flow = NativeFlow(binary)
+                using let flow = NativeFixture(binary)
                 flow.Initialize()
                 flow.Approve()
                 let run = flow.Claim()
@@ -962,7 +949,12 @@ internal class CorrectionChecks {
             external.Flow.NoInference()
         }
 
-        private func AmendCorrected(flow NativeFlow, run string, archive string, coordinator CoordinationFlow? = nil) {
+        private func AmendCorrected(
+            flow NativeFixture,
+            run string,
+            archive string,
+            coordinator CoordinationFlow? = nil
+        ) {
             let correction = Read(run)["correction"]?.DeepClone()
             let corrected = Check.Text(Read(run)["commit"])
             for text in[]string{"First amendment\n", "Second amendment\n"} {
@@ -1066,7 +1058,7 @@ internal class CorrectionChecks {
         }
 
         private func CorrectedAmendmentsV1(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.ProtectedPolicy()
             flow.Approve()
@@ -1181,7 +1173,7 @@ internal class CorrectionChecks {
         }
 
         private func Structured(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
@@ -1194,7 +1186,7 @@ internal class CorrectionChecks {
             flow.Mode("staged_whitespace")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "trailing whitespace")
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
-            let prepared = CliDiscovery.Envelope(
+            let prepared = Check.Envelope(
                 flow.Call([]string{"recover", "--run", run, "--prepare", "--json"}),
                 "recover",
                 "ok"
@@ -1207,7 +1199,7 @@ internal class CorrectionChecks {
                 "Prepared JSON lost original artifact"
             )
             let failedCommit = Correct(flow, run, "")
-            let failed = CliDiscovery.Envelope(
+            let failed = Check.Envelope(
                 flow.Call([]string{"recover", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
                 "recover",
                 "error",
@@ -1218,7 +1210,7 @@ internal class CorrectionChecks {
                 "JSON correction lost failed attempt"
             )
             let commit = Correct(flow, run)
-            let published = CliDiscovery.Envelope(
+            let published = Check.Envelope(
                 flow.Call([]string{"recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
                 "recover",
                 "ok"

@@ -16,25 +16,6 @@ internal class CliDiscovery {
             return result
         }
 
-        internal func Envelope(result Result, command string, status string, error string = "") JsonNode {
-            let value = Check.Json(result.Output)
-            Check.That(value.AsObject().Count == 8, "Unexpected public envelope fields")
-            Check.That(Check.Text(value["schema_version"]) == "1", "Missing output schema version")
-            Check.That(Check.Text(value["command"]) == command, "Wrong result command")
-            Check.That(Check.Text(value["status"]) == status, "Wrong result status")
-            Check.That(Check.Text(value["exit_code"]) == result.Code.ToString(), "Envelope exit differs from process")
-            Check.That(Encoding.UTF8.GetByteCount(result.Output) <= 65536, "Unbounded public output")
-            Check.That(!result.Output.Contains('\u001b'), "JSON contains terminal styling")
-            Check.That(
-                Check.Text(value["error"]?["code"]) == error,
-                "Wrong stable error identifier: expected " + error + ", got " + Check.Text(value["error"]?["code"]) +
-                    "\n" +
-                    result.Output +
-                    result.Error
-            )
-            return value
-        }
-
         internal func Structured(binary string) {
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")
@@ -48,7 +29,11 @@ internal class CliDiscovery {
                 File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             }
             for command in Cli.Commands {
-                let help = Envelope(Call(binary, []string{command.Name, "--help", "--json"}, temp), command.Name, "ok")
+                let help = Check.Envelope(
+                    Call(binary, []string{command.Name, "--help", "--json"}, temp),
+                    command.Name,
+                    "ok"
+                )
                 if command.Name != "help" {
                     Check.That(
                         Check.Text(help["data"]?["commands"]?[0]?["command"]) == command.Name,
@@ -56,7 +41,7 @@ internal class CliDiscovery {
                     )
                 }
             }
-            let metadata = Envelope(Call(binary, []string{"help", "--json"}, temp), "help", "ok")
+            let metadata = Check.Envelope(Call(binary, []string{"help", "--json"}, temp), "help", "ok")
             Check.That(
                 metadata["data"]?["commands"]?.AsArray().Count == Cli.Commands.Length,
                 "Metadata omits public commands"
@@ -132,19 +117,19 @@ internal class CliDiscovery {
                 },
                 []string{"approve", "--issue", "0", "--json"}
             } {
-                Envelope(Call(binary, argv, temp, 1), argv[0], "error", "invalid_arguments")
+                Check.Envelope(Call(binary, argv, temp, 1), argv[0], "error", "invalid_arguments")
             }
             Check.That(!File.Exists(calls), "Invalid inputs or metadata invoked prerequisites")
-            let version = Envelope(Call(binary, []string{"--version", "--json"}, temp), "--version", "ok")
+            let version = Check.Envelope(Call(binary, []string{"--version", "--json"}, temp), "--version", "ok")
             Check.That(
                 Call(binary, []string{"--version"}, temp).Output.Trim() == "tokate " + Check.Text(
                     version["data"]?["version"]
                 ),
                 "Structured and plain versions differ"
             )
-            let defaults = Envelope(Call(binary, []string{"help", "defaults", "--json"}, temp), "help", "ok")["data"]?[
-                "commands"
-            ]?[0]
+            let defaults = Check.Envelope(Call(binary, []string{"help", "defaults", "--json"}, temp), "help", "ok")[
+                "data"
+            ]?["commands"]?[0]
             Check.That(Check.Text(defaults?["effects"]?["local_write"]) == "true", "Defaults write effect missing")
             Check.That(
                 defaults?["operations"]?[0]?["required_inputs"]?.AsArray().Count == 4,
@@ -155,9 +140,9 @@ internal class CliDiscovery {
                 "Defaults read advertised a write"
             )
             for name in[]string{"select", "amend", "request"} {
-                let command = Envelope(Call(binary, []string{"help", name, "--json"}, temp), "help", "ok")["data"]?[
-                    "commands"
-                ]?[0]
+                let command = Check.Envelope(Call(binary, []string{"help", name, "--json"}, temp), "help", "ok")[
+                    "data"
+                ]?["commands"]?[0]
                 Check.That(
                     Check.Text(command?["effects"]?["local_write"]) == "true" && Check.Text(
                         command?["effects"]?["github_read"]
@@ -166,7 +151,7 @@ internal class CliDiscovery {
                 )
                 Check.That(Check.Text(command?["inference"]) == "false", "Non-inference command advertised inference")
             }
-            let workMetadata = Envelope(Call(binary, []string{"help", "work", "--json"}, temp), "help", "ok")
+            let workMetadata = Check.Envelope(Call(binary, []string{"help", "work", "--json"}, temp), "help", "ok")
             for name in[]string{"seconds", "runs", "fork", "allow-network"} {
                 var listed bool
                 for input in workMetadata["data"]?["commands"]?[0]?["exclusive_run_inputs"]?.AsArray() ?? JsonArray() {
@@ -180,16 +165,16 @@ internal class CliDiscovery {
                     "--allow-network",
                     "--json"
                 }: []string{"work", "--run", "saved", "--" + name, "1", "--json"}
-                let rejected = Envelope(Call(binary, argv, temp, 1), "work", "error", "invalid_arguments")
+                let rejected = Check.Envelope(Call(binary, argv, temp, 1), "work", "error", "invalid_arguments")
                 Check.Contains(Check.Text(rejected["error"]?["message"]), "--run conflicts with --" + name)
             }
-            Envelope(
+            Check.Envelope(
                 Call(binary, []string{"checks", "--run", "saved", "--watch", "--timeout", "1", "--json"}, temp, 1),
                 "checks",
                 "error",
                 "invalid_state"
             )
-            Envelope(
+            Check.Envelope(
                 Call(binary, []string{"work", "--run", "saved", "--yes", "--non-interactive", "--json"}, temp, 1),
                 "work",
                 "error",
@@ -200,14 +185,18 @@ internal class CliDiscovery {
                 longPath += "/synthetic-" + String('x', 80)
             }
             Check.Contains(Call(binary, []string{"status", "--run", longPath}, temp, 1).Error, longPath)
-            Envelope(
+            Check.Envelope(
                 Call(binary, []string{"status", "--run", longPath, "--json"}, temp, 1),
                 "status",
                 "error",
                 "invalid_state"
             )
             for shell in[]string{"bash", "zsh", "fish"} {
-                let script = Envelope(Call(binary, []string{"completion", shell, "--json"}, temp), "completion", "ok")
+                let script = Check.Envelope(
+                    Call(binary, []string{"completion", shell, "--json"}, temp),
+                    "completion",
+                    "ok"
+                )
                 Check.That(
                     Check.Text(script["data"]?["script"]) == Call(binary, []string{"completion", shell}, temp).Output,
                     "Completion script was shortened"
@@ -215,7 +204,7 @@ internal class CliDiscovery {
                 Check.That(Check.Text(script["truncated"]) == "false", "Completion was truncated")
             }
             let brokenDoctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
-            let broken = Envelope(brokenDoctor, "doctor", "error", "missing_tools")
+            let broken = Check.Envelope(brokenDoctor, "doctor", "error", "missing_tools")
             Check.That(Check.Text(broken["data"]?["tools"]?[0]?["status"]) == "failed", "Broken tool accepted")
             Check.That(
                 !(brokenDoctor.Output + brokenDoctor.Error).Contains("synthetic-tool-error-marker"),
@@ -225,10 +214,10 @@ internal class CliDiscovery {
             Directory.CreateDirectory(empty)
             temp.Env["PATH"] = empty
             let doctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
-            let diagnosis = Envelope(doctor, "doctor", "error", "missing_tools")
+            let diagnosis = Check.Envelope(doctor, "doctor", "error", "missing_tools")
             Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 8, "Doctor omitted checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
-            let blocked = Envelope(
+            let blocked = Check.Envelope(
                 TestProcess.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
                 "policy",
                 "error",
@@ -236,7 +225,7 @@ internal class CliDiscovery {
             )
             Check.That(Check.Text(blocked["next_actions"]?[0]?[1]) == "doctor", "Missing-tools action absent")
             let init = Path.Combine(temp.Root, "project")
-            Envelope(TestProcess.Run(binary, []string{"init", "--path", init, "--json"}, temp.Env), "init", "ok")
+            Check.Envelope(TestProcess.Run(binary, []string{"init", "--path", init, "--json"}, temp.Env), "init", "ok")
             Check.That(File.Exists(Path.Combine(init, ".github/tokate.json")), "JSON changed init effects")
             let saved = Path.Combine(temp.Root, "saved")
             Directory.CreateDirectory(saved)
@@ -283,7 +272,7 @@ internal class CliDiscovery {
             File.WriteAllText(Path.Combine(saved, "events.jsonl"), "synthetic-harness-marker")
             File.WriteAllText(Path.Combine(saved, "verification.json"), rows.ToJsonString())
             let statusResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
-            let status = Envelope(statusResult, "status", "ok")
+            let status = Check.Envelope(statusResult, "status", "ok")
             Check.That(
                 status["data"]?["verification"]?.AsArray().Count == 64 && Check.Text(
                     status["data"]?["verification_count"]
@@ -333,7 +322,7 @@ internal class CliDiscovery {
             record["output_truncated"] = JsonValue.Create(true)
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
             let stoppedResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
-            let stopped = Envelope(stoppedResult, "status", "ok")
+            let stopped = Check.Envelope(stoppedResult, "status", "ok")
             let stoppedCheck = stopped["data"]?["verification"]?[0] ?? throw Exception("Missing interrupted check")
             Check.That(
                 Check.Text(stoppedCheck["state"]) == "interrupted" && stoppedCheck["exit_code"] == nil && Check.Text(
@@ -377,7 +366,7 @@ internal class CliDiscovery {
             )
             File.WriteAllText(Path.Combine(saved, "correction.json"), correction.ToJsonString())
             let correctedResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
-            let corrected = Envelope(correctedResult, "status", "ok")
+            let corrected = Check.Envelope(correctedResult, "status", "ok")
             Check.That(
                 Check.Text(corrected["data"]?["correction"]?["error"]?["code"]) == "verification_failed",
                 "Correction reason missing"
@@ -404,16 +393,16 @@ internal class CliDiscovery {
                 temp.Env,
                 cwd: temp.Root
             )
-            Envelope(pty, "status", "ok")
+            Check.Envelope(pty, "status", "ok")
             record["commit"] = JsonValue.Create(String('a', 70000))
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
-            Envelope(
+            Check.Envelope(
                 TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env),
                 "status",
                 "error",
                 "output_too_large"
             )
-            let longError = Envelope(
+            let longError = Check.Envelope(
                 TestProcess.Run(binary, []string{"doctor", "--" + String('x', 6000), "--json"}, temp.Env),
                 "doctor",
                 "error",

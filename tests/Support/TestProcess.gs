@@ -8,6 +8,37 @@ import System.IO
 
 internal class TestProcess {
     shared {
+        internal func Fields(stat string)[]string -> stat.Substring(stat.LastIndexOf(')') + 2).Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries
+        )
+
+        internal func Status(path string) string? {
+            try {
+                return File.ReadAllText(path)
+            } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
+                error IOException
+            ) {
+                if error.HResult != 3 {
+                    rethrow
+                }
+            }
+            return nil
+        }
+
+        internal func Collected(pid string, message string) {
+            let stat = Status("/proc/" + pid.Trim() + "/stat")
+            Check.That(stat == nil || Fields(stat)[0] == "Z", message)
+        }
+
+        internal func HeartbeatStopped(path string, milliseconds int32, message string) {
+            let length = FileInfo(path).Length
+            select {
+                case <- after(TimeSpan.FromMilliseconds(milliseconds)) { }
+            }
+            Check.That(FileInfo(path).Length == length, message)
+        }
+
         internal func Read(reader StreamReader, result Chan[string]) {
             result <- reader.ReadToEnd()
         }

@@ -45,7 +45,7 @@ internal class ProgressChecks {
             completed <- text.ToString()
         }
 
-        private func Live(flow NativeFlow, run string, phase string, cancel bool = false) Result {
+        private func Live(flow NativeFixture, run string, phase string, cancel bool = false) Result {
             let info = ProcessStartInfo(flow.Binary)
             info.UseShellExecute = false
             info.RedirectStandardOutput = true
@@ -120,7 +120,7 @@ internal class ProgressChecks {
         }
 
         private func Success(binary string, delayed bool) string {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy(
                 "sleep 6; printf '%s' private- verifier-marker; test -f result.txt",
@@ -131,7 +131,7 @@ internal class ProgressChecks {
             flow.Mode(delayed ? "progress_delay": "")
             flow.ResetTraffic()
             let result = delayed ? Live(flow, run, "Inference"): Live(flow, run, "Owner verification 1")
-            CliDiscovery.Envelope(result, "work", "ok")
+            Check.Envelope(result, "work", "ok")
             Check.Contains(result.Error, "Verification 1:")
             Check.Contains(result.Error, "Verification 2:")
             Check.That(result.Error.Split("passed (exit 0)").Length == 3, "Missing individual command results")
@@ -160,7 +160,7 @@ internal class ProgressChecks {
         }
 
         private func Bounded(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim(seconds: "30", reserve: "5")
@@ -168,19 +168,14 @@ internal class ProgressChecks {
             flow.State["progress_delay_seconds"] = System.Text.Json.Nodes.JsonValue.Create(16)
             flow.Save()
             let result = Live(flow, run, "Inference")
-            CliDiscovery.Envelope(result, "work", "ok")
+            Check.Envelope(result, "work", "ok")
             let samples = Regex.Matches(
                 result.Error,
                 "Inference: ([0-9]+)s elapsed, ([0-9]+)s remaining; total ([0-9]+)s left"
             )
+            let phases = result.Error.Split("Inference:").Length
             Check.That(
-                samples.Count >= 2 &&
-                    samples.Count <= 3 &&
-                    result
-                    .Error
-                    .Split("Inference:")
-                    .Length == samples.Count +
-                    1,
+                samples.Count >= 2 && samples.Count <= 3 && phases == samples.Count + 1,
                 "Plain progress did not use bounded exponential intervals"
             )
             var elapsed int32 = -1
@@ -202,46 +197,34 @@ internal class ProgressChecks {
         }
 
         private func Failure(binary string, scenario string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
-            var verifier = scenario.StartsWith("verification_") ?
-            "sleep 120; test -f result.txt": "test -f result.txt"
+            let inference = scenario.StartsWith("inference_")
+            let verification = scenario.StartsWith("verification_")
+            let publication = scenario == "publication_failure"
+            let timeout = scenario.EndsWith("timeout")
+            let cancel = scenario.EndsWith("cancel")
+            var verifier = verification ? "sleep 120; test -f result.txt": "test -f result.txt"
             if scenario == "verification_failure" {
                 verifier = "sleep 6; exit 23"
             }
             flow.VerificationPolicy(verifier)
             flow.Approve()
-            let timeout = scenario.EndsWith("timeout")
             let run = flow.Claim(seconds: timeout ? "8": "30", reserve: timeout ? "1": "15")
             let mode = scenario == "inference_failure" ? "model_failure": (
-                scenario.StartsWith("inference_") ? "timeout": (scenario == "publication_failure" ? "push_fail": "")
+                inference ? "timeout": (publication ? "push_fail": "")
             )
             flow.Mode(mode)
-            let phase = scenario.StartsWith("inference_") ? "Inference": "Owner verification 1"
-            let live = scenario.EndsWith("timeout") || scenario.EndsWith("cancel") || scenario == "verification_failure"
-            let result = live ? Live(flow, run, phase, scenario.EndsWith("cancel")):
+            let phase = inference ? "Inference": "Owner verification 1"
+            let live = timeout || cancel || scenario == "verification_failure"
+            let result = live ? Live(flow, run, phase, cancel):
             flow.Call([]string{"work", "--run", run, "--json", "--plain"}, 1)
-            let code = scenario.StartsWith("inference_") ? "inference_failed": (
-                scenario.StartsWith("verification_") ? "verification_failed": "command_failed"
-            )
-            CliDiscovery.Envelope(result, "work", "error", code)
-            Check.Contains(
-                result.Error,
-                (
-                    scenario == "publication_failure" ? "Publication": (
-                        scenario.StartsWith("inference_") ? "Inference": "Verification"
-                    )
-                ) +
-                    " failed (" +
-                    code +
-                    ")"
-            )
-            Check.Contains(
-                result.Error,
-                scenario == "publication_failure" ? "Next: tokate publish": (
-                    scenario.StartsWith("verification_") ? "Next: tokate recover": "Next: tokate status"
-                )
-            )
+            let code = inference ? "inference_failed": (verification ? "verification_failed": "command_failed")
+            let failedPhase = publication ? "Publication": (inference ? "Inference": "Verification")
+            let next = publication ? "publish": (verification ? "recover": "status")
+            Check.Envelope(result, "work", "error", code)
+            Check.Contains(result.Error, failedPhase + " failed (" + code + ")")
+            Check.Contains(result.Error, "Next: tokate " + next)
             if scenario == "verification_failure" {
                 Check.Contains(result.Error, "failed (exit 23)")
             }
@@ -254,18 +237,14 @@ internal class ProgressChecks {
             flow.NoPr()
             let child = Path.Combine(flow.Bin, "child.pid")
             if File.Exists(child) {
-                let status = "/proc/" + File.ReadAllText(child) + "/stat"
-                Check.That(
-                    !File.Exists(status) || File.ReadAllText(status).Split(' ')[2] == "Z",
-                    "Cancellation or timeout left a descendant"
-                )
+                TestProcess.Collected(File.ReadAllText(child), "Cancellation or timeout left a descendant")
             }
         }
 
         private func Quote(value string) string -> "'" + value.Replace("'", "'\"'\"'") + "'"
 
         private func Tty(binary string, mode string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()

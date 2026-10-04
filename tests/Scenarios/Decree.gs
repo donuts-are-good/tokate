@@ -8,7 +8,7 @@ import System.Text.Json.Nodes
 import Tokate
 
 internal class DecreeFlow : IDisposable {
-    internal let Flow NativeFlow
+    internal let Flow NativeFixture
     internal let V2 CoordinationFlow?
 
     internal init(binary string, version int32) {
@@ -17,7 +17,7 @@ internal class DecreeFlow : IDisposable {
             V2 = coordination
             Flow = coordination.Flow
         } else {
-            Flow = NativeFlow(binary)
+            Flow = NativeFixture(binary)
         }
     }
 
@@ -284,17 +284,12 @@ internal class DecreeFlow : IDisposable {
                     )
                     test.Flow.NoInference()
                     if change == "unsupported" {
-                        Check.Contains(
-                            test
-                                .Flow
-                                .Call(
-                                []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-                                1,
-                                true
-                            )
-                                .Error,
-                            "regular Git blob"
+                        let failure = test.Flow.Call(
+                            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+                            1,
+                            true
                         )
+                        Check.Contains(failure.Error, "regular Git blob")
                     } else {
                         test.Flow.Git("-C", Path.Combine(test.Flow.Bin, "fork"), "fetch", test.Flow.Upstream, "main")
                         test.Flow.Approve()
@@ -343,16 +338,16 @@ internal class DecreeFlow : IDisposable {
                 } else if kind == "encoding" {
                     File.WriteAllBytes(path, []byte{0xC0, 0xAF})
                 } else {
-                    File.WriteAllBytes(
-                        path,
-                        Encoding.UTF8.GetBytes(
-                            kind == "nul" ? "owner\0instructions":
-                            kind == "oversized" ? String('x', 65537): kind == "unicode-size" ? String('é', 32769):
-                            kind == "lfs" ? "version https://git-lfs.github.com/spec/v1\noid sha256:" +
-                                String('a', 64) +
-                                "\nsize 10\n": Exact
-                        )
-                    )
+                    let payload = switch kind {
+                        case "nul": "owner\0instructions"
+                        case "oversized": String('x', 65537)
+                        case "unicode-size": String('é', 32769)
+                        case "lfs": "version https://git-lfs.github.com/spec/v1\noid sha256:" +
+                            String('a', 64) +
+                            "\nsize 10\n"
+                        default: Exact
+                    }
+                    File.WriteAllBytes(path, Encoding.UTF8.GetBytes(payload))
                 }
                 if kind == "submodule" {
                     test.Flow.Git(
@@ -548,7 +543,7 @@ internal class DecreeFlow : IDisposable {
             }
         }
 
-        internal func DonorCommit(flow NativeFlow, checkout string) string {
+        internal func DonorCommit(flow NativeFixture, checkout string) string {
             flow.Git("-C", checkout, "add", "-A")
             flow.Git(
                 "-C",
@@ -735,19 +730,13 @@ internal class DecreeFlow : IDisposable {
                             ManagedProtection(binary, version)
                         }
                         case "LegacyRecovery" {
-                            if version == 1 {
-                                LegacyRecovery(binary)
-                            }
+                            LegacyRecovery(binary)
                         }
                         case "ExternalProtection" {
-                            if version == 2 {
-                                ExternalProtection(binary)
-                            }
+                            ExternalProtection(binary)
                         }
                         case "PublicationProtection" {
-                            if version == 1 {
-                                PublicationProtection(binary)
-                            }
+                            PublicationProtection(binary)
                         }
                     }
                     Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)

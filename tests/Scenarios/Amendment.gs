@@ -5,100 +5,12 @@ import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
 
-internal class PublishedContribution : IDisposable {
-    internal let Coordination CoordinationFlow
-    internal let Run string
-    private let Snapshot FixtureSnapshot
-    private let Environment Dictionary[string, string]
-    private let Comment int32
-
-    private init(coordination CoordinationFlow, run string) {
-        Coordination = coordination
-        Run = run
-        Environment = Dictionary[string, string](coordination.Flow.Temp.Env)
-        Comment = coordination.Comment
-        Snapshot = FixtureSnapshot(coordination.Flow.Temp.Root)
-    }
-
-    shared {
-        internal func Create(
-            binary string,
-            v2 bool = false,
-            synchronization bool = false,
-            baseBranch string = "",
-            mutating bool = false
-        ) PublishedContribution {
-            let coordination = CoordinationFlow(binary)
-            try {
-                let run = v2 ? AmendmentFlow.V2Original(
-                    coordination,
-                    synchronization: synchronization,
-                    baseBranch: baseBranch
-                ): AmendmentFlow.Original(
-                    coordination.Flow,
-                    mutating: mutating,
-                    synchronization: synchronization,
-                    baseBranch: baseBranch
-                )
-                coordination.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                let preparation = PublishedContribution(coordination, run)
-                try {
-                    preparation.Isolation(v2, baseBranch)
-                    return preparation
-                } catch (error Exception) {
-                    preparation.Snapshot.Dispose()
-                    throw error
-                }
-            } catch (error Exception) {
-                coordination.Dispose()
-                throw error
-            }
-        }
-    }
-
-    private func Isolation(v2 bool, baseBranch string) {
-        let flow = Coordination.Flow
-        File.WriteAllText(Path.Combine(Run, "run.json"), "case-private mutation")
-        File.WriteAllText(Path.Combine(flow.Temp.Root, "case-private"), "must disappear")
-        File.CreateSymbolicLink(Path.Combine(flow.Temp.Root, "case-link"), "case-private")
-        flow.Git("-C", Path.Combine(flow.Bin, "fork"), "update-ref", "refs/heads/case-private", "HEAD")
-        flow.State["case_private"] = JsonValue.Create(true)
-        flow.Save()
-        flow.Temp.Env["CASE_PRIVATE"] = "must disappear"
-        Coordination.Comment++
-        Restore()
-        Check.That(!flow.Temp.Env.ContainsKey("CASE_PRIVATE"), "Fixture environment leaked between cases")
-        Check.That(flow.State["case_private"] == nil, "Fixture API state leaked between cases")
-        Check.That(Coordination.Comment == Comment, "Fixture event identity leaked between cases")
-        Console.WriteLine("PASS published fixture isolation " + (v2 ? "v2": "v1") + "/" + baseBranch)
-    }
-
-    internal func Restore() {
-        Snapshot.Restore()
-        let flow = Coordination.Flow
-        flow.Temp.Env.Clear()
-        for entry in Environment {
-            flow.Temp.Env[entry.Key] = entry.Value
-        }
-        flow.Reload()
-        Coordination.Comment = Comment
-    }
-
-    public func Dispose() {
-        try {
-            Snapshot.Dispose()
-        } finally {
-            Coordination.Dispose()
-        }
-    }
-}
-
 internal class AmendmentFlow {
     shared {
         private func Saved(run string) JsonNode -> Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
 
         private func Amend(
-            flow NativeFlow,
+            flow NativeFixture,
             run string,
             commit string,
             code int32 = 0,
@@ -113,7 +25,7 @@ internal class AmendmentFlow {
         }
 
         private func Edit(
-            flow NativeFlow,
+            flow NativeFixture,
             run string,
             text string = "Reviewed correction\n",
             file string = "result.txt"
@@ -136,7 +48,7 @@ internal class AmendmentFlow {
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
-        private func Review(flow NativeFlow, legacy bool = false) {
+        private func Review(flow NativeFixture, legacy bool = false) {
             flow.Reload()
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
             var body = Check.Text(pull["body"])
@@ -145,73 +57,6 @@ internal class AmendmentFlow {
             }
             pull["body"] = JsonValue.Create("Owner review before\n" + body + "\nOwner review after")
             flow.Save()
-        }
-
-        internal func Original(
-            flow NativeFlow,
-            owner bool = false,
-            mutating bool = false,
-            interruptible bool = false,
-            synchronization bool = false,
-            baseBranch string = ""
-        ) string {
-            flow.Initialize()
-            if synchronization {
-                SynchronizationChecks.SetupOwner(flow)
-            }
-            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(policyPath))
-            policy["verification"] = Check.Json(
-                "[[\"/bin/sh\",\"-c\",\"test -f result.txt\"],[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]"
-            )
-            if interruptible {
-                policy["verification"] = Check.Json(
-                    "[[\"/bin/sh\",\"-c\",\"printf 'synthetic-%s-prior' amendment; test -f result.txt\"],[\"/bin/sh\",\"-c\",\"if test -f slow; then printf 'synthetic-%s-prefix' amendment; printf 'synthetic-%s-error' amendment >&2; sleep 3; fi; test -s result.txt\"]]"
-                )
-            }
-            if mutating {
-                policy["verification"] = Check.Json(
-                    "[[\"/bin/sh\",\"-c\",\"test -f result.txt; if test -f mutate; then printf changed >> result.txt; fi\"]]"
-                )
-            }
-            File.WriteAllText(policyPath, policy.ToJsonString())
-            flow.Commit("Owner checks")
-            flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, "main")
-            let approve = List[string]{
-                "approve",
-                "--repo",
-                "owner/project",
-                "--issue",
-                "1",
-                "--donor",
-                owner ? "owner": "donor"
-            }
-            if baseBranch != "" {
-                flow.Git("-C", flow.Upstream, "branch", baseBranch)
-                approve.AddRange([]string{"--base-branch", baseBranch})
-            }
-            flow.Call(approve.ToArray(), owner: true)
-            let claim = flow.Call(
-                []string{
-                    "claim",
-                    "--repo",
-                    "owner/project",
-                    "--issue",
-                    "1",
-                    "--model",
-                    "gpt-6.1-sol",
-                    "--effort",
-                    "high",
-                    "--seconds",
-                    "20",
-                    "--runs",
-                    Path.Combine(flow.Temp.Root, "runs")
-                },
-                owner: owner
-            )
-            let run = claim.Output.Substring(claim.Output.LastIndexOf("Run: ") + 5).Trim()
-            flow.Call([]string{"work", "--run", run}, owner: owner)
-            return run
         }
 
         private func AssertOriginal(run string, original string) {
@@ -256,7 +101,7 @@ internal class AmendmentFlow {
             }
         }
 
-        private func AssertPublished(flow NativeFlow, run string, commit string, owner bool = false) {
+        private func AssertPublished(flow NativeFixture, run string, commit string, owner bool = false) {
             Check.That(Check.Text(Saved(run)["commit"]) == commit, "Saved amendment head differs")
             flow.Reload()
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Amendment duplicated PR")
@@ -277,8 +122,8 @@ internal class AmendmentFlow {
         }
 
         private func InterruptedVerification(binary string) {
-            using let flow = NativeFlow(binary)
-            let run = Original(flow, interruptible: true)
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow, interruptible: true)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let commit = Edit(flow, run, "slow-check", "slow")
             let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "1", "--json"}
@@ -316,8 +161,8 @@ internal class AmendmentFlow {
         }
 
         private func V1(binary string, owner bool = false) {
-            using let flow = NativeFlow(binary)
-            let run = Original(flow, owner)
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow, owner)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             Review(flow, true)
             let commit = Edit(flow, run)
@@ -358,8 +203,8 @@ internal class AmendmentFlow {
         }
 
         private func V1Interrupted(binary string, mode string) {
-            using let flow = NativeFlow(binary)
-            let run = Original(flow)
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow)
             Review(flow)
             let commit = Edit(flow, run)
             flow.Mode(mode)
@@ -486,69 +331,9 @@ internal class AmendmentFlow {
             }
         }
 
-        internal func V2Original(
-            flow CoordinationFlow,
-            native bool = false,
-            modelPolicy string = "",
-            synchronization bool = false,
-            baseBranch string = ""
-        ) string {
-            flow.Initialize(approve: false)
-            if synchronization {
-                SynchronizationChecks.SetupOwner(flow.Flow)
-                if baseBranch != "" {
-                    flow.Flow.Git("-C", flow.Flow.Upstream, "branch", baseBranch)
-                }
-            }
-            if modelPolicy != "" {
-                let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
-                let policy = Check.Json(File.ReadAllText(path))
-                policy["model_policy"] = JsonValue.Create(modelPolicy)
-                if modelPolicy == "unrestricted" {
-                    policy.AsObject().Remove("models")
-                } else {
-                    (policy["models"] ?? throw Exception("Missing model whitelist"))["claude-sonnet-4-6"] = Check.Json(
-                        "[\"absent\"]"
-                    )
-                }
-                File.WriteAllText(path, policy.ToJsonString())
-                flow.Flow.Commit("External amendment effort policy")
-            }
-            flow.Flow.Approve(baseBranch)
-            flow.Flow.Reload()
-            var approvals int32
-            for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                if Check.Text(call["method"]) == "POST" && Check.Text(
-                    call["path"]
-                ) == "repos/owner/project/issues/1/assignees" {
-                    approvals++
-                }
-            }
-            Check.That(approvals == 1, "Published fixture repeated approval before claiming")
-            let claim = flow.Claim(baseBranch != "")
-            if native {
-                File.WriteAllText(
-                    flow.Tools,
-                    "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
-                )
-            }
-            let run = flow.Prepare(native ? "tokate": "external")
-            if native {
-                flow.Flow.Call([]string{"work", "--run", run})
-            } else {
-                let commit = flow.Candidate(claim)
-                flow.Flow.Call([]string{"external", "--run", run, "--commit", commit})
-            }
-            flow.Flow.Call([]string{"submit", "--run", run})
-            flow.Flow.Reload()
-            let request = Check.PostedRequest(flow.Flow.State)
-            flow.Coordinate(flow.Event(request))
-            return run
-        }
-
         private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
             using let flow = CoordinationFlow(binary)
-            let run = V2Original(flow, native, modelPolicy)
+            let run = PublishedContribution.V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let contribution = Check.Text(flow.State()["state"]?["contribution"])
             Review(flow.Flow, true)
@@ -620,7 +405,7 @@ internal class AmendmentFlow {
                 flow.Coordinate(flow.Event(nextRequest))
                 Amend(flow.Flow, run, second)
                 AssertPublished(flow.Flow, run, second)
-                let current = CliDiscovery.Envelope(
+                let current = Check.Envelope(
                     flow.Flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}),
                     "coordination",
                     "ok"
@@ -710,11 +495,11 @@ internal class AmendmentFlow {
         }
 
         private func Structured(binary string) {
-            using let flow = NativeFlow(binary)
-            let run = Original(flow)
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let failedCommit = Edit(flow, run, "")
-            let failed = CliDiscovery.Envelope(
+            let failed = Check.Envelope(
                 flow.Call([]string{"amend", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
                 "amend",
                 "error",
@@ -727,7 +512,7 @@ internal class AmendmentFlow {
                 "JSON amendment lost failed attempt"
             )
             let commit = Edit(flow, run)
-            let published = CliDiscovery.Envelope(
+            let published = Check.Envelope(
                 flow.Call([]string{"amend", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
                 "amend",
                 "ok"
@@ -744,7 +529,7 @@ internal class AmendmentFlow {
                 Check.Text(flow.State["exec_count"]) == "1" && flow.State["pulls"]?.AsArray().Count == 1,
                 "JSON amendment repeated inference or PR"
             )
-            CliDiscovery.Envelope(
+            Check.Envelope(
                 flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
                 "verify-pr",
                 "ok"

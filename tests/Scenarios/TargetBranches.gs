@@ -7,7 +7,7 @@ import Tokate
 
 internal class TargetBranches {
     shared {
-        private func Target(flow NativeFlow, branch string) string {
+        private func Target(flow NativeFixture, branch string) string {
             flow.Git("-C", flow.Upstream, "checkout", "-b", branch)
             File.WriteAllText(Path.Combine(flow.Upstream, ".github/tokate.json"), "{\"version\":999}")
             File.WriteAllText(Path.Combine(flow.Upstream, ".github/tokate-pr.md"), "Untrusted target template")
@@ -19,7 +19,7 @@ internal class TargetBranches {
             return base
         }
 
-        private func Approve(flow NativeFlow, branch string) JsonNode {
+        private func Approve(flow NativeFixture, branch string) JsonNode {
             flow.Call(
                 []string{
                     "approve",
@@ -38,7 +38,7 @@ internal class TargetBranches {
             return Check.Json(state)["approval"] ?? throw Exception("Missing approval")
         }
 
-        private func Move(flow NativeFlow, branch string) string {
+        private func Move(flow NativeFixture, branch string) string {
             if branch == "release/next" {
                 flow.Git("-C", flow.Upstream, "checkout", "--orphan", "replacement-target")
                 File.WriteAllText(Path.Combine(flow.Upstream, "target.txt"), "Later target code\n")
@@ -64,7 +64,7 @@ internal class TargetBranches {
             )
         }
 
-        private func Receipt(flow NativeFlow, branch string) {
+        private func Receipt(flow NativeFixture, branch string) {
             flow.Reload()
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
             Check.That(Check.Text(pull["base"]?["ref"]) == branch, "Publication changed the target")
@@ -103,7 +103,7 @@ internal class TargetBranches {
         }
 
         private func V1(binary string, branch string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             let base = Target(flow, branch)
             flow.Call(
@@ -479,7 +479,7 @@ internal class TargetBranches {
                     let result = flow.Call(
                         []string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}
                     )
-                    let approval = CliDiscovery.Envelope(result, "coordination", "ok")["data"]?["approval"]
+                    let approval = Check.Envelope(result, "coordination", "ok")["data"]?["approval"]
                     Check.That(
                         Check.Text(approval?["base_branch"]) == "release" && Check.Text(approval?["base"]) == base &&
                             Check.Text(approval?["authority_branch"]) == "main",
@@ -497,7 +497,7 @@ internal class TargetBranches {
                         "Generic JSON exposed instruction text"
                     )
                     test.Legacy()
-                    let legacy = CliDiscovery.Envelope(
+                    let legacy = Check.Envelope(
                         flow.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1", "--json"}),
                         "coordination",
                         "ok"
@@ -522,10 +522,10 @@ internal class TargetBranches {
                         flow.Temp.Env,
                         ""
                     )
-                    CliDiscovery.Envelope(result, command, "ok")
+                    Check.Envelope(result, command, "ok")
                     Check.That(!result.Output.Contains("Target branch"), "JSON terminal approval prompted")
                     Check.That(Check.Text(test.Approval()["base_branch"]) == "main", "JSON default target changed")
-                    let metadata = CliDiscovery.Envelope(flow.Call([]string{"help", command, "--json"}), "help", "ok")
+                    let metadata = Check.Envelope(flow.Call([]string{"help", command, "--json"}), "help", "ok")
                     Check.That(
                         metadata["data"]?["commands"]?[0]?["arguments"]?.ToJsonString().Contains("base-branch") == true,
                         "JSON metadata lost target option"
@@ -533,7 +533,7 @@ internal class TargetBranches {
                 }
                 flow.NoInference()
             }
-            using let policyFlow = NativeFlow(binary)
+            using let policyFlow = NativeFixture(binary)
             policyFlow.Initialize()
             let path = Path.Combine(policyFlow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(path))
@@ -545,7 +545,7 @@ internal class TargetBranches {
                 }
                 File.WriteAllText(path, policy.ToJsonString())
                 policyFlow.Commit("Projected owner model and path policy")
-                let projected = CliDiscovery.Envelope(
+                let projected = Check.Envelope(
                     policyFlow.Call([]string{"policy", "--repo", "owner/project", "--json"}),
                     "policy",
                     "ok"

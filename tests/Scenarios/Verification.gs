@@ -5,6 +5,7 @@ import System
 import System.Collections.Generic
 import System.Diagnostics
 import System.IO
+import System.Text.Json
 import Tokate
 
 internal class VerificationChecks {
@@ -201,12 +202,11 @@ internal class VerificationChecks {
                             Directory.GetFileSystemEntries(storage)
                         )
                     )
-                    let heartbeat = Path.Combine(checkout, "heartbeat")
-                    let length = FileInfo(heartbeat).Length
-                    select {
-                        case <- after(TimeSpan.FromMilliseconds(200.0)) { }
-                    }
-                    Check.That(FileInfo(heartbeat).Length == length, "Runtime descendant survived: " + outcome)
+                    TestProcess.HeartbeatStopped(
+                        Path.Combine(checkout, "heartbeat"),
+                        200,
+                        "Runtime descendant survived: " + outcome
+                    )
                 }
             }
             Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked after preparation")
@@ -277,24 +277,18 @@ internal class VerificationChecks {
                 Check.That(!output.Contains("synthetic-cancelled"), "Cancelled verifier output escaped")
                 let checks = J.Items(J.Parse(File.ReadAllText(Path.Combine(evidence, "verification.json"))))
                 Check.That(
-                    checks.Count == 1 && J.Get(checks[0], "exit_code")
-                        .ValueKind == System
-                        .Text
-                        .Json
-                        .JsonValueKind
-                        .Undefined,
+                    checks.Count == 1 && J.Get(checks[0], "exit_code").ValueKind == JsonValueKind.Undefined,
                     "Cancelled verification fabricated success"
                 )
                 Check.That(J.Text(checks[0], "state") == "interrupted", "Cancelled verification lost active phase")
                 Check.That(J.Text(checks[0], "output") == "synthetic-cancelled-output", "Cancelled stdout lost")
                 Check.That(J.Text(checks[0], "error") == "synthetic-cancelled-error", "Cancelled stderr lost")
                 Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked on cancellation")
-                let heartbeat = Path.Combine(checkout, "heartbeat")
-                let length = FileInfo(heartbeat).Length
-                select {
-                    case <- after(TimeSpan.FromMilliseconds(200.0)) { }
-                }
-                Check.That(FileInfo(heartbeat).Length == length, "Runtime descendant survived cancellation")
+                TestProcess.HeartbeatStopped(
+                    Path.Combine(checkout, "heartbeat"),
+                    200,
+                    "Runtime descendant survived cancellation"
+                )
             } finally {
                 if !terminal.HasExited {
                     terminal.Kill(true)
@@ -472,13 +466,8 @@ internal class VerificationChecks {
                 Check.That(checks.Count == 2 && J.Number(checks[0], "exit_code") == 0, "Prior passed check lost")
                 let check = checks[1]
                 Check.That(J.Text(check, "state") == (timeout ? "interrupted": "completed"), "Active phase lost")
-                Check.That(
-                    J.Get(check, "exit_code")
-                        .ValueKind == (
-                        timeout ? System.Text.Json.JsonValueKind.Undefined: System.Text.Json.JsonValueKind.Number
-                    ),
-                    "Invalid terminal exit code"
-                )
+                let kind = timeout ? JsonValueKind.Undefined: JsonValueKind.Number
+                Check.That(J.Get(check, "exit_code").ValueKind == kind, "Invalid terminal exit code")
                 Check.That(
                     File.ReadAllText(
                         Path.Combine(evidence, J.Text(check, "output_file"))
@@ -495,11 +484,7 @@ internal class VerificationChecks {
                 )
                 let heartbeat = Path.Combine(checkout, "heartbeat")
                 Check.That(File.Exists(heartbeat), "Detached descendant never started")
-                let length = FileInfo(heartbeat).Length
-                select {
-                    case <- after(TimeSpan.FromMilliseconds(400.0)) { }
-                }
-                Check.That(FileInfo(heartbeat).Length == length, "Detached verifier descendant survived cleanup")
+                TestProcess.HeartbeatStopped(heartbeat, 400, "Detached verifier descendant survived cleanup")
             }
             Console.WriteLine("PASS verification cleans detached descendants on normal exit and timeout")
         }

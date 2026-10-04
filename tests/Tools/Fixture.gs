@@ -15,7 +15,6 @@ internal partial class Fixture {
     internal let StatePath string
     internal var State JsonNode
     internal let Env Dictionary[string, string] = Dictionary[string, string]()
-    internal var Include bool
     internal var Verb string = ""
     internal var Conditional string = ""
     internal var ApiPath string = ""

@@ -35,7 +35,7 @@ internal class TerminalOutput {
         }
 
         private func Checks(binary string) {
-            using let flow = NativeFlow(binary)
+            using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
             let run = flow.Claim()
@@ -185,7 +185,7 @@ internal class TerminalOutput {
                 Save(width.ToString() + "-dumb", dumb.Output)
                 temp.Env["TERM"] = "xterm-256color"
                 let json = Pty(binary, []string{"status", "--run", saved, "--plain", "--ascii", "--json"}, temp, width)
-                let envelope = CliDiscovery.Envelope(json, "status", "ok")
+                let envelope = Check.Envelope(json, "status", "ok")
                 Check.That(Check.Text(envelope["data"]?["model"]) == untrusted, "Presentation changed JSON data")
                 Save(width.ToString() + "-json", json.Output)
             }
