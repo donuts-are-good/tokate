@@ -1,12 +1,134 @@
 package TokateTests
 
+import Microsoft.Win32.SafeHandles
 import System
 import System.Collections.Generic
 import System.IO
+import System.Runtime.InteropServices
 import System.Text.Json.Nodes
+
+@DllImport("libc", EntryPoint: "inotify_init1", SetLastError: true)
+func MetadataWatch(flags int32) int32;
+
+@DllImport("libc", EntryPoint: "inotify_add_watch", SetLastError: true)
+func MetadataWatchPath(descriptor int32, path string, mask uint32) int32;
+
+@DllImport("libc", EntryPoint: "read", SetLastError: true)
+func MetadataEvents(descriptor int32, buffer[]byte, count uint64) int64;
+
+@DllImport("libc", EntryPoint: "mkfifo", SetLastError: true)
+func MetadataFifo(path string, mode uint32) int32;
 
 internal class Diagnostics {
     shared {
+        private func Metadata(binary string) {
+            for layout in[]string{"nested", "sibling"} {
+                for kind in[]string{
+                    "root-link",
+                    "platform-link",
+                    "platform-directory-link",
+                    "dependency-directory-link",
+                    "root-fifo",
+                    "platform-fifo",
+                    "root-directory",
+                    "platform-directory",
+                    "launcher-fifo",
+                    "native-fifo"
+                } {
+                    if kind == "dependency-directory-link" && layout == "sibling" {
+                        continue
+                    }
+                    if kind == "launcher-fifo" && layout == "sibling" {
+                        continue
+                    }
+                    using let temp = Temp()
+                    let root = Path.Combine(temp.Root, "packages/@openai/codex")
+                    let platform = Path.Combine(
+                        layout == "nested" ? Path.Combine(root, "node_modules/@openai"): (
+                            Path.GetDirectoryName(root) ?? ""
+                        ),
+                        "codex-linux-x64"
+                    )
+                    Directory.CreateDirectory(Path.Combine(root, "bin"))
+                    Directory.CreateDirectory(platform)
+                    let launcher = Path.Combine(root, "bin/codex.js")
+                    File.WriteAllText(launcher, "#!/bin/sh\nexit 1\nsynthetic-launcher\n")
+                    File.SetUnixFileMode(
+                        launcher,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                    )
+                    File.CreateSymbolicLink(Path.Combine(temp.Root, "bin/codex"), launcher)
+                    for tool in[]string{"setsid", "git", "gh", "bwrap"} {
+                        File.CreateSymbolicLink(Path.Combine(temp.Root, "bin", tool), "/usr/bin/" + tool)
+                    }
+                    let manifest = "{\"name\":\"@openai/codex\",\"version\":\"0.160.0\",\"bin\":{\"codex\":\"bin/codex.js\"},\"optionalDependencies\":{\"@openai/codex-linux-x64\":\"npm:@openai/codex@0.160.0-linux-x64\"}}"
+                    let metadata = "{\"name\":\"@openai/codex\",\"version\":\"0.160.0-linux-x64\"}"
+                    File.WriteAllText(Path.Combine(root, "package.json"), manifest)
+                    File.WriteAllText(Path.Combine(platform, "package.json"), metadata)
+                    let target = Path.Combine(temp.Root, "private/package.json")
+                    Directory.CreateDirectory(Path.GetDirectoryName(target) ?? "")
+                    File.WriteAllText(target, kind.StartsWith("root") ? manifest: metadata)
+                    let path = kind == "launcher-fifo" ? launcher: kind == "native-fifo" ?
+                    Path.Combine(platform, "vendor/x86_64-unknown-linux-musl/bin/codex"):
+                    Path.Combine(kind.StartsWith("root") ? root: platform, "package.json")
+                    Directory.CreateDirectory(Path.GetDirectoryName(path) ?? "")
+                    File.Delete(path)
+                    if kind.EndsWith("directory-link") {
+                        Directory.Delete(platform, true)
+                        let link = kind == "dependency-directory-link" ? Path.GetDirectoryName(platform) ?? "": platform
+                        if Directory.Exists(link) {
+                            Directory.Delete(link)
+                        }
+                        Directory.CreateSymbolicLink(link, Path.GetDirectoryName(target) ?? "")
+                        if kind == "dependency-directory-link" {
+                            Directory.CreateDirectory(
+                                Path.Combine(Path.GetDirectoryName(target) ?? "", "codex-linux-x64")
+                            )
+                            File.Move(
+                                target,
+                                Path.Combine(Path.GetDirectoryName(target) ?? "", "codex-linux-x64/package.json")
+                            )
+                        }
+                    } else if kind.EndsWith("link") {
+                        File.CreateSymbolicLink(path, target)
+                    } else if kind.EndsWith("fifo") {
+                        Check.That(
+                            MetadataFifo(path, kind == "launcher-fifo" || kind == "native-fifo" ? 448: 384) == 0,
+                            "Cannot create runtime FIFO"
+                        )
+                    } else {
+                        Directory.CreateDirectory(path)
+                    }
+                    let watched = kind == "dependency-directory-link" ? Path.Combine(
+                        Path.GetDirectoryName(target) ?? "",
+                        "codex-linux-x64/package.json"
+                    ): target
+                    let descriptor = MetadataWatch(2048 | 524288)
+                    Check.That(descriptor >= 0, "Cannot watch synthetic metadata")
+                    using let handle = SafeFileHandle(IntPtr(descriptor), true)
+                    Check.That(MetadataWatchPath(descriptor, watched, 33) >= 0, "Cannot watch synthetic target")
+                    let result = Check.Run(
+                        "/usr/bin/timeout",
+                        []string{"5", binary, "doctor", "--managed", "--json"},
+                        temp.Env,
+                        cwd: temp.Root
+                    )
+                    Check.That(result.Code != 124, "Runtime discovery blocked: " + layout + " " + kind)
+                    Check.That(result.Code != 0, "Unsafe metadata layout passed doctor")
+                    Check.Contains(result.Output, "Unsupported managed Codex runtime layout")
+                    let events = [64]byte
+                    Check.That(
+                        MetadataEvents(descriptor, events, Convert.ToUInt64(events.Length)) == -1 &&
+                            Marshal.GetLastPInvokeError() == 11,
+                        "Production doctor opened or read rejected synthetic metadata: " + layout + " " + kind
+                    )
+                }
+            }
+            Console.WriteLine(
+                "PASS production doctor refuses linked or special package metadata before opening synthetic targets"
+            )
+        }
+
         private func Tool(temp Temp, name string, body string) {
             let path = Path.Combine(temp.Root, "bin", name)
             File.WriteAllText(
@@ -347,7 +469,11 @@ internal class Diagnostics {
 
         internal func All(binary string, selected string = "") {
             Check.That(
-                selected == "" || selected == "local" || selected == "sandbox" || selected == "fixed",
+                selected == "" ||
+                    selected == "local" ||
+                    selected == "sandbox" ||
+                    selected == "fixed" ||
+                    selected == "metadata",
                 "Unknown diagnostics selector"
             )
             if selected == "" || selected == "local" {
@@ -358,6 +484,9 @@ internal class Diagnostics {
             }
             if selected == "" || selected == "fixed" {
                 Fixed(binary)
+            }
+            if selected == "" || selected == "metadata" {
+                Metadata(binary)
             }
         }
     }
