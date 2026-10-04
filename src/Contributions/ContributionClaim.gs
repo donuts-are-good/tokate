@@ -1,0 +1,181 @@
+package Tokate
+
+import System
+import System.Collections.Generic
+import System.IO
+import System.Text.Json
+
+internal class ContributionClaim {
+    shared {
+        internal func Claim(args Args) string {
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
+            let number = args.Number("issue")
+            let viewer = GitHub.Api("user")
+            let donor = RepositoryIdentity.Login(J.Text(viewer, "login"))
+            let record = OwnerApproval.Approved(repo, number, donor)
+            let approval = J.Get(record, "approval")
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            policy.Digest = J.Text(approval, "policy_hash")
+            let selection = DonorSelection.Resolve(args, policy)
+            let model = J.Text(selection, "model")
+            let effort = J.Text(selection, "effort")
+            let seconds = args.Number(
+                "seconds",
+                Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
+            )
+            let reserve = RuntimeBudget.Reserve(args, seconds)
+            let network = args.Get("allow-network") == "true"
+            policy.Validate(model, effort, seconds, network)
+            Terminal.Step(
+                "Selected " + J.Text(selection, "harness") + "/" + J.Text(selection, "provider") +
+                    ": " +
+                    model +
+                    " / " +
+                    effort +
+                    " from " +
+                    J.Text(selection, "source") +
+                    "; current policy permits it and native Codex advertises the controls. Availability: " +
+                    J.Text(selection, "availability") + "."
+            )
+            if args.Command == "work" {
+                DonorSelection.Confirm(args, selection)
+            }
+            let run = Data()
+            run.Fields["version"] = 1
+            run.Fields["id"] = Guid.NewGuid().ToString("N")
+            run.Fields["repo"] = repo
+            run.Fields["issue"] = number
+            run.Fields["donor"] = donor
+            run.Fields["donor_id"] = J.Get(viewer, "id")
+            run.Fields["head_repo"] = RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
+            run.Fields["approval"] = J.Text(record, "sha")
+            run.Fields["base"] = J.Text(approval, "base")
+            run.Fields["base_branch"] = J.Text(approval, "base_branch")
+            run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
+            run.Fields["model"] = model
+            run.Fields["effort"] = effort
+            run.Fields["harness"] = J.Text(selection, "harness")
+            run.Fields["provider"] = J.Text(selection, "provider")
+            run.Fields["selection"] = selection
+            run.Fields["seconds"] = seconds
+            if args.Get("verification-reserve") != "" {
+                run.Fields["verification_reserve"] = reserve
+            }
+            run.Fields["network"] = network
+            run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
+            run.Fields["state"] = "preparing"
+            let directory = Preparation.RunDirectory(args, run.Text("id"))
+            PublicOutput.RunDirectory = directory
+            Preparation.Select(run, args.Get("fork"))
+            Directory.CreateDirectory(
+                directory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            Terminal.Step(RuntimeBudget.Description(run))
+            using let lease = Preparation.Lease(directory)
+            Terminal.Step("Preparing contribution. Run: " + directory)
+            Preparation.Initialize(directory, run, args.Get("fork"))
+            Preparation.Complete(directory, run)
+            Terminal.Message("Claimed issue #" + number.ToString() + ". Run: " + directory)
+            return directory
+        }
+
+        internal func Recheck(run Data) JsonElement {
+            if run.Number("version") == 2 {
+                return ContributionClaim.RecheckV2(run)
+            }
+            let viewer = GitHub.Api("user")
+            if !RepositoryIdentity.SameDonor(viewer, run) {
+                throw CliFailure(
+                    "authentication_required",
+                    "Use the GitHub account that claimed this run",
+                    []string{"gh", "auth", "switch", "--user", run.Text("donor")}
+                )
+            }
+            let record = OwnerApproval.Approved(
+                RepositoryIdentity.Repo(run.Text("repo")),
+                run.Number("issue"),
+                RepositoryIdentity.Login(run.Text("donor"))
+            )
+            if J.Text(record, "sha") != run.Text("approval") {
+                throw CliFailure("stale_approval", "Approval was replaced. This run cannot be published.")
+            }
+            let approval = J.Get(record, "approval")
+            if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
+                approval,
+                "base_branch"
+            ) ||
+                run.Text("policy_hash") != J.Text(approval, "policy_hash") {
+                throw CliFailure("stale_approval", "Saved run differs from owner approval")
+            }
+            if run.Text("branch") != "tokate/issue-" + run.Number("issue").ToString() + "-" + run.Text("approval")
+                .Substring(0, 12) {
+                throw Exception("Invalid saved claim branch")
+            }
+            let head = RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 ||
+                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
+                RepositoryAccess.ValidateRepository(
+                    run.Text("repo"),
+                    head,
+                    J.Get(run.Element(), "donor_id"),
+                    GitHub.Api("repos/" + head)
+                )
+            }
+            Policy(J.Write(J.Get(record, "policy"))).Validate(
+                run.Text("model"),
+                run.Text("effort"),
+                run.Number("seconds"),
+                run.Flag("network")
+            )
+            return record
+        }
+
+        internal func RecheckV2(run Data) JsonElement {
+            let viewer = GitHub.Api("user")
+            let repo = RepositoryIdentity.Repo(run.Text("repo"))
+            let state = CoordinationState.Load(repo, run.Number("issue"))
+            let value = state.Value()
+            let saved = run.Element()
+            let reservation = J.Get(value, "reservation")
+            if !RepositoryIdentity.SameDonor(viewer, run) || state.Sha != run.Text("state_sha") || J.Text(
+                value,
+                "approval_id"
+            ) != run.Text("approval") || J.Text(reservation, "reservation") != run.Text("id") {
+                throw CliFailure("stale_approval", "Saved run has stale coordination authority")
+            }
+            if AccessState.Task(J.Get(value, "approval")) {
+                RepositoryIdentity.PositiveId(J.Get(saved, "donor_id"))
+            }
+            state.Reservation(J.Get(viewer, "id"))
+            let record = state.Check(repo, run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
+            let approval = J.Get(record, "approval")
+            if run.Text("base") != J.Text(approval, "base") || run.Text("policy_hash") != J.Text(
+                approval,
+                "policy_hash"
+            ) ||
+                run.Text("branch") != "tokate/v2-" + run.Text("id") || run.Text("base_branch") != J.Text(
+                approval,
+                "base_branch"
+            ) {
+                throw CliFailure("stale_approval", "Saved run differs from reservation and approval")
+            }
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            let declaredTools = J.Get(saved, "tools")
+            RequestData.Tools(declaredTools)
+            policy.ValidateTools(declaredTools, run.Text("source"))
+            let tools = J.Items(declaredTools)
+            if run.Text("source") == "tokate" &&
+                (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
+                throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
+            }
+            let fork = RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 ||
+                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
+                RepositoryAccess.ValidateRepository(repo, fork, J.Get(saved, "donor_id"), GitHub.Api("repos/" + fork))
+            }
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            return record
+        }
+    }
+}
