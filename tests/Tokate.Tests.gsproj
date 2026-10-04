@@ -10,14 +10,14 @@
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../src/Verification.gs" />
-    <Compile Include="../src/Process.gs" />
-    <Compile Include="../src/Core.gs" />
-    <Compile Include="../src/ProtectedPaths.gs" />
-    <Compile Include="../src/Decree.gs" />
-    <Compile Include="../src/Cli.gs" />
+    <Compile Include="../src/Execution/Verification.gs" />
+    <Compile Include="../src/Execution/Process.gs" />
+    <Compile Include="../src/Contributions/Core.gs" />
+    <Compile Include="../src/Policy/ProtectedPaths.gs" />
+    <Compile Include="../src/Policy/Decree.gs" />
+    <Compile Include="../src/Cli/Cli.gs" />
     <Compile Include="../src/Json.gs" />
-    <Compile Include="../src/ApiTransport.gs" />
-    <Compile Include="../src/RequestData.gs" />
+    <Compile Include="../src/GitHub/ApiTransport.gs" />
+    <Compile Include="../src/Contributions/RequestData.gs" />
   </ItemGroup>
 </Project>
