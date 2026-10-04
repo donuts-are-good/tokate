@@ -239,16 +239,13 @@ internal class SynchronizationChecks {
             return Commit(flow, checkout, "Exact candidate with " + mode)
         }
 
-        private func Run(binary string, v2 bool, mode string) {
-            using let coordination = CoordinationFlow(binary)
+        private func Run(preparation PublishedContribution, v2 bool, mode string) {
+            preparation.Restore()
+            let coordination = preparation.Coordination
             let flow = coordination.Flow
             let selected = mode == "selected-target" || mode == "authority-policy"
             let target = selected ? "release/review": ""
-            let run = v2 ? AmendmentFlow.V2Original(
-                coordination,
-                synchronization: true,
-                baseBranch: target
-            ): AmendmentFlow.Original(flow, synchronization: true, baseBranch: target)
+            let run = preparation.Run
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let h = Check.Text(Saved(run)["commit"])
             let stateBefore = v2 ? Check.Text(coordination.State()["sha"]): ""
@@ -566,64 +563,96 @@ internal class SynchronizationChecks {
         }
 
         internal func All(binary string, only string = "", partition int32 = 0) {
-            for version in[]string{"v1", "v2"} {
-                var index int32
-                for mode in[]string{
-                    "timeout",
-                    "ordinary",
-                    "conflict",
-                    "stale-creation",
-                    "donor-grant",
-                    "blob",
-                    "mode",
-                    "type",
-                    "addition",
-                    "deletion",
-                    "rename-from",
-                    "rename-to",
-                    "absence",
-                    "ancestor",
-                    "ancestor-file",
-                    "ancestor-submodule",
-                    "sibling-creation",
-                    "sibling-removal",
-                    "decree",
-                    "decree-after-sync",
-                    "decree-coordinator",
-                    "selected-target",
-                    "authority-policy",
-                    "reversion",
-                    "semantic",
-                    "revoked",
-                    "deleted",
-                    "donor-ref",
-                    "moved-ref",
-                    "stale-target",
-                    "policy",
-                    "template",
-                    "substitution",
-                    "tree-truncated",
-                    "tree-missing",
-                    "tree-identity",
-                    "tree-ancestor",
-                    "unresolved",
-                    "after-push",
-                    "after-coordinate",
-                    "state-mismatch"
-                } {
-                    index++
-                    if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
-                        version != "v2" {
-                        continue
+            let selectors = List[string](only.Split(','))
+            let matchedSelectors = HashSet[string]()
+            var matched bool
+            let preparations = Dictionary[string, PublishedContribution]()
+            try {
+                for version in[]string{"v1", "v2"} {
+                    var index int32
+                    for mode in[]string{
+                        "timeout",
+                        "ordinary",
+                        "conflict",
+                        "stale-creation",
+                        "donor-grant",
+                        "blob",
+                        "mode",
+                        "type",
+                        "addition",
+                        "deletion",
+                        "rename-from",
+                        "rename-to",
+                        "absence",
+                        "ancestor",
+                        "ancestor-file",
+                        "ancestor-submodule",
+                        "sibling-creation",
+                        "sibling-removal",
+                        "decree",
+                        "decree-after-sync",
+                        "decree-coordinator",
+                        "selected-target",
+                        "authority-policy",
+                        "reversion",
+                        "semantic",
+                        "revoked",
+                        "deleted",
+                        "donor-ref",
+                        "moved-ref",
+                        "stale-target",
+                        "policy",
+                        "template",
+                        "substitution",
+                        "tree-truncated",
+                        "tree-missing",
+                        "tree-identity",
+                        "tree-ancestor",
+                        "unresolved",
+                        "after-push",
+                        "after-coordinate",
+                        "state-mismatch"
+                    } {
+                        index++
+                        if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
+                            version != "v2" {
+                            continue
+                        }
+                        if only != "" && !selectors.Contains(version) && !selectors.Contains(mode) &&
+                            !selectors.Contains(version + "/" + mode) {
+                            continue
+                        }
+                        if (partition == 1 && index > 21) || (partition == 2 && index <= 21) {
+                            continue
+                        }
+                        let target = mode == "selected-target" || mode == "authority-policy" ? "release/review": ""
+                        let key = version + "/" + target
+                        if !preparations.ContainsKey(key) {
+                            preparations[key] = PublishedContribution.Create(
+                                binary,
+                                version == "v2",
+                                synchronization: true,
+                                baseBranch: target
+                            )
+                        }
+                        Run(preparations[key], version == "v2", mode)
+                        matched = true
+                        matchedSelectors.Add(version)
+                        matchedSelectors.Add(mode)
+                        matchedSelectors.Add(version + "/" + mode)
+                        Console.WriteLine("PASS synchronization " + version + "/" + mode)
                     }
-                    if only != "" && only != version && only != mode && only != version + "/" + mode {
-                        continue
-                    }
-                    if (partition == 1 && index > 21) || (partition == 2 && index <= 21) {
-                        continue
-                    }
-                    Run(binary, version == "v2", mode)
-                    Console.WriteLine("PASS synchronization " + version + "/" + mode)
+                }
+                Check.That(matched, "Unknown synchronization selector: " + only)
+                for selector in selectors {
+                    Check.That(
+                        only == "" || matchedSelectors.Contains(selector),
+                        "Unknown synchronization selector: " + selector
+                    )
+                }
+            } finally {
+                for preparation in preparations.Values {
+                    preparation.Dispose()
                 }
             }
         }

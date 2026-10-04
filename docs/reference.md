@@ -787,6 +787,27 @@ fixture root. A failure stops admission and drains the current peer under its
 own bound; Ctrl+C cancels both active verifiers. The runner reports actual passed
 group count and elapsed test time, including partial coverage on failure, and
 rejects unknown suite and group selectors.
+Synchronization cases and amendment rejection groups prepare published starting
+contributions once per policy/target through the shipping CLI, including real
+independent verification and publication. Cases run sequentially against fresh
+file copies restored at the original absolute paths. Private baseline copies
+retain Git repositories, API records, authentication fixtures and original
+evidence; SHA-256 manifests check every restored file, mode and symlink, while
+environment and event counters are reset separately. Each baseline also tests
+isolation by changing run evidence, API state, a fork ref, files, a link, the
+environment and an event counter before restoring. Baselines belong to their
+suite process and are deleted with its temporary fixtures.
+For comparable rejection/success measurements in one process, use
+`artifacts/tests/tokate-tests --synchronizations v1/blob,v1/ordinary` and
+`artifacts/tests/tokate-tests --synchronizations v2/blob,v2/ordinary`.
+One local NativeAOT comparison of these identical two-case workloads measured
+v1 at 41.013 seconds elapsed / 28.884 CPU seconds before and 36.716 / 28.497
+after; v2 measured 91.920 / 58.297 before and 78.246 / 56.568 after. CPU totals
+include child processes. Both rejection and successful synchronization passed
+in each workload, as did the added baseline isolation checks. These focused
+measurements do not establish complete-suite or CI elapsed time; the complete
+original suite remains required in independent verification and CI, followed
+by owner review.
 The real native Codex `doctor` probe is a separate required matrix check; passing
 the deterministic suite does not establish the managed Codex boundary.
 
