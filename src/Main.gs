@@ -4,8 +4,11 @@ import System
 import System.IO
 
 func Main(args[]string) int32 {
+    Terminal.Initialize()
     for argument in args {
         PublicOutput.Enabled = PublicOutput.Enabled || argument == "--json" || argument.StartsWith("--json=")
+        Terminal.Plain = Terminal.Plain || argument == "--plain" || argument.StartsWith("--plain=")
+        Terminal.Ascii = Terminal.Ascii || argument == "--ascii"
     }
     PublicOutput.Command = args.Length == 0 || args[0] == "--help" || args[0] == "-h" ? "help": args[0]
     var traffic bool
@@ -110,10 +113,10 @@ func Dispatch(options Args) int32 {
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
-        Startup.Check(options.Command)
+        Startup.Check(options)
     }
     if options.Command == "doctor" {
-        return Startup.Doctor()
+        return Startup.Doctor(options)
     } else if options.Command == "defaults" {
         let value = DonorDefaults.Run(options)
         if PublicOutput.Enabled {
@@ -147,6 +150,8 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "coordinator-setup" {
         CoordinatorSetup.Run(options)
         PublicOutput.ResultData = J.Map("repo", options.Get("repo"), "output", Path.GetFullPath(options.Need("output")))
+    } else if options.Command == "access" {
+        AccessState.Run(options)
     } else if options.Command == "coordinate" {
         Coordinator.Run(options)
     } else if options.Command == "coordination" {

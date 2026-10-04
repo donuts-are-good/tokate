@@ -345,7 +345,12 @@ internal class Synchronization {
             var expected = ""
             if J.Number(receipt, "version") == 2 {
                 let state = CoordinationState.Load(repo, issue)
-                record = state.Check(repo, issue, J.Text(receipt, "donor"))
+                record = state.Check(
+                    repo,
+                    issue,
+                    J.Text(receipt, "donor"),
+                    J.Get(J.Get(state.Value(), "contribution"), "actor")
+                )
                 state.Reservation(J.Get(J.Get(state.Value(), "contribution"), "actor"))
                 expected = state.Sha
             } else {

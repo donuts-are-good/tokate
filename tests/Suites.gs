@@ -201,6 +201,7 @@ internal class SuiteDriver {
                     ProcessChecks.All()
                     ProtectedPathChecks.All()
                     CliDiscovery.All(binary)
+                    Diagnostics.All(binary)
                     DonorSelectionChecks.All(binary)
                     VerificationChecks.All()
                     SuiteChecks.All()

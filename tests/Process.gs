@@ -4,12 +4,33 @@ import Gsharp.Concurrency
 import System
 import System.Diagnostics
 import System.IO
+import System.IO.Pipes
+import System.Runtime.InteropServices
 import Tokate
+
+@DllImport("libc", EntryPoint: "ptrace", SetLastError: true)
+func TraceChild(request int32, pid int32, address int64, data int64) int64;
+
+@DllImport("libc", EntryPoint: "waitpid", SetLastError: true)
+func WaitTrace(pid int32, out status int32, options int32) int32;
+
+internal class ProcessSurvived : Exception {
+    internal init(name string, identity string, stat string) : base(
+        "Process survived cleanup: " + name + "; starttime=" + identity + "; stat=" + stat.Trim()
+    ) { }
+}
 
 internal class ProcessChecks {
     shared {
+        private let Seize int32 = 0x4206
+        private let Continue int32 = 7
+        private let TraceExitOption int64 = 0x40
+        private let ExitEvent int32 = 6
+        private let WaitAll int32 = 0x40000000
+
         internal func All() {
             Success()
+            ExitObservation()
             InputDeadline()
             Cancellation()
             CancellationLifetime()
@@ -23,28 +44,191 @@ internal class ProcessChecks {
             AbruptStop()
         }
 
-        private func Collected(root string) {
+        private func Collected(root string, observed Chan[bool]? = nil) {
             for name in[]string{"parent.pid", "child.pid"} {
-                let path = Path.Combine(root, name)
-                Check.That(File.Exists(path), "Process fixture did not start: " + name)
-                let status = "/proc/" + File.ReadAllText(path).Trim() + "/stat"
-                try {
-                    Check.That(File.ReadAllText(status).Split(' ')[2] == "Z", "Process survived cleanup: " + name)
-                } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
-                    error IOException
-                ) {
-                    if error.HResult != 3 {
-                        rethrow
+                Collect(root, name, observed)
+            }
+        }
+
+        private func Fields(stat string)[]string -> stat.Substring(stat.LastIndexOf(')') + 2).Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries
+        )
+
+        private func Status(path string) string? {
+            try {
+                return File.ReadAllText(path)
+            } catch (error FileNotFoundException) { } catch (error DirectoryNotFoundException) { } catch (
+                error IOException
+            ) {
+                if error.HResult != 3 {
+                    rethrow
+                }
+            }
+            return nil
+        }
+
+        private func Collect(root string, name string, observed Chan[bool]? = nil, milliseconds int32 = 1000) {
+            let path = Path.Combine(root, name)
+            Check.That(File.Exists(path), "Process fixture did not start: " + name)
+            let identity = Fields(File.ReadAllText(path + ".stat"))[19]
+            let status = "/proc/" + File.ReadAllText(path).Trim() + "/stat"
+            let clock = Stopwatch.StartNew()
+            while true {
+                let stat = Status(status)
+                if stat == nil {
+                    return
+                }
+                let fields = Fields(stat)
+                if fields[19] != identity || fields[0] == "Z" {
+                    return
+                }
+                if let signal = observed {
+                    select {
+                        case signal <- true { }
+                        default { }
                     }
+                }
+                if clock.ElapsedMilliseconds >= milliseconds {
+                    throw ProcessSurvived(name, identity, stat)
+                }
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(5.0)) { }
                 }
             }
         }
 
-        private func Script(delay string, consume string) string ->
-        "printf synthetic-partial-output; printf synthetic-partial-error >&2; echo $$$$ > parent.pid; sleep 120 & echo $$! > child.pid; sleep " +
+        private func Script(delay string, consume string, detached bool = false) string ->
+        "printf synthetic-partial-output; printf synthetic-partial-error >&2; cat /proc/$$$$/stat > parent.pid.stat; echo $$$$ > parent.pid; /bin/sh -c 'cat /proc/$$$$/stat > child.pid.stat; echo $$$$ > child.pid; exec /usr/bin/sleep 120'" +
+            (detached ? " >/dev/null 2>&1": "") +
+            " & while test ! -s child.pid; do sleep 0.005; done; sleep " +
             delay +
             "; " +
             consume
+
+        private func ExitCollected(root string, observed Chan[bool], completed Chan[Exception?]) {
+            var failure Exception? = nil
+            try {
+                Collected(root, observed)
+            } catch (error Exception) {
+                failure = error
+            }
+            completed <- failure
+        }
+
+        private func TraceExit(root string, release Stream, exiting Chan[bool], completed Chan[Exception?]) {
+            var failure Exception? = nil
+            var pid int32
+            var attached bool
+            try {
+                let ready = Path.Combine(root, "child.pid")
+                let clock = Stopwatch.StartNew()
+                while !File.Exists(ready) || File.ReadAllText(ready).Trim() == "" {
+                    Check.That(clock.ElapsedMilliseconds < 5000, "Owned child did not become ready")
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(5.0)) { }
+                    }
+                }
+                pid = Int32.Parse(File.ReadAllText(ready).Trim())
+                var survived bool
+                try {
+                    Collect(root, "child.pid", milliseconds: 25)
+                } catch (error ProcessSurvived) {
+                    survived = true
+                }
+                Check.That(survived, "Live descendant was accepted as collected")
+                Check.That(
+                    TraceChild(Seize, pid, 0, TraceExitOption) == 0,
+                    "Cannot trace owned child: " + Marshal.GetLastPInvokeError().ToString()
+                )
+                attached = true
+                File.WriteAllText(Path.Combine(root, "release-parent"), "ready")
+                var status int32
+                Check.That(
+                    WaitTrace(pid, out status, WaitAll) == pid && status >> 16 == ExitEvent,
+                    "Child did not enter the irreversible exit event"
+                )
+                exiting <- true
+                Check.That(release.ReadByte() == 1, "Exit event release was not delivered")
+                Check.That(TraceChild(Continue, pid, 0, 0) == 0, "Cannot release owned exit event")
+                Check.That(
+                    WaitTrace(pid, out status, WaitAll) == pid && status == 9,
+                    "Owned child did not complete SIGKILL exit"
+                )
+                attached = false
+            } catch (error Exception) {
+                failure = error
+            } finally {
+                if attached {
+                    TraceChild(Continue, pid, 0, 9)
+                    var status int32
+                    while WaitTrace(pid, out status, WaitAll) == pid && (status & 0xff) == 0x7f {
+                        TraceChild(Continue, pid, 0, 9)
+                    }
+                }
+            }
+            completed <- failure
+        }
+
+        private func Joined(results[]Chan[Exception?]) {
+            var failure Exception? = nil
+            for result in results {
+                select {
+                    case let error = <- result {
+                        failure = failure ?? error
+                    }
+                    case <- after(TimeSpan.FromSeconds(5.0)) {
+                        failure = failure ?? Exception("Owned exit collection did not finish")
+                    }
+                }
+            }
+            if failure != nil {
+                throw failure
+            }
+        }
+
+        private func ExitObservation() {
+            using let temp = Temp()
+            using let release = AnonymousPipeServerStream(PipeDirection.Out)
+            using let gate = AnonymousPipeClientStream(PipeDirection.In, release.ClientSafePipeHandle)
+            let exiting = Chan[bool](1)
+            let traced = Chan[Exception?](1)
+            let observed = Chan[bool](1)
+            let collected = Chan[Exception?](1)
+            var collectorStarted bool
+            go ProcessChecks.TraceExit(temp.Root, gate, exiting, traced)
+            try {
+                let result = Commands.Run(
+                    "/bin/sh",
+                    []string{"-c", Script("0", "while test ! -f release-parent; do sleep 0.005; done", true)},
+                    temp.Root,
+                    milliseconds: 5000
+                )
+                Check.That(result.Code == 0, "Controlled parent exit failed")
+                select {
+                    case <- exiting { }
+                    case <- after(TimeSpan.FromSeconds(5.0)) {
+                        throw Exception("Owned child did not report its irreversible exit event")
+                    }
+                }
+                let pid = File.ReadAllText(Path.Combine(temp.Root, "child.pid")).Trim()
+                let stat = File.ReadAllText("/proc/" + pid + "/stat")
+                Check.That(Fields(stat)[0] == "t", "Exit fixture did not expose the non-zombie snapshot")
+                go ProcessChecks.ExitCollected(temp.Root, observed, collected)
+                collectorStarted = true
+                select {
+                    case <- observed { }
+                    case <- after(TimeSpan.FromSeconds(5.0)) {
+                        throw Exception("Collector did not observe the exiting descendant")
+                    }
+                }
+            } finally {
+                File.WriteAllText(Path.Combine(temp.Root, "release-parent"), "ready")
+                release.WriteByte(1)
+                Joined(collectorStarted ? []Chan[Exception?]{traced, collected}: []Chan[Exception?]{traced})
+            }
+            Console.WriteLine("PASS descendant exit observations wait for completion and reject live survivors")
+        }
 
         private func Success() {
             using let temp = Temp()

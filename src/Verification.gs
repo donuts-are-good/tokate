@@ -8,6 +8,60 @@ import System.Text.Json
 
 internal class Verification {
     shared {
+        internal func Doctor() bool {
+            let root = Path.Combine("/tmp", "tokate-doctor-verification-" + Guid.NewGuid().ToString("N"))
+            Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            let checkout = Path.Combine(root, "checkout")
+            try {
+                Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+                File.WriteAllText(Path.Combine(checkout, ".git/config"), "private")
+                let sentinel = Path.Combine(root, "private-probe")
+                File.WriteAllText(sentinel, "private")
+                let global = Path.Combine(Directory.GetCurrentDirectory(), "global.json")
+                if FileInfo(global).LinkTarget != nil {
+                    throw CliFailure(
+                        "verification_failed",
+                        "Repository global.json must be a regular file, not a symbolic link."
+                    )
+                }
+                let pinned = File.Exists(global)
+                if pinned {
+                    File.Copy(global, Path.Combine(checkout, "global.json"))
+                }
+                let result = Run(
+                    checkout,
+                    []string{
+                        "/bin/sh",
+                        "-c",
+                        "test ! -r \"$1\" && test -r .git/config && ! touch .git/tokate-probe && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && cache=$$(mktemp \"$$HOME/tokate-probe.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\"",
+                        "probe",
+                        sentinel
+                    },
+                    false,
+                    30
+                )
+                if result.Code != 0 || result.Truncated || result.ReadFailed {
+                    throw Exception("Independent verification sandbox probe failed")
+                }
+                if pinned {
+                    try {
+                        let toolchain = Run(checkout, []string{"dotnet", "msbuild", "-nologo", "-version"}, false, 30)
+                        if toolchain.Code != 0 || toolchain.Truncated || toolchain.ReadFailed {
+                            throw Exception("Pinned SDK startup failed")
+                        }
+                    } catch (error Exception) {
+                        throw CliFailure(
+                            "missing_tools",
+                            "Pinned SDK/MSBuild startup failed. Install the global.json SDK in a standard system path; home-directory tools are unavailable."
+                        )
+                    }
+                }
+                return pinned
+            } finally {
+                Directory.Delete(root, true)
+            }
+        }
+
         internal func DirectoryPath(path string) string {
             let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))
             var current = Path.GetPathRoot(absolute) ?? "/"

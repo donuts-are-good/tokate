@@ -18,7 +18,7 @@ internal class CoordinationFlow : IDisposable {
         Tools = Path.Combine(Flow.Temp.Root, "tools.json")
     }
 
-    internal func Initialize() {
+    internal func Initialize(approve bool = true) {
         Flow.Initialize()
         Flow.Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
         let policyPath = Path.Combine(Flow.Upstream, ".github/tokate.json")
@@ -31,7 +31,9 @@ internal class CoordinationFlow : IDisposable {
         models["claude-sonnet-4-6"] = Check.Json("[\"unknown\"]")
         File.WriteAllText(policyPath, policy.ToJsonString())
         Flow.Commit("Explicit owner version-2 opt-in")
-        Flow.Approve()
+        if approve {
+            Flow.Approve()
+        }
         File.WriteAllText(
             Tools,
             "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-6\",\"effort\":\"unknown\",\"usage\":null,\"coding_seconds\":null},{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
@@ -1360,6 +1362,15 @@ internal class CoordinationFlow : IDisposable {
         internal func All(binary string, selected string = "") {
             var matched bool
             for name in[]string{
+                "EligibilityTraffic",
+                "EligibilityRaces",
+                "EligibilityLatePublication",
+                "EligibilityDeclarations",
+                "EligibilityModes",
+                "EligibilityRevocation",
+                "EligibilityAuthority",
+                "EligibilityTransport",
+                "EligibilityConcurrency",
                 "SimultaneousClaims",
                 "SimultaneousClaimsMissingParticipant",
                 "ReplayAndInterruptedState",
@@ -1390,6 +1401,10 @@ internal class CoordinationFlow : IDisposable {
                     continue
                 }
                 matched = true
+                if name.StartsWith("Eligibility", StringComparison.Ordinal) {
+                    EligibilityChecks.All(binary, name)
+                    continue
+                }
                 using let test = CoordinationFlow(binary)
                 test.Initialize()
                 switch name {

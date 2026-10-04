@@ -137,6 +137,17 @@ internal class Fixture {
         return bytes.ToArray()
     }
 
+    internal func DenyAccess() {
+        let reference = "refs/heads/tokate/access"
+        let previous = Git("upstream", []string{"rev-parse", reference})
+        let access = Check.Json(Git("upstream", []string{"show", previous + ":access.json"}))
+        access["members"] = Check.Json("[{\"actor\":123,\"trusted\":true,\"denied\":true,\"issues\":[1]}]")
+        let blob = Git("upstream", []string{"hash-object", "-w", "--stdin"}, access.ToJsonString())
+        let tree = Git("upstream", []string{"mktree"}, "100644 blob " + blob + "\taccess.json\n")
+        let next = Git("upstream", []string{"commit-tree", tree, "-p", previous}, "Concurrent owner denial")
+        Git("upstream", []string{"update-ref", reference, next, previous})
+    }
+
     internal func Codex(args[]string) int32 {
         if (args.Length == 2 && args[0] == "exec" && args[1] == "--help") ||
             (args.Length == 3 && args[0] == "debug" && args[1] == "models" && args[2] == "--bundled") {
@@ -212,12 +223,12 @@ internal class Fixture {
         }
         if args[0] == "sandbox" {
             Check.That(Array.IndexOf(args, "permissions.tokate.network.enabled=false") >= 0, "Network must be disabled")
-            if Array.IndexOf(args, "probe") >= 0 {
+            if Array.IndexOf(args, "probe") >= 0 || Array.IndexOf(args, "toolchain") >= 0 {
                 if Check.Text(State["mode"]) == "unsupported_sandbox" {
                     return 1
                 }
                 let checkout = args[Array.IndexOf(args, "-C") + 1]
-                if File.Exists(Path.Combine(checkout, "global.json")) {
+                if Array.IndexOf(args, "toolchain") >= 0 && File.Exists(Path.Combine(checkout, "global.json")) {
                     let result = Check.Run(
                         "/usr/bin/dotnet",
                         []string{"msbuild", "-nologo", "-version"},
@@ -489,6 +500,16 @@ internal class Fixture {
         calls.Add(call)
         State["api_calls"] = calls
         Save()
+        if method == "GET" && path == Check.Text(State["access_revoke_after_path"]) {
+            let reads = State["access_downstream_reads"] == nil ? 1:
+            Int32.Parse(Check.Text(State["access_downstream_reads"])) + 1
+            State["access_downstream_reads"] = JsonValue.Create(reads)
+            if reads == Int32.Parse(Check.Text(State["access_revoke_after_read"])) {
+                DenyAccess()
+                State["access_revoked_on_read"] = JsonValue.Create(true)
+            }
+            Save()
+        }
         if path == Check.Text(State["fault_path"]) {
             let faults = State["faults"]?.AsArray() ?? JsonArray()
             let index = Int32.Parse(Check.Text(State["fault_index"] ?? JsonValue.Create(0)))
@@ -524,6 +545,13 @@ internal class Fixture {
                 )
             )
         }
+        if path.StartsWith("users/") {
+            let login = path.Substring(6)
+            if login == "missing" {
+                return Response(404)
+            }
+            return Answer(Check.Map("login", login, "id", login == "donor" || login == "renamed" ? 123: 124))
+        }
         if path.StartsWith("repos/obselate/tokate/releases/tags/") {
             if let release = State["release"] {
                 return Answer(release)
@@ -544,11 +572,18 @@ internal class Fixture {
                     "default_branch",
                     State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
                     "id",
-                    folder == "fork" ? 2: 1,
+                    folder == "fork" ? 2: (State["repo_id"] ?? JsonValue.Create(1) as JsonNode),
                     "full_name",
                     repo,
                     "owner",
-                    Check.Map("login", parts[1], "id", folder == "fork" ? 123: 1),
+                    Check.Map(
+                        "login",
+                        parts[1],
+                        "id",
+                        folder == "fork" ? (
+                            State["fork_owner_id"] ?? JsonValue.Create(123) as JsonNode
+                        ): JsonValue.Create(1)
+                    ),
                     "permissions",
                     Check.Map("push", actor == parts[1]),
                     "parent",
@@ -726,6 +761,9 @@ internal class Fixture {
             } catch (error Exception) {
                 return Response(404)
             }
+            if file == "access.json" && State["access_override"] != nil {
+                content = Check.Text(State["access_override"])
+            }
             return Answer(
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )
@@ -840,6 +878,13 @@ internal class Fixture {
             return Answer(Check.Map("name", "tokate:approved"))
         }
         if tail.StartsWith("git/ref/heads/") {
+            if tail == "git/ref/heads/tokate/access" && State["access_revoke_at"] != nil {
+                let count = State["access_reads"] == nil ? 1: Int32.Parse(Check.Text(State["access_reads"])) + 1
+                State["access_reads"] = JsonValue.Create(count)
+                if count == Int32.Parse(Check.Text(State["access_revoke_at"])) {
+                    DenyAccess()
+                }
+            }
             var sha string
             try {
                 sha = Git(
@@ -985,6 +1030,10 @@ internal class Fixture {
             ) == "interrupted_state_write" {
                 return Response(500)
             }
+            if reference == "refs/heads/tokate/access" && Check.Text(State["mode"]) == "access_conflict" {
+                DenyAccess()
+                State["mode"] = JsonValue.Create("")
+            }
             let previous = Git(folder, []string{"rev-parse", reference})
             try {
                 Check.That(Check.Text(body["force"]) == "false", "Ref updates must never force")
@@ -992,6 +1041,11 @@ internal class Fixture {
                 Git(folder, []string{"update-ref", reference, Check.Text(body["sha"]), previous})
             } catch (error Exception) {
                 return Response(422)
+            }
+            if reference == "refs/heads/tokate/access" && Check.Text(State["mode"]) == "lost_access_response" {
+                State["mode"] = JsonValue.Create("")
+                Save()
+                return 1
             }
             if reference.StartsWith("refs/heads/tokate/contributions/") && Check.Text(
                 State["mode"]

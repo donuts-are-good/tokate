@@ -2,7 +2,7 @@
 
 Version 2 coordinates contributions on GitHub independently of the coding tool.
 The repository owner installs a small workflow; there is no hosted service or
-polling daemon. Approval, the assigned-donor eligibility rule, reservations,
+polling daemon. Approval, donor eligibility, reservations,
 contribution records, exact-commit CI and owner review do not require Codex.
 Tokate-launched inference currently uses Codex. Claude (#20), API providers
 (#21), local models (#22), OMP (#29) and pi (#30) can already contribute through
@@ -21,8 +21,8 @@ provenance; `submit` still uses the original unexpired reservation and coordinat
 External v2 work is excluded. Existing default templates remain usable for version 2.
 
 Opt-in requires an owner to commit policy version 2 and install the generated
-workflow, then issue fresh approval. Changing policy, task, template or assignment
-requires fresh approval in either version. Old approval refs and local work are
+workflow, then issue fresh approval. Changing policy, task or template requires
+fresh approval. Assignment changes also stale legacy assignment-bound approvals. Old approval refs and local work are
 retained; their publication authority does not survive a changed approval or
 policy. Version-2 state history retains replaced contributions and all older
 outcomes in Git even when they leave the active window. Returning to version 1
@@ -43,7 +43,7 @@ retains the original contribution and adds UUID-bound amendment history under
 the current published coordination revision.
 
 Synchronization amendments additionally require Tokate **0.2.21** on both donor
-and coordinator. [The synchronization commands](reference.md#synchronize-an-already-published-contribution)
+and coordinator. [The synchronization commands](reference.md#synchronize-with-upstream)
 use a separate live owner ref, bound to exact candidate C, upstream U, previous
 published H and current coordination state S. They keep the original approval,
 reservation and contribution intact. The coordinator authenticates the grant,
@@ -98,19 +98,80 @@ Extend the existing policy explicitly, for example:
 Use your project's actual checks. Reservations default to 24 hours, bounded
 between 300 and 604800 seconds. They are separate from the compute/verification
 budget. Every declared tool must match an allowed harness/provider pair. The
-[model policy](reference.md) defaults to the existing exact model/effort whitelist;
+[model policy](reference.md#set-owner-policy-and-approve) defaults to the existing exact model/effort whitelist;
 explicit `model_policy: "unrestricted"` permits any valid declared pair and requires
 omitted or empty `models`. External unknown model/effort values retain their legacy
 meaning and need an exact whitelist allowance when filtering is enabled. Under
 either explicit mode, external effort `"absent"` declares a known lack of an effort
 control and needs its exact pair in whitelist mode. Managed work rejects unknown
 or absent controls. Never substitute a declaration to satisfy policy.
-Expanded eligibility, pause/handoff/renewal and automated assignment/readiness
+Guided setup, access requests/history, pause/handoff/renewal and expanded readiness
 remain #12, #14, #27 and #28.
 
-Both policy versions support optional [`protected_paths`](reference.md#commands-and-recovery)
+Both policy versions support optional [`protected_paths`](reference.md#set-owner-policy-and-approve)
 with at most 64 literal paths, each at most 512 characters. Owners adopt it under
 fresh approval and explicitly select any tools or inputs beyond the entrypoint.
+
+## Independent task eligibility (0.2.22)
+
+Upgrade the donor CLI and pinned coordinator to 0.2.22 before adopting this mode.
+Existing v1/v2 policies without these fields keep exactly their assignment-bound
+approval behavior. No approval, run or receipt is migrated. To opt in, add both
+fields to a version-2 policy and commit it to the authority branch:
+
+```json
+"approval_scope": "task",
+"eligibility": "trusted"
+```
+
+The mode must be exactly `open`, `trusted` or `manual`. Missing one field,
+duplicates, other values and v1 declarations are rejected. The full policy text
+remains hashed, so a mode change requires fresh approval. Initialize the separate
+owner-controlled access ref, then approve task scope without a donor:
+
+```sh
+tokate access --repo OWNER/REPO --operation init
+tokate approve --repo OWNER/REPO --issue 42
+```
+
+Task-scoped approvals retain task fingerprint, target, policy, template,
+instructions and revocation checks. They neither assign a donor nor use issue
+assignment to authorize access. `--donor` and `assign` conflict with this opt-in.
+New approvals bind the numeric repository ID. The independent `tokate/access`
+ref stores a bounded `access.json` with that ID and only current numeric account
+membership: persistent trust, denied status and issue numbers. Login arguments
+are resolved through GitHub's user identity API; stored usernames never grant access.
+
+Authenticated repository writers can perform these noninteractive operations:
+
+```sh
+tokate access --repo OWNER/REPO --operation trust --donor LOGIN
+tokate access --repo OWNER/REPO --operation untrust --donor LOGIN
+tokate access --repo OWNER/REPO --operation grant --donor LOGIN --issue 42
+tokate access --repo OWNER/REPO --operation remove --donor LOGIN --issue 42
+tokate access --repo OWNER/REPO --operation deny --donor LOGIN
+tokate access --repo OWNER/REPO --operation restore --donor LOGIN
+tokate access --repo OWNER/REPO --operation check --issue 42 --json
+```
+
+`check` evaluates the authenticated donor against current task authority. Open
+allows authenticated donors, Trusted requires persistent trust or an issue grant,
+and Manual requires an issue grant. Deny overrides every mode and grant. Restore
+removes denial; it does not create trust or grants. Removing one issue grant leaves
+other grants intact; removing trust leaves issue grants intact. Missing, malformed,
+unavailable or mismatched access authority fails closed, including in Open mode.
+The JSON result uses the existing schema-version-1 envelope and bounded gate data.
+Eligibility does not prove model availability, subscription quota or correctness.
+
+Membership changes take effect without rewriting policy, approvals or saved work.
+Claims recheck access before and after the contribution ref CAS; saved work and
+receipts recheck current access, with another check immediately before inference
+or publication. Access-ref and contribution-ref writes are separate transactions.
+A concurrent revocation can leave a reservation or physical PR for inspection,
+without valid execution/publication authority. Updates have one expected parent,
+never force, and never automatically repeat uncertain writes. Access writes inspect
+the remote result; contribution writes retain existing UUID-bound reconciliation.
+Inspect current refs and saved artifacts before an explicit next operation.
 
 ## Requests and authoritative state
 
@@ -197,9 +258,9 @@ verification, not independently unobservable external coding time.
 For Tokate-launched execution, prepare with `--source tokate` and exactly one
 `codex`/`openai` tool declaration, then `work --run RUN_DIR` and `submit --run
 RUN_DIR`. Omitting `--tools` uses explicit selection arguments or an eligible
-Tokate-owned donor default; see [donor selection](reference.md#explicit-donor-defaults-and-selection).
+Tokate-owned donor default; see [donor selection](reference.md#prepare-donor-tools-and-defaults).
 Optional `--verification-reserve N` allocates a positive part of the unchanged
-total budget to independent verification; see [the command reference](reference.md).
+total budget to independent verification; see [budgets](reference.md#allocate-time-and-network-consent).
 The saved allocation is reused by `work --run` and cannot be overridden there.
 An explicit declaration must match invocation choices. Tokate records its observed invocation/requested model and effort and
 tool-reported usage locally. This still does not cryptographically attest model
@@ -258,7 +319,7 @@ head locally. Interrupted push/body/state responses are resolved by reading save
 previous/candidate state; applied writes are skipped. Changed authority, expired
 reservations and ambiguous physical states require inspection, not a new attempt.
 Exact-head CI and owner acceptance remain required. See [amendment recovery and
-local evidence](reference.md#commands-and-recovery).
+local evidence](reference.md#amend-a-published-pr).
 
 ## Traffic and validation
 

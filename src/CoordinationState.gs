@@ -49,17 +49,31 @@ internal class CoordinationState {
         Sha = next
     }
 
-    internal func Check(repo string, issue int32, donor string = "") JsonElement {
+    internal func Check(repo string, issue int32, donor string, actor JsonElement) JsonElement {
         let state = Value()
         let approval = J.Get(state, "approval")
         let task = GitHub.Issue(repo, issue)
         let assigned = J.Text(approval, "donor")
-        if J.Bool(state, "revoked") || !GitHub.HasLabel(task) || !GitHub.Assigned(task, assigned) ||
-            (donor != "" && !String.Equals(donor, assigned, StringComparison.OrdinalIgnoreCase)) ||
+        let scoped = AccessState.Task(approval)
+        if J.Bool(state, "revoked") || !GitHub.HasLabel(task) ||
+            (
+            !scoped &&
+                (
+                !GitHub.Assigned(task, assigned) ||
+                    (donor != "" && !String.Equals(donor, assigned, StringComparison.OrdinalIgnoreCase))
+            )
+        ) ||
             J.Text(approval, "issue_hash") != GitHub.Fingerprint(task) {
             throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
         }
         let configuration = ApprovalBase.Check(repo, approval, 2)
+        let mode = Policy(J.Write(J.Get(configuration, "policy"))).Eligibility
+        if scoped != (mode != "") || (scoped && J.Text(approval, "eligibility") != mode) {
+            throw CliFailure("stale_approval", "Task eligibility declaration differs from current policy")
+        }
+        if scoped {
+            AccessState.Check(repo, issue, approval, actor)
+        }
         return J.Parse(
             J.Write(
                 J.Map(
@@ -78,6 +92,10 @@ internal class CoordinationState {
 
     internal func Reservation(actor JsonElement) {
         let reservation = J.Get(Value(), "reservation")
+        if AccessState.Task(J.Get(Value(), "approval")) {
+            RequestData.PositiveId(actor)
+            RequestData.PositiveId(J.Get(reservation, "actor"))
+        }
         if J.Get(reservation, "actor").ToString() != actor.ToString() ||
             Unix(reservation, "expires") <= DateTimeOffset
             .UtcNow

@@ -226,7 +226,7 @@ internal class CliDiscovery {
             temp.Env["PATH"] = empty
             let doctor = Check.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let diagnosis = Envelope(doctor, "doctor", "error", "missing_tools")
-            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 6, "Doctor omitted checks")
+            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 8, "Doctor omitted checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
             let blocked = Envelope(
                 Check.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
@@ -432,13 +432,21 @@ internal class CliDiscovery {
 
         internal func All(binary string, shell string = "bash") {
             Structured(binary)
+            TerminalOutput.All(binary)
             Check.That(shell == "bash" || shell == "zsh" || shell == "fish", "Choose bash, zsh or fish")
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")
             let log = Path.Combine(temp.Root, "calls")
             for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
                 let tool = Path.Combine(bin, name)
-                File.WriteAllText(tool, "#!/bin/sh\nprintf '%s\\n' '" + name + "' \"$$@\" >> '" + log + "'\nexit 17\n")
+                File.WriteAllText(
+                    tool,
+                    "#!/bin/sh\nprintf '%s\\n' '" +
+                        name +
+                        "' \"$$@\" >> '" +
+                        log +
+                        "'\ntest \"$1\" = --version && exit 0\nexit 17\n"
+                )
                 File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             }
             for argv in[][]string{[]string{}, []string{"--help"}, []string{"-h"}, []string{"help"}} {
@@ -493,7 +501,6 @@ internal class CliDiscovery {
                 []string{"recover", "--run=x", "--seconds=0"},
                 []string{"checks", "--run=x", "--timeout=86401"},
                 []string{"verify-pr", "--repo=owner/project", "--pr=no"},
-                []string{"approve", "--repo=owner/project", "--issue=1"},
                 []string{"approve", "--base-branch=bad..branch", "--help"},
                 []string{"approve", "--base-branch=release//next", "--help"},
                 []string{"approve", "--base-branch=release.lock", "--help"},

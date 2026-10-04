@@ -37,8 +37,7 @@ internal class Workflow {
             let repo = Data.Repo(args.Need("repo"))
             let number = args.Number("issue")
             let info = RequireOwner(repo)
-            let donorArg = args.Need("donor")
-            let donor = Data.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
+            var donor = ""
             let issue = GitHub.Issue(repo, number)
             if args.Command == "assign" && !GitHub.HasLabel(issue) {
                 throw Exception("Approve the issue first")
@@ -48,6 +47,15 @@ internal class Workflow {
             let authorityBase = GitHub.Branch(repo, authority)
             let revision = branch == authority ? authorityBase: GitHub.Branch(repo, branch)
             let policy = Policy.Load(repo, authorityBase)
+            if policy.Eligibility != "" {
+                if args.Get("donor") != "" || args.Command == "assign" {
+                    throw Exception("Task-scoped approval cannot assign a donor")
+                }
+                AccessState.Load(repo, RequestData.PositiveId(J.Get(info, "id")))
+            } else {
+                let donorArg = args.Need("donor")
+                donor = Data.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
+            }
             let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
             ValidateTemplate(template)
             let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
@@ -56,27 +64,29 @@ internal class Workflow {
                 "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
             )
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
-            var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
-            let others = List[string]()
-            var found bool
-            for person in J.Items(J.Get(assigned, "assignees")) {
-                let login = J.Text(person, "login")
-                if String.Equals(login, donor, StringComparison.OrdinalIgnoreCase) {
-                    found = true
-                } else {
-                    others.Add(login)
+            if policy.Eligibility == "" {
+                var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
+                let others = List[string]()
+                var found bool
+                for person in J.Items(J.Get(assigned, "assignees")) {
+                    let login = J.Text(person, "login")
+                    if String.Equals(login, donor, StringComparison.OrdinalIgnoreCase) {
+                        found = true
+                    } else {
+                        others.Add(login)
+                    }
                 }
-            }
-            if !found {
-                throw Exception(
-                    "GitHub could not assign this donor. Ask them to comment on the issue, then approve again. Existing assignees were kept."
-                )
-            }
-            if others.Count > 0 {
-                assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", others), "DELETE")
-            }
-            if !GitHub.Assigned(assigned, donor) {
-                throw Exception("Issue assignment changed. Approve again with exactly one donor.")
+                if !found {
+                    throw Exception(
+                        "GitHub could not assign this donor. Ask them to comment on the issue, then approve again. Existing assignees were kept."
+                    )
+                }
+                if others.Count > 0 {
+                    assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", others), "DELETE")
+                }
+                if !GitHub.Assigned(assigned, donor) {
+                    throw Exception("Issue assignment changed. Approve again with exactly one donor.")
+                }
             }
             let label = GitHub.Api("repos/" + repo + "/labels/tokate%3Aapproved", missing: true)
             if label.ValueKind == JsonValueKind.Undefined {
@@ -120,6 +130,12 @@ internal class Workflow {
             )
             if J.Number(policy.Value, "version") == 2 {
                 approval["version"] = 2
+                if policy.Eligibility != "" {
+                    approval.Remove("donor")
+                    approval["approval_scope"] = "task"
+                    approval["eligibility"] = policy.Eligibility
+                    approval["repo_id"] = RequestData.PositiveId(J.Get(info, "id"))
+                }
                 CoordinationState.Approve(repo, number, approval)
                 GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
                 Terminal.Message(

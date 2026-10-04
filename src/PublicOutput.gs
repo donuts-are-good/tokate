@@ -73,7 +73,20 @@ internal class PublicOutput {
         internal func Tools(tools List[ToolCheck]) {
             let rows = List[Object]()
             for tool in tools {
-                rows.Add(J.Map("name", tool.Name, "status", tool.Status, "path", tool.Path, "hint", tool.Hint))
+                rows.Add(
+                    J.Map(
+                        "name",
+                        tool.Name,
+                        "status",
+                        tool.Status,
+                        "path",
+                        tool.Path,
+                        "hint",
+                        tool.Hint,
+                        "detail",
+                        tool.Detail
+                    )
+                )
             }
             ResultData = J.Map("tools", rows, "tool_count", tools.Count, "inference", false)
         }
@@ -117,7 +130,10 @@ internal class PublicOutput {
         ) >= 0
 
         internal func Policy(value JsonElement) Object {
-            let result = Select(value, "version,max_seconds,allow_network,reservation_seconds")
+            let result = Select(
+                value,
+                "version,max_seconds,allow_network,reservation_seconds,approval_scope,eligibility"
+            )
             let mode = J.Text(value, "model_policy")
             result["model_policy"] = mode == "" ? "whitelist": mode
             let models = J.Map()
@@ -288,7 +304,7 @@ internal class PublicOutput {
             let approval = J.Get(value, "approval")
             let summary = Select(
                 approval,
-                "repo,issue,donor,base,base_branch,authority_branch,policy_hash,template_hash"
+                "repo,repo_id,issue,donor,approval_scope,eligibility,base,base_branch,authority_branch,policy_hash,template_hash"
             )
             if Decree.HasSnapshot(approval) {
                 summary["decree"] = Select(J.Get(approval, "decree"), "present,sha256")
@@ -350,7 +366,19 @@ internal class PublicOutput {
                 }
                 Actions.Add(known ? []string{"tokate", "help", Command, "--json"}: []string{"tokate", "help", "--json"})
             } else if code == "missing_tools" {
-                Actions.Add([]string{"tokate", "doctor", "--json"})
+                if Command != "doctor" {
+                    let diagnostic = Command == "work" ||
+                        Command == "select" ||
+                        Command == "claim" ||
+                        (Command == "prepare" && options?.Get("source") == "tokate") ? "--managed": (
+                        Command == "external" ||
+                            Command == "amend" ||
+                            Command == "recover" ||
+                            Command == "submit" ||
+                            Command == "publish" ? "--external": "--owner"
+                    )
+                    Actions.Add([]string{"tokate", "doctor", diagnostic, "--json"})
+                }
             }
             if options != nil && code == "" && Command == "checks" && RunDirectory == "" {
                 Actions.Add(

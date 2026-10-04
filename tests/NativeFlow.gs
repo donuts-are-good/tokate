@@ -199,7 +199,7 @@ internal class NativeFlow : IDisposable {
             []string{"work", "--repo", "owner/project", "--issue", "1", "--model", "model", "--effort", "high"},
             1
         )
-        Check.Contains(work.Error, "Install the tools needed")
+        Check.Contains(work.Error, "Install or repair the tools needed")
         NoInference()
     }
 
@@ -211,14 +211,14 @@ internal class NativeFlow : IDisposable {
             []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
             owner: true
         )
-        Check.Contains(result.Error, "codex: missing")
+        Check.That(result.Error == "", "Owner command warned about donor tools")
         Check.Contains(result.Output, "Approved")
         Check.Contains(
             Call(
                 []string{"work", "--repo", "owner/project", "--issue", "1", "--model", "model", "--effort", "high"},
                 1
             ).Error,
-            "Install the tools needed"
+            "Install or repair the tools needed"
         )
     }
 
@@ -232,8 +232,7 @@ internal class NativeFlow : IDisposable {
         File.WriteAllText(global, "{\"sdk\":{\"version\":\"99.0.100\",\"rollForward\":\"disable\"}}")
         let missing = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
         Check.That(missing.Code == 1, "Doctor accepted unavailable pinned SDK")
-        Check.Contains(missing.Output, "sandbox: failed")
-        Check.Contains(missing.Output, "99.0.100")
+        Check.Contains(missing.Output, "toolchain: failed")
         Check.Contains(missing.Output, "standard system path")
         File.Delete(global)
         let unpinned = Check.Run(Binary, []string{"doctor"}, env, cwd: Upstream)
@@ -1866,7 +1865,7 @@ internal class NativeFlow : IDisposable {
         Approve()
         let run = Claim()
         Mode("unsupported_sandbox")
-        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Sandbox preflight failed")
+        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Managed sandbox isolation probe failed.")
         NoInference()
         NoPr()
     }
