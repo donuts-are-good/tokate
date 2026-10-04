@@ -226,7 +226,7 @@ internal class CliDiscovery {
             temp.Env["PATH"] = empty
             let doctor = Check.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let diagnosis = Envelope(doctor, "doctor", "error", "missing_tools")
-            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 6, "Doctor omitted checks")
+            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 8, "Doctor omitted checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
             let blocked = Envelope(
                 Check.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
