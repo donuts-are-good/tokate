@@ -589,7 +589,7 @@ internal class CorrectionChecks {
             }
         }
 
-        private func ManagedRun(flow CoordinationFlow, mode string) string {
+        private func ManagedRun(flow CoordinationFixture, mode string) string {
             flow.Claim()
             File.WriteAllText(
                 flow.Tools,
@@ -785,7 +785,7 @@ internal class CorrectionChecks {
 
         private func ManagedRefusals(binary string) {
             for change in[]string{"expiry", "revocation", "identity", "revision"} {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let run = ManagedRun(flow, "staged_whitespace")
                 Prepared(flow.Flow, run)
@@ -825,7 +825,7 @@ internal class CorrectionChecks {
             for originalMode in modelPolicy == "" ? []string{"staged_whitespace", "verification_fail"}: []string{
                 "staged_whitespace"
             } {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 if modelPolicy != "" {
                     let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
@@ -908,7 +908,7 @@ internal class CorrectionChecks {
 
         private func InterruptedManaged(binary string) {
             for mode in[]string{"push_fail_after_write", "request_fail_after_write", "request_fail_before_write"} {
-                using let flow = CoordinationFlow(binary)
+                using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let run = ManagedRun(flow, "staged_whitespace")
                 Prepared(flow.Flow, run)
@@ -941,7 +941,7 @@ internal class CorrectionChecks {
                     Once(flow.Flow, 1)
                 }
             }
-            using let external = CoordinationFlow(binary)
+            using let external = CoordinationFixture(binary)
             external.Initialize()
             external.Claim()
             let run = external.Prepare()
@@ -953,7 +953,7 @@ internal class CorrectionChecks {
             flow NativeFixture,
             run string,
             archive string,
-            coordinator CoordinationFlow? = nil
+            coordinator CoordinationFixture? = nil
         ) {
             let correction = Read(run)["correction"]?.DeepClone()
             let corrected = Check.Text(Read(run)["commit"])
@@ -1157,7 +1157,7 @@ internal class CorrectionChecks {
         }
 
         private func CorrectedAmendmentsV2(binary string) {
-            using let flow = CoordinationFlow(binary)
+            using let flow = CoordinationFixture(binary)
             flow.Initialize()
             flow.Flow.ProtectedPolicy()
             flow.Flow.Approve()

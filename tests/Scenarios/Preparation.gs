@@ -239,7 +239,7 @@ internal class PreparationChecks {
         }
 
         private func External(binary string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             let claim = test.Claim()
             let run = test.Prepare()
@@ -283,7 +283,7 @@ internal class PreparationChecks {
             Resume(v1, directory, 1)
             Check.That(File.ReadAllText(path) == old, "Old v1 record was migrated")
             for owner in[]bool{true, false} {
-                using let test = CoordinationFlow(binary)
+                using let test = CoordinationFixture(binary)
                 test.Initialize(false)
                 test.Flow.Reload()
                 test.Flow.State["self_owned"] = JsonValue.Create(true)
@@ -378,7 +378,7 @@ internal class PreparationChecks {
             flow.Call([]string{"work", "--run", run}, 1)
             flow.NoInference()
             flow.NoPr()
-            using let external = CoordinationFlow(binary)
+            using let external = CoordinationFixture(binary)
             external.Initialize()
             let claim = external.Claim()
             let directory = external.Prepare()

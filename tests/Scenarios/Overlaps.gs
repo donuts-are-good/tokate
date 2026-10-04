@@ -7,14 +7,14 @@ import System.Text.Json.Nodes
 import Tokate
 
 internal class OverlapFlow : IDisposable {
-    internal let Test CoordinationFlow
+    internal let Test CoordinationFixture
     internal let Flow NativeFixture
     internal let Version int32
     internal let Heads List[string] = List[string]()
     internal let Bases List[string] = List[string]()
 
     internal init(binary string, version int32) {
-        Test = CoordinationFlow(binary)
+        Test = CoordinationFixture(binary)
         Flow = Test.Flow
         Version = version
     }

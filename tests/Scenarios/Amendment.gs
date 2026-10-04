@@ -332,7 +332,7 @@ internal class AmendmentFlow {
         }
 
         private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
-            using let flow = CoordinationFlow(binary)
+            using let flow = CoordinationFixture(binary)
             let run = PublishedContribution.V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let contribution = Check.Text(flow.State()["state"]?["contribution"])
