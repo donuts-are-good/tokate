@@ -21,27 +21,32 @@ internal class Contribution {
             run.Fields["failure_reason"] = "candidate_invalid"
             let coding = RuntimeBudget(timer, seconds - reserve)
             let total = RuntimeBudget(timer, seconds)
-            coding.Remaining()
-            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"), coding)
-            if coding.Git(checkout, "status", "--porcelain") == "" {
-                throw Exception("No changes returned. No PR will be opened.")
+            var checkout string
+            var candidate string
+            {
+                using let progress = TerminalProgress("Candidate validation", coding, total)
+                coding.Remaining()
+                checkout = Verification.Candidate(Path.Combine(directory, "checkout"), coding)
+                if coding.Git(checkout, "status", "--porcelain") == "" {
+                    throw Exception("No changes returned. No PR will be opened.")
+                }
+                candidate = Snapshot(checkout, run, coding)
+                let candidatePath = Path.Combine(directory, "candidate.patch")
+                if !File.Exists(candidatePath) {
+                    File.WriteAllText(candidatePath, candidate)
+                }
+                ProtectedPaths.Local(
+                    checkout,
+                    J.Get(record, "policy"),
+                    J.Get(record, "approval"),
+                    run.Text("base"),
+                    budget: coding
+                )
+                if File.ReadAllText(candidatePath) != candidate {
+                    throw Exception("Saved candidate patch changed")
+                }
+                coding.Remaining()
             }
-            let candidate = Snapshot(checkout, run, coding)
-            let candidatePath = Path.Combine(directory, "candidate.patch")
-            if !File.Exists(candidatePath) {
-                File.WriteAllText(candidatePath, candidate)
-            }
-            ProtectedPaths.Local(
-                checkout,
-                J.Get(record, "policy"),
-                J.Get(record, "approval"),
-                run.Text("base"),
-                budget: coding
-            )
-            if File.ReadAllText(candidatePath) != candidate {
-                throw Exception("Saved candidate patch changed")
-            }
-            coding.Remaining()
             Terminal.Step("Running independent owner verification...")
             PublicOutput.FailureCode = "verification_failed"
             run.Fields["failure_stage"] = "owner_verification"
@@ -53,7 +58,7 @@ internal class Contribution {
                 total.Remaining()
                 run.Fields["verification"] = verification
                 run.Save(directory)
-                let check = Verification.Check(
+                let check = Terminal.Verify(
                     directory,
                     verification,
                     command,
@@ -74,6 +79,7 @@ internal class Contribution {
             PublicOutput.FailureCode = "invalid_state"
             run.Fields["failure_stage"] = "changed_candidate"
             run.Fields["failure_reason"] = "candidate_changed"
+            using let progress = TerminalProgress("Verified candidate validation", total)
             let patch = Snapshot(checkout, run, total)
             ProtectedPaths.Local(
                 checkout,

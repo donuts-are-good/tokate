@@ -180,6 +180,21 @@ sequences and invisible formatting controls and treats markup literally. Use
 `--json` for automation. No-flag piped `policy` and `status` retain their legacy
 JSON forms. Use `--plain` for redirected human text.
 
+Foreground inference and owner verification show their phase, monotonic elapsed
+time, and remaining local allowance on stderr. Inference shows both the coding
+allowance and total allowance; the saved verification reserve is unchanged.
+Verification names each command and reports its exit result. Raw stdout/stderr
+remain in private run artifacts (`events.jsonl`, `stderr.log`, and the per-command
+logs referenced by `verification.json`); open those files locally for details.
+TTY progress at 80 columns or wider refreshes one line every five seconds. Narrow
+terminals, plain mode, redirected stderr, JSON, `NO_COLOR`, and dumb terminals use
+lines spaced at exponentially increasing intervals starting at five seconds,
+capped at one day. These timers make no remote
+requests and do not imply agent activity, retry inference, or extend deadlines.
+Completion and failure diagnostics identify the run, saved artifacts, and explicit
+next commands when the saved state permits them. Publication failures use the
+existing `command_failed` fallback and are labeled as publication failures locally.
+
 ### Explicit structured output
 
 Every public command accepts `--json`, including `doctor`, `update`, `uninstall`,

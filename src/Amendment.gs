@@ -492,13 +492,14 @@ internal class Amendment {
                         amendment.Fields["failure_stage"] = "owner_verification"
                         amendment.Fields["failure_reason"] = "verification_failed"
                         amendment.Save(location)
-                        let result = Verification.Check(
+                        let result = Terminal.Verify(
                             location,
                             results,
                             command,
                             checkout,
                             run.Flag("network") && J.Bool(policy.Value, "allow_network"),
-                            remaining
+                            remaining,
+                            progressBudget: RuntimeBudget(timer, seconds)
                         )
                         if result.Code != 0 {
                             throw CliFailure(

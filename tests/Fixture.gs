@@ -274,6 +274,13 @@ internal class Fixture {
         }
         Save()
         let mode = Check.Text(State["mode"])
+        if mode == "progress_delay" {
+            let seconds = Int32.Parse(Check.Text(State["progress_delay_seconds"] ?? JsonValue.Create(6)))
+            using let delay = after(TimeSpan.FromSeconds(seconds))
+            select {
+                case <- delay { }
+            }
+        }
         if mode == "model_failure" {
             Console.Error.WriteLine("Synthetic model unavailable")
             return 1

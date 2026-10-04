@@ -256,13 +256,14 @@ internal class V2Contribution {
                     if remaining < 1 {
                         throw Exception("Verification budget exhausted")
                     }
-                    let result = Verification.Check(
+                    let result = Terminal.Verify(
                         directory,
                         results,
                         command,
                         checkout,
                         run.Flag("network"),
-                        remaining
+                        remaining,
+                        progressBudget: RuntimeBudget(timer, run.Number("seconds"))
                     )
                     if result.Code != 0 {
                         throw CliFailure(

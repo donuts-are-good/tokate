@@ -96,6 +96,13 @@ internal class RuntimeBudget {
 
     internal func Expired() bool -> Timer.Elapsed.TotalSeconds >= Seconds
 
+    internal func Left() string -> Math.Max(0, Math.Ceiling(Seconds - Timer.Elapsed.TotalSeconds)).ToString() + "s"
+
+    internal func Status() string -> Math.Floor(Timer.Elapsed.TotalSeconds).ToString() +
+        "s elapsed, " +
+        Left() +
+        " remaining"
+
     internal func Remaining() int32 {
         let remaining = Math.Floor(Seconds * 1000.0 - Timer.Elapsed.TotalMilliseconds)
         if remaining < 1 {

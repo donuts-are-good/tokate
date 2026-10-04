@@ -308,7 +308,15 @@ internal class Worker {
             try {
                 PublicOutput.FailureCode = "inference_failed"
                 let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
-                let result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true, coding)
+                var result CommandResult
+                {
+                    using let progress = TerminalProgress(
+                        "Inference",
+                        coding,
+                        RuntimeBudget(timer, run.Number("seconds"))
+                    )
+                    result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true, coding)
+                }
                 run.Fields["output_truncated"] = result.OutputTruncated
                 run.Fields["error_truncated"] = result.ErrorTruncated
                 run.Fields["inference_exit_code"] = result.Code
