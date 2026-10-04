@@ -522,6 +522,9 @@ internal class Publication {
                         "Checks " + status + ": " + run.Text("pr_url"),
                         failed ? "red": (pending ? "yellow": "green")
                     )
+                    if !PublicOutput.Enabled {
+                        Terminal.Checks(rows)
+                    }
                     previous = snapshot
                 }
                 if failed {
