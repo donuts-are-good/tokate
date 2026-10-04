@@ -612,6 +612,12 @@ internal class V2Contribution {
             )
             if run.Text("source") == "tokate" {
                 File.WriteAllText(Path.Combine(directory, "publication.json"), "{}\n")
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 Commands.Git(
                     checkout,
                     "-c",

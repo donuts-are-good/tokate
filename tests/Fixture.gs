@@ -500,6 +500,16 @@ internal class Fixture {
         calls.Add(call)
         State["api_calls"] = calls
         Save()
+        if method == "GET" && path == Check.Text(State["access_revoke_after_path"]) {
+            let reads = State["access_downstream_reads"] == nil ? 1:
+            Int32.Parse(Check.Text(State["access_downstream_reads"])) + 1
+            State["access_downstream_reads"] = JsonValue.Create(reads)
+            if reads == Int32.Parse(Check.Text(State["access_revoke_after_read"])) {
+                DenyAccess()
+                State["access_revoked_on_read"] = JsonValue.Create(true)
+            }
+            Save()
+        }
         if path == Check.Text(State["fault_path"]) {
             let faults = State["faults"]?.AsArray() ?? JsonArray()
             let index = Int32.Parse(Check.Text(State["fault_index"] ?? JsonValue.Create(0)))

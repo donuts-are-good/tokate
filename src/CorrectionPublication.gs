@@ -525,6 +525,12 @@ internal class CorrectionPublication {
                 }
                 if remote != correction.Text("commit") {
                     SetStage(directory, correction, "push_pending")
+                    AccessState.Check(
+                        run.Text("repo"),
+                        run.Number("issue"),
+                        J.Get(record, "approval"),
+                        J.Get(run.Element(), "donor_id")
+                    )
                     Push(directory, run, correction)
                     remote = Remote(run, correction)
                     if remote != correction.Text("commit") {
@@ -546,6 +552,12 @@ internal class CorrectionPublication {
                 }
                 Correction.Exact(directory, run, correction, record)
                 let latest = V2Authority(directory, run, correction)
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 SetStage(directory, correction, "request_pending")
                 try {
                     GitHub.Api(

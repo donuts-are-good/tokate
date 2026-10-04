@@ -1361,6 +1361,7 @@ internal class CoordinationFlow : IDisposable {
             for name in[]string{
                 "EligibilityTraffic",
                 "EligibilityRaces",
+                "EligibilityLatePublication",
                 "EligibilityDeclarations",
                 "EligibilityModes",
                 "EligibilityRevocation",

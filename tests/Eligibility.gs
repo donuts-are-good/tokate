@@ -288,6 +288,112 @@ internal class EligibilityChecks {
             )
         }
 
+        private func LatePublication(binary string) {
+            for amend in[]bool{true, false} {
+                using let test = CoordinationFlow(binary)
+                test.Initialize()
+                Setup(test, "open")
+                let claim = Claim(test)
+                let previous = test.Candidate(claim)
+                var request = test.PublishRequest(claim, previous)
+                let branch = "tokate/v2-" + Check.Text(claim["uuid"])
+                if amend {
+                    test.Coordinate(test.Event(request))
+                    let checkout = Path.Combine(test.Flow.Temp.Root, "donor-work")
+                    File.AppendAllText(Path.Combine(checkout, "result.txt"), "Reviewed change\n")
+                    test.Flow.Git("-C", checkout, "add", ".")
+                    test.Flow.Git(
+                        "-C",
+                        checkout,
+                        "-c",
+                        "user.name=Donor",
+                        "-c",
+                        "user.email=donor@example.test",
+                        "commit",
+                        "-m",
+                        "Review correction"
+                    )
+                    let head = test.Flow.Git("-C", checkout, "rev-parse", "HEAD")
+                    test.Flow.Git(
+                        "-C",
+                        checkout,
+                        "push",
+                        Path.Combine(test.Flow.Bin, "fork"),
+                        "HEAD:refs/heads/" + branch
+                    )
+                    test.Flow.Reload()
+                    let pullHead = test.Flow.State["pulls"]?[0]?["head"] ?? throw Exception("Missing PR head")
+                    pullHead["sha"] = JsonValue.Create(head)
+                    test.Flow.Save()
+                    let state = test.State()
+                    request = Check.Map(
+                        "uuid",
+                        Guid.NewGuid().ToString("D"),
+                        "expected",
+                        Check.Text(state["sha"]),
+                        "approval",
+                        Check.Text(state["state"]?["approval_id"]),
+                        "action",
+                        "amend",
+                        "metadata",
+                        Check.Map(
+                            "fork",
+                            "donor/project",
+                            "branch",
+                            branch,
+                            "previous",
+                            previous,
+                            "head",
+                            head,
+                            "pr",
+                            10,
+                            "seconds",
+                            30,
+                            "tools",
+                            JsonArray(),
+                            "verification",
+                            "donor-reported-pass"
+                        )
+                    )
+                }
+                let stateBefore = Check.Text(test.State()["sha"])
+                test.Flow.Reload()
+                let bodyBefore = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
+                let path = amend ? "repos/owner/project/pulls/10": "repos/donor/project/git/ref/heads/" + branch
+                test.Flow.State["access_revoke_after_path"] = JsonValue.Create(path)
+                test.Flow.State["access_revoke_after_read"] = JsonValue.Create(2)
+                test.Flow.Save()
+                test.Flow.ResetTraffic()
+                let failure = test.Coordinate(test.Event(request), 1)
+                test.Flow.Reload()
+                Check.That(
+                    Check.Text(test.Flow.State["access_revoked_on_read"]) == "true",
+                    "Late revocation did not run: " + failure.Error
+                )
+                for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                    Check.That(
+                        Check.Text(call["method"]) == "GET" || !Check.Text(call["path"]).StartsWith(
+                            "repos/owner/project/pulls"
+                        ),
+                        "Revoked donor wrote a PR after downstream evidence read: " + call?.ToJsonString()
+                    )
+                }
+                if amend {
+                    Check.That(
+                        Check.Text(test.Flow.State["pulls"]?[0]?["body"]) == bodyBefore,
+                        "Revoked amendment changed PR body"
+                    )
+                } else {
+                    test.Flow.NoPr()
+                }
+                Check.That(
+                    Check.Text(test.State()["sha"]) == stateBefore,
+                    "Revoked publication changed contribution state"
+                )
+                test.Flow.NoInference()
+            }
+        }
+
         private func RevokeAt(test CoordinationFlow, read int32) {
             test.Flow.Reload()
             test.Flow.State["access_reads"] = JsonValue.Create(0)
@@ -315,7 +421,7 @@ internal class EligibilityChecks {
             execution.Flow.Call([]string{"work", "--run", run}, 1)
             execution.Flow.NoInference()
             execution.Flow.NoPr()
-            for read in[]int32{2, 3} {
+            for read in[]int32{2, 4} {
                 using let test = CoordinationFlow(binary)
                 test.Initialize()
                 Setup(test, "open")
@@ -412,6 +518,9 @@ internal class EligibilityChecks {
                 }
                 case "EligibilityRaces" {
                     Races(binary)
+                }
+                case "EligibilityLatePublication" {
+                    LatePublication(binary)
                 }
                 case "EligibilityDeclarations" {
                     Declarations(binary)

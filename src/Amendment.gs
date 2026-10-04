@@ -741,6 +741,12 @@ internal class Amendment {
                 ) != snapshot {
                     throw Exception("Amendment checkout changed before push")
                 }
+                AccessState.Check(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(record, "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
                 Commands.Git(
                     checkout,
                     "-c",

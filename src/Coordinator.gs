@@ -175,6 +175,7 @@ internal class Coordinator {
                 Revalidate(repo, number, state, actor, donor)
                 ValidateFork(repo, donor, metadata, actor)
                 if pull.ValueKind == JsonValueKind.Undefined {
+                    AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                     pull = GitHub.Api(
                         "repos/" + repo + "/pulls",
                         J.Map(
@@ -408,6 +409,7 @@ internal class Coordinator {
                 if J.Text(fresh, "body") != body {
                     throw Exception("PR body changed before amendment write")
                 }
+                AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                 GitHub.Api(
                     "repos/" + repo + "/pulls/" + J.Number(metadata, "pr").ToString(),
                     J.Map("body", updated),
