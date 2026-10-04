@@ -1,6 +1,5 @@
 package Tokate
 
-import Spectre.Console
 import System
 import System.Collections.Generic
 import System.IO
@@ -186,28 +185,11 @@ internal class Startup {
         }
 
         internal func Show(tools List[ToolCheck], error bool = false) {
-            if !Terminal.Rich(error) {
-                for tool in tools {
-                    let detail = tool.Detail
-                    Terminal.Message(tool.Name + ": " + tool.Status + " - " + detail, error: error)
-                }
-                return
-            }
-            let table = Table()
-            table.Border = TableBorder.Rounded
-            table.AddColumn("Check")
-            table.AddColumn("Status")
-            table.AddColumn("Details")
             for tool in tools {
                 let style = tool.Status == "ready" ||
-                    tool.Status == "found" ? "green": (tool.Status == "skipped" ? "grey": "yellow")
-                table.AddRow(
-                    Markup.Escape(tool.Name),
-                    "[" + style + "]" + Markup.Escape(tool.Status) + "[/]",
-                    Markup.Escape(Terminal.Clean(tool.Detail))
-                )
+                    tool.Status == "found" ? "green": (tool.Status == "failed" ? "red": "yellow")
+                Terminal.Row(tool.Name, tool.Status + " - " + tool.Detail, style, error)
             }
-            Terminal.Output(error).Write(table)
         }
 
         internal func Check(options Args) {
@@ -350,7 +332,7 @@ internal class Startup {
                 fields["scope"] = doctorScope
                 fields["authentication_requested"] = options.Get("auth") == "true"
             }
-            Terminal.Message("Tokate " + doctorScope + " diagnostics", "bold cyan")
+            Terminal.Heading("Tokate " + doctorScope + " diagnostics")
             Show(tools)
             Terminal.Message(
                 "Checked capabilities are listed above. No inference was run. PATH, startup, login and catalog data do not prove model availability or subscription allowance. Repository dependencies and builds were not checked.",

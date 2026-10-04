@@ -157,6 +157,29 @@ Unrestricted policy lists known managed pairs from the same offline catalog; it
 never selects an alternative automatically. External and mixed-tool declarations
 still validate every tool against owner policy.
 
+### Human terminal output
+
+Human output uses Tokate's parchment, antique gold, sage, terracotta and celestial
+blue accents with the terminal's default foreground for body text. A small solar
+wordmark and fine rule introduce help, diagnostics and status; no custom font,
+images, animation or fullscreen interface is needed. Color-capable terminals use
+Spectre.Console's truecolor or 256-color rendering when advertised by `COLORTERM`
+or `TERM`, with an eight-color fallback. `COLORFGBG` with a dark background (0 or 8)
+selects lighter accents; other terminals use restrained midtone accents.
+
+Every command accepts `--plain` for human text without ANSI, ornaments or animation,
+and `--ascii` for ASCII ornaments in styled terminals. `NO_COLOR` (even empty)
+and `TERM=dumb` automatically use plain human output in terminals. ASCII
+fallback affects ornaments, preserving Unicode names and URLs. `--json` takes
+precedence over these presentation flags and environment settings.
+
+Help and labeled rows adapt to terminal width. Status and individual checks use
+words as well as accents. Long names, paths, URLs and executable commands remain
+complete; terminals may soft-wrap long tokens. Human text strips terminal escape
+sequences and invisible formatting controls and treats markup literally. Use
+`--json` for automation. No-flag piped `policy` and `status` retain their legacy
+JSON forms. Use `--plain` for redirected human text.
+
 ### Explicit structured output
 
 Every public command accepts `--json`, including `doctor`, `update`, `uninstall`,
