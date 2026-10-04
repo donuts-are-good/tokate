@@ -53,10 +53,10 @@ effort explicitly or explicitly save Tokate-owned defaults.
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.
 
-Source: [Cli.gs](../src/Cli.gs), [Completion.gs](../src/Completion.gs),
-[Startup.gs](../src/Startup.gs), [Worker.gs](../src/Worker.gs).
-Defaults and selection: [DonorDefaults.gs](../src/DonorDefaults.gs),
-[DonorSelection.gs](../src/DonorSelection.gs).
+Source: [Cli.gs](../src/Cli/Cli.gs), [Completion.gs](../src/Cli/Completion.gs),
+[Startup.gs](../src/Cli/Startup.gs), [Worker.gs](../src/Execution/Worker.gs).
+Defaults and selection: [DonorDefaults.gs](../src/Cli/DonorDefaults.gs),
+[DonorSelection.gs](../src/Cli/DonorSelection.gs).
 
 ## Installer access
 
@@ -74,7 +74,7 @@ Fish gets a dedicated configuration snippet. No shell configuration contents are
 uploaded. Uninstall preserves saved work and credentials. See
 [installation details](reference.md#install-and-check-support) for retained setup markers.
 
-Source: [install.sh](../site/install.sh), [Installation.gs](../src/Installation.gs).
+Source: [install.sh](../site/install.sh), [Installation.gs](../src/Cli/Installation.gs).
 
 ## Authentication and process environments
 
@@ -103,7 +103,7 @@ copied into errors. `--traffic`
 reports only numeric attempted reads, mutations, live 304s and retries on stderr;
 it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API output and retry limits](reference.md#automate-commands) and
-[ApiTransport.gs](../src/ApiTransport.gs).
+[ApiTransport.gs](../src/GitHub/ApiTransport.gs).
 
 Version-2 `request --file FILE` writes a local posting intent and lock beside the
 request file. The intent contains the canonical repository/issue, numeric actor,
@@ -202,8 +202,8 @@ cleanup. Missing or unsupported bubblewrap fails closed without host execution.
 Nested sandbox probes remain permitted. This verifies a checkout; it makes no
 claim that coding work performed outside the managed path was sandboxed.
 
-Source: [Process.gs](../src/Process.gs), [Worker.gs](../src/Worker.gs),
-[Verification.gs](../src/Verification.gs), [Publish.gs](../src/Publish.gs), [Amendment.gs](../src/Amendment.gs).
+Source: [Process.gs](../src/Execution/Process.gs), [Worker.gs](../src/Execution/Worker.gs),
+[Verification.gs](../src/Execution/Verification.gs), [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
 
 ## Files, logs, and network destinations
 
@@ -303,9 +303,9 @@ Tokate does not add a separate telemetry upload in these source paths. The
 installed harness, GitHub CLI, and services have their own behavior and policies.
 This document is not a claim about their retention practices.
 
-Source: [Core.gs](../src/Core.gs), [Workflow.gs](../src/Workflow.gs),
-[Worker.gs](../src/Worker.gs), [Contribution.gs](../src/Contribution.gs),
-[Publish.gs](../src/Publish.gs), [Amendment.gs](../src/Amendment.gs).
+Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
+[Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
+[Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
 
 ## Bounded public-content audit
 
