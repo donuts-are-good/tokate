@@ -556,7 +556,14 @@ internal class Fixture {
         }
         if path.StartsWith("user/repos?") {
             if State["fork_discovery"] != nil {
-                return Answer(State["fork_discovery"] ?? JsonArray())
+                let publicOnly = Array.IndexOf(path.Split('?')[1].Split('&'), "visibility=public") >= 0
+                let repositories = JsonArray()
+                for repository in State["fork_discovery"]?.AsArray() ?? JsonArray() {
+                    if !publicOnly || Check.Text(repository["private"]) != "true" {
+                        repositories.Add(repository.DeepClone())
+                    }
+                }
+                return Answer(repositories)
             }
             return Answer(
                 Check.Text(State["missing_fork"]) == "true" ? JsonArray(): Check.Json(

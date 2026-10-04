@@ -66,6 +66,20 @@ internal class PreparationChecks {
                 flow.Approve()
                 flow.Reload()
                 var discovery = Check.Json("[{\"full_name\":\"donor/renamed\",\"fork\":true,\"owner\":{\"id\":123}}]")
+                if mode == "renamed" {
+                    discovery.AsArray().Add(
+                        Check.Map(
+                            "full_name",
+                            "donor/private",
+                            "private",
+                            true,
+                            "fork",
+                            true,
+                            "owner",
+                            Check.Map("id", 123)
+                        )
+                    )
+                }
                 if mode == "ambiguous" {
                     discovery.AsArray().Add(
                         Check.Map("full_name", "donor/second", "fork", true, "owner", Check.Map("id", 123))
@@ -140,6 +154,16 @@ internal class PreparationChecks {
                     )
                 }
                 flow.Reload()
+                for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                    let path = Check.Text(call["path"])
+                    if path.StartsWith("user/repos?") {
+                        Check.That(
+                            Array.IndexOf(path.Split('?')[1].Split('&'), "visibility=public") >= 0,
+                            "Fork discovery requested private repository metadata"
+                        )
+                    }
+                    Check.That(path != "repos/donor/private", "Private fork metadata was collected")
+                }
                 Check.That(flow.State["fork_creations"] == nil, "Selection failure created a fork")
                 flow.NoInference()
                 flow.NoPr()

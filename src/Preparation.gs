@@ -195,7 +195,9 @@ internal class Preparation {
                     let candidates = List[string]()
                     var complete bool
                     for page in 1 ... 4 {
-                        let items = GitHub.Api("user/repos?affiliation=owner&per_page=100&page=" + page.ToString())
+                        let items = GitHub.Api(
+                            "user/repos?visibility=public&affiliation=owner&per_page=100&page=" + page.ToString()
+                        )
                         if items.ValueKind != JsonValueKind.Array {
                             throw Exception("Incomplete fork discovery; select --fork DONOR/NAME explicitly")
                         }
