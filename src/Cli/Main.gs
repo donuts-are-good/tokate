@@ -107,14 +107,14 @@ func Dispatch(options Args) int32 {
     }
     if options.Command == "--version" {
         if PublicOutput.Enabled {
-            PublicOutput.ResultData = J.Map("version", Data.Version())
+            PublicOutput.ResultData = J.Map("version", ApplicationInfo.Version())
         } else {
-            Console.WriteLine("tokate " + Data.Version())
+            Console.WriteLine("tokate " + ApplicationInfo.Version())
         }
         return 0
     }
     if options.Command == "update" || options.Command == "uninstall" {
-        PublicOutput.ResultData = J.Map("version", Data.Version(), "installation", options.Command)
+        PublicOutput.ResultData = J.Map("version", ApplicationInfo.Version(), "installation", options.Command)
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
@@ -130,7 +130,7 @@ func Dispatch(options Args) int32 {
             Terminal.Json(value, "Donor defaults")
         }
     } else if options.Command == "select" {
-        let repo = Data.Repo(options.Need("repo"))
+        let repo = RepositoryIdentity.Repo(options.Need("repo"))
         let info = GitHub.Api("repos/" + repo)
         let selection = DonorSelection.Resolve(options, Policy.Load(repo, J.Text(info, "default_branch")))
         if PublicOutput.Enabled {
@@ -142,7 +142,7 @@ func Dispatch(options Args) int32 {
             Terminal.Json(selection, "Donor selection")
         }
     } else if options.Command == "init" {
-        Workflow.Init(options)
+        OwnerApproval.Init(options)
         let root = Path.GetFullPath(options.Get("path", "."))
         PublicOutput.ResultData = J.Map(
             "path",
@@ -160,7 +160,7 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "coordinate" {
         Coordinator.Run(options)
     } else if options.Command == "coordination" {
-        let state = CoordinationState.Load(Data.Repo(options.Need("repo")), options.Number("issue"))
+        let state = CoordinationState.Load(RepositoryIdentity.Repo(options.Need("repo")), options.Number("issue"))
         if PublicOutput.Enabled {
             PublicOutput.ResultData = PublicOutput.Coordination(state.Value(), state.Sha)
         } else {
@@ -170,11 +170,11 @@ func Dispatch(options Args) int32 {
             )
         }
     } else if options.Command == "request" {
-        V2Contribution.Request(options)
+        Submission.Request(options)
     } else if options.Command == "prepare" {
-        V2Contribution.Prepare(options)
+        V2Preparation.Prepare(options)
     } else if options.Command == "external" {
-        V2Contribution.External(options)
+        ExternalContribution.External(options)
     } else if options.Command == "authorize-sync" {
         Synchronization.Authorize(options)
     } else if options.Command == "revoke-sync" {
@@ -182,20 +182,22 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "amend" {
         Amendment.Run(options)
     } else if options.Command == "submit" {
-        V2Contribution.Submit(options)
+        Submission.Submit(options)
     } else if options.Command == "approve" || options.Command == "assign" {
-        Workflow.Approve(options)
+        OwnerApproval.Approve(options)
     } else if options.Command == "revoke" {
-        Workflow.Revoke(options)
+        OwnerApproval.Revoke(options)
     } else if options.Command == "claim" {
-        Workflow.Claim(options)
+        ContributionClaim.Claim(options)
     } else if options.Command == "work" {
-        let directory = options.Get("run") == "" ? Workflow.Claim(options): Path.GetFullPath(options.Need("run"))
+        let directory = options.Get("run") == "" ? ContributionClaim.Claim(options): Path.GetFullPath(
+            options.Need("run")
+        )
         PublicOutput.RunDirectory = directory
         Worker.Execute(directory, options)
         PublicOutput.FailureCode = "command_failed"
         if Data.Load(directory).Number("version") == 2 {
-            V2Contribution.Commit(directory)
+            Submission.Commit(directory)
         } else {
             Publication.Publish(directory)
         }
@@ -213,9 +215,9 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "overlaps" {
         Overlaps.Run(options)
     } else if options.Command == "checks" {
-        return Publication.Checks(options)
+        return Checks.Run(options)
     } else if options.Command == "policy" {
-        let repo = Data.Repo(options.Need("repo"))
+        let repo = RepositoryIdentity.Repo(options.Need("repo"))
         let info = GitHub.Api("repos/" + repo)
         let value = Policy.Load(repo, J.Text(info, "default_branch")).Value
         if PublicOutput.Enabled {
@@ -224,7 +226,7 @@ func Dispatch(options Args) int32 {
             Terminal.Json(value, "Repository policy")
         }
     } else if options.Command == "verify-pr" {
-        let run = Publication.Verify(Data.Repo(options.Need("repo")), options.Number("pr"))
+        let run = ReceiptVerification.Verify(RepositoryIdentity.Repo(options.Need("repo")), options.Number("pr"))
         PublicOutput.ResultData = PublicOutput.Select(run.Element(), "repo,pr,pr_url,commit")
         Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
     } else if options.Command == "status" {

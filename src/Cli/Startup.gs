@@ -284,13 +284,12 @@ internal class Startup {
                     Hint: doctorScope == "external" ? "Install /usr/bin/bwrap and ensure independent verification namespaces are supported. Tokate does not change security settings.": "Ensure bubblewrap user namespaces and native Codex permission profiles are supported. Tokate does not change security settings.",
                     Detail: doctorScope == "external" ? "Requires working setsid, /usr/bin/setsid and /usr/bin/bwrap.": "Requires working setsid, /usr/bin/setsid, /usr/bin/env, codex and bwrap."
                 }
-                if Ready(tools, "setsid") &&
-                    Ready(tools, "/usr/bin/setsid") &&
-                    (
-                    doctorScope == "external" ? Ready(tools, "/usr/bin/bwrap"): (
-                        Ready(tools, "codex") && Ready(tools, "bwrap") && Ready(tools, "/usr/bin/env")
-                    )
-                ) {
+                var probe = Ready(tools, "setsid") && Ready(tools, "/usr/bin/setsid")
+                if probe {
+                    probe = doctorScope == "external" ? Ready(tools, "/usr/bin/bwrap"):
+                    (Ready(tools, "codex") && Ready(tools, "bwrap") && Ready(tools, "/usr/bin/env"))
+                }
+                if probe {
                     try {
                         let pinned = doctorScope == "external" ? Verification.Doctor(): Worker.Doctor()
                         sandbox.Status = "ready"

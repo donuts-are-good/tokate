@@ -17,9 +17,9 @@ internal class Synchronization {
             }
             for item in J.Items(history) {
                 RequestData.Keys(item, "grant,candidate,upstream")
-                Data.CommitSha(J.Text(item, "grant"))
-                Data.CommitSha(J.Text(item, "candidate"))
-                Data.CommitSha(J.Text(item, "upstream"))
+                RepositoryIdentity.CommitSha(J.Text(item, "grant"))
+                RepositoryIdentity.CommitSha(J.Text(item, "candidate"))
+                RepositoryIdentity.CommitSha(J.Text(item, "upstream"))
             }
             return history
         }
@@ -60,8 +60,8 @@ internal class Synchronization {
         }
 
         internal func Load(repo string, grant string) JsonElement {
-            Data.Repo(repo)
-            Data.CommitSha(grant)
+            RepositoryIdentity.Repo(repo)
+            RepositoryIdentity.CommitSha(grant)
             let value = RequestData.Parse(GitHub.FileAt(repo, "synchronization.json", grant), 1024 * 1024)
             RequestData.Keys(
                 value,
@@ -85,13 +85,13 @@ internal class Synchronization {
             ) {
                 throw Exception("Invalid original synchronization approval identity")
             }
-            Data.CommitSha(J.Text(value, "base"))
-            Data.CommitSha(J.Text(value, "upstream"))
-            Data.CommitSha(J.Text(value, "previous"))
-            Data.CommitSha(J.Text(value, "candidate"))
-            Data.Repo(J.Text(value, "fork"))
+            RepositoryIdentity.CommitSha(J.Text(value, "base"))
+            RepositoryIdentity.CommitSha(J.Text(value, "upstream"))
+            RepositoryIdentity.CommitSha(J.Text(value, "previous"))
+            RepositoryIdentity.CommitSha(J.Text(value, "candidate"))
+            RepositoryIdentity.Repo(J.Text(value, "fork"))
             if J.Number(value, "approval_version") == 2 {
-                Data.CommitSha(J.Text(value, "expected"))
+                RepositoryIdentity.CommitSha(J.Text(value, "expected"))
             } else if J.Text(value, "expected") != "" {
                 throw Exception("Version-1 grant cannot claim coordination authority")
             }
@@ -140,62 +140,67 @@ internal class Synchronization {
             ready bool = true
         ) {
             let approved = J.Get(record, "approval")
+            let issue = J.Number(J.Get(record, "issue"), "number")
+            let approvalVersion = J.Number(approved, "version")
+            let approvedBase = J.Text(approved, "base")
+            let target = J.Text(approved, "base_branch")
+            let donor = J.Text(approved, "donor")
+            let failure = "Synchronization differs from original approval, PR or historical receipt"
             let prefix = List[Object]()
             var last JsonElement
-            for item in J.Items(history) {
+            let historyItems = J.Items(history)
+            for item in historyItems {
                 let grant = J.Text(item, "grant")
                 let value = Load(repo, grant)
                 let receipt = J.Get(value, "receipt")
-                if J.Number(value, "pr") != pr || J.Number(value, "issue") != J.Number(
-                    J.Get(record, "issue"),
-                    "number"
-                ) ||
-                    J.Number(value, "approval_version") != J.Number(approved, "version") || J.Text(
-                    value,
-                    "approval"
-                ) != approval ||
-                    J.Text(value, "base") != J.Text(approved, "base") || J.Text(value, "target") != J.Text(
-                    approved,
-                    "base_branch"
-                ) ||
-                    J.Text(value, "fork") != fork || J.Text(value, "branch") != branch || J.Text(
-                    item,
-                    "candidate"
-                ) != J.Text(value, "candidate") || J.Text(item, "upstream") != J.Text(value, "upstream") || J.Text(
-                    receipt,
-                    "head"
-                ) != J.Text(value, "previous") || J.Text(receipt, "approval") != approval || J.Number(
-                    receipt,
-                    "version"
-                ) != J.Number(value, "approval_version") || J.Text(receipt, "repo") != repo || J.Number(
-                    receipt,
-                    "issue"
-                ) != J.Number(value, "issue") || J.Text(receipt, "donor") != J.Text(approved, "donor") ||
-                    RequestData.Canonical(History(receipt)) != RequestData.Canonical(J.Parse(J.Write(prefix))) {
-                    throw Exception("Synchronization differs from original approval, PR or historical receipt")
+                if J.Number(value, "pr") != pr || J.Number(value, "issue") != issue {
+                    throw Exception(failure)
                 }
-                if grant == sync &&
-                    (
-                    J.Text(value, "candidate") != head || J.Text(value, "previous") != previous || J.Text(
-                        value,
-                        "expected"
-                    ) != expected
-                ) {
-                    throw Exception(
-                        "Synchronization candidate, previous head or expected state differs from exact owner grant"
-                    )
+                if J.Number(value, "approval_version") != approvalVersion || J.Text(value, "approval") != approval {
+                    throw Exception(failure)
+                }
+                if J.Text(value, "base") != approvedBase || J.Text(value, "target") != target {
+                    throw Exception(failure)
+                }
+                if J.Text(value, "fork") != fork || J.Text(value, "branch") != branch {
+                    throw Exception(failure)
+                }
+                let candidate = J.Text(value, "candidate")
+                let upstream = J.Text(value, "upstream")
+                if J.Text(item, "candidate") != candidate || J.Text(item, "upstream") != upstream {
+                    throw Exception(failure)
+                }
+                if J.Text(receipt, "head") != J.Text(value, "previous") || J.Text(receipt, "approval") != approval {
+                    throw Exception(failure)
+                }
+                if J.Number(receipt, "version") != approvalVersion || J.Text(receipt, "repo") != repo {
+                    throw Exception(failure)
+                }
+                if J.Number(receipt, "issue") != issue || J.Text(receipt, "donor") != donor {
+                    throw Exception(failure)
+                }
+                if RequestData.Canonical(History(receipt)) != RequestData.Canonical(J.Parse(J.Write(prefix))) {
+                    throw Exception(failure)
+                }
+                if grant == sync {
+                    let predecessor = J.Text(value, "previous")
+                    let revision = J.Text(value, "expected")
+                    if candidate != head || predecessor != previous || revision != expected {
+                        throw Exception(
+                            "Synchronization candidate, previous head or expected state differs from exact owner grant"
+                        )
+                    }
                 }
                 prefix.Add(item)
                 last = value
             }
-            if sync != "" &&
-                (
-                last.ValueKind == JsonValueKind.Undefined || J.Text(
-                    J.Items(history)[history.GetArrayLength() - 1],
+            if sync != "" {
+                if last.ValueKind == JsonValueKind.Undefined || J.Text(
+                    historyItems[historyItems.Count - 1],
                     "grant"
-                ) != sync
-            ) {
-                throw Exception("Missing exact synchronization grant in amendment history")
+                ) != sync {
+                    throw Exception("Missing exact synchronization grant in amendment history")
+                }
             }
             if ready && last.ValueKind != JsonValueKind.Undefined {
                 Target(repo, approved, J.Text(last, "target"), J.Text(last, "upstream"))
@@ -293,21 +298,19 @@ internal class Synchronization {
         }
 
         private func Open(pull JsonElement) {
+            let mergedAt = J.Get(pull, "merged_at").ValueKind
             if J.Text(pull, "state") != "open" || J.Bool(pull, "merged") ||
-                (
-                J.Get(pull, "merged_at").ValueKind != JsonValueKind.Undefined && J.Get(pull, "merged_at")
-                    .ValueKind != JsonValueKind.Null
-            ) {
+                (mergedAt != JsonValueKind.Undefined && mergedAt != JsonValueKind.Null) {
                 throw Exception("Synchronization requires an already-published open, unmerged PR")
             }
         }
 
         private func Fresh(repo string, pr int32, value JsonElement, approval JsonElement) {
-            Publication.Verify(repo, pr, false)
+            ReceiptVerification.Verify(repo, pr, false)
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + pr.ToString())
             Open(pull)
             if J.Text(J.Get(pull, "head"), "sha") != J.Text(value, "previous") || RequestData.Canonical(
-                Amendment.Receipt(J.Text(pull, "body"))
+                PrBody.Receipt(J.Text(pull, "body"))
             ) != RequestData
                 .Canonical(J.Get(value, "receipt")) {
                 throw Exception("Published head or receipt changed during synchronization authorization")
@@ -330,36 +333,33 @@ internal class Synchronization {
         }
 
         internal func Authorize(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
-            let info = Workflow.RequireOwner(repo)
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
+            let info = RepositoryAccess.RequireOwner(repo)
             Numeric(J.Get(info, "id"))
             let pr = args.Number("pr")
-            let candidate = Data.CommitSha(args.Need("commit"))
-            let upstream = Data.CommitSha(args.Need("upstream"))
-            Publication.Verify(repo, pr, false)
+            let candidate = RepositoryIdentity.CommitSha(args.Need("commit"))
+            let upstream = RepositoryIdentity.CommitSha(args.Need("upstream"))
+            ReceiptVerification.Verify(repo, pr, false)
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + pr.ToString())
             Open(pull)
-            let receipt = Amendment.Receipt(J.Text(pull, "body"))
+            let receipt = PrBody.Receipt(J.Text(pull, "body"))
             let issue = J.Number(receipt, "issue")
             var record JsonElement
             var expected = ""
             if J.Number(receipt, "version") == 2 {
                 let state = CoordinationState.Load(repo, issue)
-                record = state.Check(
-                    repo,
-                    issue,
-                    J.Text(receipt, "donor"),
-                    J.Get(J.Get(state.Value(), "contribution"), "actor")
-                )
-                state.Reservation(J.Get(J.Get(state.Value(), "contribution"), "actor"))
+                let value = state.Value()
+                let actor = J.Get(J.Get(value, "contribution"), "actor")
+                record = state.Check(repo, issue, J.Text(receipt, "donor"), actor)
+                state.Reservation(actor)
                 expected = state.Sha
             } else {
-                record = Workflow.Approved(repo, issue, J.Text(receipt, "donor"))
+                record = OwnerApproval.Approved(repo, issue, J.Text(receipt, "donor"))
             }
             let approval = J.Get(record, "approval")
             let target = J.Text(approval, "base_branch")
             let previous = J.Text(J.Get(pull, "head"), "sha")
-            let fork = Data.Repo(J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"))
+            let fork = RepositoryIdentity.Repo(J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"))
             Target(repo, approval, target, upstream)
             ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), fork, previous)
             ProtectedPaths.Ancestor(repo, J.Text(approval, "base"), repo, upstream)
@@ -429,9 +429,9 @@ internal class Synchronization {
                     []string{upstream}
                 )
             )
-            let grant = Data.CommitSha(J.Text(commit, "sha"))
+            let grant = RepositoryIdentity.CommitSha(J.Text(commit, "sha"))
             Fresh(repo, pr, value, approval)
-            Workflow.RequireOwner(repo)
+            RepositoryAccess.RequireOwner(repo)
             GitHub.Api("repos/" + repo + "/git/refs", J.Map("ref", "refs/heads/" + Ref(value), "sha", grant))
             Load(repo, grant)
             Fresh(repo, pr, value, approval)
@@ -446,9 +446,9 @@ internal class Synchronization {
         }
 
         internal func Revoke(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
-            Workflow.RequireOwner(repo)
-            let grant = Data.CommitSha(args.Need("grant"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
+            RepositoryAccess.RequireOwner(repo)
+            let grant = RepositoryIdentity.CommitSha(args.Need("grant"))
             let value = Load(repo, grant)
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
@@ -472,9 +472,9 @@ internal class Synchronization {
                 "repos/" + repo + "/git/commits",
                 GitHub.AutomationCommit("Revoke Tokate synchronization " + grant, J.Text(tree, "sha"), []string{grant})
             )
-            let revoked = Data.CommitSha(J.Text(commit, "sha"))
+            let revoked = RepositoryIdentity.CommitSha(J.Text(commit, "sha"))
             Load(repo, grant)
-            Workflow.RequireOwner(repo)
+            RepositoryAccess.RequireOwner(repo)
             GitHub.Api(
                 "repos/" + repo + "/git/refs/heads/" + Ref(value),
                 J.Map("sha", revoked, "force", false),

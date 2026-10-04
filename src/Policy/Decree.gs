@@ -10,13 +10,13 @@ internal class Decree {
         JsonValueKind.Undefined
 
         internal func Capture(repo string, revision string) JsonElement {
-            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
-            let treeSha = Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
+            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + RepositoryIdentity.CommitSha(revision))
+            let treeSha = RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
             return CaptureTree(repo, treeSha)
         }
 
         internal func CaptureTree(repo string, treeSha string) JsonElement {
-            Data.CommitSha(treeSha)
+            RepositoryIdentity.CommitSha(treeSha)
             let tree = GitHub.Api("repos/" + repo + "/git/trees/" + treeSha)
             if J.Get(tree, "truncated").ValueKind != JsonValueKind.False || J.Get(tree, "tree")
                 .ValueKind != JsonValueKind.Array ||
@@ -47,7 +47,7 @@ internal class Decree {
                 size > 65536 {
                 throw Exception("DECREE.md must be at most 64 KiB of source bytes")
             }
-            let sha = Data.CommitSha(J.Text(entry, "sha"))
+            let sha = RepositoryIdentity.CommitSha(J.Text(entry, "sha"))
             var blob JsonElement
             try {
                 blob = GitHub.Api("repos/" + repo + "/git/blobs/" + sha)

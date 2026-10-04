@@ -28,7 +28,7 @@ internal class Recovery {
                     "Recovery requires a completed agent turn with failed owner verification"
                 )
             }
-            let record = Workflow.Recheck(run)
+            let record = ContributionClaim.Recheck(run)
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
                 throw Exception("Recovery budget exceeds owner limit")
             }

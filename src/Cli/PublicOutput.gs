@@ -215,7 +215,7 @@ internal class PublicOutput {
             }
             let correctionPath = Path.Combine(directory, "correction.json")
             if File.Exists(correctionPath) {
-                let correction = Correction.Load(correctionPath)
+                let correction = Data.Read(correctionPath)
                 var uuid Guid
                 let location = Guid.TryParse(correction.Text("uuid"), out uuid) ?
                 Path.Combine(directory, "correction-" + correction.Text("uuid")): directory
@@ -318,7 +318,10 @@ internal class PublicOutput {
             }
             result["approval"] = summary
             result["reservation"] = Select(J.Get(value, "reservation"), "reservation,donor,actor,created,expires")
-            result["contribution"] = Select(J.Get(Amendment.Current(value), "outcome"), "pr,url,head,reservation")
+            result["contribution"] = Select(
+                J.Get(CoordinationState.Current(value), "outcome"),
+                "pr,url,head,reservation"
+            )
             result["outcome_count"] = J.Items(J.Get(value, "outcomes")).Count
             return result
         }

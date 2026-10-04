@@ -10,7 +10,7 @@ import System.Text.RegularExpressions
 internal class Coordinator {
     shared {
         internal func Run(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let event = RequestData.FileData(args.Need("event"), 1024 * 1024)
             if Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") != "issue_comment" || J.Text(
                 event,
@@ -32,8 +32,8 @@ internal class Coordinator {
             let canonical = GitHub.Api("repos/" + repo + "/issues/comments/" + commentId.ToString())
             let actor = J.Get(J.Get(canonical, "user"), "id")
             PositiveId(actor)
-            let donor = Data.Login(J.Text(J.Get(canonical, "user"), "login"))
-            let info = Workflow.RequireOwner(repo)
+            let donor = RepositoryIdentity.Login(J.Text(J.Get(canonical, "user"), "login"))
+            let info = RepositoryAccess.RequireOwner(repo)
             if number < 1 || J.Get(J.Get(event, "repository"), "id").ToString() != J.Get(info, "id").ToString() ||
                 J
                 .Get(canonical, "id").ToString() != commentId.ToString() || J.Text(
@@ -64,7 +64,7 @@ internal class Coordinator {
                         state.Check(repo, number, donor, actor)
                     }
                     if J.Text(request, "action") == "amend" {
-                        Publication.Verify(repo, J.Number(J.Get(old, "outcome"), "pr"))
+                        ReceiptVerification.Verify(repo, J.Number(J.Get(old, "outcome"), "pr"))
                     }
                     Terminal.Json(J.Get(old, "outcome"), "Recorded request outcome")
                     return
@@ -109,7 +109,8 @@ internal class Coordinator {
                 outcome = Amend(repo, number, state, record, request, actor, donor)
             } else {
                 state.Reservation(actor)
-                if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
+                let value = state.Value()
+                if J.Get(value, "contribution").ValueKind == JsonValueKind.Object {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
@@ -128,22 +129,13 @@ internal class Coordinator {
                     throw Exception("Publication must use this reservation's branch")
                 }
                 let marker = "<!-- tokate-v2:" + reservation + " -->"
-                let receipt = J.Map(
-                    "version",
-                    2,
-                    "repo",
+                let receipt = ContributionReceipt.Coordinated(
                     repo,
-                    "issue",
                     number,
-                    "approval",
-                    J.Text(state.Value(), "approval_id"),
-                    "expected",
+                    J.Text(value, "approval_id"),
                     J.Text(request, "expected"),
-                    "reservation",
                     reservation,
-                    "donor",
                     donor,
-                    "head",
                     J.Text(metadata, "head")
                 )
                 if correction.ValueKind != JsonValueKind.Undefined {
@@ -272,29 +264,9 @@ internal class Coordinator {
                 acquired.Reservation(actor)
             }
             if J.Text(request, "action") == "amend" {
-                Publication.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
+                ReceiptVerification.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
             }
             Terminal.Json(J.Parse(J.Write(outcome)), "Request outcome")
-        }
-
-        internal func OriginalReport(metadata JsonElement) string {
-            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
-                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
-            let correction = J.Get(metadata, "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                report += " Explicit correction " + J.Text(correction, "uuid") +
-                    ": " +
-                    (
-                    J.Items(J.Get(correction, "tools"))
-                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
-                        J.Write(J.Get(correction, "tools"))
-                ) +
-                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
-                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
-                    J
-                    .Number(correction, "seconds").ToString() + " seconds."
-            }
-            return report
         }
 
         private func Amend(
@@ -309,22 +281,22 @@ internal class Coordinator {
             state.Reservation(actor)
             let value = state.Value()
             let original = J.Get(value, "contribution")
-            let current = Amendment.Current(value)
+            let current = CoordinationState.Current(value)
             let metadata = J.Get(request, "metadata")
             let old = J.Get(original, "metadata")
             let policy = Policy(J.Write(J.Get(record, "policy")))
             Amendment.Tools(policy, J.Get(metadata, "tools"))
             if J.Number(metadata, "seconds") > J.Number(policy.Value, "max_seconds") || J.Get(original, "actor")
-                .ToString() != actor.ToString() || J.Text(metadata, "previous") != Amendment.Head(value) || J.Number(
+                .ToString() != actor.ToString() || J.Text(metadata, "previous") != CoordinationState.Head(value) ||
+                J.Number(metadata, "pr") != J.Number(J.Get(current, "outcome"), "pr") || J.Text(
                 metadata,
-                "pr"
-            ) != J.Number(J.Get(current, "outcome"), "pr") || J.Text(metadata, "fork") != J.Text(old, "fork") || J.Text(
+                "fork"
+            ) != J.Text(old, "fork") || J.Text(metadata, "branch") != J.Text(old, "branch") || J.Text(
                 metadata,
                 "branch"
-            ) != J.Text(old, "branch") || J.Text(metadata, "branch") != "tokate/v2-" + J.Text(
-                J.Get(value, "reservation"),
-                "reservation"
-            ) {
+            ) != "tokate/v2-" +
+                J
+                .Text(J.Get(value, "reservation"), "reservation") {
                 throw Exception("Amendment differs from current published contribution authority")
             }
             ValidateFork(repo, donor, metadata, actor)
@@ -346,26 +318,16 @@ internal class Coordinator {
                 amendment.Fields["sync"] = J.Text(metadata, "sync")
             }
             Synchronization.Keep(amendment.Fields, history)
-            let fields = J.Map(
-                "version",
-                2,
-                "repo",
+            let fields = ContributionReceipt.Coordinated(
                 repo,
-                "issue",
                 number,
-                "approval",
                 J.Text(value, "approval_id"),
-                "expected",
                 J.Text(request, "expected"),
-                "reservation",
                 run.Text("id"),
-                "donor",
                 donor,
-                "head",
-                J.Text(metadata, "head"),
-                "amendment",
-                Amendment.PublicRecord(amendment)
+                J.Text(metadata, "head")
             )
+            fields["amendment"] = Amendment.PublicRecord(amendment)
             let correction = J.Get(old, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
@@ -374,34 +336,34 @@ internal class Coordinator {
             let receipt = J.Parse(J.Write(fields))
             let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             let body = J.Text(pull, "body")
-            let oldReceipt = Amendment.Receipt(body)
+            let oldReceipt = PrBody.Receipt(body)
             let report = Amendment.Summary(
                 J.Text(metadata, "previous"),
                 J.Text(metadata, "head"),
                 J.Number(metadata, "seconds"),
                 J.Get(metadata, "tools")
             )
-            if RequestData.Canonical(oldReceipt) == RequestData.Canonical(receipt) && Amendment.ReportText(
+            if RequestData.Canonical(oldReceipt) == RequestData.Canonical(receipt) && PrBody.ReportText(
                 body,
-                OriginalReport(old)
+                Publication.OriginalReport(old)
             ) != report {
                 throw Exception("Candidate PR report differs from saved amendment intent")
             }
             if RequestData.Canonical(oldReceipt) != RequestData.Canonical(receipt) {
-                if RequestData.Canonical(oldReceipt) != RequestData.Canonical(Amendment.StateReceipt(value)) {
+                if RequestData.Canonical(oldReceipt) != RequestData.Canonical(ContributionReceipt.FromState(value)) {
                     throw Exception("PR receipt differs from saved previous or candidate state")
                 }
-                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? OriginalReport(old):
+                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? Publication.OriginalReport(old):
                 Amendment.Summary(
                     J.Text(current, "previous"),
                     J.Text(current, "head"),
                     J.Number(current, "seconds"),
                     J.Get(current, "tools")
                 )
-                if Amendment.ReportText(body, OriginalReport(old)) != previousReport {
+                if PrBody.ReportText(body, Publication.OriginalReport(old)) != previousReport {
                     throw Exception("Previous PR report differs from current contribution")
                 }
-                let updated = Amendment.ReplaceBody(body, OriginalReport(old), report, receipt)
+                let updated = PrBody.ReplaceBody(body, Publication.OriginalReport(old), report, receipt)
                 Revalidate(repo, number, state, actor, donor)
                 SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
                 ValidateFork(repo, donor, metadata, actor)
@@ -421,8 +383,8 @@ internal class Coordinator {
             SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
             ValidateFork(repo, donor, metadata, actor)
             let latest = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
-            if RequestData.Canonical(Amendment.Receipt(J.Text(latest, "body"))) != RequestData.Canonical(receipt) ||
-                Amendment.ReportText(J.Text(latest, "body"), OriginalReport(old)) != report {
+            if RequestData.Canonical(PrBody.Receipt(J.Text(latest, "body"))) != RequestData.Canonical(receipt) ||
+                PrBody.ReportText(J.Text(latest, "body"), Publication.OriginalReport(old)) != report {
                 throw Exception("Physical PR receipt changed; amendment has no coordination authority")
             }
             let outcome = J.Map(
@@ -477,7 +439,14 @@ internal class Coordinator {
             metadata JsonElement,
             expected string
         ) {
-            SyncProofHistory(repo, record, state, metadata, expected, Synchronization.History(Amendment.Current(state)))
+            SyncProofHistory(
+                repo,
+                record,
+                state,
+                metadata,
+                expected,
+                Synchronization.History(CoordinationState.Current(state))
+            )
         }
 
         private func SyncProofHistory(
@@ -555,9 +524,9 @@ internal class Coordinator {
         }
 
         internal func ValidateFork(repo string, donor string, metadata JsonElement, actor JsonElement) {
-            let fork = Data.Repo(J.Text(metadata, "fork"))
+            let fork = RepositoryIdentity.Repo(J.Text(metadata, "fork"))
             let info = GitHub.Api("repos/" + fork)
-            Preparation.ValidateRepository(repo, fork, actor, info, push: false)
+            RepositoryAccess.ValidateRepository(repo, fork, actor, info, push: false)
             let reference = GitHub.Api("repos/" + fork + "/git/ref/heads/" + J.Text(metadata, "branch"))
             if J.Text(J.Get(reference, "object"), "sha") != J.Text(metadata, "head") {
                 throw Exception("Fork branch does not point to the exact declared commit")
@@ -584,7 +553,7 @@ internal class Coordinator {
         ) string {
             let values = Dictionary[string, string]()
             values["issue"] = J.Number(J.Get(record, "issue"), "number").ToString()
-            values["report"] = Amendment.Report(OriginalReport(metadata))
+            values["report"] = PrBody.Report(Publication.OriginalReport(metadata))
             values["donor"] = donor
             values["model"] = "donor-reported tools: " + J.Write(J.Get(metadata, "tools"))
             values["effort"] = "per-tool declaration; not independently attested"

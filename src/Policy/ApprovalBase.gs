@@ -7,16 +7,16 @@ internal class ApprovalBase {
     shared {
         internal func Select(args Args, fallback string) string {
             if args.Get("base-branch") != "" {
-                return Data.Branch(args.Get("base-branch"))
+                return RepositoryIdentity.Branch(args.Get("base-branch"))
             }
             if !PublicOutput.Enabled && !Console.IsInputRedirected && !Console.IsOutputRedirected {
                 Console.Write("Target branch [" + Terminal.Clean(fallback) + "]: ")
                 let answer = Console.ReadLine() ?? throw Exception("Target branch selection cancelled")
                 if answer != "" {
-                    return Data.Branch(answer)
+                    return RepositoryIdentity.Branch(answer)
                 }
             }
-            return Data.Branch(fallback)
+            return RepositoryIdentity.Branch(fallback)
         }
 
         internal func Check(repo string, approval JsonElement, version int32) JsonElement {
@@ -44,8 +44,8 @@ internal class ApprovalBase {
             }
             var target = current
             if selected {
-                let baseBranch = Data.Branch(J.Text(approval, "base_branch"))
-                let approved = Data.CommitSha(J.Text(approval, "base"))
+                let baseBranch = RepositoryIdentity.Branch(J.Text(approval, "base_branch"))
+                let approved = RepositoryIdentity.CommitSha(J.Text(approval, "base"))
                 target = baseBranch == branch ? current: GitHub.Branch(repo, baseBranch)
                 if target != approved {
                     Terminal.Message(

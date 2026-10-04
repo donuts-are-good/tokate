@@ -889,7 +889,7 @@ internal class CorrectionChecks {
                     "Repeated submit posted a duplicate request"
                 )
                 flow.Flow.Reload()
-                let posted = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+                let posted = Check.PostedRequest(flow.Flow.State)
                 let path = flow.Event(posted)
                 flow.Flow.Mode("pr_fail_after_create")
                 flow.Coordinate(path, 1)
@@ -945,7 +945,7 @@ internal class CorrectionChecks {
                 Check.That(Check.Text(Read(run, "correction.json")["verification"]) == checks, "Submit reran checks")
                 Once(flow.Flow)
                 if mode != "request_fail_before_write" {
-                    let posted = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+                    let posted = Check.PostedRequest(flow.Flow.State)
                     let path = flow.Event(posted)
                     flow.Flow.Mode("lost_state_response")
                     flow.Coordinate(path, 1)
@@ -971,7 +971,7 @@ internal class CorrectionChecks {
                 flow.Call(args)
                 if let managed = coordinator {
                     flow.Reload()
-                    let request = Check.Json(Check.Text(flow.State["posted_request"]?["body"]).Substring(8))
+                    let request = Check.PostedRequest(flow.State)
                     managed.Coordinate(managed.Event(request))
                     flow.Call(args)
                 }
@@ -1116,7 +1116,7 @@ internal class CorrectionChecks {
                     if let coordinator = test.V2 {
                         test.Flow.Call([]string{"submit", "--run", run})
                         test.Flow.Reload()
-                        let request = Check.Json(Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8))
+                        let request = Check.PostedRequest(test.Flow.State)
                         coordinator.Coordinate(coordinator.Event(request))
                         test.Flow.Call([]string{"submit", "--run", run})
                     }
@@ -1130,9 +1130,7 @@ internal class CorrectionChecks {
                         test.Flow.Call(args)
                         if let coordinator = test.V2 {
                             test.Flow.Reload()
-                            let request = Check.Json(
-                                Check.Text(test.Flow.State["posted_request"]?["body"]).Substring(8)
-                            )
+                            let request = Check.PostedRequest(test.Flow.State)
                             coordinator.Coordinate(coordinator.Event(request))
                             test.Flow.Call(args)
                         }
@@ -1176,7 +1174,7 @@ internal class CorrectionChecks {
             Recover(flow.Flow, run, Correct(flow.Flow, run))
             flow.Flow.Call([]string{"submit", "--run", run})
             flow.Flow.Reload()
-            let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+            let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
             flow.Flow.Call([]string{"submit", "--run", run})
             AmendCorrected(flow.Flow, run, archive, flow)

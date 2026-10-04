@@ -541,7 +541,7 @@ internal class AmendmentFlow {
             }
             flow.Flow.Call([]string{"submit", "--run", run})
             flow.Flow.Reload()
-            let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+            let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
             return run
         }
@@ -567,7 +567,7 @@ internal class AmendmentFlow {
             }
             Amend(flow.Flow, run, commit, tools: tools)
             flow.Flow.Reload()
-            let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+            let request = Check.PostedRequest(flow.Flow.State)
             Check.That(Check.Text(request["action"]) == "amend", "Wrong amendment request")
             Check.That(
                 Check.Text(request["expected"]) != Check.Text(Saved(run)["state_sha"]),
@@ -616,7 +616,7 @@ internal class AmendmentFlow {
                 let second = Edit(flow.Flow, run, "Second v2 correction\n")
                 Amend(flow.Flow, run, second)
                 flow.Flow.Reload()
-                let nextRequest = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+                let nextRequest = Check.PostedRequest(flow.Flow.State)
                 flow.Coordinate(flow.Event(nextRequest))
                 Amend(flow.Flow, run, second)
                 AssertPublished(flow.Flow, run, second)
@@ -682,7 +682,7 @@ internal class AmendmentFlow {
                     failure == "report-edited" {
                     Amend(flow.Flow, run, commit)
                     flow.Flow.Reload()
-                    let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+                    let request = Check.PostedRequest(flow.Flow.State)
                     if failure == "expired-after-checks" {
                         flow.Expire()
                     } else if failure == "stale-state" {

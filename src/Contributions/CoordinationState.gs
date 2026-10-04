@@ -91,8 +91,9 @@ internal class CoordinationState {
     }
 
     internal func Reservation(actor JsonElement) {
-        let reservation = J.Get(Value(), "reservation")
-        if AccessState.Task(J.Get(Value(), "approval")) {
+        let value = Value()
+        let reservation = J.Get(value, "reservation")
+        if AccessState.Task(J.Get(value, "approval")) {
             RequestData.PositiveId(actor)
             RequestData.PositiveId(J.Get(reservation, "actor"))
         }
@@ -121,7 +122,7 @@ internal class CoordinationState {
             if reference.ValueKind == JsonValueKind.Undefined {
                 return result
             }
-            result.Sha = Data.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
+            result.Sha = RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
             let value = RequestData.Parse(GitHub.FileAt(repo, "state.json", result.Sha), 1024 * 1024)
             if J.Number(value, "version") != 2 || J.Text(value, "repo") != repo || J.Number(value, "issue") != issue {
                 throw Exception("Invalid version-2 coordination state")
@@ -134,12 +135,13 @@ internal class CoordinationState {
 
         internal func Approve(repo string, issue int32, approval Object) {
             let state = Load(repo, issue, true)
-            let expected = state.Sha == "" ? J.Text(J.Parse(J.Write(approval)), "base"): state.Sha
+            let approved = J.Parse(J.Write(approval))
+            let expected = state.Sha == "" ? J.Text(approved, "base"): state.Sha
             state.Fields["version"] = 2
             state.Fields["repo"] = repo
             state.Fields["issue"] = issue
             state.Fields["approval"] = approval
-            state.Fields["approval_id"] = Data.Hash(RequestData.Canonical(J.Parse(J.Write(approval))))
+            state.Fields["approval_id"] = Data.Hash(RequestData.Canonical(approved))
             state.Fields["revoked"] = false
             state.Fields["reservation"] = nil
             state.Fields["contribution"] = nil
@@ -149,5 +151,12 @@ internal class CoordinationState {
             }
             state.Write(repo, issue, expected)
         }
+
+        internal func Current(state JsonElement) JsonElement {
+            let amendments = J.Items(J.Get(state, "amendments"))
+            return amendments.Count == 0 ? J.Get(state, "contribution"): amendments[amendments.Count - 1]
+        }
+
+        internal func Head(state JsonElement) string -> J.Text(J.Get(Current(state), "outcome"), "head")
     }
 }

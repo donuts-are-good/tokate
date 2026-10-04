@@ -183,7 +183,7 @@ internal class DonorSelectionChecks {
                     args.AddRange([]string{"--model", "gpt-6.1-sol", "--effort", "high"})
                 }
                 flow.Mode("model_failure")
-                let result = Check.Run(binary, args.ToArray(), flow.Temp.Env)
+                let result = TestProcess.Run(binary, args.ToArray(), flow.Temp.Env)
                 Check.That(result.Code == 1, "Synthetic model failure succeeded")
                 Check.Contains(result.Error, "Codex failed")
                 flow.Reload()
@@ -247,7 +247,7 @@ internal class DonorSelectionChecks {
             File.WriteAllText(path, saved.ToJsonString())
             Set(flow, effort: "xhigh")
             flow.Mode("model_failure")
-            let result = Check.Run(binary, []string{"work", "--run", run}, flow.Temp.Env)
+            let result = TestProcess.Run(binary, []string{"work", "--run", run}, flow.Temp.Env)
             Check.That(result.Code == 1, "Synthetic model failure succeeded")
             Check.Contains(result.Error, "Codex failed")
             flow.Reload()
@@ -263,7 +263,7 @@ internal class DonorSelectionChecks {
             flow.Initialize()
             ExpandPolicy(flow)
             let command = "'" + binary + "' select --repo owner/project"
-            let result = Check.Run(
+            let result = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 flow.Temp.Env,
@@ -274,7 +274,7 @@ internal class DonorSelectionChecks {
             Check.Contains(result.Output, "interactive donor choice")
             Check.Contains(result.Output, "xhigh")
             Check.That(!File.Exists(Settings(flow)), "Interactive choice saved preferences implicitly")
-            let refused = Check.Run(
+            let refused = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 flow.Temp.Env,
@@ -282,7 +282,7 @@ internal class DonorSelectionChecks {
             )
             Check.That(refused.Code == 1, "Blank input accepted the first eligible pair")
             Check.Contains(refused.Output, "No inference started")
-            let noninteractive = Check.Run(
+            let noninteractive = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command + " --non-interactive", "/dev/null"},
                 flow.Temp.Env,
@@ -298,7 +298,7 @@ internal class DonorSelectionChecks {
                 "runs"
             ) +
                 "'"
-            let declined = Check.Run(
+            let declined = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
                 flow.Temp.Env,
@@ -309,7 +309,7 @@ internal class DonorSelectionChecks {
             flow.NoInference()
             flow.NoPr()
             flow.Mode("model_failure")
-            let confirmed = Check.Run(
+            let confirmed = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
                 flow.Temp.Env,
@@ -371,7 +371,7 @@ internal class DonorSelectionChecks {
             )
             Check.That(saved["tools"]?.AsArray().Count == 1, "V2 default invented tool declarations")
             flow.Mode("model_failure")
-            let result = Check.Run(binary, []string{"work", "--run", run, "--non-interactive"}, flow.Temp.Env)
+            let result = TestProcess.Run(binary, []string{"work", "--run", run, "--non-interactive"}, flow.Temp.Env)
             Check.That(result.Code == 1, "Synthetic model failure succeeded")
             Check.Contains(result.Error, "Codex failed")
             flow.Reload()
@@ -424,7 +424,7 @@ internal class DonorSelectionChecks {
                 }
                 flow.Call([]string{"defaults", "remove"})
                 let command = "'" + binary + "' select --repo owner/project"
-                let chosen = Check.Run(
+                let chosen = TestProcess.Run(
                     "/usr/bin/script",
                     []string{"-q", "-e", "-c", command, "/dev/null"},
                     flow.Temp.Env,
@@ -433,7 +433,7 @@ internal class DonorSelectionChecks {
                 Check.Success(chosen)
                 Check.Contains(chosen.Output, "gpt-6-sol / high")
                 Check.Contains(chosen.Output, "interactive donor choice")
-                let cancelled = Check.Run(
+                let cancelled = TestProcess.Run(
                     "/usr/bin/script",
                     []string{"-q", "-e", "-c", command, "/dev/null"},
                     flow.Temp.Env,
@@ -514,7 +514,11 @@ internal class DonorSelectionChecks {
                 "diagnostics"
             ) +
                 "'"
-            let terminal = Check.Run("/usr/bin/script", []string{"-q", "-e", "-c", command, "/dev/null"}, flow.Temp.Env)
+            let terminal = TestProcess.Run(
+                "/usr/bin/script",
+                []string{"-q", "-e", "-c", command, "/dev/null"},
+                flow.Temp.Env
+            )
             CliDiscovery.Envelope(terminal, "select", "error", "command_failed")
             Check.That(!terminal.Output.Contains("Choice number"), "JSON terminal selection prompted")
             flow.NoInference()

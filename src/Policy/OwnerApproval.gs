@@ -5,7 +5,7 @@ import System.Collections.Generic
 import System.IO
 import System.Text.Json
 
-internal class Workflow {
+internal class OwnerApproval {
     shared {
         internal func Init(args Args) {
             let root = Path.GetFullPath(args.Get("path", "."))
@@ -16,27 +16,19 @@ internal class Workflow {
             if File.Exists(policy) || File.Exists(template) {
                 throw CliFailure("invalid_state", "Tokate files already exist. Edit them directly.")
             }
-            File.WriteAllText(policy, Data.Resource("tokate.json"))
-            File.WriteAllText(template, Data.Resource("tokate-pr.md"))
+            File.WriteAllText(policy, ApplicationInfo.Resource("tokate.json"))
+            File.WriteAllText(template, ApplicationInfo.Resource("tokate-pr.md"))
             Terminal.Message(
                 "Created .github/tokate.json and .github/tokate-pr.md. Set allowed model/effort pairs and required checks, then commit to the default branch."
             )
         }
 
-        internal func RequireOwner(repo string) JsonElement {
-            let info = GitHub.Api("repos/" + repo)
-            if !J.Bool(J.Get(info, "permissions"), "push") {
-                throw Exception("Repository write permission is required")
-            }
-            return info
-        }
-
         internal func ApprovalRef(number int32) string -> "tokate/approvals/" + number.ToString()
 
         internal func Approve(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let number = args.Number("issue")
-            let info = RequireOwner(repo)
+            let info = RepositoryAccess.RequireOwner(repo)
             var donor = ""
             let issue = GitHub.Issue(repo, number)
             if args.Command == "assign" && !GitHub.HasLabel(issue) {
@@ -54,12 +46,12 @@ internal class Workflow {
                 AccessState.Load(repo, RequestData.PositiveId(J.Get(info, "id")))
             } else {
                 let donorArg = args.Need("donor")
-                donor = Data.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
+                donor = RepositoryIdentity.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
             }
             let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
             ValidateTemplate(template)
-            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + Data.CommitSha(revision))
-            let decree = Decree.CaptureTree(repo, Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
+            let commit = GitHub.Api("repos/" + repo + "/git/commits/" + RepositoryIdentity.CommitSha(revision))
+            let decree = Decree.CaptureTree(repo, RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
             Terminal.Step(
                 "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
             )
@@ -212,8 +204,8 @@ internal class Workflow {
         }
 
         internal func Revoke(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
-            RequireOwner(repo)
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
+            RepositoryAccess.RequireOwner(repo)
             let state = CoordinationState.Load(repo, args.Number("issue"), true)
             if state.Sha != "" {
                 let expected = state.Sha
@@ -268,142 +260,6 @@ internal class Workflow {
                     )
                 )
             )
-        }
-
-        internal func Claim(args Args) string {
-            let repo = Data.Repo(args.Need("repo"))
-            let number = args.Number("issue")
-            let viewer = GitHub.Api("user")
-            let donor = Data.Login(J.Text(viewer, "login"))
-            let record = Approved(repo, number, donor)
-            let approval = J.Get(record, "approval")
-            let policy = Policy(J.Write(J.Get(record, "policy")))
-            policy.Digest = J.Text(approval, "policy_hash")
-            let selection = DonorSelection.Resolve(args, policy)
-            let model = J.Text(selection, "model")
-            let effort = J.Text(selection, "effort")
-            let seconds = args.Number(
-                "seconds",
-                Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
-            )
-            let reserve = RuntimeBudget.Reserve(args, seconds)
-            let network = args.Get("allow-network") == "true"
-            policy.Validate(model, effort, seconds, network)
-            Terminal.Step(
-                "Selected " + J.Text(selection, "harness") + "/" + J.Text(selection, "provider") +
-                    ": " +
-                    model +
-                    " / " +
-                    effort +
-                    " from " +
-                    J.Text(selection, "source") +
-                    "; current policy permits it and native Codex advertises the controls. Availability: " +
-                    J.Text(selection, "availability") + "."
-            )
-            if args.Command == "work" {
-                DonorSelection.Confirm(args, selection)
-            }
-            let run = Data()
-            run.Fields["version"] = 1
-            run.Fields["id"] = Guid.NewGuid().ToString("N")
-            run.Fields["repo"] = repo
-            run.Fields["issue"] = number
-            run.Fields["donor"] = donor
-            run.Fields["donor_id"] = J.Get(viewer, "id")
-            run.Fields["head_repo"] = Data.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
-            run.Fields["approval"] = J.Text(record, "sha")
-            run.Fields["base"] = J.Text(approval, "base")
-            run.Fields["base_branch"] = J.Text(approval, "base_branch")
-            run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
-            run.Fields["model"] = model
-            run.Fields["effort"] = effort
-            run.Fields["harness"] = J.Text(selection, "harness")
-            run.Fields["provider"] = J.Text(selection, "provider")
-            run.Fields["selection"] = selection
-            run.Fields["seconds"] = seconds
-            if args.Get("verification-reserve") != "" {
-                run.Fields["verification_reserve"] = reserve
-            }
-            run.Fields["network"] = network
-            run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
-            run.Fields["state"] = "preparing"
-            let root = Path.GetFullPath(
-                args.Get(
-                    "runs",
-                    Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".local",
-                        "state",
-                        "tokate",
-                        "runs"
-                    )
-                )
-            )
-            let directory = Path.Combine(root, run.Text("id"))
-            PublicOutput.RunDirectory = directory
-            Preparation.Select(run, args.Get("fork"))
-            Directory.CreateDirectory(
-                directory,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            )
-            Terminal.Step(RuntimeBudget.Description(run))
-            using let lease = Preparation.Lease(directory)
-            Terminal.Step("Preparing contribution. Run: " + directory)
-            Preparation.Initialize(directory, run, args.Get("fork"))
-            Preparation.Complete(directory, run)
-            Terminal.Message("Claimed issue #" + number.ToString() + ". Run: " + directory)
-            return directory
-        }
-
-        internal func Recheck(run Data) JsonElement {
-            if run.Number("version") == 2 {
-                return V2Contribution.Recheck(run)
-            }
-            let viewer = GitHub.Api("user")
-            if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) || J.Get(
-                viewer,
-                "id"
-            )
-                .ToString() != J.Get(run.Element(), "donor_id").ToString() {
-                throw CliFailure(
-                    "authentication_required",
-                    "Use the GitHub account that claimed this run",
-                    []string{"gh", "auth", "switch", "--user", run.Text("donor")}
-                )
-            }
-            let record = Approved(Data.Repo(run.Text("repo")), run.Number("issue"), Data.Login(run.Text("donor")))
-            if J.Text(record, "sha") != run.Text("approval") {
-                throw CliFailure("stale_approval", "Approval was replaced. This run cannot be published.")
-            }
-            let approval = J.Get(record, "approval")
-            if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
-                approval,
-                "base_branch"
-            ) ||
-                run.Text("policy_hash") != J.Text(approval, "policy_hash") {
-                throw CliFailure("stale_approval", "Saved run differs from owner approval")
-            }
-            if run.Text("branch") != "tokate/issue-" + run.Number("issue").ToString() + "-" + run.Text("approval")
-                .Substring(0, 12) {
-                throw Exception("Invalid saved claim branch")
-            }
-            let head = Data.Repo(run.Text("head_repo"))
-            if run.Number("preparation_version") == 0 ||
-                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
-                Preparation.ValidateRepository(
-                    run.Text("repo"),
-                    head,
-                    J.Get(run.Element(), "donor_id"),
-                    GitHub.Api("repos/" + head)
-                )
-            }
-            Policy(J.Write(J.Get(record, "policy"))).Validate(
-                run.Text("model"),
-                run.Text("effort"),
-                run.Number("seconds"),
-                run.Flag("network")
-            )
-            return record
         }
     }
 }

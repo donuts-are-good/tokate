@@ -55,7 +55,7 @@ internal class Publication {
             let query = "?state=all&head=" + Uri.EscapeDataString(run.Text("donor") + ":" + run.Text("branch")) +
                 "&base=" +
                 Uri.EscapeDataString(run.Text("base_branch"))
-            let pulls = J.Items(GitHub.Api("repos/" + Data.Repo(run.Text("repo")) + "/pulls" + query))
+            let pulls = J.Items(GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")) + "/pulls" + query))
             return pulls.Count == 0 ? JsonElement{}: pulls[0]
         }
 
@@ -74,7 +74,7 @@ internal class Publication {
                 FileShare.None
             )
             let run = Data.Load(directory)
-            let record = Workflow.Recheck(run)
+            let record = ContributionClaim.Recheck(run)
             if run.Text("state") != "generated" && run.Text("state") != "published" {
                 throw Exception("Only a successful saved run can be published")
             }
@@ -144,33 +144,10 @@ internal class Publication {
                 run.Text("base"),
                 run.Text("commit")
             )
-            let receipt = J.Map(
-                "version",
-                1,
-                "repo",
-                run.Text("repo"),
-                "issue",
-                run.Number("issue"),
-                "donor",
-                run.Text("donor"),
-                "approval",
-                run.Text("approval"),
-                "head",
-                run.Text("commit"),
-                "model",
-                run.Text("model"),
-                "effort",
-                run.Text("effort"),
-                "seconds",
-                run.Number("seconds"),
-                "network",
-                run.Flag("network"),
-                "policy",
-                run.Text("policy_hash")
-            )
+            let receipt = ContributionReceipt.Native(run, run.Text("commit"))
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            values["report"] = Amendment.Report(VerificationReport(run, record))
+            values["report"] = PrBody.Report(VerificationReport(run, record))
             values["donor"] = run.Text("donor")
             values["model"] = run.Text("model")
             values["effort"] = run.Text("effort")
@@ -216,7 +193,7 @@ internal class Publication {
                 "https://github.com/" + run.Text("head_repo") + ".git",
                 run.Text("commit") + ":refs/heads/" + run.Text("branch")
             )
-            Workflow.Recheck(run)
+            ContributionClaim.Recheck(run)
             let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
             SavePr(directory, run, pull)
         }
@@ -229,339 +206,24 @@ internal class Publication {
             Terminal.Message("Draft PR: " + run.Text("pr_url"))
         }
 
-        internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data {
-            let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
-            let body = J.Text(pull, "body")
-            let prefix = "<!-- tokate-receipt:"
-            let start = body.IndexOf(prefix, StringComparison.Ordinal)
-            if start < 0 || body.IndexOf(prefix, start + prefix.Length, StringComparison.Ordinal) >= 0 {
-                throw Exception("PR needs exactly one Tokate receipt")
-            }
-            let end = body.IndexOf(" -->", start, StringComparison.Ordinal)
-            if end < 0 {
-                throw Exception("Malformed Tokate receipt")
-            }
-            let receipt = J.Parse(body.Substring(start + prefix.Length, end - start - prefix.Length))
-            if J.Number(receipt, "version") == 2 {
-                return V2Contribution.VerifyReceipt(repo, number, pull, receipt, ready, paths)
-            }
-            if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
-                J.Get(pull, "user"),
-                "login"
-            ) != J.Text(receipt, "donor") {
-                throw Exception("PR author or repository does not match the receipt")
-            }
-            let head = J.Get(pull, "head")
-            if J.Text(head, "sha") != J.Text(receipt, "head") {
-                throw Exception("PR head changed since the receipt was written")
-            }
-            let record = Workflow.Approved(repo, J.Number(receipt, "issue"), Data.Login(J.Text(receipt, "donor")))
-            let approval = J.Get(record, "approval")
-            if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
-                receipt,
-                "policy"
-            ) ||
-                J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
-                throw CliFailure("stale_approval", "PR approval or policy no longer matches")
-            }
-            let expectedBranch = "tokate/issue-" + J.Number(receipt, "issue").ToString() + "-" + J.Text(record, "sha")
-                .Substring(0, 12)
-            if J.Text(head, "ref") != expectedBranch || !String.Equals(
-                J.Text(J.Get(J.Get(head, "repo"), "owner"), "login"),
-                J.Text(receipt, "donor"),
-                StringComparison.OrdinalIgnoreCase
-            ) {
-                throw Exception("PR does not use the assigned donor's claim")
-            }
-            Policy(J.Write(J.Get(record, "policy"))).Validate(
-                J.Text(receipt, "model"),
-                J.Text(receipt, "effort"),
-                J.Number(receipt, "seconds"),
-                J.Bool(receipt, "network")
-            )
-            let correction = J.Get(receipt, "correction")
+        internal func OriginalReport(metadata JsonElement) string {
+            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
+                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
+            let correction = J.Get(metadata, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
-                RequestData.Correction(
-                    correction,
-                    J.Get(receipt, "amendment").ValueKind == JsonValueKind.Undefined ? J.Text(receipt, "head"):
-                    J.Text(receipt, "original_head"),
-                    J.Get(record, "policy")
-                )
+                report += " Explicit correction " + J.Text(correction, "uuid") +
+                    ": " +
+                    (
+                    J.Items(J.Get(correction, "tools"))
+                        .Count == 0 ? "manual/unknown editing": "donor-reported tools " +
+                        J.Write(J.Get(correction, "tools"))
+                ) +
+                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
+                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
+                    J
+                    .Number(correction, "seconds").ToString() + " seconds."
             }
-            let history = Synchronization.History(receipt)
-            let fork = Data.Repo(J.Text(J.Get(head, "repo"), "full_name"))
-            if history.GetArrayLength() > 0 {
-                Synchronization.Live(
-                    repo,
-                    number,
-                    record,
-                    J.Text(record, "sha"),
-                    history,
-                    fork,
-                    J.Text(head, "ref"),
-                    J.Text(head, "sha"),
-                    ready: ready
-                )
-                if paths {
-                    Synchronization.Remote(
-                        repo,
-                        J.Get(record, "policy"),
-                        J.Get(record, "approval"),
-                        J.Text(approval, "base"),
-                        history,
-                        fork,
-                        J.Text(head, "sha")
-                    )
-                }
-            } else if paths {
-                ProtectedPaths.Remote(
-                    repo,
-                    J.Get(record, "policy"),
-                    J.Get(record, "approval"),
-                    J.Text(approval, "base"),
-                    Data.Repo(J.Text(J.Get(head, "repo"), "full_name")),
-                    J.Text(head, "sha")
-                )
-            }
-            let amendment = J.Get(receipt, "amendment")
-            if amendment.ValueKind != JsonValueKind.Undefined {
-                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))))
-                Data.CommitSha(J.Text(receipt, "original_head"))
-                if J.Text(amendment, "sync") != "" {
-                    Synchronization.Live(
-                        repo,
-                        number,
-                        record,
-                        J.Text(record, "sha"),
-                        history,
-                        fork,
-                        J.Text(head, "ref"),
-                        J.Text(head, "sha"),
-                        J.Text(amendment, "sync"),
-                        previous: J.Text(amendment, "previous"),
-                        ready: ready
-                    )
-                }
-                let report = Amendment.Summary(
-                    J.Text(amendment, "previous"),
-                    J.Text(receipt, "head"),
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools")
-                )
-                if Amendment.ReportText(body, report) != report {
-                    throw Exception("PR amendment report differs from its exact-head receipt")
-                }
-            }
-            if history.GetArrayLength() > 0 {
-                if J.Text(
-                    Workflow.Approved(repo, J.Number(receipt, "issue"), J.Text(receipt, "donor")),
-                    "sha"
-                ) != J.Text(record, "sha") {
-                    throw Exception("Approval changed during receipt validation")
-                }
-                Synchronization.Live(
-                    repo,
-                    number,
-                    record,
-                    J.Text(record, "sha"),
-                    history,
-                    fork,
-                    J.Text(head, "ref"),
-                    J.Text(head, "sha"),
-                    ready: ready
-                )
-            }
-            let run = Data()
-            run.Fields["repo"] = repo
-            run.Fields["pr"] = number
-            run.Fields["pr_url"] = J.Text(pull, "html_url")
-            run.Fields["commit"] = J.Text(head, "sha")
-            run.Fields["policy"] = J.Get(record, "policy")
-            Binding(run, receipt, approval, J.Text(record, "sha"))
-            return run
-        }
-
-        internal func Binding(run Data, receipt JsonElement, approval JsonElement, revision string) {
-            for key in[]string{"version", "issue", "approval", "donor"} {
-                run.Fields[key] = J.Get(receipt, key)
-            }
-            for key in[]string{"base", "base_branch"} {
-                run.Fields[key] = J.Get(approval, key)
-            }
-            run.Fields["authority_revision"] = revision
-        }
-
-        internal func CheckRows(repo string, head string) JsonElement {
-            let rows = List[Object]()
-            let prefix = "repos/" + repo + "/commits/" + head
-            for kind in[]string{"check-runs", "status"} {
-                var page int32 = 1
-                var inspected int32
-                while page <= 10 {
-                    let response = GitHub.Api(prefix + "/" + kind + "?per_page=100&page=" + page.ToString())
-                    if kind == "status" && J.Get(response, "sha").ValueKind != JsonValueKind.Undefined && J.Text(
-                        response,
-                        "sha"
-                    ) != head {
-                        throw Exception("Commit status belongs to a different head")
-                    }
-                    let items = J.Get(response, kind == "check-runs" ? "check_runs": "statuses")
-                    if items.ValueKind != JsonValueKind.Array {
-                        throw Exception("Cannot read complete commit checks")
-                    }
-                    let checks = J.Items(items)
-                    inspected += checks.Count
-                    if checks.Count > 100 {
-                        throw Exception("Cannot read complete commit checks")
-                    }
-                    if kind == "check-runs" {
-                        var total int32
-                        if !J.Get(response, "total_count").TryGetInt32(out total) ||
-                            total < inspected ||
-                            (checks.Count < 100 && total != inspected) {
-                            throw Exception("Cannot read complete commit checks")
-                        }
-                    }
-                    for check in checks {
-                        if kind == "check-runs" && J.Get(check, "head_sha")
-                            .ValueKind != JsonValueKind.Undefined &&
-                            J.Text(check, "head_sha") != head {
-                            throw Exception("Commit check belongs to a different head")
-                        }
-                        let state = kind == "check-runs" ? (
-                            J.Text(check, "status") == "completed" ?
-                            J.Text(check, "conclusion"): J.Text(check, "status")
-                        ): J.Text(check, "state")
-                        let bucket = state == "success" ? "pass":
-                        (
-                            state == "failure" ||
-                                state == "error" ||
-                                state == "timed_out" ||
-                                state == "action_required" ||
-                                state == "startup_failure" ? "fail": (
-                                state == "cancelled" ? "cancel":
-                                (state == "skipped" || state == "neutral" ? "skipping": "pending")
-                            )
-                        )
-                        rows.Add(
-                            J.Map(
-                                "name",
-                                J.Text(check, kind == "check-runs" ? "name": "context"),
-                                "state",
-                                state.ToUpperInvariant(),
-                                "bucket",
-                                bucket,
-                                "link",
-                                J.Text(check, kind == "check-runs" ? "html_url": "target_url"),
-                                "workflow",
-                                ""
-                            )
-                        )
-                    }
-                    if checks.Count < 100 {
-                        break
-                    }
-                    if page == 10 {
-                        throw Exception("Commit check inspection exceeded its bounded history")
-                    }
-                    page++
-                }
-            }
-            return J.Parse(J.Write(rows))
-        }
-
-        internal func Checks(args Args) int32 {
-            ApiTransport.BeginDeadline(args.Number("timeout", "1200"))
-            try {
-                return ChecksWithinDeadline(args)
-            } catch (error ApiDeadlineException) {
-                Terminal.Message(error.Message, "yellow")
-                return 8
-            } finally {
-                ApiTransport.EndDeadline()
-            }
-        }
-
-        private func ChecksWithinDeadline(args Args) int32 {
-            let directory = args.Get("run") == "" ? "": Path.GetFullPath(args.Need("run"))
-            let run = directory == "" ? Verify(Data.Repo(args.Need("repo")), args.Number("pr")): Data.Load(directory)
-            if run.Number("pr") == 0 {
-                throw Exception("No PR has been published for this run")
-            }
-            var previous string = ""
-            while true {
-                ApiTransport.CheckDeadline()
-                let verified = Verify(run.Text("repo"), run.Number("pr"))
-                if verified.Text("commit") != run.Text("commit") {
-                    throw Exception("Saved commit differs from PR receipt")
-                }
-                let policy = Policy(J.Write(J.Get(verified.Element(), "policy")))
-                let pullPath = "repos/" + run.Text("repo") + "/pulls/" + run.Number("pr").ToString()
-                let pull = GitHub.Api(pullPath)
-                if J.Text(J.Get(pull, "head"), "sha") != run.Text("commit") {
-                    throw Exception("PR head changed. Saved run no longer describes this PR")
-                }
-                let rows = CheckRows(run.Text("repo"), run.Text("commit"))
-                var failed bool
-                var pending bool
-                for row in J.Items(rows) {
-                    let bucket = J.Text(row, "bucket")
-                    if bucket == "fail" || bucket == "cancel" {
-                        failed = true
-                    } else if bucket != "pass" && bucket != "skipping" {
-                        pending = true
-                    }
-                }
-                for name in J.Items(J.Get(policy.Value, "required_checks")) {
-                    var passed bool
-                    for row in J.Items(rows) {
-                        if J.Text(row, "name") == name.GetString() && J.Text(row, "bucket") == "pass" {
-                            passed = true
-                        }
-                    }
-                    if !passed {
-                        pending = true
-                    }
-                }
-                let latest = GitHub.Api(pullPath)
-                if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
-                    throw Exception("PR changed while reading checks")
-                }
-                let live = Verify(run.Text("repo"), run.Number("pr"))
-                if live.Text("commit") != run.Text("commit") {
-                    throw Exception("PR authority changed while reading checks")
-                }
-                ApiTransport.CheckDeadline()
-                let status = failed ? "failed": (pending ? "pending": "passed")
-                PublicOutput.Checks(run, rows, status)
-                let snapshot = J.Write(J.Map("head", run.Text("commit"), "status", status, "checks", rows))
-                if snapshot != previous {
-                    if directory != "" {
-                        let path = Path.Combine(directory, "checks.json")
-                        if !File.Exists(path) || File.ReadAllText(path) != snapshot {
-                            File.WriteAllText(path, snapshot)
-                        }
-                    }
-                    Terminal.Message(
-                        "Checks " + status + ": " + run.Text("pr_url"),
-                        failed ? "red": (pending ? "yellow": "green")
-                    )
-                    if !PublicOutput.Enabled {
-                        Terminal.Checks(rows)
-                    }
-                    previous = snapshot
-                }
-                if failed {
-                    return 1
-                }
-                if !pending {
-                    return 0
-                }
-                if args.Get("watch") != "true" {
-                    return 8
-                }
-                ApiTransport.PollWait()
-            }
+            return report
         }
     }
 }

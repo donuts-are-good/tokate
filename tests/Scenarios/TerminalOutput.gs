@@ -16,7 +16,7 @@ internal class TerminalOutput {
             if Array.IndexOf(args, "--json") >= 0 {
                 command += " 2>'" + Path.Combine(temp.Root, "diagnostics") + "'"
             }
-            return Check.Run("/usr/bin/script", []string{"-q", "-e", "-c", command, "/dev/null"}, temp.Env)
+            return TestProcess.Run("/usr/bin/script", []string{"-q", "-e", "-c", command, "/dev/null"}, temp.Env)
         }
 
         private func Plain(text string) {
@@ -190,7 +190,7 @@ internal class TerminalOutput {
                 Save(width.ToString() + "-json", json.Output)
             }
             temp.Env["TERM"] = "xterm-256color"
-            let redirected = Check.Run(binary, []string{"status", "--run", saved, "--plain"}, temp.Env)
+            let redirected = TestProcess.Run(binary, []string{"status", "--run", saved, "--plain"}, temp.Env)
             Check.Success(redirected)
             Plain(redirected.Output)
             Check.Contains(redirected.Output, "Donor run")

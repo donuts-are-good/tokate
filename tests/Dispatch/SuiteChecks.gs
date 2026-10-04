@@ -98,7 +98,7 @@ internal class SuiteChecks {
             temp.Env["TOKATE_DRIVER_SECRET"] = "synthetic-driver-secret"
             temp.Env["GH_TOKEN"] = "synthetic-driver-token"
             temp.Env["CODEX_HOME"] = "synthetic-driver-home"
-            let result = Check.Run(
+            let result = TestProcess.Run(
                 Path.Combine(checkout, ".git/suite-tests"),
                 []string{"--suite-fixture", checkout, "success"},
                 temp.Env
@@ -123,7 +123,7 @@ internal class SuiteChecks {
                 using let temp = Temp()
                 let checkout = Prepare(temp)
                 let clock = Stopwatch.StartNew()
-                let result = Check.Run(
+                let result = TestProcess.Run(
                     Path.Combine(checkout, ".git/suite-tests"),
                     []string{"--suite-fixture", checkout, mode},
                     temp.Env
@@ -197,7 +197,7 @@ internal class SuiteChecks {
                 )
                 Check.That(Directory.GetDirectories(storage).Length == 2, "Both workers did not prepare runtime files")
                 let pid = File.ReadAllText(Path.Combine(checkout, "driver.pid")).Trim()
-                Check.Success(Check.Run("/usr/bin/kill", []string{"-INT", pid}, temp.Env))
+                Check.Success(TestProcess.Run("/usr/bin/kill", []string{"-INT", pid}, temp.Env))
                 Check.That(terminal.WaitForExit(5000), "Ctrl+C did not collect both suite workers")
                 let output = terminal.StandardOutput.ReadToEnd() + terminal.StandardError.ReadToEnd()
                 Check.That(terminal.ExitCode != 0, "Ctrl+C became success")
@@ -219,12 +219,12 @@ internal class SuiteChecks {
             using let temp = Temp()
             let binary = Environment.ProcessPath ?? throw Exception("Missing test executable")
             for selector in[]string{"--suite", "--flow", "--coordination", "--correction", "--amendments"} {
-                let result = Check.Run(binary, []string{selector, "unknown-suite"}, temp.Env)
+                let result = TestProcess.Run(binary, []string{selector, "unknown-suite"}, temp.Env)
                 Check.That(result.Code != 0, "Unknown selector succeeded: " + selector)
                 Check.Contains(result.Error, "Unknown")
                 Check.That(!result.Output.Contains("PASS "), "Unknown selector ran unrelated groups")
             }
-            let malformed = Check.Run(binary, []string{"--suite"}, temp.Env)
+            let malformed = TestProcess.Run(binary, []string{"--suite"}, temp.Env)
             Check.That(malformed.Code != 0, "Malformed suite selector succeeded")
             Console.WriteLine("PASS unknown suite/group selectors and malformed arguments fail closed")
         }

@@ -151,8 +151,8 @@ internal class RequestData {
             ) != "tokate-observed-locally-exact-commit" {
                 throw Exception("Invalid bounded correction provenance")
             }
-            Data.CommitSha(head)
-            Data.CommitSha(J.Text(value, "tree"))
+            RepositoryIdentity.CommitSha(head)
+            RepositoryIdentity.CommitSha(J.Text(value, "tree"))
             let tools = J.Get(value, "tools")
             if tools.ValueKind != JsonValueKind.Array {
                 throw Exception("Correction tools must be an array; [] declares manual editing")
@@ -249,14 +249,14 @@ internal class RequestData {
                 .IsMatch(J.Text(value, "approval"), "^[0-9a-f]{64}$") {
                 throw Exception("Request needs a canonical UUID and approval identity")
             }
-            Data.CommitSha(J.Text(value, "expected"))
+            RepositoryIdentity.CommitSha(J.Text(value, "expected"))
             let metadata = J.Get(value, "metadata")
             if J.Text(value, "action") == "claim" {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
                 Keys(metadata, "fork,branch,head,source,tools,verification,correction")
-                Data.Repo(J.Text(metadata, "fork"))
-                Data.CommitSha(J.Text(metadata, "head"))
+                RepositoryIdentity.Repo(J.Text(metadata, "fork"))
+                RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
                     (J.Text(metadata, "source") != "external" && J.Text(metadata, "source") != "tokate") ||
                     J.Text(metadata, "verification") != "donor-reported-pass" {
@@ -272,11 +272,11 @@ internal class RequestData {
                 }
             } else if J.Text(value, "action") == "amend" {
                 Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync")
-                Data.Repo(J.Text(metadata, "fork"))
-                Data.CommitSha(J.Text(metadata, "head"))
-                Data.CommitSha(J.Text(metadata, "previous"))
+                RepositoryIdentity.Repo(J.Text(metadata, "fork"))
+                RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
+                RepositoryIdentity.CommitSha(J.Text(metadata, "previous"))
                 if J.Get(metadata, "sync").ValueKind != JsonValueKind.Undefined {
-                    Data.CommitSha(J.Text(metadata, "sync"))
+                    RepositoryIdentity.CommitSha(J.Text(metadata, "sync"))
                 }
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") || J.Number(
                     metadata,

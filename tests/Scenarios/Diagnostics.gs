@@ -21,7 +21,7 @@ internal class Diagnostics {
         private func Call(binary string, temp Temp, words[]string, status string = "ok", code string = "") JsonNode {
             let args = List[string](words)
             args.Add("--json")
-            let result = Check.Run(binary, args.ToArray(), temp.Env, cwd: temp.Root)
+            let result = TestProcess.Run(binary, args.ToArray(), temp.Env, cwd: temp.Root)
             Check.That(
                 !(result.Output + result.Error).Contains("synthetic-auth-secret"),
                 "Raw tool or authentication output leaked"
@@ -221,7 +221,7 @@ internal class Diagnostics {
             }
             args.AddRange(words)
             args.Add("--json")
-            return Check.Run("/usr/bin/bwrap", args.ToArray(), flow.Temp.Env, cwd: flow.Upstream)
+            return TestProcess.Run("/usr/bin/bwrap", args.ToArray(), flow.Temp.Env, cwd: flow.Upstream)
         }
 
         private func Fixed(binary string) {
@@ -274,7 +274,7 @@ internal class Diagnostics {
         private func Sandboxes(binary string) {
             using let flow = NativeFlow(binary)
             flow.Initialize()
-            let managed = Check.Run(
+            let managed = TestProcess.Run(
                 binary,
                 []string{"doctor", "--managed", "--json"},
                 flow.Temp.Env,
@@ -288,11 +288,16 @@ internal class Diagnostics {
             )
             flow.State["mode"] = JsonValue.Create("unsupported_sandbox")
             flow.Save()
-            let failed = Check.Run(binary, []string{"doctor", "--managed", "--json"}, flow.Temp.Env, cwd: flow.Upstream)
+            let failed = TestProcess.Run(
+                binary,
+                []string{"doctor", "--managed", "--json"},
+                flow.Temp.Env,
+                cwd: flow.Upstream
+            )
             let failure = CliDiscovery.Envelope(failed, "doctor", "error", "verification_failed")
             Check.That(Check.Text(Row(failure, "sandbox")["status"]) == "failed", "Failed managed sandbox passed")
             File.Delete(Path.Combine(flow.Bin, "codex"))
-            let external = Check.Run(
+            let external = TestProcess.Run(
                 binary,
                 []string{"doctor", "--external", "--json"},
                 flow.Temp.Env,
@@ -305,7 +310,7 @@ internal class Diagnostics {
             )
             flow.Temp.Env["TMPDIR"] = Path.Combine(flow.Temp.Root, "unavailable-temporary-storage")
             let unavailable = CliDiscovery.Envelope(
-                Check.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
+                TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "error",
                 "verification_failed"
@@ -320,7 +325,7 @@ internal class Diagnostics {
                 Path.Combine(flow.Upstream, "global.json")
             )
             CliDiscovery.Envelope(
-                Check.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
+                TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "ok"
             )
@@ -329,7 +334,7 @@ internal class Diagnostics {
                 "{\"sdk\":{\"version\":\"99.0.100\",\"rollForward\":\"disable\"}}"
             )
             let pinned = CliDiscovery.Envelope(
-                Check.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
+                TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
                 "doctor",
                 "error",
                 "missing_tools"

@@ -21,7 +21,7 @@ internal class AccessState {
             "repos/" + repo + "/git/commits",
             GitHub.AutomationCommit("Tokate donor access", J.Text(tree, "sha"), []string{expected})
         )
-        let next = Data.CommitSha(J.Text(commit, "sha"))
+        let next = RepositoryIdentity.CommitSha(J.Text(commit, "sha"))
         try {
             if Sha == "" {
                 GitHub.Api("repos/" + repo + "/git/refs", J.Map("ref", "refs/heads/tokate/access", "sha", next))
@@ -87,7 +87,7 @@ internal class AccessState {
             if J.Text(J.Get(reference, "object"), "type") != "commit" {
                 throw Exception("Donor access ref must identify a commit")
             }
-            result.Sha = Data.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
+            result.Sha = RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
             let value = RequestData.Parse(GitHub.FileAt(repo, "access.json", result.Sha), 65536)
             RequestData.Keys(value, "version,repo_id,members")
             if J.Number(value, "version") != 1 || RequestData.PositiveId(J.Get(value, "repo_id")) != repoId || J.Get(
@@ -207,7 +207,7 @@ internal class AccessState {
         }
 
         internal func Run(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let operation = args.Need("operation")
             if operation == "check" {
                 if args.Get("donor") != "" {
@@ -217,7 +217,12 @@ internal class AccessState {
                 RequestData.PositiveId(J.Get(viewer, "id"))
                 let issue = args.Number("issue")
                 let state = CoordinationState.Load(repo, issue)
-                let record = state.Check(repo, issue, Data.Login(J.Text(viewer, "login")), J.Get(viewer, "id"))
+                let record = state.Check(
+                    repo,
+                    issue,
+                    RepositoryIdentity.Login(J.Text(viewer, "login")),
+                    J.Get(viewer, "id")
+                )
                 if !Task(J.Get(record, "approval")) {
                     PublicOutput.ResultData = J.Map(
                         "repo",
@@ -242,7 +247,7 @@ internal class AccessState {
                 throw Exception("Unknown access operation")
             }
             RequestData.PositiveId(J.Get(GitHub.Api("user"), "id"))
-            let info = Workflow.RequireOwner(repo)
+            let info = RepositoryAccess.RequireOwner(repo)
             let repoId = RequestData.PositiveId(J.Get(info, "id"))
             let single = operation == "grant" || operation == "remove"
             if (single && args.Get("issue") == "") ||
@@ -258,7 +263,7 @@ internal class AccessState {
                     throw Exception("Access already exists; inspect current membership")
                 }
             } else {
-                let donor = Data.Login(args.Need("donor"))
+                let donor = RepositoryIdentity.Login(args.Need("donor"))
                 actor = RequestData.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
                 var trusted bool
                 var denied bool

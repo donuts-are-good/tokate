@@ -205,7 +205,7 @@ internal class Worker {
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
                 DonorSelection.Confirm(options, selected)
             }
-            let record = Workflow.Recheck(run)
+            let record = ContributionClaim.Recheck(run)
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
                 let policy = Policy(J.Write(J.Get(record, "policy")))
                 policy.Digest = run.Text("policy_hash")
@@ -313,7 +313,7 @@ internal class Worker {
                 Config(args, "features." + feature, "false")
             }
             args.Add("-")
-            Workflow.Recheck(run)
+            ContributionClaim.Recheck(run)
             if run.Number("preparation_version") == 1 {
                 Preparation.Ready(directory, run)
             }

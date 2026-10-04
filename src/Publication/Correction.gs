@@ -14,14 +14,6 @@ func EvidenceOpen(path string, flags int32) int32;
 
 internal class Correction {
     shared {
-        internal func Load(path string) Data {
-            let data = Data()
-            for field in J.Parse(File.ReadAllText(path)).EnumerateObject() {
-                data.Fields[field.Name] = field.Value.Clone()
-            }
-            return data
-        }
-
         internal func Same(left JsonElement, right JsonElement) bool {
             if left.ValueKind == JsonValueKind.Undefined || right.ValueKind == JsonValueKind.Undefined {
                 return left.ValueKind == right.ValueKind
@@ -29,21 +21,16 @@ internal class Correction {
             return RequestData.Canonical(left) == RequestData.Canonical(right)
         }
 
-        internal func Write(path string, data Data) {
-            File.WriteAllText(path + ".tmp", J.Write(data.Fields) + "\n")
-            File.Move(path + ".tmp", path, true)
-        }
-
         internal func Save(directory string, correction Data) {
             let current = Path.Combine(directory, "correction.json")
             if File.Exists(current) {
-                let previous = Load(current)
+                let previous = Data.Read(current)
                 if previous.Text("uuid") != correction.Text("uuid") {
-                    Write(Path.Combine(directory, "correction-" + previous.Text("uuid"), "record.json"), previous)
+                    previous.Write(Path.Combine(directory, "correction-" + previous.Text("uuid"), "record.json"))
                 }
             }
-            Write(Path.Combine(directory, "correction.json"), correction)
-            Write(Path.Combine(directory, "correction-" + correction.Text("uuid"), "record.json"), correction)
+            correction.Write(Path.Combine(directory, "correction.json"))
+            correction.Write(Path.Combine(directory, "correction-" + correction.Text("uuid"), "record.json"))
         }
 
         internal func GitRaw(checkout string, args ...string) string -> Commands.GitRaw(checkout, args)
@@ -63,7 +50,7 @@ internal class Correction {
 
         internal func Candidate(checkout string, run Data, commit string, record JsonElement) string {
             Verification.Candidate(checkout)
-            Data.CommitSha(commit)
+            RepositoryIdentity.CommitSha(commit)
             if Commands.Git(checkout, "rev-parse", "HEAD") != commit ||
                 GitRaw(checkout, "status", "--porcelain=v1", "--untracked-files=all") != "" {
                 throw Exception("Correction requires a clean checkout at the declared exact commit")
@@ -112,7 +99,7 @@ internal class Correction {
         }
 
         internal func Fork(run Data) {
-            let info = GitHub.Api("repos/" + Data.Repo(run.Text("head_repo")))
+            let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("head_repo")))
             if !J.Bool(J.Get(info, "permissions"), "push") || J.Get(J.Get(info, "owner"), "id").ToString() != J.Get(
                 run.Element(),
                 "donor_id"
@@ -130,7 +117,7 @@ internal class Correction {
         }
 
         internal func Authority(directory string, run Data) JsonElement {
-            let record = Workflow.Recheck(run)
+            let record = ContributionClaim.Recheck(run)
             Fork(run)
             if run.Number("version") == 2 {
                 let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
@@ -368,7 +355,7 @@ internal class Correction {
                 File.WriteAllText(Path.Combine(temporary, "manifest.json"), manifest + "\n")
                 let seal = Data()
                 seal.Fields["manifest_sha256"] = Data.Hash(manifest)
-                Write(Path.Combine(temporary, "seal.json"), seal)
+                seal.Write(Path.Combine(temporary, "seal.json"))
                 Directory.Move(temporary, final)
             } finally {
                 if Directory.Exists(temporary) {
@@ -380,7 +367,7 @@ internal class Correction {
         internal func Original(directory string) Data {
             let archive = Verification.DirectoryPath(Path.Combine(directory, "original-evidence"))
             let manifest = File.ReadAllText(Path.Combine(archive, "manifest.json")).TrimEnd('\n')
-            let seal = Load(Path.Combine(archive, "seal.json"))
+            let seal = Data.Read(Path.Combine(archive, "seal.json"))
             let inventory = Inventory(archive)
             inventory.Remove("manifest.json")
             inventory.Remove("seal.json")
@@ -444,7 +431,7 @@ internal class Correction {
                 return
             }
             Original(directory)
-            let commit = Data.CommitSha(args.Need("commit"))
+            let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
                 throw Exception("Correction verification budget exceeds original owner limit")
@@ -452,7 +439,7 @@ internal class Correction {
             let tools = Tools(args.Get("tools"), J.Get(record, "policy"))
             let current = Path.Combine(directory, "correction.json")
             if File.Exists(current) {
-                let saved = Load(current)
+                let saved = Data.Read(current)
                 if saved.Text("commit") == commit {
                     if saved.Number("seconds") != seconds || RequestData.Canonical(
                         J.Get(saved.Element(), "tools")

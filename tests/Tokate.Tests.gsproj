@@ -12,7 +12,14 @@
   <ItemGroup>
     <Compile Include="../src/Execution/Verification.gs" />
     <Compile Include="../src/Execution/Process.gs" />
-    <Compile Include="../src/Contributions/Core.gs" />
+    <Compile Include="../src/Cli/Args.gs" />
+    <Compile Include="../src/Cli/ApplicationInfo.gs" />
+    <Compile Include="../src/Cli/RepositoryInput.gs" />
+    <Compile Include="../src/GitHub/RepositoryIdentity.gs" />
+    <Compile Include="../src/Cli/CliFailure.gs" />
+    <Compile Include="../src/Contributions/Data.gs" />
+    <Compile Include="../src/GitHub/GitHub.gs" />
+    <Compile Include="../src/Policy/Policy.gs" />
     <Compile Include="../src/Policy/ProtectedPaths.gs" />
     <Compile Include="../src/Policy/Decree.gs" />
     <Compile Include="../src/Cli/Cli.gs" />

@@ -82,7 +82,7 @@ internal class VerificationChecks {
                         mode
                     }
                 )
-                let result = Check.Run("/usr/bin/bwrap", args.ToArray(), temp.Env)
+                let result = TestProcess.Run("/usr/bin/bwrap", args.ToArray(), temp.Env)
                 Check.Success(result)
                 Check.That(Directory.GetFileSystemEntries(storage).Length == 0, "Runtime copies leaked from parent")
             }
@@ -269,7 +269,7 @@ internal class VerificationChecks {
                 Check.That(File.Exists(ready), "Foreground verifier did not become ready")
                 Check.That(Directory.GetFileSystemEntries(storage).Length > 0, "Runtime copies were not created")
                 let pid = int32.Parse(File.ReadAllText(Path.Combine(temp.Root, "verifier.pid")).Trim())
-                Check.Success(Check.Run("/usr/bin/kill", []string{"-INT", pid.ToString()}, temp.Env))
+                Check.Success(TestProcess.Run("/usr/bin/kill", []string{"-INT", pid.ToString()}, temp.Env))
                 Check.That(terminal.WaitForExit(5000), "Verification cancellation did not stop the terminal")
                 let output = terminal.StandardOutput.ReadToEnd() + terminal.StandardError.ReadToEnd()
                 Check.That(terminal.ExitCode != 0, output)
@@ -319,7 +319,7 @@ internal class VerificationChecks {
                 "set -eu\n/usr/bin/awk 'BEGIN { print \"standard-tool-started\" }'\n" +
                     "test ! -e /etc/private\nif : > /etc/alternatives/unwanted; then exit 1; fi\n"
             )
-            let result = Check.Run(
+            let result = TestProcess.Run(
                 "/usr/bin/bwrap",
                 []string{
                     "--die-with-parent",
@@ -518,7 +518,7 @@ internal class VerificationChecks {
             for missing in[]bool{true, false} {
                 let source = missing ? Path.Combine(temp.Root, "empty"): "/dev/null"
                 let target = missing ? "/usr/bin": "/usr/bin/bwrap"
-                let result = Check.Run(
+                let result = TestProcess.Run(
                     "/usr/bin/bwrap",
                     []string{
                         "--die-with-parent",

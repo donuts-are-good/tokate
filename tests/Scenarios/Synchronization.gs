@@ -84,7 +84,7 @@ internal class SynchronizationChecks {
             for key in[]string{"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"} {
                 env.Remove(key)
             }
-            let merged = Check.Run(
+            let merged = TestProcess.Run(
                 "/usr/bin/git",
                 []string{
                     "-C",
@@ -448,7 +448,7 @@ internal class SynchronizationChecks {
             }
             if v2 {
                 flow.Reload()
-                let request = Check.Json(Check.Text(flow.State["posted_request"]?["body"]).Substring(8))
+                let request = Check.PostedRequest(flow.State)
                 if mode == "timeout" {
                     let path = Path.Combine(run, "amendments", candidate, "request.json")
                     let savedRequest = File.ReadAllText(path)
@@ -526,7 +526,7 @@ internal class SynchronizationChecks {
             Amend(flow, run, next)
             if v2 {
                 flow.Reload()
-                let request = Check.Json(Check.Text(flow.State["posted_request"]?["body"]).Substring(8))
+                let request = Check.PostedRequest(flow.State)
                 coordination.Coordinate(coordination.Event(request))
                 Amend(flow, run, next)
             }
@@ -550,7 +550,7 @@ internal class SynchronizationChecks {
             Amend(flow, run, newCandidate, newGrant)
             if v2 {
                 flow.Reload()
-                let request = Check.Json(Check.Text(flow.State["posted_request"]?["body"]).Substring(8))
+                let request = Check.PostedRequest(flow.State)
                 coordination.Coordinate(coordination.Event(request))
                 Amend(flow, run, newCandidate, newGrant)
             }

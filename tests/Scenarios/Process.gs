@@ -639,7 +639,7 @@ internal class ProcessChecks {
         private func CaptureWriteFailure() {
             using let temp = Temp()
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/bin/bash",
                     []string{
                         "-c",

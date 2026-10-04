@@ -11,7 +11,7 @@ internal class ProtectedPathChecks {
         private func Git(temp Temp, checkout string, args ...string) string {
             let all = List[string]{"-C", checkout, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test"}
             all.AddRange(args)
-            return Check.Success(Check.Run("/usr/bin/git", all.ToArray(), temp.Env))
+            return Check.Success(TestProcess.Run("/usr/bin/git", all.ToArray(), temp.Env))
         }
 
         private func Refused(checkout string, policy JsonElement, base string, head string = "") {

@@ -171,10 +171,10 @@ internal class Overlaps {
                 let pull = GitHub.Api("repos/" + repo + "/pulls/" + item.Number.ToString())
                 item.Identity = Identity(pull)
                 let head = J.Get(pull, "head")
-                facts["head"] = Data.CommitSha(J.Text(head, "sha"))
+                facts["head"] = RepositoryIdentity.CommitSha(J.Text(head, "sha"))
                 facts["head_branch"] = J.Text(head, "ref")
-                facts["head_repo"] = Data.Repo(J.Text(J.Get(head, "repo"), "full_name"))
-                facts["target_branch"] = Data.Branch(J.Text(J.Get(pull, "base"), "ref"))
+                facts["head_repo"] = RepositoryIdentity.Repo(J.Text(J.Get(head, "repo"), "full_name"))
+                facts["target_branch"] = RepositoryIdentity.Branch(J.Text(J.Get(pull, "base"), "ref"))
                 let branch = J.Text(J.Get(pull, "base"), "ref")
                 if !targets.ContainsKey(branch) {
                     try {
@@ -189,7 +189,7 @@ internal class Overlaps {
                     .ValueKind == JsonValueKind.True ? true: (
                     J.Get(pull, "mergeable").ValueKind == JsonValueKind.False ? false as Object: nil
                 )
-                let binding = Publication.Verify(repo, item.Number, ready: false, paths: false)
+                let binding = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
                 item.Binding = binding
                 facts["binding_status"] = "validated"
                 facts["binding"] = PublicOutput.Select(
@@ -212,7 +212,7 @@ internal class Overlaps {
                     Failure(facts, "diff", error)
                 }
                 try {
-                    let checks = Publication.CheckRows(repo, binding.Text("commit"))
+                    let checks = CommitChecks.Read(repo, binding.Text("commit"))
                     let rows = List[Object]()
                     for check in J.Items(checks) {
                         Retain(rows, PublicOutput.Select(check, "name,state,bucket,link,workflow"))
@@ -242,7 +242,7 @@ internal class Overlaps {
 
         internal func Run(args Args) {
             Remaining = 24000
-            let repo = Data.Repo(args.Need("repo"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let numbers = Cli.PullNumbers(args.Need("prs"))
             let items = List[OverlapContribution]()
             let targets = Dictionary[string, string](StringComparer.Ordinal)
@@ -260,7 +260,7 @@ internal class Overlaps {
                         throw Exception("Contribution identity changed during evidence collection")
                     }
                     if let binding = item.Binding {
-                        let live = Publication.Verify(repo, item.Number, ready: false, paths: false)
+                        let live = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
                         if J.Write(
                             PublicOutput.Select(
                                 live.Element(),

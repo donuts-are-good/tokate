@@ -10,7 +10,7 @@ import Tokate
 internal class CliDiscovery {
     shared {
         internal func Call(binary string, args[]string, temp Temp, code int32 = 0) Result {
-            let result = Check.Run(binary, args, temp.Env, cwd: temp.Root)
+            let result = TestProcess.Run(binary, args, temp.Env, cwd: temp.Root)
             Check.That(result.Code == code, result.Output + result.Error)
             Check.That(!result.Error.Contains("Missing tools"), "Prerequisites checked before validation")
             return result
@@ -214,7 +214,7 @@ internal class CliDiscovery {
                 )
                 Check.That(Check.Text(script["truncated"]) == "false", "Completion was truncated")
             }
-            let brokenDoctor = Check.Run(binary, []string{"doctor", "--json"}, temp.Env)
+            let brokenDoctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let broken = Envelope(brokenDoctor, "doctor", "error", "missing_tools")
             Check.That(Check.Text(broken["data"]?["tools"]?[0]?["status"]) == "failed", "Broken tool accepted")
             Check.That(
@@ -224,19 +224,19 @@ internal class CliDiscovery {
             let empty = Path.Combine(temp.Root, "empty")
             Directory.CreateDirectory(empty)
             temp.Env["PATH"] = empty
-            let doctor = Check.Run(binary, []string{"doctor", "--json"}, temp.Env)
+            let doctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let diagnosis = Envelope(doctor, "doctor", "error", "missing_tools")
             Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 8, "Doctor omitted checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
             let blocked = Envelope(
-                Check.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
+                TestProcess.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
                 "policy",
                 "error",
                 "missing_tools"
             )
             Check.That(Check.Text(blocked["next_actions"]?[0]?[1]) == "doctor", "Missing-tools action absent")
             let init = Path.Combine(temp.Root, "project")
-            Envelope(Check.Run(binary, []string{"init", "--path", init, "--json"}, temp.Env), "init", "ok")
+            Envelope(TestProcess.Run(binary, []string{"init", "--path", init, "--json"}, temp.Env), "init", "ok")
             Check.That(File.Exists(Path.Combine(init, ".github/tokate.json")), "JSON changed init effects")
             let saved = Path.Combine(temp.Root, "saved")
             Directory.CreateDirectory(saved)
@@ -282,7 +282,7 @@ internal class CliDiscovery {
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
             File.WriteAllText(Path.Combine(saved, "events.jsonl"), "synthetic-harness-marker")
             File.WriteAllText(Path.Combine(saved, "verification.json"), rows.ToJsonString())
-            let statusResult = Check.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
+            let statusResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
             let status = Envelope(statusResult, "status", "ok")
             Check.That(
                 status["data"]?["verification"]?.AsArray().Count == 64 && Check.Text(
@@ -306,7 +306,7 @@ internal class CliDiscovery {
                     statusResult.Output
             )
             Check.That(Check.Text(status["next_actions"]?[0]?[3]) == saved, "Action path shortened")
-            let legacy = Check.Run(binary, []string{"status", "--run", saved}, temp.Env)
+            let legacy = TestProcess.Run(binary, []string{"status", "--run", saved}, temp.Env)
             Check.Success(legacy)
             Check.That(Check.Json(legacy.Output)["schema_version"] == nil, "Legacy status was enveloped")
             Check.That(
@@ -332,7 +332,7 @@ internal class CliDiscovery {
             record["failure_reason"] = JsonValue.Create("inference_interrupted")
             record["output_truncated"] = JsonValue.Create(true)
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
-            let stoppedResult = Check.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
+            let stoppedResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
             let stopped = Envelope(stoppedResult, "status", "ok")
             let stoppedCheck = stopped["data"]?["verification"]?[0] ?? throw Exception("Missing interrupted check")
             Check.That(
@@ -376,7 +376,7 @@ internal class CliDiscovery {
                 "synthetic-correction-error-marker"
             )
             File.WriteAllText(Path.Combine(saved, "correction.json"), correction.ToJsonString())
-            let correctedResult = Check.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
+            let correctedResult = TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env)
             let corrected = Envelope(correctedResult, "status", "ok")
             Check.That(
                 Check.Text(corrected["data"]?["correction"]?["error"]?["code"]) == "verification_failed",
@@ -392,7 +392,7 @@ internal class CliDiscovery {
                 Check.That(Check.Text(action[1]) != "recover", "Suggested legacy recovery for explicit correction")
             }
             File.Copy(binary, Path.Combine(temp.Root, "tokate-cli"))
-            let pty = Check.Run(
+            let pty = TestProcess.Run(
                 "/usr/bin/script",
                 []string{
                     "-q",
@@ -408,13 +408,13 @@ internal class CliDiscovery {
             record["commit"] = JsonValue.Create(String('a', 70000))
             File.WriteAllText(Path.Combine(saved, "run.json"), record.ToJsonString())
             Envelope(
-                Check.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env),
+                TestProcess.Run(binary, []string{"status", "--run", saved, "--json"}, temp.Env),
                 "status",
                 "error",
                 "output_too_large"
             )
             let longError = Envelope(
-                Check.Run(binary, []string{"doctor", "--" + String('x', 6000), "--json"}, temp.Env),
+                TestProcess.Run(binary, []string{"doctor", "--" + String('x', 6000), "--json"}, temp.Env),
                 "doctor",
                 "error",
                 "invalid_arguments"
@@ -548,7 +548,7 @@ internal class CliDiscovery {
                 let script = Call(binary, []string{"completion", shell}, temp).Output
                 let path = Path.Combine(temp.Root, "completion." + shell)
                 File.WriteAllText(path, script)
-                Check.Success(Check.Run("/usr/bin/" + shell, []string{"-n", path}, temp.Env))
+                Check.Success(TestProcess.Run("/usr/bin/" + shell, []string{"-n", path}, temp.Env))
                 var command string
                 var args[]string
                 if shell == "bash" {
@@ -574,7 +574,7 @@ internal class CliDiscovery {
                         "'; complete -C 'tokate work --mo'; complete -C 'tokate work --effort=hi'"
                     args = []string{"--no-config", "-c", command}
                 }
-                let output = Check.Success(Check.Run("/usr/bin/" + shell, args, temp.Env))
+                let output = Check.Success(TestProcess.Run("/usr/bin/" + shell, args, temp.Env))
                 Check.Contains(output, "--model")
                 Check.Contains(output, shell == "zsh" ? "--effort=": "--effort=high")
                 if shell == "bash" {
@@ -587,7 +587,7 @@ internal class CliDiscovery {
                         "' $$fpath); autoload -Uz _tokate; " +
                         "_arguments() { if [[ $$1 == -C ]]; then state=args; line=(work); else print -rl -- \"$$@\"; fi; }; _tokate"
                     Check.Contains(
-                        Check.Success(Check.Run("/usr/bin/zsh", []string{"-f", "-c", autoload}, temp.Env)),
+                        Check.Success(TestProcess.Run("/usr/bin/zsh", []string{"-f", "-c", autoload}, temp.Env)),
                         "--model"
                     )
                 }
@@ -624,7 +624,7 @@ internal class CliDiscovery {
                 []string{"work", "https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
                 []string{"work", "--issue=https://github.com/owner/project/issues/1", "--model=model", "--effort=high"}
             } {
-                let result = Check.Run(binary, argv, temp.Env, cwd: temp.Root)
+                let result = TestProcess.Run(binary, argv, temp.Env, cwd: temp.Root)
                 Check.That(result.Code == 1, "Recording gh stub should fail")
                 Check.Contains(File.ReadAllText(log), "gh\napi\n")
                 Check.That(!result.Error.Contains("Usage:"), "Valid URL input rejected")
@@ -637,22 +637,22 @@ internal class CliDiscovery {
             Check.That(!File.Exists(log), "Failed repository discovery invoked GitHub")
             File.Delete(Path.Combine(bin, "git"))
             File.CreateSymbolicLink(Path.Combine(bin, "git"), "/usr/bin/git")
-            Check.Success(Check.Run("/usr/bin/git", []string{"init", "-b", "main", temp.Root}, temp.Env))
+            Check.Success(TestProcess.Run("/usr/bin/git", []string{"init", "-b", "main", temp.Root}, temp.Env))
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "No GitHub remote")
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/usr/bin/git",
                     []string{"-C", temp.Root, "remote", "add", "origin", "git@github.com:owner/project.git"},
                     temp.Env
                 )
             )
-            let policy = Check.Run(binary, []string{"policy"}, temp.Env, cwd: temp.Root)
+            let policy = TestProcess.Run(binary, []string{"policy"}, temp.Env, cwd: temp.Root)
             Check.That(policy.Code == 1 && !policy.Error.Contains("Usage:"), "Unique remote rejected")
             Check.Contains(File.ReadAllText(log), "repos/owner/project\n")
             File.Delete(log)
             let nested = Path.Combine(temp.Root, "subdirectory")
             Directory.CreateDirectory(nested)
-            let fromSubdirectory = Check.Run(binary, []string{"policy"}, temp.Env, cwd: nested)
+            let fromSubdirectory = TestProcess.Run(binary, []string{"policy"}, temp.Env, cwd: nested)
             Check.That(
                 fromSubdirectory.Code == 1 && !fromSubdirectory.Error.Contains("Usage:"),
                 "Repository subdirectory rejected"
@@ -660,17 +660,17 @@ internal class CliDiscovery {
             Check.Contains(File.ReadAllText(log), "repos/owner/project\n")
             File.Delete(log)
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/usr/bin/git",
                     []string{"-C", temp.Root, "remote", "add", "upstream", "https://github.com/OWNER/project.git"},
                     temp.Env
                 )
             )
-            let same = Check.Run(binary, []string{"policy"}, temp.Env, cwd: temp.Root)
+            let same = TestProcess.Run(binary, []string{"policy"}, temp.Env, cwd: temp.Root)
             Check.That(same.Code == 1 && !same.Error.Contains("Usage:"), "Equivalent remotes rejected")
             File.Delete(log)
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/usr/bin/git",
                     []string{"-C", temp.Root, "remote", "set-url", "upstream", "https://github.com/other/project.git"},
                     temp.Env
@@ -678,7 +678,7 @@ internal class CliDiscovery {
             )
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "Ambiguous local remotes")
             Check.That(!File.Exists(log), "Ambiguous remotes invoked GitHub")
-            let urlOverride = Check.Run(
+            let urlOverride = TestProcess.Run(
                 binary,
                 []string{"work", "https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
                 temp.Env,
@@ -690,10 +690,10 @@ internal class CliDiscovery {
             )
             File.Delete(log)
             Check.Success(
-                Check.Run("/usr/bin/git", []string{"-C", temp.Root, "remote", "remove", "upstream"}, temp.Env)
+                TestProcess.Run("/usr/bin/git", []string{"-C", temp.Root, "remote", "remove", "upstream"}, temp.Env)
             )
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/usr/bin/git",
                     []string{
                         "-C",
@@ -709,7 +709,7 @@ internal class CliDiscovery {
             )
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "Ambiguous local remotes")
             Check.That(!File.Exists(log), "Conflicting push remote invoked GitHub")
-            let explicitRepo = Check.Run(
+            let explicitRepo = TestProcess.Run(
                 binary,
                 []string{"policy", "--repo=https://github.com/owner/project.git"},
                 temp.Env,

@@ -10,7 +10,7 @@ import System.Text.RegularExpressions
 internal class CoordinatorSetup {
     shared {
         internal func Run(args Args) {
-            let repo = Data.Repo(args.Need("repo"))
+            let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let requested = Path.GetFullPath(args.Need("output"))
             let output = Path.Combine(
                 Worker.CanonicalPath(
@@ -25,7 +25,7 @@ internal class CoordinatorSetup {
                     "Generate to a new file outside protected .github paths; installation is an owner action after release"
                 )
             }
-            let info = Workflow.RequireOwner(repo)
+            let info = RepositoryAccess.RequireOwner(repo)
             let existing = GitHub.Api(
                 "repos/" + repo + "/contents/.github/workflows/tokate-coordinator.yml?ref=" + Uri.EscapeDataString(
                     J.Text(info, "default_branch")
@@ -35,7 +35,7 @@ internal class CoordinatorSetup {
             if existing.ValueKind != JsonValueKind.Undefined {
                 throw Exception("Coordinator workflow already exists; refusing replacement")
             }
-            let version = Data.Version()
+            let version = ApplicationInfo.Version()
             let release = GitHub.Api("repos/obselate/tokate/releases/tags/v" + version, missing: true)
             if release.ValueKind == JsonValueKind.Undefined || J.Bool(release, "draft") || J.Bool(
                 release,
@@ -91,7 +91,7 @@ internal class CoordinatorSetup {
                 if FileInfo(binary).LinkTarget != nil || HashFile(binary) != HashFile(Environment.ProcessPath ?? "") {
                     throw Exception("Running binary does not match the released archive member")
                 }
-                let yaml = Data
+                let yaml = ApplicationInfo
                     .Resource("coordinator.yml")
                     .Replace("@ARCHIVE_URL@", archiveUrl)
                     .Replace("@ARCHIVE_SHA256@", hash)

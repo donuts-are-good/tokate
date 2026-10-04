@@ -86,7 +86,7 @@ internal class ProtectedPaths {
 
         private func AddTree(entries Dictionary[string, string], path string, mode string, type string, sha string) {
             Relative(path)
-            Data.CommitSha(sha)
+            RepositoryIdentity.CommitSha(sha)
             if !(
                 (mode == "040000" && type == "tree") ||
                     ((mode == "100644" || mode == "100755" || mode == "120000") && type == "blob") ||
@@ -121,7 +121,7 @@ internal class ProtectedPaths {
         internal func LocalTree(checkout string, head string) Dictionary[string, string] {
             let output = Commands.GitRaw(
                 checkout,
-                []string{"ls-tree", "-r", "-t", "-z", "--full-tree", Data.CommitSha(head)}
+                []string{"ls-tree", "-r", "-t", "-z", "--full-tree", RepositoryIdentity.CommitSha(head)}
             )
             let entries = Dictionary[string, string](StringComparer.Ordinal)
             if output != "" && !output.EndsWith("\0", StringComparison.Ordinal) {
@@ -143,11 +143,13 @@ internal class ProtectedPaths {
         }
 
         internal func RemoteTree(repo string, head string) Dictionary[string, string] {
-            let commit = GitHub.Api("repos/" + Data.Repo(repo) + "/git/commits/" + Data.CommitSha(head))
+            let commit = GitHub.Api(
+                "repos/" + RepositoryIdentity.Repo(repo) + "/git/commits/" + RepositoryIdentity.CommitSha(head)
+            )
             if J.Text(commit, "sha") != head {
                 throw Exception("Mismatched protected commit evidence")
             }
-            let sha = Data.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
+            let sha = RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
             let value = GitHub.Api("repos/" + repo + "/git/trees/" + sha + "?recursive=1")
             if J.Text(value, "sha") != sha || J.Get(value, "truncated").ValueKind != JsonValueKind.False || J.Get(
                 value,
@@ -203,10 +205,10 @@ internal class ProtectedPaths {
         }
 
         internal func Ancestor(repo string, base string, fork string, head string) {
-            Data.Repo(repo)
-            Data.Repo(fork)
-            Data.CommitSha(base)
-            Data.CommitSha(head)
+            RepositoryIdentity.Repo(repo)
+            RepositoryIdentity.Repo(fork)
+            RepositoryIdentity.CommitSha(base)
+            RepositoryIdentity.CommitSha(head)
             let value = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
             let commits = J.Items(J.Get(value, "commits"))
             if J.Text(J.Get(value, "base_commit"), "sha") != base || J.Text(
@@ -246,9 +248,9 @@ internal class ProtectedPaths {
             if head == "" {
                 args.Add("--cached")
             }
-            args.Add(Data.CommitSha(base))
+            args.Add(RepositoryIdentity.CommitSha(base))
             if head != "" {
-                args.Add(Data.CommitSha(head))
+                args.Add(RepositoryIdentity.CommitSha(head))
             }
             args.Add("--")
             let output = Commands.GitRaw(checkout, args.ToArray(), budget)
@@ -279,10 +281,10 @@ internal class ProtectedPaths {
         }
 
         internal func Diff(repo string, base string, fork string, head string) HashSet[string] {
-            Data.Repo(repo)
-            Data.Repo(fork)
-            Data.CommitSha(base)
-            Data.CommitSha(head)
+            RepositoryIdentity.Repo(repo)
+            RepositoryIdentity.Repo(fork)
+            RepositoryIdentity.CommitSha(base)
+            RepositoryIdentity.CommitSha(head)
             let comparison = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
             let files = J.Get(comparison, "files")
             let commits = J.Items(J.Get(comparison, "commits"))

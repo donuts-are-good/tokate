@@ -303,7 +303,7 @@ Tokate does not add a separate telemetry upload in these source paths. The
 installed harness, GitHub CLI, and services have their own behavior and policies.
 This document is not a claim about their retention practices.
 
-Source: [Core.gs](../src/Contributions/Core.gs), [Workflow.gs](../src/Policy/Workflow.gs),
+Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
 [Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
 [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
 

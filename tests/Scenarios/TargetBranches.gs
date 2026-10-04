@@ -516,7 +516,7 @@ internal class TargetBranches {
                         command +
                         " --repo owner/project --issue 1 --donor donor --json 2> '" +
                         Path.Combine(flow.Temp.Root, "diagnostics") + "'"
-                    let result = Check.Run(
+                    let result = TestProcess.Run(
                         "/usr/bin/script",
                         []string{"-q", "-e", "-c", shell, "/dev/null"},
                         flow.Temp.Env,

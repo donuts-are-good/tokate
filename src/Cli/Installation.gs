@@ -30,7 +30,7 @@ internal class Installation {
                 go Commands.Read(process.StandardOutput, output, failed)
                 go Commands.Read(process.StandardError, error, failed)
             }
-            process.StandardInput.Write(Data.Resource("install.sh"))
+            process.StandardInput.Write(ApplicationInfo.Resource("install.sh"))
             process.StandardInput.Close()
             process.WaitForExit()
             if PublicOutput.Enabled {

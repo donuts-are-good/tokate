@@ -63,9 +63,9 @@ internal class DecreeFlow : IDisposable {
             env.Remove(key)
         }
         env["GIT_INDEX_FILE"] = Path.Combine(Flow.Temp.Root, "approval.index")
-        Check.Success(Check.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "read-tree", previous}, env))
+        Check.Success(TestProcess.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "read-tree", previous}, env))
         Check.Success(
-            Check.Run(
+            TestProcess.Run(
                 "/usr/bin/git",
                 []string{
                     "-C",
@@ -78,7 +78,7 @@ internal class DecreeFlow : IDisposable {
                 env
             )
         )
-        let tree = Check.Success(Check.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "write-tree"}, env))
+        let tree = Check.Success(TestProcess.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "write-tree"}, env))
         let next = Flow.Git(
             "-C",
             Flow.Upstream,

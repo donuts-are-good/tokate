@@ -100,13 +100,13 @@ internal class Installer {
                 temp.Env.Remove("SHELL")
             }
             File.WriteAllText(Path.Combine(tools, "account-shell"), accountShell ?? "")
-            let version = Check.Success(Check.Run(binary, []string{"--version"}, temp.Env)).Substring(7)
+            let version = Check.Success(TestProcess.Run(binary, []string{"--version"}, temp.Env)).Substring(7)
             let bundleName = "tokate-" + version + "-linux-x64"
             let bundle = Path.Combine(temp.Root, bundleName)
             Directory.CreateDirectory(bundle)
             File.Copy(binary, Path.Combine(bundle, "tokate"))
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/usr/bin/tar",
                     []string{"-czf", Path.Combine(tools, "release.tar.gz"), "-C", temp.Root, bundleName},
                     temp.Env
@@ -136,7 +136,7 @@ internal class Installer {
                     File.WriteAllText(Path.Combine(temp.Env["HOME"], ".bash_profile"), existing)
                 }
             }
-            let output = Check.Success(Check.Run("/bin/sh", []string{script}, temp.Env))
+            let output = Check.Success(TestProcess.Run("/bin/sh", []string{script}, temp.Env))
             Check.That(Hash(installed) == Hash(binary), "Installed binary differs")
             if unresolved {
                 Check.Contains(output, "Add ~/.local/bin to PATH in your shell startup file.")
@@ -163,15 +163,15 @@ internal class Installer {
                 "probe",
                 profile
             }
-            let path = Check.Success(Check.Run(shell, probe, temp.Env))
+            let path = Check.Success(TestProcess.Run(shell, probe, temp.Env))
             Check.That(path == installed, "PATH hook did not expose Tokate")
             if !unresolved {
-                let terminal = Check.Run(shell, []string{"-ic", "command -v tokate"}, temp.Env)
+                let terminal = TestProcess.Run(shell, []string{"-ic", "command -v tokate"}, temp.Env)
                 Check.That(Check.Success(terminal) == installed, "Ordinary terminal did not find Tokate")
                 if !fish {
                     Check.That(
                         Check.Success(
-                            Check.Run(shell, []string{"-ic", "printf '%s' \"$$TOKATE_EXISTING\""}, temp.Env)
+                            TestProcess.Run(shell, []string{"-ic", "printf '%s' \"$$TOKATE_EXISTING\""}, temp.Env)
                         ) ==
                         "keep",
                         "Ordinary terminal lost existing shell configuration"
@@ -183,7 +183,7 @@ internal class Installer {
             temp.Env["OPENAI_API_KEY"] = "fixture-secret"
             state["clean"] = JsonValue.Create(true)
             File.WriteAllText(statePath, state.ToJsonString())
-            CliDiscovery.Envelope(Check.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
+            CliDiscovery.Envelope(TestProcess.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
             Check.That(File.ReadAllText(profile) == hook, "Update duplicated shell setup")
             if loginHook != "" {
                 Check.That(File.ReadAllText(bashProfile) == loginHook, "Update duplicated login shell setup")
@@ -191,41 +191,51 @@ internal class Installer {
             for mode in[]string{"checksum-fail", "download-fail"} {
                 state["mode"] = JsonValue.Create(mode)
                 File.WriteAllText(statePath, state.ToJsonString())
-                let failure = Check.Run(installed, []string{"update", "--json"}, temp.Env)
+                let failure = TestProcess.Run(installed, []string{"update", "--json"}, temp.Env)
                 Check.That(failure.Code != 0, "Update should fail: " + mode)
                 CliDiscovery.Envelope(failure, "update", "error", "command_failed")
                 Check.That(Hash(installed) == Hash(binary), "Failed update changed binary")
             }
-            Check.Success(Check.Run(installed, []string{"uninstall", "--help"}, temp.Env))
+            Check.Success(TestProcess.Run(installed, []string{"uninstall", "--help"}, temp.Env))
             Check.That(File.Exists(installed), "Help removed the binary")
             let saved = Path.Combine(temp.Env["HOME"], ".local/state/tokate/runs/saved")
             Directory.CreateDirectory(Path.GetDirectoryName(saved) ?? "")
             File.WriteAllText(saved, "keep")
             File.Delete(Path.Combine(tools, "curl"))
-            CliDiscovery.Envelope(Check.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
+            CliDiscovery.Envelope(
+                TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env),
+                "uninstall",
+                "ok"
+            )
             Check.That(!File.Exists(installed), "Uninstall left binary")
             Check.That(File.Exists(saved), "Uninstall removed saved work")
             if fish {
                 Check.That(!File.Exists(profile), "Uninstall left Fish setup")
             } else {
-                Check.Success(Check.Run(shell, []string{"-c", ". \"$1\"", "probe", profile}, temp.Env))
+                Check.Success(TestProcess.Run(shell, []string{"-c", ". \"$1\"", "probe", profile}, temp.Env))
             }
             Check.That(
                 !File.Exists(Path.Combine(temp.Env["HOME"], ".local/share/tokate/env")),
                 "Uninstall left active PATH hook"
             )
-            Check.That(Check.Run(binary, []string{"uninstall"}, temp.Env).Code != 0, "Unmanaged uninstall should fail")
+            Check.That(
+                TestProcess.Run(binary, []string{"uninstall"}, temp.Env).Code != 0,
+                "Unmanaged uninstall should fail"
+            )
             state["mode"] = JsonValue.Create("")
             File.WriteAllText(statePath, state.ToJsonString())
             temp.Env.Remove("GH_TOKEN")
             temp.Env.Remove("OPENAI_API_KEY")
             temp.Tool("curl")
-            Check.Success(Check.Run("/bin/sh", []string{script}, temp.Env))
+            Check.Success(TestProcess.Run("/bin/sh", []string{script}, temp.Env))
             Check.That(File.ReadAllText(profile) == hook, "Reinstall duplicated shell setup")
             if loginHook != "" {
                 Check.That(File.ReadAllText(bashProfile) == loginHook, "Reinstall duplicated login shell setup")
             }
-            Check.That(Check.Success(Check.Run(shell, probe, temp.Env)) == installed, "Reinstall did not restore PATH")
+            Check.That(
+                Check.Success(TestProcess.Run(shell, probe, temp.Env)) == installed,
+                "Reinstall did not restore PATH"
+            )
         }
 
         internal func ShellDetection(project string, binary string) {
@@ -243,14 +253,18 @@ internal class Installer {
             File.WriteAllText(target, "keep")
             Directory.CreateDirectory(Path.Combine(temp.Env["HOME"], ".local/bin"))
             File.CreateSymbolicLink(Path.Combine(temp.Env["HOME"], ".local/bin/tokate"), target)
-            let result = Check.Run("/bin/sh", []string{Path.Combine(project, "site/install.sh")}, temp.Env)
+            let result = TestProcess.Run("/bin/sh", []string{Path.Combine(project, "site/install.sh")}, temp.Env)
             Check.That(result.Code != 0, "Installer replaced symlink")
             Check.Contains(result.Error, "Refusing to replace a symlink")
             Check.That(File.ReadAllText(target) == "keep", "Symlink target changed")
             let destination = Path.Combine(temp.Env["HOME"], ".local/bin/tokate")
             File.Delete(destination)
             Directory.CreateDirectory(destination)
-            let directoryResult = Check.Run("/bin/sh", []string{Path.Combine(project, "site/install.sh")}, temp.Env)
+            let directoryResult = TestProcess.Run(
+                "/bin/sh",
+                []string{Path.Combine(project, "site/install.sh")},
+                temp.Env
+            )
             Check.That(directoryResult.Code != 0, "Installer accepted a directory as executable path")
             Check.Contains(directoryResult.Error, "Expected a regular file")
             Check.That(
@@ -302,11 +316,11 @@ internal class Installer {
                         Check.Map("os", "Linux", "arch", cases[i * 3], "libc", cases[i * 3 + 1]).ToJsonString()
                     )
                     for action in existing ? []string{"install", "update"}: []string{"install"} {
-                        let result = action == "update" ? Check.Run(installed, []string{"update"}, temp.Env): Check.Run(
-                            "/bin/sh",
-                            []string{script},
+                        let result = action == "update" ? TestProcess.Run(
+                            installed,
+                            []string{"update"},
                             temp.Env
-                        )
+                        ): TestProcess.Run("/bin/sh", []string{script}, temp.Env)
                         Check.That(result.Code != 0, "Installer accepted unsupported platform: " + cases[i * 3 + 1])
                         Check.Contains(result.Error, cases[i * 3 + 2])
                         Check.That(!result.Output.Contains("Downloading"), "Unsupported platform reached downloads")
@@ -331,7 +345,11 @@ internal class Installer {
                     }
                 }
             }
-            CliDiscovery.Envelope(Check.Run(installed, []string{"uninstall", "--json"}, temp.Env), "uninstall", "ok")
+            CliDiscovery.Envelope(
+                TestProcess.Run(installed, []string{"uninstall", "--json"}, temp.Env),
+                "uninstall",
+                "ok"
+            )
             Check.That(!File.Exists(installed), "Unsupported libc blocked offline removal")
         }
     }

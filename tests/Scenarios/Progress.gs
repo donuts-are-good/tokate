@@ -63,7 +63,7 @@ internal class ProgressChecks {
             let stdout = Chan[string](1)
             let stderr = Chan[string](1)
             let lines = Chan[string](256)
-            go Check.Read(process.StandardOutput, stdout)
+            go TestProcess.Read(process.StandardOutput, stdout)
             go ProgressChecks.Read(process.StandardError, lines, stderr)
             var observed bool
             var initialRequests int32 = -1
@@ -280,7 +280,11 @@ internal class ProgressChecks {
                 Quote(run) +
                 (mode == "plain" ? " --plain --ascii": "")
             let timer = Stopwatch.StartNew()
-            let result = Check.Run("/usr/bin/script", []string{"-q", "-e", "-c", command, "/dev/null"}, flow.Temp.Env)
+            let result = TestProcess.Run(
+                "/usr/bin/script",
+                []string{"-q", "-e", "-c", command, "/dev/null"},
+                flow.Temp.Env
+            )
             timer.Stop()
             Check.Success(result)
             Check.Contains(result.Output, "Inference:")

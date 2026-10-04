@@ -56,21 +56,6 @@ internal class DonorSelection {
             }
         }
 
-        private func ToolAllowed(policy Policy, harness string, provider string) bool {
-            if harness != "codex" || provider != "openai" {
-                return false
-            }
-            if J.Number(policy.Value, "version") == 1 {
-                return true
-            }
-            for tool in J.Items(J.Get(policy.Value, "allowed_tools")) {
-                if J.Text(tool, "harness") == harness && J.Text(tool, "provider") == provider {
-                    return true
-                }
-            }
-            return false
-        }
-
         internal func Interactive(args Args) bool -> !PublicOutput.Enabled && args.Get("non-interactive") != "true" &&
             !Console.IsInputRedirected &&
             !Console.IsOutputRedirected &&
@@ -84,7 +69,7 @@ internal class DonorSelection {
                     "Unsupported managed harness/provider: choose codex/openai explicitly. No inference started."
                 )
             }
-            if !ToolAllowed(policy, harness, provider) {
+            if J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider) {
                 throw Exception(
                     "No eligible pair: codex/openai is rejected by current exact owner tool restrictions. No inference started."
                 )
@@ -235,13 +220,20 @@ internal class DonorSelection {
             if selected.ValueKind == JsonValueKind.Undefined {
                 return
             }
-            if J.Text(selected, "model") != run.Text("model") || J.Text(selected, "effort") != run.Text("effort") ||
-                J.Text(selected, "harness") != run.Text("harness") || J.Text(selected, "provider") != run.Text(
-                "provider"
-            ) ||
-                J.Text(selected, "policy_hash") != policy.Digest ||
-                !ToolAllowed(policy, J.Text(selected, "harness"), J.Text(selected, "provider")) {
-                throw Exception("Saved selection differs from run or policy; no model substitution is allowed")
+            let harness = J.Text(selected, "harness")
+            let provider = J.Text(selected, "provider")
+            let failure = "Saved selection differs from run or policy; no model substitution is allowed"
+            if J.Text(selected, "model") != run.Text("model") || J.Text(selected, "effort") != run.Text("effort") {
+                throw Exception(failure)
+            }
+            if harness != run.Text("harness") || provider != run.Text("provider") {
+                throw Exception(failure)
+            }
+            if J.Text(selected, "policy_hash") != policy.Digest ||
+                harness != "codex" ||
+                provider != "openai" ||
+                (J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider)) {
+                throw Exception(failure)
             }
             policy.Validate(run.Text("model"), run.Text("effort"), run.Number("seconds"), run.Flag("network"))
             let capabilities = Capabilities()

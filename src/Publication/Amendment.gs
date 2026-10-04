@@ -37,132 +37,11 @@ internal class Amendment {
             ) > J.Number(policy.Value, "max_seconds") {
                 throw Exception("Invalid amendment receipt or verification budget")
             }
-            Data.CommitSha(J.Text(value, "previous"))
+            RepositoryIdentity.CommitSha(J.Text(value, "previous"))
             Tools(policy, J.Get(value, "tools"))
             if J.Get(value, "sync").ValueKind != JsonValueKind.Undefined {
-                Data.CommitSha(J.Text(value, "sync"))
+                RepositoryIdentity.CommitSha(J.Text(value, "sync"))
             }
-        }
-
-        internal func Current(state JsonElement) JsonElement {
-            let amendments = J.Items(J.Get(state, "amendments"))
-            return amendments.Count == 0 ? J.Get(state, "contribution"): amendments[amendments.Count - 1]
-        }
-
-        internal func Head(state JsonElement) string -> J.Text(J.Get(Current(state), "outcome"), "head")
-
-        internal func StateReceipt(state JsonElement) JsonElement {
-            let current = Current(state)
-            let original = J.Get(state, "contribution")
-            let fields = J.Map(
-                "version",
-                2,
-                "repo",
-                J.Text(state, "repo"),
-                "issue",
-                J.Number(state, "issue"),
-                "approval",
-                J.Text(state, "approval_id"),
-                "expected",
-                J.Text(current, "expected"),
-                "reservation",
-                J.Text(J.Get(state, "reservation"), "reservation"),
-                "donor",
-                J.Text(original, "donor"),
-                "head",
-                Head(state)
-            )
-            let correction = J.Get(J.Get(original, "metadata"), "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                fields["correction"] = correction
-            }
-            if J.Items(J.Get(state, "amendments")).Count > 0 {
-                let amended = J.Map(
-                    "id",
-                    J.Text(current, "request"),
-                    "previous",
-                    J.Text(current, "previous"),
-                    "seconds",
-                    J.Number(current, "seconds"),
-                    "tools",
-                    J.Get(current, "tools")
-                )
-                if J.Text(current, "sync") != "" {
-                    amended["sync"] = J.Text(current, "sync")
-                }
-                fields["amendment"] = amended
-            }
-            Synchronization.Keep(fields, Synchronization.History(current))
-            return J.Parse(J.Write(fields))
-        }
-
-        internal func Receipt(body string) JsonElement {
-            let prefix = "<!-- tokate-receipt:"
-            let start = Unique(body, prefix)
-            let end = body.IndexOf(" -->", start, StringComparison.Ordinal)
-            if end < 0 {
-                throw Exception("Malformed Tokate receipt")
-            }
-            return RequestData.Parse(body.Substring(start + prefix.Length, end - start - prefix.Length))
-        }
-
-        private func Unique(body string, value string) int32 {
-            let start = body.IndexOf(value, StringComparison.Ordinal)
-            if start < 0 || body.IndexOf(value, start + value.Length, StringComparison.Ordinal) >= 0 {
-                throw Exception("Missing or ambiguous Tokate-owned report/receipt region")
-            }
-            return start
-        }
-
-        internal func Report(text string) string -> "<!-- tokate-report:start -->\n" +
-            text +
-            "\n<!-- tokate-report:end -->"
-
-        internal func ReportText(body string, legacy string) string {
-            let prefix = "<!-- tokate-report:start -->"
-            let suffix = "<!-- tokate-report:end -->"
-            if !body.Contains(prefix) {
-                Unique(body, legacy)
-                return legacy
-            }
-            let start = Unique(body, prefix) + prefix.Length
-            let end = Unique(body, suffix)
-            if end < start {
-                throw Exception("Malformed Tokate report region")
-            }
-            return body.Substring(start, end - start).Trim()
-        }
-
-        private func Owned(body string, legacy string) string -> ReportText(body, legacy) +
-            "\n" +
-            RequestData.Canonical(Receipt(body))
-
-        internal func ReplaceBody(body string, oldReport string, report string, receipt JsonElement) string {
-            let prefix = "<!-- tokate-report:start -->"
-            let suffix = "<!-- tokate-report:end -->"
-            var start int32
-            var length int32
-            if body.Contains(prefix) {
-                start = Unique(body, prefix)
-                let end = Unique(body, suffix)
-                if end <= start {
-                    throw Exception("Malformed Tokate report region")
-                }
-                length = end + suffix.Length - start
-            } else {
-                start = Unique(body, oldReport)
-                length = oldReport.Length
-            }
-            let updated = body.Remove(start, length).Insert(start, Report(report))
-            start = Unique(updated, "<!-- tokate-receipt:")
-            let end = updated.IndexOf(" -->", start, StringComparison.Ordinal)
-            if end < 0 {
-                throw Exception("Malformed Tokate receipt")
-            }
-            return updated.Remove(start, end + 4 - start).Insert(
-                start,
-                "<!-- tokate-receipt:" + J.Write(receipt) + " -->"
-            )
         }
 
         internal func Summary(previous string, head string, seconds int32, tools JsonElement) string ->
@@ -184,57 +63,45 @@ internal class Amendment {
         internal func Pull(run Data, number int32, previous string, candidate string) JsonElement {
             let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls/" + number.ToString())
             let head = J.Get(pull, "head")
+            let base = J.Get(pull, "base")
+            let headRepo = J.Text(J.Get(head, "repo"), "full_name")
+            let mergedAt = J.Get(pull, "merged_at").ValueKind
             let marker = run.Number("version") == 2 ? "<!-- tokate-v2:" + run.Text("id") + " -->":
             "<!-- tokate-run:" + run.Text("id") + " -->"
-            if J.Number(pull, "number") != number || J.Text(pull, "state") != "open" || J.Bool(pull, "merged") || J.Get(
-                pull,
-                "merged_at"
-            )
-                .ValueKind != JsonValueKind.Undefined &&
-                J
-                .Get(pull, "merged_at").ValueKind != JsonValueKind.Null || !J.Text(pull, "body").Contains(marker) ||
-                J.Text(head, "ref") != run.Text("branch") || J.Text(J.Get(head, "repo"), "full_name") != run.Text(
-                "head_repo"
-            ) ||
-                J.Text(J.Get(pull, "base"), "ref") != run.Text("base_branch") ||
-                (
-                J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name") != "" && J.Text(
-                    J.Get(J.Get(pull, "base"), "repo"),
-                    "full_name"
-                ) != run.Text("repo")
-            ) ||
-                (J.Text(head, "sha") != previous && J.Text(head, "sha") != candidate) {
-                throw Exception("Existing PR changed, closed or merged; saved amendment retained")
+            let failure = "Existing PR changed, closed or merged; saved amendment retained"
+            if J.Number(pull, "number") != number || J.Text(pull, "state") != "open" || J.Bool(pull, "merged") ||
+                (mergedAt != JsonValueKind.Undefined && mergedAt != JsonValueKind.Null) {
+                throw Exception(failure)
+            }
+            if !J.Text(pull, "body").Contains(marker) || J.Text(head, "ref") != run.Text("branch") ||
+                headRepo != run.Text("head_repo") {
+                throw Exception(failure)
+            }
+            let baseRepo = J.Text(J.Get(base, "repo"), "full_name")
+            if J.Text(base, "ref") != run.Text("base_branch") || (baseRepo != "" && baseRepo != run.Text("repo")) {
+                throw Exception(failure)
+            }
+            let headSha = J.Text(head, "sha")
+            if headSha != previous && headSha != candidate {
+                throw Exception(failure)
             }
             return pull
         }
 
         private func Authority(run Data, amendment Data?) JsonElement {
             let viewer = GitHub.Api("user")
-            if !String.Equals(J.Text(viewer, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) || J.Get(
-                viewer,
-                "id"
-            )
-                .ToString() != J.Get(run.Element(), "donor_id").ToString() {
+            if !RepositoryIdentity.SameDonor(viewer, run) {
                 throw CliFailure("authentication_required", "Use the same donor account and numeric identity")
             }
             if run.Number("version") == 1 {
-                let record = Workflow.Recheck(run)
-                let info = GitHub.Api("repos/" + Data.Repo(run.Text("head_repo")))
-                if !J.Bool(J.Get(info, "permissions"), "push") ||
-                    (
-                    run.Text("head_repo") != run.Text("repo") && !String.Equals(
-                        J.Text(J.Get(info, "parent"), "full_name"),
-                        run.Text("repo"),
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                ) ||
-                    !String
-                    .Equals(
-                    J.Text(J.Get(info, "owner"), "login"),
-                    run.Text("donor"),
-                    StringComparison.OrdinalIgnoreCase
-                ) {
+                let record = ContributionClaim.Recheck(run)
+                let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("head_repo")))
+                let writable = J.Bool(J.Get(info, "permissions"), "push")
+                let parent = J.Text(J.Get(info, "parent"), "full_name")
+                let owner = J.Text(J.Get(info, "owner"), "login")
+                let sameParent = String.Equals(parent, run.Text("repo"), StringComparison.OrdinalIgnoreCase)
+                let sameOwner = String.Equals(owner, run.Text("donor"), StringComparison.OrdinalIgnoreCase)
+                if !writable || (run.Text("head_repo") != run.Text("repo") && !sameParent) || !sameOwner {
                     throw Exception("Donor fork ownership or upstream changed")
                 }
                 SyncAuthority(run, amendment, record)
@@ -250,50 +117,67 @@ internal class Amendment {
             let original = J.Get(value, "contribution")
             let metadata = J.Get(original, "metadata")
             let approval = J.Get(record, "approval")
-            if J.Text(value, "approval_id") != run.Text("approval") || J.Text(
-                J.Get(value, "reservation"),
-                "reservation"
-            ) != run.Text("id") || J.Get(original, "actor").ToString() != J.Get(viewer, "id").ToString() || J.Text(
-                metadata,
-                "fork"
-            ) != run.Text("head_repo") || J.Text(metadata, "branch") != run.Text("branch") || run.Text(
-                "branch"
-            ) != "tokate/v2-" +
-                run.Text("id") || run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
-                approval,
-                "base_branch"
-            ) ||
-                run.Text("policy_hash") != J.Text(approval, "policy_hash") {
-                throw CliFailure("stale_approval", "Published contribution authority changed")
+            let reservation = J.Get(value, "reservation")
+            let actor = J.Get(viewer, "id").ToString()
+            let originalActor = J.Get(original, "actor").ToString()
+            let reservationId = J.Text(reservation, "reservation")
+            let target = J.Text(approval, "base_branch")
+            let policyHash = J.Text(approval, "policy_hash")
+            let failure = "Published contribution authority changed"
+            if J.Text(value, "approval_id") != run.Text("approval") || reservationId != run.Text("id") ||
+                originalActor != actor {
+                throw CliFailure("stale_approval", failure)
+            }
+            if J.Text(metadata, "fork") != run.Text("head_repo") || J.Text(metadata, "branch") != run.Text("branch") ||
+                run.Text("branch") != "tokate/v2-" + run.Text("id") {
+                throw CliFailure("stale_approval", failure)
+            }
+            if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != target || run.Text(
+                "policy_hash"
+            ) != policyHash {
+                throw CliFailure("stale_approval", failure)
             }
             if amendment != nil && state.Sha != amendment.Text("expected") {
-                let current = Current(value)
-                if J.Text(current, "request") != amendment.Text("id") || J.Text(current, "expected") != amendment.Text(
-                    "expected"
-                ) ||
-                    Head(value) != amendment.Text("commit") || J.Number(
-                    J.Get(current, "outcome"),
-                    "pr"
-                ) != amendment.Number("pr") || J.Get(current, "actor").ToString() != J.Get(viewer, "id").ToString() ||
-                    J.Text(current, "previous") != amendment.Text("previous") || J.Number(
-                    current,
-                    "seconds"
-                ) != amendment.Number("seconds") || RequestData.Canonical(J.Get(current, "tools")) != RequestData
-                    .Canonical(J.Get(amendment.Element(), "tools")) {
-                    throw CliFailure("stale_approval", "Amendment has stale coordination revision")
+                let current = CoordinationState.Current(value)
+                let outcome = J.Get(current, "outcome")
+                let saved = amendment.Element()
+                let stale = "Amendment has stale coordination revision"
+                let requestId = amendment.Text("id")
+                let expected = amendment.Text("expected")
+                let savedCommit = amendment.Text("commit")
+                let pr = amendment.Number("pr")
+                if J.Text(current, "request") != requestId || J.Text(current, "expected") != expected {
+                    throw CliFailure("stale_approval", stale)
                 }
-                if J.Text(current, "sync") != amendment.Text("sync") || RequestData.Canonical(
-                    Synchronization.History(current)
-                ) != RequestData
-                    .Canonical(Synchronization.History(amendment.Element())) {
-                    throw Exception("Amendment synchronization differs from coordination authority")
+                let currentActor = J.Get(current, "actor").ToString()
+                if J.Text(outcome, "head") != savedCommit || J.Number(outcome, "pr") != pr || currentActor != actor {
+                    throw CliFailure("stale_approval", stale)
+                }
+                let previous = amendment.Text("previous")
+                let seconds = amendment.Number("seconds")
+                if J.Text(current, "previous") != previous || J.Number(current, "seconds") != seconds {
+                    throw CliFailure("stale_approval", stale)
+                }
+                let declaredTools = RequestData.Canonical(J.Get(current, "tools"))
+                let savedTools = RequestData.Canonical(J.Get(saved, "tools"))
+                if declaredTools != savedTools {
+                    throw CliFailure("stale_approval", stale)
+                }
+                let syncFailure = "Amendment synchronization differs from coordination authority"
+                if J.Text(current, "sync") != amendment.Text("sync") {
+                    throw Exception(syncFailure)
+                }
+                let currentHistory = RequestData.Canonical(Synchronization.History(current))
+                let savedHistory = RequestData.Canonical(Synchronization.History(saved))
+                if currentHistory != savedHistory {
+                    throw Exception(syncFailure)
                 }
                 let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
                 let parents = J.Items(J.Get(commit, "parents"))
                 if parents.Count != 1 || J.Text(parents[0], "sha") != amendment.Text("expected") {
                     throw Exception("Amendment state is not the exact saved coordination transition")
                 }
-            } else if Head(value) != (amendment?.Text("previous") ?? run.Text("commit")) {
+            } else if CoordinationState.Head(value) != (amendment?.Text("previous") ?? run.Text("commit")) {
                 throw Exception("Current published head differs from saved contribution")
             }
             let remoteHead = Remote(
@@ -402,9 +286,9 @@ internal class Amendment {
                 FileShare.None
             )
             let run = Data.Load(directory)
-            let commit = Data.CommitSha(args.Need("commit"))
+            let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
-            let sync = args.Get("sync") == "" ? "": Data.CommitSha(args.Need("sync"))
+            let sync = args.Get("sync") == "" ? "": RepositoryIdentity.CommitSha(args.Need("sync"))
             let tools = args.Get("tools") == "" ? J.Parse("[]"): RequestData.FileData(args.Need("tools"), 8192)
             let location = Path.Combine(directory, "amendments", commit)
             var amendment Data
@@ -424,16 +308,16 @@ internal class Amendment {
                     throw Exception("Amendment verification budget exceeds owner policy")
                 }
                 let number = run.Number("version") == 2 ? J.Number(
-                    J.Get(Current(J.Get(authority, "state")), "outcome"),
+                    J.Get(CoordinationState.Current(J.Get(authority, "state")), "outcome"),
                     "pr"
                 ): run.Number("pr")
                 let pull = Pull(run, number, run.Text("commit"), "")
-                Publication.Verify(run.Text("repo"), number, sync == "")
+                ReceiptVerification.Verify(run.Text("repo"), number, sync == "")
                 Remote(run, run.Text("commit"), "")
                 let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
                 let history = Synchronization.Append(
                     run.Text("repo"),
-                    Synchronization.History(Receipt(J.Text(pull, "body"))),
+                    Synchronization.History(PrBody.Receipt(J.Text(pull, "body"))),
                     sync
                 )
                 let expected = run.Number("version") == 2 ? J.Text(authority, "sha"): ""
@@ -605,12 +489,14 @@ internal class Amendment {
             if J.Text(J.Get(pull, "head"), "sha") != remote {
                 throw Exception("Remote branch and PR head disagree")
             }
-            let receipt = Receipt(J.Text(pull, "body"))
+            let receipt = PrBody.Receipt(J.Text(pull, "body"))
             if amendment.Text("state") == "verified" {
                 if remote != amendment.Text("previous") || J.Text(receipt, "head") != amendment.Text("previous") {
                     throw Exception("Remote changed before amendment publication intent")
                 }
-                if RequestData.Canonical(receipt) != RequestData.Canonical(Receipt(amendment.Text("previous_body"))) {
+                if RequestData.Canonical(receipt) != RequestData.Canonical(
+                    PrBody.Receipt(amendment.Text("previous_body"))
+                ) {
                     throw Exception("Previous receipt changed after amendment acceptance")
                 }
                 let intent = J.Map(
@@ -641,7 +527,7 @@ internal class Amendment {
                         amendment.Number("seconds"),
                         J.Get(amendment.Element(), "tools")
                     )
-                    amendment.Fields["body"] = ReplaceBody(
+                    amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
                         Publication.VerificationReport(run, record),
                         report,
@@ -658,9 +544,9 @@ internal class Amendment {
                     updated["amendment"] = PublicRecord(amendment)
                     Synchronization.Keep(updated, Synchronization.History(amendment.Element()))
                     let original = J.Get(J.Get(authority, "state"), "contribution")
-                    amendment.Fields["body"] = ReplaceBody(
+                    amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
-                        Coordinator.OriginalReport(J.Get(original, "metadata")),
+                        Publication.OriginalReport(J.Get(original, "metadata")),
                         Summary(
                             amendment.Text("previous"),
                             amendment.Text("commit"),
@@ -717,12 +603,12 @@ internal class Amendment {
                 amendment.Save(location)
                 File.WriteAllText(Path.Combine(location, "publication.json"), J.Write(amendment.Element()) + "\n")
             }
-            let previousReceipt = Receipt(amendment.Text("previous_body"))
+            let previousReceipt = PrBody.Receipt(amendment.Text("previous_body"))
             let legacyReport = run.Number("version") == 1 ? Publication.VerificationReport(run, record):
-            Coordinator.OriginalReport(J.Get(J.Get(J.Get(authority, "state"), "contribution"), "metadata"))
-            let previousOwned = Owned(amendment.Text("previous_body"), legacyReport)
-            let owned = Owned(J.Text(pull, "body"), legacyReport)
-            if owned != previousOwned && owned != Owned(amendment.Text("body"), legacyReport) {
+            Publication.OriginalReport(J.Get(J.Get(J.Get(authority, "state"), "contribution"), "metadata"))
+            let previousOwned = PrBody.Owned(amendment.Text("previous_body"), legacyReport)
+            let owned = PrBody.Owned(J.Text(pull, "body"), legacyReport)
+            if owned != previousOwned && owned != PrBody.Owned(amendment.Text("body"), legacyReport) {
                 throw Exception("PR owned regions differ from saved previous or candidate state")
             }
             if remote == amendment.Text("previous") {
@@ -786,18 +672,18 @@ internal class Amendment {
             Authority(run, amendment)
             if run.Number("version") == 1 {
                 let body = J.Text(latest, "body")
-                let candidateOwned = Owned(amendment.Text("body"), legacyReport)
-                if Owned(body, legacyReport) != candidateOwned {
-                    if Owned(body, legacyReport) != previousOwned {
+                let candidateOwned = PrBody.Owned(amendment.Text("body"), legacyReport)
+                if PrBody.Owned(body, legacyReport) != candidateOwned {
+                    if PrBody.Owned(body, legacyReport) != previousOwned {
                         throw Exception(
                             "PR owned regions changed during interrupted publication; physical state retained for inspection"
                         )
                     }
-                    let updated = ReplaceBody(
+                    let updated = PrBody.ReplaceBody(
                         body,
                         legacyReport,
-                        ReportText(amendment.Text("body"), legacyReport),
-                        Receipt(amendment.Text("body"))
+                        PrBody.ReportText(amendment.Text("body"), legacyReport),
+                        PrBody.Receipt(amendment.Text("body"))
                     )
                     amendment.Fields["body"] = updated
                     amendment.Save(location)
@@ -825,14 +711,14 @@ internal class Amendment {
                 Authority(run, amendment)
                 Remote(run, amendment.Text("commit"), "")
                 let finalPull = Pull(run, amendment.Number("pr"), amendment.Text("commit"), "")
-                if Owned(J.Text(finalPull, "body"), legacyReport) != candidateOwned {
+                if PrBody.Owned(J.Text(finalPull, "body"), legacyReport) != candidateOwned {
                     throw Exception("Published owned report/receipt changed")
                 }
-                Publication.Verify(run.Text("repo"), amendment.Number("pr"))
+                ReceiptVerification.Verify(run.Text("repo"), amendment.Number("pr"))
                 Complete(directory, location, run, amendment, latest)
             } else {
                 if J.Text(authority, "sha") != amendment.Text("expected") {
-                    Publication.Verify(run.Text("repo"), amendment.Number("pr"))
+                    ReceiptVerification.Verify(run.Text("repo"), amendment.Number("pr"))
                     Complete(directory, location, run, amendment, latest)
                     return
                 }
@@ -840,7 +726,7 @@ internal class Amendment {
                 let path = Path.Combine(location, "request.json")
                 File.WriteAllText(path, J.Write(request) + "\n")
                 if amendment.Text("state") != "requested" {
-                    V2Contribution.Request(
+                    Submission.Request(
                         Args(
                             []string{
                                 "request",

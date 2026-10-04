@@ -130,7 +130,7 @@ internal class CommandTrafficChecks {
         }
 
         private func RequestAttempt(binary string, path string, env Dictionary[string, string], output Chan[Result]) {
-            output <- Check.Run(
+            output <- TestProcess.Run(
                 binary,
                 []string{"request", "--repo", "owner/project", "--issue", "1", "--file", path},
                 env
@@ -295,7 +295,7 @@ internal class CommandTrafficChecks {
             let duplicate = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
             Budgets(flow.Flow, duplicate, 18, 0, 0, 7)
             flow.Flow.Reload()
-            let request = Check.Json(Check.Text(flow.Flow.State["posted_request"]?["body"]).Substring(8))
+            let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
             flow.Flow.ResetTraffic()
             Budgets(flow.Flow, flow.Flow.Call([]string{"submit", "--run", run}, traffic: true), 8, 0, 0)
