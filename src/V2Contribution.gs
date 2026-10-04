@@ -59,10 +59,7 @@ internal class V2Contribution {
                     GitHub.Api("repos/" + fork)
                 )
             }
-            if run.Number("seconds") < 1 || run.Number("seconds") > J.Number(policy.Value, "max_seconds") ||
-                (run.Flag("network") && !J.Bool(policy.Value, "allow_network")) {
-                throw Exception("Verification budget or network access exceeds owner policy")
-            }
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             return record
         }
 
@@ -81,6 +78,7 @@ internal class V2Contribution {
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, issue, donor, J.Get(viewer, "id"))
+            let policy = Policy(J.Write(J.Get(record, "policy")))
             let source = args.Need("source")
             if source != "external" && source != "tokate" {
                 throw Exception("source must be external or tokate")
@@ -89,7 +87,7 @@ internal class V2Contribution {
             var selection = JsonElement{}
             if tools.ValueKind != JsonValueKind.Undefined {
                 RequestData.Tools(tools)
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools, source)
+                policy.ValidateTools(tools, source)
             }
             let approval = J.Get(record, "approval")
             if source == "tokate" {
@@ -104,7 +102,6 @@ internal class V2Contribution {
                         args.Values["--" + key] = J.Text(declared, key)
                     }
                 }
-                let policy = Policy(J.Write(J.Get(record, "policy")))
                 policy.Digest = J.Text(approval, "policy_hash")
                 selection = DonorSelection.Resolve(args, policy)
                 if tools.ValueKind == JsonValueKind.Undefined {
@@ -150,6 +147,7 @@ internal class V2Contribution {
                 run.Fields["verification_reserve"] = RuntimeBudget.Reserve(args, run.Number("seconds"))
             }
             run.Fields["network"] = args.Get("allow-network") == "true"
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             run.Fields["state"] = "claimed"
             if source == "tokate" {
                 run.Fields["model"] = J.Text(J.Items(tools)[0], "model")

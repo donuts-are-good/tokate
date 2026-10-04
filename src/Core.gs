@@ -440,6 +440,10 @@ internal class Policy {
         if !Allows(model, effort) {
             throw Exception("Model/effort pair is not allowed by the repository policy")
         }
+        ValidateBudget(seconds, network)
+    }
+
+    internal func ValidateBudget(seconds int32, network bool) {
         if seconds < 1 || seconds > J.Number(Value, "max_seconds") {
             throw Exception("Runtime exceeds repository policy")
         }
