@@ -68,7 +68,7 @@ Use the donor's own GitHub and ChatGPT accounts. Never ask them to paste tokens 
 
 Run `tokate doctor`, then check the project's actual tool versions too. Doctor does not verify repository dependencies, model availability, or remaining subscription allowance. A tool appearing on PATH does not prove it starts.
 
-The sandbox cannot use home-directory tools or package caches. Build tools need to work from standard system paths. Dependency downloads need both owner `allow_network: true` and donor `--allow-network`. Inference connectivity is separate from repository command network access.
+Managed Codex supports user-local Linux x64 native binaries and official npm launchers with their matching native platform executable; only the canonical executable is available read-only to repository commands. Other home-directory tools and package caches remain unavailable. Build tools need to work from standard system paths. Dependency downloads need both owner `allow_network: true` and donor `--allow-network`. Inference connectivity is separate from repository command network access.
 
 ### 2. Check approval and prepare a fork
 
