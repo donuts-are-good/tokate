@@ -4,8 +4,11 @@ import System
 import System.IO
 
 func Main(args[]string) int32 {
+    Terminal.Initialize()
     for argument in args {
         PublicOutput.Enabled = PublicOutput.Enabled || argument == "--json" || argument.StartsWith("--json=")
+        Terminal.Plain = Terminal.Plain || argument == "--plain" || argument.StartsWith("--plain=")
+        Terminal.Ascii = Terminal.Ascii || argument == "--ascii"
     }
     PublicOutput.Command = args.Length == 0 || args[0] == "--help" || args[0] == "-h" ? "help": args[0]
     var traffic bool

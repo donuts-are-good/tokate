@@ -1,6 +1,5 @@
 package Tokate
 
-import Spectre.Console
 import System
 import System.Collections.Generic
 import System.IO
@@ -59,28 +58,12 @@ internal class Startup {
         }
 
         internal func Show(tools List[ToolCheck], error bool = false) {
-            if !Terminal.Rich(error) {
-                for tool in tools {
-                    let detail = PublicOutput.Enabled ? (tool.Path == "" ? tool.Hint: tool.Path): tool.Detail
-                    Terminal.Message(tool.Name + ": " + tool.Status + " - " + detail, error: error)
-                }
-                return
-            }
-            let table = Table()
-            table.Border = TableBorder.Rounded
-            table.AddColumn("Check")
-            table.AddColumn("Status")
-            table.AddColumn("Details")
             for tool in tools {
                 let style = tool.Status == "ready" ||
-                    tool.Status == "found" ? "green": (tool.Status == "skipped" ? "grey": "yellow")
-                table.AddRow(
-                    Markup.Escape(tool.Name),
-                    "[" + style + "]" + Markup.Escape(tool.Status) + "[/]",
-                    Markup.Escape(Terminal.Clean(tool.Detail))
-                )
+                    tool.Status == "found" ? "green": (tool.Status == "failed" ? "red": "yellow")
+                let detail = PublicOutput.Enabled ? (tool.Path == "" ? tool.Hint: tool.Path): tool.Detail
+                Terminal.Row(tool.Name, tool.Status + " - " + detail, style, error)
             }
-            Terminal.Output(error).Write(table)
         }
 
         internal func Check(command string) {
@@ -177,7 +160,7 @@ internal class Startup {
             }
             tools.Add(sandbox)
             PublicOutput.Tools(tools)
-            Terminal.Message("Tokate environment", "bold cyan")
+            Terminal.Heading("Tokate environment")
             Show(tools)
             Terminal.Message("No inference was run. Authentication is checked when a command needs it.", "grey")
             return failed ? 1: 0

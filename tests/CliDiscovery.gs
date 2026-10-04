@@ -432,6 +432,7 @@ internal class CliDiscovery {
 
         internal func All(binary string, shell string = "bash") {
             Structured(binary)
+            TerminalOutput.All(binary)
             Check.That(shell == "bash" || shell == "zsh" || shell == "fish", "Choose bash, zsh or fish")
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")
