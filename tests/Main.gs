@@ -11,6 +11,9 @@ func Main(args[]string) int32 {
             return Installer.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
+        if name == "id" || name == "getent" {
+            return Installer.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
+        }
         if name == "uname" || name == "getconf" {
             return Installer.PlatformFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
@@ -135,6 +138,10 @@ func Main(args[]string) int32 {
         if args.Length == 2 && args[0] == "--shell" {
             Installer.Lifecycle(project, binary, args[1])
             Console.WriteLine("PASS installer lifecycle for " + args[1])
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--installer-shell-detection" {
+            Installer.ShellDetection(project, binary)
             return 0
         }
         if args.Length == 2 && args[0] == "--flow" {

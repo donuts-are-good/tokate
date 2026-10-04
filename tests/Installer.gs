@@ -10,6 +10,25 @@ internal class Installer {
         internal func Hash(path string) string -> Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))
             .ToLowerInvariant()
 
+        internal func ShellFixture(name string, args[]string, root string) int32 {
+            if name == "id" {
+                Check.That(args.Length == 1 && args[0] == "-u", "Unexpected account identity lookup")
+                Console.WriteLine("12345")
+                return 0
+            }
+            Check.That(
+                args.Length == 2 && args[0] == "passwd" && args[1] == "12345",
+                "Shell detection must query only the current account"
+            )
+            File.AppendAllText(Path.Combine(root, "shell-lookups"), "lookup\n")
+            let shell = File.ReadAllText(Path.Combine(root, "account-shell"))
+            if shell == "" {
+                return 2
+            }
+            Console.WriteLine("fixture:x:12345:12345::/unused:" + (shell == "empty" ? "": shell))
+            return 0
+        }
+
         internal func PlatformFixture(name string, args[]string, root string) int32 {
             let state = Check.Json(File.ReadAllText(Path.Combine(root, "platform.json")))
             if name == "uname" {
@@ -69,11 +88,18 @@ internal class Installer {
             return 0
         }
 
-        internal func Lifecycle(project string, binary string, shell string = "/bin/bash") {
+        internal func Lifecycle(project string, binary string, shell string = "/bin/bash", accountShell string? = nil) {
             using let temp = Temp()
             temp.Env["SHELL"] = shell
+            temp.Env["TMPDIR"] = temp.Root
             temp.Tool("curl")
+            temp.Tool("id")
+            temp.Tool("getent")
             let tools = Path.Combine(temp.Root, "bin")
+            if accountShell != nil {
+                temp.Env.Remove("SHELL")
+            }
+            File.WriteAllText(Path.Combine(tools, "account-shell"), accountShell ?? "")
             let version = Check.Success(Check.Run(binary, []string{"--version"}, temp.Env)).Substring(7)
             let bundleName = "tokate-" + version + "-linux-x64"
             let bundle = Path.Combine(temp.Root, bundleName)
@@ -92,14 +118,45 @@ internal class Installer {
             File.WriteAllText(statePath, state.ToJsonString())
             let script = Path.Combine(project, "site/install.sh")
             let installed = Path.Combine(temp.Env["HOME"], ".local/bin/tokate")
-            Check.Success(Check.Run("/bin/sh", []string{script}, temp.Env))
-            Check.That(Hash(installed) == Hash(binary), "Installed binary differs")
             let fish = Path.GetFileName(shell) == "fish"
+            let unresolved = shell == "/bin/sh"
             let profile = Path.Combine(
                 temp.Env["HOME"],
-                fish ? ".config/fish/conf.d/tokate.fish": (Path.GetFileName(shell) == "zsh" ? ".zshrc": ".bashrc")
+                fish ? ".config/fish/conf.d/tokate.fish": (
+                    Path.GetFileName(shell) == "zsh" ? ".zshrc": (
+                        unresolved ?
+                        ".profile": ".bashrc"
+                    )
+                )
+            )
+            let existing = fish ? "set -gx TOKATE_EXISTING keep\n": "export TOKATE_EXISTING=keep\n"
+            if !fish {
+                File.WriteAllText(profile, existing)
+                if !unresolved && Path.GetFileName(shell) == "bash" {
+                    File.WriteAllText(Path.Combine(temp.Env["HOME"], ".bash_profile"), existing)
+                }
+            }
+            let output = Check.Success(Check.Run("/bin/sh", []string{script}, temp.Env))
+            Check.That(Hash(installed) == Hash(binary), "Installed binary differs")
+            if unresolved {
+                Check.Contains(output, "Add ~/.local/bin to PATH in your shell startup file.")
+                Check.Contains(output, ". \"$$HOME/.local/share/tokate/env\"")
+                Check.Contains(output, "fish_add_path \"$$HOME/.local/bin\"")
+                Check.Contains(output, installed + " --help")
+                Check.That(!output.Contains("Open a new terminal"), "Unresolved shell promised automatic PATH setup")
+            } else {
+                Check.Contains(output, "Open a new terminal")
+            }
+            Check.That(
+                File.Exists(Path.Combine(tools, "shell-lookups")) == (accountShell != nil),
+                "Account lookup did not respect SHELL"
             )
             let hook = File.ReadAllText(profile)
+            if !fish {
+                Check.That(hook.StartsWith(existing), "Installer changed existing shell configuration")
+            }
+            let bashProfile = Path.Combine(temp.Env["HOME"], ".bash_profile")
+            let loginHook = File.Exists(bashProfile) ? File.ReadAllText(bashProfile): ""
             let probe = fish ? []string{"-c", "source \"$$argv[1]\"; command -s tokate", profile}: []string{
                 "-c",
                 ". \"$1\"; command -v tokate",
@@ -108,6 +165,19 @@ internal class Installer {
             }
             let path = Check.Success(Check.Run(shell, probe, temp.Env))
             Check.That(path == installed, "PATH hook did not expose Tokate")
+            if !unresolved {
+                let terminal = Check.Run(shell, []string{"-ic", "command -v tokate"}, temp.Env)
+                Check.That(Check.Success(terminal) == installed, "Ordinary terminal did not find Tokate")
+                if !fish {
+                    Check.That(
+                        Check.Success(
+                            Check.Run(shell, []string{"-ic", "printf '%s' \"$$TOKATE_EXISTING\""}, temp.Env)
+                        ) ==
+                        "keep",
+                        "Ordinary terminal lost existing shell configuration"
+                    )
+                }
+            }
 
             temp.Env["GH_TOKEN"] = "fixture-secret"
             temp.Env["OPENAI_API_KEY"] = "fixture-secret"
@@ -115,6 +185,9 @@ internal class Installer {
             File.WriteAllText(statePath, state.ToJsonString())
             CliDiscovery.Envelope(Check.Run(installed, []string{"update", "--json"}, temp.Env), "update", "ok")
             Check.That(File.ReadAllText(profile) == hook, "Update duplicated shell setup")
+            if loginHook != "" {
+                Check.That(File.ReadAllText(bashProfile) == loginHook, "Update duplicated login shell setup")
+            }
             for mode in[]string{"checksum-fail", "download-fail"} {
                 state["mode"] = JsonValue.Create(mode)
                 File.WriteAllText(statePath, state.ToJsonString())
@@ -142,6 +215,26 @@ internal class Installer {
                 "Uninstall left active PATH hook"
             )
             Check.That(Check.Run(binary, []string{"uninstall"}, temp.Env).Code != 0, "Unmanaged uninstall should fail")
+            state["mode"] = JsonValue.Create("")
+            File.WriteAllText(statePath, state.ToJsonString())
+            temp.Env.Remove("GH_TOKEN")
+            temp.Env.Remove("OPENAI_API_KEY")
+            temp.Tool("curl")
+            Check.Success(Check.Run("/bin/sh", []string{script}, temp.Env))
+            Check.That(File.ReadAllText(profile) == hook, "Reinstall duplicated shell setup")
+            if loginHook != "" {
+                Check.That(File.ReadAllText(bashProfile) == loginHook, "Reinstall duplicated login shell setup")
+            }
+            Check.That(Check.Success(Check.Run(shell, probe, temp.Env)) == installed, "Reinstall did not restore PATH")
+        }
+
+        internal func ShellDetection(project string, binary string) {
+            Lifecycle(project, binary, "/bin/bash", "/bin/bash")
+            Console.WriteLine("PASS unset SHELL installer lifecycle for Bash")
+            for shell in[]string{"", "empty", "/bin/tcsh"} {
+                Lifecycle(project, binary, "/bin/sh", shell)
+                Console.WriteLine("PASS unresolved shell installer lifecycle: " + shell)
+            }
         }
 
         internal func RefuseInvalidPath(project string) {
