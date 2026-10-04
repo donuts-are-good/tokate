@@ -268,6 +268,7 @@ internal class Policy {
     internal var Value JsonElement
     internal var Digest string = ""
     internal var ModelPolicy string = "whitelist"
+    internal var Eligibility string = ""
     internal init(text string) {
         Value = J.Parse(text)
         Digest = Data.Hash(text)
@@ -275,6 +276,29 @@ internal class Policy {
             throw Exception("Policy version must be 1 or 2")
         }
         ProtectedPaths.Validate(J.Get(Value, "protected_paths"))
+        var eligibilityFields int32
+        var scopeFields int32
+        for field in Value.EnumerateObject() {
+            if field.Name == "eligibility" {
+                eligibilityFields++
+            }
+            if field.Name == "approval_scope" {
+                scopeFields++
+            }
+        }
+        if eligibilityFields > 0 || scopeFields > 0 {
+            RequestData.Parse(text, 1024 * 1024)
+            Eligibility = J.Text(Value, "eligibility")
+            if eligibilityFields != 1 || scopeFields != 1 || J.Number(Value, "version") != 2 || J.Text(
+                Value,
+                "approval_scope"
+            ) != "task" ||
+                (Eligibility != "open" && Eligibility != "trusted" && Eligibility != "manual") {
+                throw Exception(
+                    "Task eligibility requires version 2, approval_scope task, and eligibility open, trusted or manual"
+                )
+            }
+        }
         var modes int32
         var modelMaps int32
         for field in Value.EnumerateObject() {

@@ -403,7 +403,7 @@ internal class CorrectionPublication {
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(J.Get(viewer, "id"))
-            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"))
+            let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
                 if !Correction.Same(J.Get(record, key), J.Get(pinned, key)) {

@@ -493,7 +493,6 @@ internal class CliDiscovery {
                 []string{"recover", "--run=x", "--seconds=0"},
                 []string{"checks", "--run=x", "--timeout=86401"},
                 []string{"verify-pr", "--repo=owner/project", "--pr=no"},
-                []string{"approve", "--repo=owner/project", "--issue=1"},
                 []string{"approve", "--base-branch=bad..branch", "--help"},
                 []string{"approve", "--base-branch=release//next", "--help"},
                 []string{"approve", "--base-branch=release.lock", "--help"},

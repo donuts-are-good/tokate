@@ -71,6 +71,7 @@ internal class Cli {
         internal let Options[]CliOption = []CliOption{
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
+            CliOption("operation", "ACTION", "Access operation", "init trust untrust grant remove deny restore check"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption(
                 "base-branch",
@@ -185,6 +186,15 @@ internal class Cli {
                 effects: "local_read local_write github_read"
             ),
             CliCommand(
+                "access",
+                "repo,donor,issue,operation",
+                "repo,operation",
+                "Owner: mutate numeric donor membership, or check current task eligibility; no inference.",
+                "--repo OWNER/REPO --operation ACTION [--donor LOGIN] [--issue N]",
+                "access --repo owner/project --operation trust --donor donor",
+                effects: "local_read github_read github_write"
+            ),
+            CliCommand(
                 "coordination",
                 "repo,issue",
                 "repo,issue",
@@ -284,9 +294,9 @@ internal class Cli {
             CliCommand(
                 "approve",
                 "repo,issue,donor,base-branch",
-                "repo,issue,donor",
-                "Write GitHub approval, assignment and label; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
+                "repo,issue",
+                "Write GitHub task approval and label; legacy scope also requires one donor assignment.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH]",
                 "approve https://github.com/owner/project/issues/42 --donor donor"
                 ,
                 effects: "local_read github_read github_write"
