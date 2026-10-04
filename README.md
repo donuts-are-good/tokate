@@ -38,7 +38,7 @@ Review the resulting PR and [required checks](docs/reference.md#review-and-accep
 ## For Donors:
 
 1. Follow the [donor setup guide](AGENTS.md#guide-a-donor) to sign in and check your tools with `tokate doctor`.
-2. Get assigned to an approved issue and create or reuse your fork.
+2. Get assigned to an approved issue. Tokate discovers or creates your fork; use `--fork DONOR/NAME` for an explicit selection.
 3. Choose an allowed model/effort pair and start:
 
 ```sh

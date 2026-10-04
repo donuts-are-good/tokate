@@ -105,6 +105,8 @@ internal class Startup {
                 }
             }
             if command == "work" ||
+                command == "claim" ||
+                command == "prepare" ||
                 command == "external" ||
                 command == "publish" ||
                 command == "submit" ||

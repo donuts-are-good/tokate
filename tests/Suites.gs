@@ -183,6 +183,9 @@ internal class SuiteDriver {
                 case "Overlaps" {
                     OverlapChecks.All(binary)
                 }
+                case "Preparation" {
+                    PreparationChecks.All(binary)
+                }
                 case "Targets" {
                     TargetBranches.All(binary)
                 }
@@ -231,6 +234,7 @@ internal class SuiteDriver {
                     Job("Amendment"),
                     Job("Decree"),
                     Job("Targets"),
+                    Job("Preparation"),
                     Job("Overlaps")
                 }
                 SuiteDriver(data.Root, jobs).Run(report)

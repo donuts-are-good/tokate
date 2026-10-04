@@ -182,7 +182,7 @@ internal class PublicOutput {
             let value = run.Element()
             let result = Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared"
             )
             if run.Number("version") == 1 || run.Text("source") == "tokate" {
                 result["coding_seconds"] = run.Number("seconds") - run.Number("verification_reserve")
@@ -262,7 +262,14 @@ internal class PublicOutput {
                     artifacts[name] = path
                 }
             }
-            for name in[]string{"original-evidence", "amendments"} {
+            for name in[]string{
+                "original-evidence",
+                "amendments",
+                "coding",
+                "checkout",
+                "coding.staging",
+                "checkout.staging"
+            } {
                 let path = Path.Combine(directory, name)
                 if Directory.Exists(path) {
                     artifacts[name.Replace('-', '_')] = path
@@ -340,6 +347,10 @@ internal class PublicOutput {
                         }
                     }
                     Actions.Add([]string{"tokate", "status", "--run", RunDirectory, "--json"})
+                    if run.Text("state") == "preparing" && run.Number("preparation_version") == 1 &&
+                        code != "stale_approval" {
+                        Actions.Add([]string{"tokate", "prepare", "--run", RunDirectory, "--json"})
+                    }
                     if code == "" && run.Text("state") == "claimed" &&
                         (run.Number("version") == 1 || run.Text("source") == "tokate") {
                         Actions.Add([]string{"tokate", "work", "--run", RunDirectory, "--json"})

@@ -601,23 +601,10 @@ internal class NativeFlow : IDisposable {
         Reload()
         State["missing_fork"] = JsonValue.Create(true)
         Save()
-        Check.Contains(
-            Call(
-                []string{
-                    "claim",
-                    "--repo",
-                    "owner/project",
-                    "--issue",
-                    "1",
-                    "--model",
-                    "gpt-6.1-sol",
-                    "--effort",
-                    "high"
-                },
-                1
-            ).Error,
-            "gh repo fork owner/project --clone=false"
-        )
+        let run = Claim()
+        Reload()
+        Check.That(Check.Text(State["fork_creations"]) == "1", "Missing fork was not created once")
+        Check.That(Directory.Exists(Path.Combine(run, "checkout")), "Missing fork checkout was not prepared")
         NoInference()
         for status in[]int32{0, 403} {
             let faults = JsonArray()
@@ -642,7 +629,7 @@ internal class NativeFlow : IDisposable {
             )
             Check.Contains(failure.Error, "GitHub read failed")
             Check.That(!failure.Error.Contains("Create a writable fork"), "Non-404 error was treated as missing")
-            Traffic(status == 0 ? 11: 9, 0, 0, status == 0 ? 2: 0, failure)
+            Traffic(status == 0 ? 13: 11, 0, 1, status == 0 ? 2: 0, failure)
             NoInference()
         }
     }
@@ -1094,8 +1081,10 @@ internal class NativeFlow : IDisposable {
         Commit("Agent config")
         Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
         Approve()
-        let run = Claim()
-        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Repository Codex configuration")
+        Claim(code: 1)
+        let directories = Directory.GetDirectories(Path.Combine(Temp.Root, "runs"))
+        Check.That(directories.Length == 1, "Rejected repository configuration lost preparation")
+        Check.Contains(Call([]string{"prepare", "--run", directories[0]}, 1).Error, "Repository Codex configuration")
         NoInference()
     }
 
@@ -1218,7 +1207,7 @@ internal class NativeFlow : IDisposable {
             if mode != "push_fail" {
                 Check.Contains(failure.Error, "No automatic retry")
                 Check.Contains(failure.Error, "outcome may be uncertain")
-                flow.Traffic(26, 1, 16, 0)
+                flow.Traffic(44, 1, 32, 0)
             }
             let failed = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(failed["state"]) == "generated", "Publication failure discarded generated work")
@@ -1230,9 +1219,9 @@ internal class NativeFlow : IDisposable {
             flow.ResetTraffic()
             flow.Call([]string{"publish", "--run", run}, traffic: true)
             if mode == "pr_fail_after_create" {
-                flow.Traffic(10, 0, 0, 0)
+                flow.Traffic(11, 0, 0, 0)
             } else {
-                flow.Traffic(18, 1, 8, 0)
+                flow.Traffic(20, 1, 9, 0)
             }
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Publication retry ran inference")
@@ -1494,19 +1483,19 @@ internal class NativeFlow : IDisposable {
             },
             traffic: true
         )
-        Traffic(9, 1, 0, 0, claimed)
+        Traffic(33, 1, 21, 0, claimed)
         let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
         Mode("push_fail")
         Call([]string{"work", "--run", run}, 1)
         Mode("")
         ResetTraffic()
         let published = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(18, 1, 8, 0, published)
+        Traffic(20, 1, 9, 0, published)
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Publishing repeated inference")
         ResetTraffic()
         let repeated = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(10, 0, 0, 0, repeated)
+        Traffic(11, 0, 0, 0, repeated)
         Reload()
         Check.That(
             State["pulls"]?.AsArray().Count == 1 && Check.Text(State["exec_count"]) == "1",
@@ -1579,7 +1568,7 @@ internal class NativeFlow : IDisposable {
             }
             flow.ResetTraffic()
             let claimed = flow.SameRepositoryClaim()
-            flow.Traffic(9, 1, 1, 0, claimed)
+            flow.Traffic(31, 1, 21, 0, claimed)
             let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(saved["state"]) == "claimed", "Equivalent ETags blocked claim: " + mode)
@@ -1625,7 +1614,14 @@ internal class NativeFlow : IDisposable {
                     Check.Text(calls[calls.Count - 1]?["conditional"]) == (initial ? "false": "true"),
                     "Malformed initial tag was cached"
                 )
-                Check.That(!Directory.Exists(Path.Combine(Temp.Root, "runs")), "Rejected 304 created a run")
+                for directory in Directory.Exists(Path.Combine(Temp.Root, "runs")) ? Directory.GetDirectories(
+                    Path.Combine(Temp.Root, "runs")
+                ): []string{} {
+                    Check.That(
+                        !Directory.Exists(Path.Combine(directory, "checkout")),
+                        "Rejected 304 created a checkout"
+                    )
+                }
                 NoInference()
                 NoPr()
             }
@@ -1647,7 +1643,11 @@ internal class NativeFlow : IDisposable {
             let failed = SameRepositoryClaim(1)
             Check.Contains(failed.Error, "HTTP 304 without a matching in-memory body")
             Traffic(9, 0, 1, 0, failed)
-            Check.That(!Directory.Exists(Path.Combine(Temp.Root, "runs")), "Unmatched 304 created a run")
+            for directory in Directory.Exists(Path.Combine(Temp.Root, "runs")) ? Directory.GetDirectories(
+                Path.Combine(Temp.Root, "runs")
+            ): []string{} {
+                Check.That(!Directory.Exists(Path.Combine(directory, "checkout")), "Unmatched 304 created a checkout")
+            }
             NoInference()
             NoPr()
         }
@@ -1663,15 +1663,15 @@ internal class NativeFlow : IDisposable {
             flow.Mode("push_fail")
             flow.ResetTraffic()
             let worked = flow.Call([]string{"work", "--run", run}, 1, traffic: true)
-            flow.Traffic(18, 0, 8, 0, worked)
+            flow.Traffic(35, 0, 23, 0, worked)
             flow.NoPr()
             flow.Mode("")
             flow.ResetTraffic()
             let published = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(18, 1, 8, 0, published)
+            flow.Traffic(20, 1, 9, 0, published)
             flow.ResetTraffic()
             let repeated = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(10, 0, 0, 0, repeated)
+            flow.Traffic(11, 0, 0, 0, repeated)
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Equivalent ETags repeated inference")
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Equivalent ETags duplicated publication")
@@ -1697,7 +1697,13 @@ internal class NativeFlow : IDisposable {
                     let failed = flow.Call([]string{publication ? "publish": "work", "--run", run}, 1, traffic: true)
                     let edited = mode == "after_304_edit"
                     Check.Contains(failed.Error, edited ? "The owner must approve again": "Issue needs Tokate approval")
-                    flow.Traffic((publication ? 12: 10) + (edited ? 2: 0), 0, edited ? 3: 1, 0, failed)
+                    flow.Traffic(
+                        (publication ? 13: 14) + (edited ? 2: 0),
+                        0,
+                        (publication ? 1: 3) + (edited ? 2: 0),
+                        0,
+                        failed
+                    )
                     flow.Reload()
                     var live bool
                     for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
@@ -1708,7 +1714,10 @@ internal class NativeFlow : IDisposable {
                     }
                     Check.That(live, "No live 304 preceded approval change")
                     flow.NoPr()
-                    Check.That(Check.Text(flow.State["exec_count"]) == "1", "Approval change repeated inference")
+                    Check.That(
+                        Check.Text(flow.State["exec_count"]) == (publication ? "1": ""),
+                        "Approval change launched or repeated inference"
+                    )
                 }
             }
         }

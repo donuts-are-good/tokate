@@ -303,23 +303,6 @@ internal class Workflow {
             if args.Command == "work" {
                 DonorSelection.Confirm(args, selection)
             }
-            let head = Data.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
-            if !String.Equals(head.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) {
-                throw Exception("Use a fork owned by your signed-in account")
-            }
-            let headInfo = GitHub.Api("repos/" + head, missing: true)
-            if !J.Bool(J.Get(headInfo, "permissions"), "push") ||
-                (
-                head != repo && !String.Equals(
-                    J.Text(J.Get(headInfo, "parent"), "full_name"),
-                    repo,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            ) {
-                throw Exception(
-                    "Create a writable fork of the upstream repository first: gh repo fork " + repo + " --clone=false"
-                )
-            }
             let run = Data()
             run.Fields["version"] = 1
             run.Fields["id"] = Guid.NewGuid().ToString("N")
@@ -327,7 +310,7 @@ internal class Workflow {
             run.Fields["issue"] = number
             run.Fields["donor"] = donor
             run.Fields["donor_id"] = J.Get(viewer, "id")
-            run.Fields["head_repo"] = head
+            run.Fields["head_repo"] = Data.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
             run.Fields["approval"] = J.Text(record, "sha")
             run.Fields["base"] = J.Text(approval, "base")
             run.Fields["base_branch"] = J.Text(approval, "base_branch")
@@ -358,18 +341,16 @@ internal class Workflow {
             )
             let directory = Path.Combine(root, run.Text("id"))
             PublicOutput.RunDirectory = directory
+            Preparation.Select(run, args.Get("fork"))
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
             Terminal.Step(RuntimeBudget.Description(run))
-            run.Save(directory)
-            GitHub.Api(
-                "repos/" + head + "/git/refs",
-                J.Map("ref", "refs/heads/" + run.Text("branch"), "sha", run.Text("base"))
-            )
-            run.Fields["state"] = "claimed"
-            run.Save(directory)
+            using let lease = Preparation.Lease(directory)
+            Terminal.Step("Preparing contribution. Run: " + directory)
+            Preparation.Initialize(directory, run, args.Get("fork"))
+            Preparation.Complete(directory, run)
             Terminal.Message("Claimed issue #" + number.ToString() + ". Run: " + directory)
             return directory
         }
@@ -407,8 +388,14 @@ internal class Workflow {
                 throw Exception("Invalid saved claim branch")
             }
             let head = Data.Repo(run.Text("head_repo"))
-            if !String.Equals(head.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) {
-                throw Exception("Invalid donor fork")
+            if run.Number("preparation_version") == 0 ||
+                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
+                Preparation.ValidateRepository(
+                    run.Text("repo"),
+                    head,
+                    J.Get(run.Element(), "donor_id"),
+                    GitHub.Api("repos/" + head)
+                )
             }
             Policy(J.Write(J.Get(record, "policy"))).Validate(
                 run.Text("model"),

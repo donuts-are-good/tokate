@@ -50,18 +50,24 @@ internal class V2Contribution {
                 throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
             let fork = Data.Repo(run.Text("head_repo"))
-            if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
-                fork == repo {
-                throw Exception("Use a donor-owned upstream fork")
+            if run.Number("preparation_version") == 0 ||
+                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
+                Preparation.ValidateRepository(
+                    repo,
+                    fork,
+                    J.Get(run.Element(), "donor_id"),
+                    GitHub.Api("repos/" + fork)
+                )
             }
-            if run.Number("seconds") < 1 || run.Number("seconds") > J.Number(policy.Value, "max_seconds") ||
-                (run.Flag("network") && !J.Bool(policy.Value, "allow_network")) {
-                throw Exception("Verification budget or network access exceeds owner policy")
-            }
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             return record
         }
 
         internal func Prepare(args Args) {
+            if args.Get("run") != "" {
+                Preparation.Resume(args.Need("run"))
+                return
+            }
             let repo = Data.Repo(args.Need("repo"))
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
@@ -72,6 +78,7 @@ internal class V2Contribution {
             }
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(repo, issue, donor, J.Get(viewer, "id"))
+            let policy = Policy(J.Write(J.Get(record, "policy")))
             let source = args.Need("source")
             if source != "external" && source != "tokate" {
                 throw Exception("source must be external or tokate")
@@ -80,7 +87,7 @@ internal class V2Contribution {
             var selection = JsonElement{}
             if tools.ValueKind != JsonValueKind.Undefined {
                 RequestData.Tools(tools)
-                Policy(J.Write(J.Get(record, "policy"))).ValidateTools(tools, source)
+                policy.ValidateTools(tools, source)
             }
             let approval = J.Get(record, "approval")
             if source == "tokate" {
@@ -95,7 +102,6 @@ internal class V2Contribution {
                         args.Values["--" + key] = J.Text(declared, key)
                     }
                 }
-                let policy = Policy(J.Write(J.Get(record, "policy")))
                 policy.Digest = J.Text(approval, "policy_hash")
                 selection = DonorSelection.Resolve(args, policy)
                 if tools.ValueKind == JsonValueKind.Undefined {
@@ -141,6 +147,7 @@ internal class V2Contribution {
                 run.Fields["verification_reserve"] = RuntimeBudget.Reserve(args, run.Number("seconds"))
             }
             run.Fields["network"] = args.Get("allow-network") == "true"
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             run.Fields["state"] = "claimed"
             if source == "tokate" {
                 run.Fields["model"] = J.Text(J.Items(tools)[0], "model")
@@ -149,7 +156,6 @@ internal class V2Contribution {
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
             }
-            Recheck(run)
             let root = Path.GetFullPath(
                 args.Get(
                     "runs",
@@ -167,6 +173,7 @@ internal class V2Contribution {
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
+            Preparation.Select(run, args.Get("fork"))
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -174,7 +181,10 @@ internal class V2Contribution {
             if source == "tokate" {
                 Terminal.Step(RuntimeBudget.Description(run))
             }
-            run.Save(directory)
+            using let lease = Preparation.Lease(directory)
+            Terminal.Step("Preparing contribution. Run: " + directory)
+            Preparation.Initialize(directory, run, args.Get("fork"))
+            Preparation.Complete(directory, run)
             Terminal.Message("Prepared contribution. Run: " + directory)
         }
 
