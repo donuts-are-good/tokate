@@ -548,7 +548,19 @@ internal class Fixture {
                     "login",
                     State["viewer_login"] ?? JsonValue.Create(actor) as JsonNode,
                     "id",
-                    State["viewer_id"] ?? JsonValue.Create(123) as JsonNode
+                    State["viewer_id"] ?? JsonValue.Create(
+                        actor == "owner" && Check.Text(State["self_owned"]) != "true" ? 1: 123
+                    ) as JsonNode
+                )
+            )
+        }
+        if path.StartsWith("user/repos?") {
+            if State["fork_discovery"] != nil {
+                return Answer(State["fork_discovery"] ?? JsonArray())
+            }
+            return Answer(
+                Check.Text(State["missing_fork"]) == "true" ? JsonArray(): Check.Json(
+                    "[{\"full_name\":\"donor/project\",\"fork\":true,\"owner\":{\"id\":123}}]"
                 )
             )
         }
@@ -571,6 +583,12 @@ internal class Fixture {
         let folder = repo == "owner/project" ? "upstream": "fork"
         let tail = String.Join("/", parts, 3, parts.Length - 3)
         if tail == "" {
+            if folder == "fork" && State["fork_pending_reads"] != nil && Int32.Parse(
+                Check.Text(State["fork_pending_reads"])
+            ) > 0 {
+                State["fork_pending_reads"] = JsonValue.Create(Int32.Parse(Check.Text(State["fork_pending_reads"])) - 1)
+                return Response(404)
+            }
             if folder == "fork" && Check.Text(State["missing_fork"]) == "true" {
                 return Response(404)
             }
@@ -587,14 +605,64 @@ internal class Fixture {
                         "login",
                         parts[1],
                         "id",
-                        folder == "fork" ? (
-                            State["fork_owner_id"] ?? JsonValue.Create(123) as JsonNode
-                        ): JsonValue.Create(1)
+                        folder == "fork" ? (State["fork_owner_id"] ?? JsonValue.Create(123) as JsonNode): (
+                            State["upstream_owner_id"] ?? JsonValue.Create(
+                                Check.Text(State["self_owned"]) == "true" ? 123: 1
+                            ) as JsonNode
+                        )
                     ),
+                    "fork",
+                    folder == "fork",
                     "permissions",
-                    Check.Map("push", actor == parts[1]),
+                    Check.Map("push", State["fork_push"] ?? JsonValue.Create(actor == parts[1]) as JsonNode),
                     "parent",
-                    Check.Map("full_name", "owner/project")
+                    Check.Map(
+                        "full_name",
+                        State["fork_parent"] ?? JsonValue.Create("owner/project") as JsonNode,
+                        "id",
+                        State["repo_id"] ?? JsonValue.Create(1) as JsonNode
+                    )
+                )
+            )
+        }
+        if tail == "forks" && method == "POST" {
+            if !Directory.Exists(Path.Combine(Root, "fork")) {
+                Check.Success(
+                    Check.Run(
+                        "/usr/bin/git",
+                        []string{"clone", "--bare", Path.Combine(Root, "upstream"), Path.Combine(Root, "fork")},
+                        Env
+                    )
+                )
+            }
+            State["fork_creations"] = JsonValue.Create(
+                Int32.Parse(Check.Text(State["fork_creations"] ?? JsonValue.Create(0))) + 1
+            )
+            State["missing_fork"] = JsonValue.Create(false)
+            if State["fork_creation_pending"] != nil {
+                State["fork_pending_reads"] = State["fork_creation_pending"]?.DeepClone()
+            }
+            State["fork_name"] = JsonValue.Create("donor/" + Check.Text(body["name"]))
+            Save()
+            if Check.Text(State["mode"]) == "lost_fork_response" {
+                State["mode"] = JsonValue.Create("")
+                Save()
+                return Response(500)
+            }
+            return Answer(
+                Check.Map(
+                    "id",
+                    2,
+                    "full_name",
+                    "donor/" + Check.Text(body["name"]),
+                    "fork",
+                    true,
+                    "owner",
+                    Check.Map("id", 123),
+                    "parent",
+                    Check.Map("full_name", "owner/project", "id", 1),
+                    "permissions",
+                    Check.Map("push", true)
                 )
             )
         }
@@ -1023,10 +1091,20 @@ internal class Fixture {
             return Answer(Check.Map("sha", sha))
         }
         if tail == "git/refs" {
+            if folder == "fork" && Check.Text(body["ref"]).StartsWith("refs/heads/tokate/") {
+                Git(folder, []string{"fetch", Path.Combine(Root, "upstream"), Check.Text(body["sha"])})
+            }
             try {
                 Git(folder, []string{"update-ref", Check.Text(body["ref"]), Check.Text(body["sha"]), String('0', 40)})
             } catch (error Exception) {
                 return Response(422)
+            }
+            if Check.Text(State["mode"]) == "lost_branch_response" && Check.Text(body["ref"]).StartsWith(
+                "refs/heads/tokate/issue-"
+            ) {
+                State["mode"] = JsonValue.Create("")
+                Save()
+                return Response(500)
             }
             return Answer(Check.Map("ref", Check.Text(body["ref"])))
         }
@@ -1270,7 +1348,7 @@ internal class Fixture {
             for arg in args {
                 if arg == "https://github.com/owner/project.git" {
                     command.Add(Path.Combine(Root, "upstream"))
-                } else if arg == "https://github.com/donor/project.git" {
+                } else if arg.StartsWith("https://github.com/donor/") && arg.EndsWith(".git") {
                     command.Add(Path.Combine(Root, "fork"))
                 } else {
                     command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)
@@ -1451,6 +1529,23 @@ internal class Fixture {
                 let issue = latest["issue"] ?? throw Exception("Missing issue")
                 issue["labels"] = JsonArray()
                 File.WriteAllText(StatePath, latest.ToJsonString())
+            }
+            if result.Code == 0 && command.Contains("fetch") && Directory.GetCurrentDirectory().EndsWith(".staging") &&
+                Check.Text(State["preparation_revoke_after_fetch"]) == "true" {
+                State["preparation_revoke_after_fetch"] = nil
+                let issue = State["issue"] ?? throw Exception("Missing issue")
+                issue["labels"] = JsonArray()
+                Save()
+            }
+            let interrupted = Check.Text(State["preparation_interrupt"])
+            if result.Code == 0 && Directory.GetCurrentDirectory().EndsWith(".staging") &&
+                interrupted != "" &&
+                command
+                .Contains(interrupted) {
+                State["preparation_interrupt"] = nil
+                Save()
+                Console.Error.WriteLine("Interrupted staged " + interrupted)
+                return 1
             }
             Console.Write(result.Output)
             Console.Error.Write(result.Error)

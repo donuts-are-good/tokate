@@ -66,7 +66,8 @@ internal class CliCommand {
         name != "ascii" &&
         (
         (Name == "work" && name != "yes" && name != "non-interactive") ||
-            (Name == "checks" && name != "watch" && name != "timeout")
+            (Name == "checks" && name != "watch" && name != "timeout") ||
+            Name == "prepare"
     )
 }
 
@@ -104,7 +105,7 @@ internal class Cli {
                 "N",
                 "Managed verification reserve in seconds; positive and smaller than total; default: 0"
             ),
-            CliOption("fork", "LOGIN/REPO", "Donor fork; default: your login/upstream name"),
+            CliOption("fork", "LOGIN/REPO", "Explicit donor fork; otherwise discover one or create it once"),
             CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
             CliOption("run", "DIR", "Saved run directory"),
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
@@ -227,13 +228,13 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
+                "run,repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
                 "repo,issue,state,source",
-                "Save a v2 run for an existing reservation; no inference or publication.",
-                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]",
+                "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
+                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       tokate prepare --run DIR",
                 "prepare --issue 42 --state SHA --source external --tools tools.json"
                 ,
-                effects: "local_read local_write github_read"
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "external",
@@ -477,7 +478,7 @@ internal class Cli {
                     }
                 }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
-                if command.Name == "work" || command.Name == "checks" {
+                if command.Name == "work" || command.Name == "checks" || command.Name == "prepare" {
                     inputs.Add([]string{"run"})
                 }
                 let effects = J.Map()
@@ -618,8 +619,9 @@ internal class Cli {
                 if command.Has("issue") {
                     text.AppendLine("An issue URL can replace --repo and --issue.")
                 }
-                if name == "work" || name == "checks" {
+                if name == "work" || name == "checks" || name == "prepare" {
                     text.AppendLine(
+                        name == "prepare" ? "Use --run DIR only for recorded preparation before coding; it never resumes coding.":
                         name == "work" ? "For a saved claim, use --run DIR instead of required inputs.":
                         "Use --run DIR instead of --repo/--pr to check a saved run."
                     )
@@ -673,7 +675,8 @@ internal class Cli {
                     throw Exception("--tools requires an explicit corrected --commit")
                 }
             }
-            if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
+            if args.Get("run") != "" &&
+                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
                 for key in args.Values.Keys {
                     if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
@@ -762,7 +765,8 @@ internal class Cli {
                     }
                 }
             }
-            if args.Get("run") != "" && (args.Command == "work" || args.Command == "checks") {
+            if args.Get("run") != "" &&
+                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
                 return
             }
             for option in Options {

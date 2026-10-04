@@ -50,9 +50,14 @@ internal class V2Contribution {
                 throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
             let fork = Data.Repo(run.Text("head_repo"))
-            if !String.Equals(fork.Split('/')[0], run.Text("donor"), StringComparison.OrdinalIgnoreCase) ||
-                fork == repo {
-                throw Exception("Use a donor-owned upstream fork")
+            if run.Number("preparation_version") == 0 ||
+                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
+                Preparation.ValidateRepository(
+                    repo,
+                    fork,
+                    J.Get(run.Element(), "donor_id"),
+                    GitHub.Api("repos/" + fork)
+                )
             }
             if run.Number("seconds") < 1 || run.Number("seconds") > J.Number(policy.Value, "max_seconds") ||
                 (run.Flag("network") && !J.Bool(policy.Value, "allow_network")) {
@@ -62,6 +67,10 @@ internal class V2Contribution {
         }
 
         internal func Prepare(args Args) {
+            if args.Get("run") != "" {
+                Preparation.Resume(args.Need("run"))
+                return
+            }
             let repo = Data.Repo(args.Need("repo"))
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
@@ -149,7 +158,6 @@ internal class V2Contribution {
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
             }
-            Recheck(run)
             let root = Path.GetFullPath(
                 args.Get(
                     "runs",
@@ -167,6 +175,7 @@ internal class V2Contribution {
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
+            Preparation.Select(run, args.Get("fork"))
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -174,7 +183,10 @@ internal class V2Contribution {
             if source == "tokate" {
                 Terminal.Step(RuntimeBudget.Description(run))
             }
-            run.Save(directory)
+            using let lease = Preparation.Lease(directory)
+            Terminal.Step("Preparing contribution. Run: " + directory)
+            Preparation.Initialize(directory, run, args.Get("fork"))
+            Preparation.Complete(directory, run)
             Terminal.Message("Prepared contribution. Run: " + directory)
         }
 

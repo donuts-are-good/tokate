@@ -556,14 +556,8 @@ internal class Coordinator {
 
         internal func ValidateFork(repo string, donor string, metadata JsonElement, actor JsonElement) {
             let fork = Data.Repo(J.Text(metadata, "fork"))
-            if !String.Equals(fork.Split('/')[0], donor, StringComparison.OrdinalIgnoreCase) || fork == repo {
-                throw Exception("Use a donor-owned fork")
-            }
             let info = GitHub.Api("repos/" + fork)
-            if !String.Equals(J.Text(J.Get(info, "parent"), "full_name"), repo, StringComparison.OrdinalIgnoreCase) ||
-                RequestData.PositiveId(J.Get(J.Get(info, "owner"), "id")) != RequestData.PositiveId(actor) {
-                throw Exception("Fork ownership or upstream identity differs")
-            }
+            Preparation.ValidateRepository(repo, fork, actor, info, push: false)
             let reference = GitHub.Api("repos/" + fork + "/git/ref/heads/" + J.Text(metadata, "branch"))
             if J.Text(J.Get(reference, "object"), "sha") != J.Text(metadata, "head") {
                 throw Exception("Fork branch does not point to the exact declared commit")

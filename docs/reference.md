@@ -104,11 +104,11 @@ gh auth login
 codex login
 tokate doctor --managed --auth
 tokate select --repo OWNER/REPO --non-interactive
-gh repo fork OWNER/REPO --clone=false
 ```
 
-Use your own GitHub account and ChatGPT login. Reuse an existing fork; `--fork
-DONOR/NAME` selects a renamed fork. Managed execution supports native Codex/OpenAI.
+Use your own GitHub account and ChatGPT login. Fresh preparation discovers a
+writable fork or creates one once; `--fork DONOR/NAME` selects a renamed fork.
+Ambiguous or incomplete discovery requires explicit selection. Managed execution supports native Codex/OpenAI.
 Credentials remain with their tools; never paste tokens into repository files.
 
 `doctor` defaults to managed diagnostics; `--owner` and `--external` select other
@@ -192,7 +192,8 @@ Inspect `status` and private evidence first. No recovery command starts inferenc
 | Completed v1 turn, verification failed | Fix the cause; `tokate recover --run DIR --seconds 300` reruns all checks under unchanged approval. |
 | Successful v1 work, publication failed | `tokate publish --run DIR` inspects existing publication and resumes without inference. |
 | Stale approval or expired reservation | Return to the owner. |
-| Existing claim branch | Find the existing run; do not delete it to silently restart. |
+| Interrupted fresh preparation | `tokate prepare --run DIR` inspects recorded fork, branch and checkout state without inference, checks or publication. |
+| Dirty, divergent or unidentified preparation | Inspect preserved work and use its original run, or move local files aside explicitly; do not delete branches to restart. |
 
 For an explicit correction **before first publication**:
 

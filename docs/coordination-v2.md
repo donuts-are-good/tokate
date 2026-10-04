@@ -235,8 +235,15 @@ tokate prepare --repo OWNER/REPO --issue 42 --state STATE_SHA \
   --source external --tools tools.json --fork DONOR/REPO
 ```
 
-Work in your own tool and push the result to your donor-owned upstream fork, on
-`tokate/v2-RESERVATION_UUID`. Then run:
+Preparation creates or reuses a verified donor fork and prepares `RUN_DIR/coding`
+at the approved source revision on `tokate/v2-RESERVATION_UUID`. Code with your own
+tool, then push that branch to the selected fork. The upstream itself is allowed
+only when its numeric owner ID equals your authenticated donor ID. Write access
+alone does not qualify. `tokate prepare --run RUN_DIR` resumes recorded preparation
+before coding; dirty or divergent work is preserved for explicit inspection.
+See `tokate prepare --help` and [transparency](transparency.md).
+
+Then run:
 
 ```sh
 tokate external --run RUN_DIR --commit EXACT_COMMIT_SHA
