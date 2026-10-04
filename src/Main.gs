@@ -205,6 +205,8 @@ func Dispatch(options Args) int32 {
         }
     } else if options.Command == "publish" {
         Publication.Publish(Path.GetFullPath(options.Need("run")))
+    } else if options.Command == "overlaps" {
+        Overlaps.Run(options)
     } else if options.Command == "checks" {
         return Publication.Checks(options)
     } else if options.Command == "policy" {

@@ -273,6 +273,12 @@ internal class ProtectedPaths {
             fork string,
             head string
         ) {
+            for path in Diff(repo, base, fork, head) {
+                Check(policy, approval, path)
+            }
+        }
+
+        internal func Diff(repo string, base string, fork string, head string) HashSet[string] {
             Data.Repo(repo)
             Data.Repo(fork)
             Data.CommitSha(base)
@@ -292,13 +298,14 @@ internal class ProtectedPaths {
                 throw Exception("Missing, truncated or mismatched approved-base-to-head diff evidence")
             }
             let filenames = HashSet[string](StringComparer.Ordinal)
+            let endpoints = HashSet[string](StringComparer.Ordinal)
             for file in files.EnumerateArray() {
                 let path = J.Text(file, "filename")
                 Relative(path)
-                Check(policy, approval, path)
                 if !filenames.Add(path) {
                     throw Exception("Duplicate GitHub file diff evidence")
                 }
+                endpoints.Add(path)
                 let status = J.Text(file, "status")
                 if status != "added" &&
                     status != "removed" &&
@@ -312,9 +319,10 @@ internal class ProtectedPaths {
                 if status == "renamed" || previous.ValueKind != JsonValueKind.Undefined {
                     let name = J.Text(file, "previous_filename")
                     Relative(name)
-                    Check(policy, approval, name)
+                    endpoints.Add(name)
                 }
             }
+            return endpoints
         }
     }
 }

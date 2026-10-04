@@ -110,6 +110,7 @@ internal class Cli {
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
             CliOption("pr", "N", "Positive pull request number"),
+            CliOption("prs", "N,N", "Explicit selection of 2 to 16 unique positive PR numbers"),
             CliOption("watch", "", "Wait for checks; default: off"),
             CliOption("timeout", "N", "Check wait limit, 1..86400 seconds; default: 1200"),
             CliOption("state", "SHA", "Exact coordination-state commit"),
@@ -392,6 +393,15 @@ internal class Cli {
                 effects: "local_read github_read"
             ),
             CliCommand(
+                "overlaps",
+                "repo,prs",
+                "repo,prs",
+                "Read selected contribution filename overlap and native issue dependencies; advisory only.",
+                "--repo OWNER/REPO --prs N,N",
+                "overlaps --repo owner/project --prs 12,34",
+                effects: "local_read github_read"
+            ),
+            CliCommand(
                 "checks",
                 "run,repo,pr,watch,timeout",
                 "repo,pr",
@@ -619,6 +629,25 @@ internal class Cli {
             return text.ToString().TrimEnd()
         }
 
+        internal func PullNumbers(value string) List[int32] {
+            let parts = value.Split(',')
+            if parts.Length < 2 || parts.Length > 16 {
+                throw Exception("--prs requires 2 to 16 unique positive PR numbers")
+            }
+            let numbers = List[int32]()
+            let seen = HashSet[int32]()
+            for part in parts {
+                var number int32
+                if !Regex.IsMatch(part, "^[0-9]+\\z") || !Int32.TryParse(part, out number) || number < 1 || !seen.Add(
+                    number
+                ) {
+                    throw Exception("--prs requires 2 to 16 unique positive PR numbers")
+                }
+                numbers.Add(number)
+            }
+            return numbers
+        }
+
         internal func Validate(args Args) {
             let command = Find(args.Command)
             if args.Command == "doctor" {
@@ -656,6 +685,9 @@ internal class Cli {
             }
             if args.Get("verification-reserve") != "" && args.Command == "prepare" && args.Get("source") != "tokate" {
                 throw Exception("--verification-reserve requires --source tokate")
+            }
+            if args.Get("prs") != "" {
+                PullNumbers(args.Get("prs"))
             }
             for key in[]string{"seconds", "verification-reserve", "timeout", "pr"} {
                 if args.Get(key) != "" {

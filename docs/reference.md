@@ -242,6 +242,22 @@ Revocation or target movement invalidates readiness. No automatic rebase, confli
 resolver, force push or inference is supplied. See [coordination](coordination-v2.md#compatibility-comes-first)
 for v2 state and coordinator requirements.
 
+## Check contribution overlap
+
+```sh
+tokate overlaps --repo OWNER/REPO --prs 12,34
+```
+
+Select 2 to 16 distinct PRs in one repository. This read-only command reports
+observed heads, selected targets, checks, filename overlap and native GitHub
+`blocked_by` dependencies. It never executes PR code.
+
+Filename overlap is advisory; disjoint files do not prove compatibility.
+Incomplete comparison evidence remains unknown. Open dependencies block their
+dependency gate; closed-completed removes only that gate. Other resolutions need
+owner review. The report grants no acceptance or merge order. Recheck `verify-pr`
+and exact-head `checks` after changes.
+
 ## Review and accept
 
 ```sh

@@ -654,7 +654,9 @@ internal class Fixture {
                 "merge_base_commit",
                 Check.Map("sha", Git("upstream", []string{"merge-base", comparison[0], sha}))
             )
-            let fault = Check.Text(State["diff_fault"])
+            let fault = Check.Text(State["overlap_diff_fault_head"]) != "" && Check.Text(
+                State["overlap_diff_fault_head"]
+            ) != sha ? "": Check.Text(State["diff_fault"])
             if fault == "missing-files" {
                 value.AsObject().Remove("files")
             } else if fault == "truncated-files" {
@@ -696,9 +698,20 @@ internal class Fixture {
             if effect == "head" {
                 let head = State["pulls"]?[0]?["head"] ?? throw Exception("Missing PR head")
                 head["sha"] = JsonValue.Create(String('a', 40))
+            } else if effect == "retarget" {
+                let target = State["pulls"]?[0]?["base"] ?? throw Exception("Missing PR target")
+                target["ref"] = JsonValue.Create("release")
             } else if effect == "approval" {
                 let issue = State["issue"] ?? throw Exception("Missing issue")
                 issue["labels"] = JsonArray()
+            }
+            let move = State["overlap_move_target"]
+            if move != nil {
+                Git(
+                    "upstream",
+                    []string{"update-ref", "refs/heads/" + Check.Text(move["branch"]), Check.Text(move["sha"])}
+                )
+                State["overlap_move_target"] = nil
             }
             State["check_read_effect"] = nil
             let runs = JsonArray()
@@ -756,7 +769,17 @@ internal class Fixture {
             )
         }
         if tail.StartsWith("issues/") {
-            let issue = State["issue"] ?? throw Exception("Missing issue")
+            let issueNumber = tail.Split('/')[1]
+            if tail.Contains("/dependencies/blocked_by?") {
+                let pages = State["dependency_pages"]?[issueNumber]
+                let page = Int32.Parse(tail.Substring(tail.LastIndexOf("page=") + 5))
+                if let values = pages {
+                    let entries = values.AsArray()
+                    return Answer(page <= entries.Count ? entries[page - 1] ?? JsonArray(): JsonArray())
+                }
+                return Answer(JsonArray())
+            }
+            let issue = State["issues"]?[issueNumber] ?? State["issue"] ?? throw Exception("Missing issue")
             if tail.Contains("/comments?") && method == "GET" {
                 let comments = JsonArray()
                 if let saved = State["comments"] {
@@ -1041,16 +1064,34 @@ internal class Fixture {
             ) ??
                 ""
             let target = filter == "" ? "": Uri.UnescapeDataString(filter.Substring(5))
+            let headFilter = Array.Find(
+                tail.Substring(tail.IndexOf('?') + 1).Split('&'),
+                field -> field.StartsWith("head=", StringComparison.Ordinal)
+            ) ??
+                ""
+            let head = headFilter == "" ? "": Uri.UnescapeDataString(headFilter.Substring(5))
             let pulls = JsonArray()
             for pull in(State["pulls"] ?? JsonArray()).AsArray() {
-                if target == "" || Check.Text(pull["base"]?["ref"]) == target {
+                if (target == "" || Check.Text(pull["base"]?["ref"]) == target) &&
+                    (
+                    head == "" || Check.Text(pull["head"]?["repo"]?["owner"]?["login"]) + ":" + Check.Text(
+                        pull["head"]?["ref"]
+                    ) == head
+                ) {
                     pulls.Add(pull.DeepClone())
                 }
             }
             return Answer(pulls)
         }
         if tail.StartsWith("pulls/") {
-            let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+            let number = tail.Split('/')[1]
+            var selected JsonNode? = nil
+            for candidate in State["pulls"]?.AsArray() ?? JsonArray() {
+                if Check.Text(candidate["number"]) == number {
+                    selected = candidate
+                }
+            }
+            let pull = selected ?? throw Exception("Missing PR")
             if method == "PATCH" {
                 if Check.Text(State["mode"]) == "body_fail" {
                     return Response(500)
@@ -1073,8 +1114,9 @@ internal class Fixture {
             }
             let headLogin = Check.Text(body["head"]).Split(':')[0]
             let branch = Check.Text(body["head"]).Split(':')[1]
-            body["number"] = JsonValue.Create(10)
-            body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/10")
+            let number = Check.Text(State["multiple_pulls"]) == "true" ? 9 + count: 10
+            body["number"] = JsonValue.Create(number)
+            body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/" + number.ToString())
             body["state"] = JsonValue.Create("open")
             body["user"] = Check.Map("login", actor, "id", 123)
             body["head"] = Check.Map(
