@@ -65,7 +65,7 @@ main() {
     tokate_os=$(uname -s)
     [ "$tokate_os" = Linux ] || fail "Unsupported operating system: $tokate_os. Tokate requires Linux x86_64 with glibc 2.34+; Windows and macOS are not supported."
     [ -n "${HOME:-}" ] && [ "${HOME#/}" != "$HOME" ] || fail 'HOME must be an absolute path.'
-    tokate_shell=${SHELL:-/bin/sh}
+    tokate_shell=$(printenv SHELL 2>/dev/null) || tokate_shell=
     tokate_bin="$HOME/.local/bin/tokate"
     tokate_data="$HOME/.local/share/tokate"
     if [ "$tokate_action" != install ]; then
@@ -82,6 +82,11 @@ main() {
         fi
         printf 'Tokate removed. Saved runs and shell setup markers were kept.\n'
         return
+    fi
+    if [ -z "$tokate_shell" ] && command -v getent >/dev/null 2>&1; then
+        if tokate_uid=$(id -u 2>/dev/null) && tokate_account=$(getent passwd "$tokate_uid" 2>/dev/null); then
+            tokate_shell=${tokate_account##*:}
+        fi
     fi
     tokate_arch=$(uname -m)
     [ "$tokate_arch" = x86_64 ] || fail "Unsupported architecture: $tokate_arch. Install on Linux x86_64; ARM64 is not supported."
@@ -129,7 +134,13 @@ main() {
     printf 'Installed Tokate %s.\nUpdate: tokate update\nRemove: tokate uninstall\n' "${tokate_tag#v}"
     case ":$PATH:" in
         *":$HOME/.local/bin:"*) printf 'Run tokate --help to get started.\n' ;;
-        *) printf 'Open a new terminal, then run tokate --help.\nFor this terminal: %s --help\n' "$tokate_bin" ;;
+        *)
+            case "${tokate_shell##*/}" in
+                bash|zsh|fish) printf 'Open a new terminal, then run tokate --help.\n' ;;
+                *) printf 'Add ~/.local/bin to PATH in your shell startup file.\nBash/Zsh: . "$HOME/.local/share/tokate/env"\nFish: fish_add_path "$HOME/.local/bin"\n' ;;
+            esac
+            printf 'For this terminal: %s --help\n' "$tokate_bin"
+            ;;
     esac
 }
 

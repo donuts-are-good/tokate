@@ -244,6 +244,7 @@ internal class SuiteDriver {
                     Console.WriteLine(
                         "PASS installer lifecycle, failed updates, credential boundary, and offline removal"
                     )
+                    Installer.ShellDetection(project, binary)
                     Installer.RefuseInvalidPath(project)
                     Console.WriteLine("PASS installer rejects symlink and directory replacement")
                     Installer.RefuseUnsupportedPlatform(project, binary)

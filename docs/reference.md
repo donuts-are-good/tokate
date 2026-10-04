@@ -22,7 +22,9 @@ before replacing `~/.local/bin/tokate`. Checksums detect corruption, not a compr
 release account. [Inspect the installer](../site/install.sh) or install a verified
 archive manually from [Releases](https://github.com/obselate/tokate/releases).
 
-Open a new terminal for PATH setup. Update/uninstall manage the installer location;
+PATH setup supports Bash, Zsh and Fish, using the account shell when `SHELL` is absent.
+Open a new terminal if prompted; otherwise follow the printed PATH instructions.
+Update/uninstall manage the installer location;
 uninstall works offline and preserves saved work and credentials. Inactive shell
 hooks remain for reinstall. Manual locations are not managed.
 
