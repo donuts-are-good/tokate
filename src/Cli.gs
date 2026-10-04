@@ -52,7 +52,9 @@ internal class CliCommand {
         Effects = effects
     }
 
-    internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,").Contains("," + name + ",")
+    internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,plain,ascii,").Contains(
+        "," + name + ","
+    )
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
 
@@ -60,6 +62,8 @@ internal class CliCommand {
         name != "help" &&
         name != "traffic" &&
         name != "json" &&
+        name != "plain" &&
+        name != "ascii" &&
         (
         (Name == "work" && name != "yes" && name != "non-interactive") ||
             (Name == "checks" && name != "watch" && name != "timeout")
@@ -69,6 +73,10 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
+            CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
+            CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
+            CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
+            CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
             CliOption("operation", "ACTION", "Access operation", "init trust untrust grant remove deny restore check"),
@@ -118,14 +126,16 @@ internal class Cli {
             CliOption("help", "", "Show help (-h); no tools, network or inference"),
             CliOption("traffic", "", "Print Tokate API counts on stderr; default: off"),
             CliOption("json", "", "Emit one schema-version-1 result on stdout; diagnostics on stderr"),
+            CliOption("plain", "", "Plain human output without color, ornament or animation; --json takes precedence"),
+            CliOption("ascii", "", "Use ASCII ornaments; preserve names and URLs verbatim"),
         }
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "doctor",
+                "owner,managed,external,auth,non-interactive",
                 "",
-                "",
-                "Check tools and sandbox locally; no inference.",
-                "",
+                "Check the selected role locally; no login required unless --auth, no inference.",
+                "[--owner|--managed|--external] [--auth] [--non-interactive]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -543,11 +553,11 @@ internal class Cli {
             return "Usage: tokate <command> [options]\nRun tokate --help for commands."
         }
 
-        private func OptionHelp(text StringBuilder, label string, description string) {
+        private func OptionHelp(text StringBuilder, label string, description string, width int32) {
             text.AppendLine("  " + label)
             var line = "    "
             for word in description.Split(' ', StringSplitOptions.RemoveEmptyEntries) {
-                if line.Length > 4 && line.Length + word.Length + 1 > 78 {
+                if line.Length > 4 && line.Length + word.Length + 1 > width - 2 {
                     text.AppendLine(line)
                     line = "    "
                 }
@@ -557,13 +567,17 @@ internal class Cli {
             text.AppendLine()
         }
 
-        internal func Help(name string = "") string {
+        internal func Help(name string = "", width int32 = 80) string {
             let text = StringBuilder()
             if name == "" {
                 text.AppendLine("Tokate " + Data.Version() + " (toh-KAH-teh)")
                 text.AppendLine("Donate AI usage to approved GitHub issues.\n\nUsage: tokate <command> [options]\n")
                 for command in Commands {
-                    text.AppendLine("  " + command.Name.PadRight(18) + command.Summary.Replace("\n", " "))
+                    if width < 80 {
+                        OptionHelp(text, command.Name, command.Summary.Replace("\n", " "), width)
+                    } else {
+                        text.AppendLine("  " + command.Name.PadRight(18) + command.Summary.Replace("\n", " "))
+                    }
                 }
                 text.AppendLine("\nUse tokate <command> --help, tokate help <command>, or -h for details.")
                 text.AppendLine(
@@ -571,6 +585,9 @@ internal class Cli {
                 )
                 text.AppendLine(
                     "Explicit --repo OWNER/REPO and --issue N remain available. PRs are drafts; owners review and merge."
+                )
+                text.AppendLine(
+                    "Human output: --plain or --ascii. NO_COLOR and TERM=dumb select plain text in terminals."
                 )
             } else {
                 let command = Find(name)
@@ -584,7 +601,8 @@ internal class Cli {
                     OptionHelp(
                         text,
                         "--" + option.Name + (option.Value == "" ? "": " " + option.Value) + required,
-                        option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")")
+                        option.Describe(name) + (option.Choices == "" ? "": " (" + option.Choices + ")"),
+                        width
                     )
                 }
                 if command.Has("issue") {
@@ -603,6 +621,17 @@ internal class Cli {
 
         internal func Validate(args Args) {
             let command = Find(args.Command)
+            if args.Command == "doctor" {
+                var scopes int32
+                for key in[]string{"owner", "managed", "external"} {
+                    if args.Get(key) == "true" {
+                        scopes++
+                    }
+                }
+                if scopes > 1 {
+                    throw Exception("Choose one doctor scope: --owner, --managed or --external")
+                }
+            }
             if args.Command == "recover" {
                 if args.Get("prepare") == "true" &&
                     (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {

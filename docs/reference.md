@@ -158,6 +158,29 @@ Unrestricted policy lists known managed pairs from the same offline catalog; it
 never selects an alternative automatically. External and mixed-tool declarations
 still validate every tool against owner policy.
 
+### Human terminal output
+
+Human output uses Tokate's parchment, antique gold, sage, terracotta and celestial
+blue accents with the terminal's default foreground for body text. A small solar
+wordmark and fine rule introduce help, diagnostics and status; no custom font,
+images, animation or fullscreen interface is needed. Color-capable terminals use
+Spectre.Console's truecolor or 256-color rendering when advertised by `COLORTERM`
+or `TERM`, with an eight-color fallback. `COLORFGBG` with a dark background (0 or 8)
+selects lighter accents; other terminals use restrained midtone accents.
+
+Every command accepts `--plain` for human text without ANSI, ornaments or animation,
+and `--ascii` for ASCII ornaments in styled terminals. `NO_COLOR` (even empty)
+and `TERM=dumb` automatically use plain human output in terminals. ASCII
+fallback affects ornaments, preserving Unicode names and URLs. `--json` takes
+precedence over these presentation flags and environment settings.
+
+Help and labeled rows adapt to terminal width. Status and individual checks use
+words as well as accents. Long names, paths, URLs and executable commands remain
+complete; terminals may soft-wrap long tokens. Human text strips terminal escape
+sequences and invisible formatting controls and treats markup literally. Use
+`--json` for automation. No-flag piped `policy` and `status` retain their legacy
+JSON forms. Use `--plain` for redirected human text.
+
 ### Explicit structured output
 
 Every public command accepts `--json`, including `doctor`, `update`, `uninstall`,
@@ -492,20 +515,54 @@ A reserve does not guarantee completed coding or successful checks, restrict
 repository commands, or provide retries, extensions or continuation.
 
 
-Startup checks warn about missing tools. Owner commands work without Codex.
-`doctor` checks all tools and probes the real managed sandbox without login or
-inference. Run it from the repository root: when that directory contains
-`global.json`, the same probe also starts .NET/MSBuild using that file's SDK
-selection rules. Linked `global.json` files are refused. Install the required SDK in a standard system path; a
-home-directory SDK is unavailable inside the sandbox. This checks SDK startup,
-not dependency restore, the build, authentication, or model access. `NO_COLOR`
-disables styling. Redirected output is plain, and `policy` and `status` output
-JSON when piped.
+Startup checks execute only the tools required by the accepted command path.
+Local help, version, completion, defaults, status and init require no donor tools
+or login. Owner GitHub commands require GitHub CLI and the subprocess runner,
+not Codex. Selection, claim and managed preparation also require native Codex
+for the accepted offline control/catalog probes; external preparation does not.
+External verification, recovery and amendments require the independent verifier
+at `/usr/bin/bwrap`, without Codex. A failed tool startup blocks the action.
+
+`doctor` defaults to local managed Codex donor diagnostics. Explicit scopes are
+`--owner`, `--managed` and `--external`; choose at most one. The scopes never
+prompt and accept `--non-interactive` and `--json`:
+
+```sh
+tokate doctor --owner --non-interactive --json
+tokate doctor --managed --non-interactive --json
+tokate doctor --external --non-interactive --json
+tokate doctor --owner --auth --json
+```
+
+Owner diagnostics execute `setsid --version` and `gh --version`. Managed donor
+diagnostics additionally execute Git, native Codex and bubblewrap version checks,
+then probe the real managed sandbox without login or inference. External donor
+diagnostics execute Git and `/usr/bin/bwrap` version checks and probe independent
+verification isolation without discovering or launching Codex. Each result lists
+the exact checked tools/capabilities, statuses and repair instructions. Missing,
+failed and skipped tools are distinct; a skipped required probe is a failure.
+Sandbox failures use `verification_failed`; failed pinned toolchains use
+`missing_tools` with a separate `toolchain` diagnostic.
+
+Authentication is checked only with explicit `--auth`: `gh auth status
+--hostname github.com` in every scope, and `codex login status` for managed donors.
+Only sanitized status and repair actions are reported, never raw tool output or
+credential values. No credential stores or authentication configuration are read
+by Tokate. Tool-owned status reports do not prove repository permissions.
+
+Run donor diagnostics from the repository root: when that directory contains
+`global.json`, the probe also starts .NET/MSBuild using that file's SDK selection
+rules. Linked `global.json` files are refused. Install the required SDK in a
+standard system path; home-directory tools are unavailable inside the sandbox.
+This checks SDK startup, not dependency restore or builds. PATH discovery, tool
+startup, login and catalog data never prove model availability or subscription
+allowance. No diagnostic runs inference, installs tools or changes security settings.
+`NO_COLOR` disables styling; redirected output is plain.
 
 Managed run directories, harness homes and tool installations must be outside
-`/tmp`, which is replaced with private temporary storage. The default run
-location meets this requirement. `doctor` uses a private directory under
-`/var/tmp` and removes it after the probe.
+`/tmp`, which is replaced with private temporary storage. The default run location
+meets this requirement. Managed `doctor` uses a private directory under `/var/tmp`;
+external `doctor` uses temporary storage. Both remove their probe files afterwards.
 
 The operating system must permit bubblewrap to create user namespaces. On
 Ubuntu 24.04, an administrator may need to enable an AppArmor profile for

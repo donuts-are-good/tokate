@@ -73,7 +73,20 @@ internal class PublicOutput {
         internal func Tools(tools List[ToolCheck]) {
             let rows = List[Object]()
             for tool in tools {
-                rows.Add(J.Map("name", tool.Name, "status", tool.Status, "path", tool.Path, "hint", tool.Hint))
+                rows.Add(
+                    J.Map(
+                        "name",
+                        tool.Name,
+                        "status",
+                        tool.Status,
+                        "path",
+                        tool.Path,
+                        "hint",
+                        tool.Hint,
+                        "detail",
+                        tool.Detail
+                    )
+                )
             }
             ResultData = J.Map("tools", rows, "tool_count", tools.Count, "inference", false)
         }
@@ -353,7 +366,19 @@ internal class PublicOutput {
                 }
                 Actions.Add(known ? []string{"tokate", "help", Command, "--json"}: []string{"tokate", "help", "--json"})
             } else if code == "missing_tools" {
-                Actions.Add([]string{"tokate", "doctor", "--json"})
+                if Command != "doctor" {
+                    let diagnostic = Command == "work" ||
+                        Command == "select" ||
+                        Command == "claim" ||
+                        (Command == "prepare" && options?.Get("source") == "tokate") ? "--managed": (
+                        Command == "external" ||
+                            Command == "amend" ||
+                            Command == "recover" ||
+                            Command == "submit" ||
+                            Command == "publish" ? "--external": "--owner"
+                    )
+                    Actions.Add([]string{"tokate", "doctor", diagnostic, "--json"})
+                }
             }
             if options != nil && code == "" && Command == "checks" && RunDirectory == "" {
                 Actions.Add(

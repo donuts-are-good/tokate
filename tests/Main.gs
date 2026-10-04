@@ -96,8 +96,16 @@ func Main(args[]string) int32 {
             SuiteDriver.Select(binary, args[1])
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--diagnostics" {
+            Diagnostics.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if args.Length == 1 && args[0] == "--json-cli" {
             CliDiscovery.Structured(binary)
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--terminal" {
+            TerminalOutput.All(binary)
             return 0
         }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--selection" {
