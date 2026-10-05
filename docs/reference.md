@@ -226,8 +226,9 @@ metadata, logs, failure and attribution remain preserved; no missing completion,
 usage, report or verification is reconstructed.
 
 Capture is limited to 1000 changed regular files, 32 MiB of edit bytes and 100000
-inventory paths. Protected paths, unsafe names, symbolic/hard links, submodules,
-file/directory replacements and inconsistent staged edits are refused. Known
+inventory paths. Protected paths, unsafe names, symbolic/hard links, mount
+crossings, submodules, file/directory replacements and inconsistent staged edits
+are refused. Known
 generated directories, including `.verification-data/`, `.tokate-scratch/`,
 credential homes, package caches and build output, are excluded by name without
 reading their contents; logs and runtime artifacts stay with the source. Approved
