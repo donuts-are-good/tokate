@@ -49,6 +49,7 @@ internal open class NativeFixture : IDisposable {
 
     internal func Initialize() {
         Git("init", "-b", "main", Upstream)
+        Git("-C", Upstream, "config", "maintenance.autoDetach", "false")
         Call([]string{"init", "--path", Upstream})
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
@@ -57,6 +58,7 @@ internal open class NativeFixture : IDisposable {
         File.WriteAllText(path, policy.ToJsonString())
         Commit("Initial")
         Git("clone", "--bare", Upstream, Path.Combine(Bin, "fork"))
+        Git("-C", Path.Combine(Bin, "fork"), "config", "maintenance.autoDetach", "false")
     }
 
     public func Dispose() -> Temp.Dispose()
