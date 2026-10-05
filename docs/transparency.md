@@ -179,10 +179,13 @@ run artifacts. The namespace is not whole-harness data isolation: the trusted
 harness retains its host file access outside the private temporary directory.
 
 Independent owner verification directly invokes Linux bubblewrap and does not
-discover or launch Codex. Each command starts with an empty mount namespace:
-the canonical checkout is writable, its actual `.git` directory is read-only,
-and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
-`/etc/alternatives` are read-only when present.
+discover or launch Codex. Tokate copies the candidate checkout, including
+ignored and untracked files, into a private disposable host directory. Ordered
+checks share that copy; the saved checkout is not writable by verification.
+The copy is removed after success, failure or handled interruption. Each command
+starts with an empty mount namespace: the copy is writable and its `.git`
+directory is read-only. `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system
+tool links in `/etc/alternatives` are read-only when present.
 Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
 are copied into private invocation storage (at most 4 MiB each) and mounted
 read-only. Copies stay linked until process cleanup finishes and are then removed,
@@ -202,8 +205,12 @@ cleanup. Missing or unsupported bubblewrap fails closed without host execution.
 Nested sandbox probes remain permitted. This verifies a checkout; it makes no
 claim that coding work performed outside the managed path was sandboxed.
 
-Source: [Process.gs](../src/Execution/Process.gs), [Worker.gs](../src/Execution/Worker.gs),
-[Verification.gs](../src/Execution/Verification.gs), [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
+Source: [Process.gs](../src/Execution/Process.gs),
+[Worker.gs](../src/Execution/Worker.gs),
+[Verification.gs](../src/Execution/Verification.gs),
+[VerificationWorkspace.gs](../src/Execution/VerificationWorkspace.gs),
+[Publish.gs](../src/Publication/Publish.gs), and
+[Amendment.gs](../src/Publication/Amendment.gs).
 
 ## Files, logs, and network destinations
 

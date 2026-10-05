@@ -317,6 +317,18 @@ prose to 2048 characters and summary lists to 64 entries with total counts.
 arguments stay complete; oversized safe output fails with exit 1, possibly after
 effects completed. Inspect state before reinvoking.
 
+Owner verification, including review amendments, runs in one private disposable
+copy of the exact candidate. Commands run in order and share that copy; Git
+metadata is read-only, and verification cannot write the saved checkout. The
+copy is removed on success, failure or handled interruption. Tracked candidate
+changes still fail verification. Logs and results remain in the run; ignored
+and untracked donor files are never cleaned.
+
+`status --run DIR` reports `storage.retained_bytes` and `storage.checkout_bytes`
+(regular-file bytes without following symlinks), plus `storage.next_safe_cleanup`.
+Keep runs for recovery and amendment. After acceptance and evidence backup, deletion
+of a completed run must be explicit: later amendment will no longer be available.
+
 Managed summaries include total `seconds`, `coding_seconds`, `verification_reserve`,
 safe check arguments/exit codes and private `data.artifacts` paths, excluding raw
 logs. Without `--json`, redirected `policy`/`status` retain unenveloped forms;
