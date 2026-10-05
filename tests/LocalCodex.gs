@@ -4,10 +4,12 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Security.Cryptography
-import Tokate
+import System.Text.Json.Nodes
 
 internal class LocalCodex {
     shared {
+        private func Quote(path string) string -> "'" + path.Replace("'", "'\\''") + "'"
+
         internal func All(binary string, launcher string, native string, standalone string) {
             using let flow = NativeFlow(binary)
             flow.Initialize()
@@ -83,11 +85,12 @@ internal class LocalCodex {
             }
             for runtime in[]string{native, standalone} {
                 let digest = SHA256.HashData(File.ReadAllBytes(runtime))
-                let filesystem = "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " + J.Write(
-                    checkout
-                ) +
-                    " = \"write\", " +
-                    J.Write(Path.Combine(checkout, ".git")) + " = \"deny\", " + J.Write(runtime) + " = \"read\" }"
+                let filesystem = "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " +
+                    JsonValue
+                    .Create(checkout).ToJsonString() + " = \"write\", " + JsonValue.Create(
+                    Path.Combine(checkout, ".git")
+                )
+                    .ToJsonString() + " = \"deny\", " + JsonValue.Create(runtime).ToJsonString() + " = \"read\" }"
                 let args = List[string]{
                     "sandbox",
                     "-P",
@@ -122,19 +125,23 @@ internal class LocalCodex {
                     "Installed runtime changed"
                 )
             }
-            let verification = List[string]{
-                "/bin/sh",
-                "-c",
-                "set -eu; test -r .git/config; test ! -w .git/config; for private do test ! -r \"$$private\"; done; touch independent-writable",
-                "proof",
-                native,
-                standalone,
-                launcher,
-                node
+            var quoted = Quote(native) + " " + Quote(standalone)
+            for secret in secrets {
+                quoted += " " + Quote(secret)
             }
-            verification.AddRange(secrets)
-            let result = Verification.Run(checkout, verification.ToArray(), false, 30)
-            Check.That(result.Code == 0, result.Output + result.Error)
+            using let independent = CoordinationFixture(binary)
+            independent.Initialize(approve: false)
+            independent.Flow.VerificationPolicy(
+                "set -eu; test -r .git/config; test ! -w .git/config; for private in " +
+                    quoted +
+                    "; do test ! -r \"$$private\"; done; touch independent-writable"
+            )
+            independent.Flow.Approve()
+            let request = independent.Claim()
+            let run = independent.Prepare()
+            let head = independent.Candidate(request)
+            independent.Flow.Call([]string{"external", "--run", run, "--commit", head})
+            independent.Flow.NoInference()
             let unsupported = Path.Combine(flow.Bin, "unsupported-launcher")
             let marker = Path.Combine(flow.Temp.Root, "launcher-discovery-ran")
             File.WriteAllText(

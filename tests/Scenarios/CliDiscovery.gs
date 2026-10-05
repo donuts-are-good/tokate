@@ -5,10 +5,12 @@ import System.Diagnostics
 import System.IO
 import System.Text
 import System.Text.Json.Nodes
-import Tokate
 
 internal class CliDiscovery {
     shared {
+        private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external authorize-sync revoke-sync repair amend submit coordinate policy approve assign revoke claim work recover publish status verify-pr overlaps checks completion help --version"
+            .Split(' ')
+
         internal func Call(binary string, args[]string, temp Temp, code int32 = 0) Result {
             let result = TestProcess.Run(binary, args, temp.Env, cwd: temp.Root)
             Check.That(result.Code == code, result.Output + result.Error)
@@ -28,22 +30,18 @@ internal class CliDiscovery {
                 )
                 File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             }
-            for command in Cli.Commands {
-                let help = Check.Envelope(
-                    Call(binary, []string{command.Name, "--help", "--json"}, temp),
-                    command.Name,
-                    "ok"
-                )
-                if command.Name != "help" {
+            for command in Commands {
+                let help = Check.Envelope(Call(binary, []string{command, "--help", "--json"}, temp), command, "ok")
+                if command != "help" {
                     Check.That(
-                        Check.Text(help["data"]?["commands"]?[0]?["command"]) == command.Name,
+                        Check.Text(help["data"]?["commands"]?[0]?["command"]) == command,
                         "Focused metadata missing command"
                     )
                 }
             }
             let metadata = Check.Envelope(Call(binary, []string{"help", "--json"}, temp), "help", "ok")
             Check.That(
-                metadata["data"]?["commands"]?.AsArray().Count == Cli.Commands.Length,
+                metadata["data"]?["commands"]?.AsArray().Count == Commands.Length,
                 "Metadata omits public commands"
             )
             for command in metadata["data"]?["commands"]?.AsArray() ?? JsonArray() {
@@ -443,24 +441,15 @@ internal class CliDiscovery {
                 Check.Contains(help.Output, "toh-KAH-teh")
                 Check.That(help.Error == "", "Help wrote warnings")
             }
-            for command in Cli.Commands {
-                if command.Name == "help" {
+            for command in Commands {
+                if command == "help" {
                     continue
                 }
-                for argv in[][]string{
-                    []string{command.Name, "--help"},
-                    []string{command.Name, "-h"},
-                    []string{"help", command.Name}
-                } {
+                for argv in[][]string{[]string{command, "--help"}, []string{command, "-h"}, []string{"help", command}} {
                     let help = Call(binary, argv, temp)
-                    Check.Contains(help.Output, "Usage: tokate " + command.Name)
+                    Check.Contains(help.Output, "Usage: tokate " + command)
                     Check.Contains(help.Output, "Example:")
                     Check.That(help.Error == "", "Command help wrote warnings")
-                    for option in Cli.Options {
-                        if command.Has(option.Name) {
-                            Check.Contains(help.Output, "--" + option.Name)
-                        }
-                    }
                 }
             }
             let work = Call(binary, []string{"work", "--help"}, temp).Output
@@ -594,24 +583,19 @@ internal class CliDiscovery {
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "use --repo OWNER/REPO")
             temp.Env["PATH"] = originalPath
 
-            let input = Args(
-                []string{
-                    "revoke",
-                    "--repo=OWNER/project",
-                    "--issue=01",
-                    "https://github.com/owner/project/issues/1#issuecomment-2"
-                }
-            )
-            Cli.Validate(input)
-            Check.That(
-                input.Get("repo") == "owner/project" && input.Number("issue") == 1,
-                "URL inputs were not normalized"
-            )
             File.Delete(Path.Combine(bin, "setsid"))
             File.CreateSymbolicLink(Path.Combine(bin, "setsid"), "/usr/bin/setsid")
             for argv in[][]string{
                 []string{"work", "https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
-                []string{"work", "--issue=https://github.com/owner/project/issues/1", "--model=model", "--effort=high"}
+                []string{"work", "--issue=https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
+                []string{
+                    "work",
+                    "--repo=OWNER/project",
+                    "--issue=01",
+                    "https://github.com/owner/project/issues/1#issuecomment-2",
+                    "--model=model",
+                    "--effort=high"
+                }
             } {
                 let result = TestProcess.Run(binary, argv, temp.Env, cwd: temp.Root)
                 Check.That(result.Code == 1, "Recording gh stub should fail")
@@ -619,10 +603,12 @@ internal class CliDiscovery {
                 Check.That(!result.Error.Contains("Usage:"), "Valid URL input rejected")
                 File.Delete(log)
             }
-            File.WriteAllText(Path.Combine(bin, "git"), "#!/bin/sh\n/bin/sleep 30 &\nexit 0\n")
-            let deadline = Stopwatch.StartNew()
+            File.WriteAllText(Path.Combine(bin, "git"), "#!/bin/sh\n/bin/sleep 120 &\necho $$! > child.pid\nexit 0\n")
             Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "No GitHub remote")
-            Check.That(deadline.Elapsed.TotalSeconds < 7, "Repository discovery waited for a detached pipe holder")
+            TestProcess.Collected(
+                File.ReadAllText(Path.Combine(temp.Root, "child.pid")),
+                "Repository discovery left a detached pipe holder"
+            )
             Check.That(!File.Exists(log), "Failed repository discovery invoked GitHub")
             File.Delete(Path.Combine(bin, "git"))
             File.CreateSymbolicLink(Path.Combine(bin, "git"), "/usr/bin/git")

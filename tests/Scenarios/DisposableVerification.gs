@@ -4,6 +4,7 @@ import Gsharp.Concurrency
 import System
 import System.Diagnostics
 import System.IO
+import System.Text.Json
 
 internal class DisposableVerificationChecks {
     shared {
@@ -171,11 +172,13 @@ internal class DisposableVerificationChecks {
                 for i in 0 ... 1000 {
                     let path = Path.Combine(run, "verification.json")
                     if File.Exists(path) {
-                        let checks = Check.Json(File.ReadAllText(path)).AsArray()
-                        if checks.Count == 2 {
-                            let output = Path.Combine(run, Check.Text(checks[1]?["output_file"]))
-                            ready = File.Exists(output) && File.ReadAllText(output).Contains("useful-test-evidence")
-                        }
+                        try {
+                            let checks = Check.Json(File.ReadAllText(path)).AsArray()
+                            if checks.Count == 2 {
+                                let output = Path.Combine(run, Check.Text(checks[1]?["output_file"]))
+                                ready = File.Exists(output) && File.ReadAllText(output).Contains("useful-test-evidence")
+                            }
+                        } catch (error JsonException) { }
                     }
                     if ready {
                         break
