@@ -130,10 +130,11 @@ internal class RepositoryIdentityChecks {
                 "branch",
                 "source"
             } {
-                legacy[field] = run[field]?.DeepClone()
+                legacy[field] = field == "version" || field == "issue" || field == "donor_id" ?
+                run[field]?.DeepClone(): JsonValue.Create(Check.Text(run[field]))
             }
-            legacy["fork"] = run["requested_fork"]?.DeepClone()
-            legacy["head_repo"] = run["head_repo"]?.DeepClone()
+            legacy["fork"] = JsonValue.Create(Check.Text(run["requested_fork"]))
+            legacy["head_repo"] = JsonValue.Create(Check.Text(run["head_repo"]))
             let identity = Check.TextHash(legacy.ToJsonString())
             Check.That(identity != Check.Text(run["preparation_identity"]), "Legacy fixture did not retain exact case")
             let saved = Check.Json(File.ReadAllText(path))

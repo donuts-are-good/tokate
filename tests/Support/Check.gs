@@ -15,7 +15,6 @@ internal class Check {
         internal func TextHash(text string) string -> Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))
             .ToLowerInvariant()
 
-        // For constructing legacy/corrupt authority fixtures, never for validating a CLI result.
         internal func FixtureDigest(value JsonNode) string -> TextHash(Ordered(value)?.ToJsonString() ?? "null")
 
         private func Ordered(value JsonNode?) JsonNode? {

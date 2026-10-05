@@ -14,6 +14,7 @@ internal class VerificationChecks {
             Layouts(binary)
             RuntimeFiles(binary)
             Alternatives(binary)
+            FailClosed(binary)
         }
 
         private func Cleanup(binary string) {
@@ -200,7 +201,6 @@ internal class VerificationChecks {
                     )
                         .FullName: storage
                     reason = mode == "alias" ? "real directories without checkout/Git symlinks": "runtime storage must be outside the checkout"
-                    // The ignored storage directory keeps the saved candidate unchanged.
                     Directory.CreateDirectory(Path.Combine(git, "info"))
                     File.AppendAllText(Path.Combine(git, "info/exclude"), "\nruntime-tmp/\n")
                 } else {
@@ -280,6 +280,75 @@ internal class VerificationChecks {
             )
         }
 
+        private func FailClosed(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            PublishedContribution.Write(flow.Upstream, ".gitignore", "verification-marker\n")
+            flow.VerificationPolicy("printf ran > verification-marker; exit 1")
+            flow.Approve()
+            let run = flow.Claim()
+            let marker = Path.Combine(run, "checkout/verification-marker")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+            let storage = Path.Combine(flow.Temp.Root, "runtime-tmp")
+            Directory.CreateDirectory(storage)
+            flow.Temp.Env["TMPDIR"] = storage
+            let broken = Path.Combine(flow.Temp.Root, "broken-bwrap")
+            File.WriteAllText(
+                broken,
+                "#!/bin/sh\nif [ \"$1\" = --version ]; then printf fixture-bwrap; exit 0; fi\nprintf 'synthetic sandbox startup failure' >&2\nexit 77\n"
+            )
+            File.SetUnixFileMode(broken, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for missing in[]bool{true, false} {
+                baseline.Restore()
+                File.Delete(marker)
+                let args = List[string]{
+                    "--die-with-parent",
+                    "--unshare-user",
+                    "--unshare-pid",
+                    "--ro-bind",
+                    "/",
+                    "/",
+                    "--proc",
+                    "/proc",
+                    "--dev",
+                    "/dev",
+                    "--bind",
+                    flow.Temp.Root,
+                    flow.Temp.Root
+                }
+                if missing {
+                    args.AddRange([]string{"--tmpfs", "/usr/bin"})
+                    for tool in[]string{"bash", "env", "git", "setsid"} {
+                        args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
+                    }
+                    args.AddRange([]string{"--symlink", "bash", "/usr/bin/sh"})
+                } else {
+                    args.AddRange([]string{"--ro-bind", broken, "/usr/bin/bwrap"})
+                }
+                args.AddRange([]string{"--", binary, "recover", "--run", run, "--json"})
+                let result = TestProcess.Run("/usr/bin/bwrap", args.ToArray(), flow.Temp.Env)
+                Check.Envelope(result, "recover", "error", missing ? "missing_tools": "verification_failed")
+                if missing {
+                    Check.Contains(result.Error, "/usr/bin/bwrap: missing")
+                } else {
+                    let checks = Check.Json(File.ReadAllText(Path.Combine(run, "verification.json"))).AsArray()
+                    Check.Contains(Check.Text(checks[checks.Count - 1]?["error"]), "synthetic sandbox startup failure")
+                }
+                Check.That(!File.Exists(marker), "Repository verification ran without its required sandbox")
+                Check.That(
+                    Directory.GetFileSystemEntries(storage).Length == 0,
+                    "Runtime copies leaked after sandbox startup failure"
+                )
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Sandbox startup failure repeated inference")
+                flow.NoPr()
+            }
+            Console.WriteLine(
+                "PASS CLI recovery refuses missing or unusable verification sandbox without running repository code or leaking runtime copies"
+            )
+        }
+
         internal func RuntimeFilesParent(binary string, mode string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
@@ -336,6 +405,8 @@ internal class VerificationChecks {
                 "/",
                 "--proc",
                 "/proc",
+                "--dev",
+                "/dev",
                 "--tmpfs",
                 "/tmp",
                 "--bind",
@@ -351,6 +422,9 @@ internal class VerificationChecks {
                 "/etc/private",
                 "--tmpfs",
                 "/usr/bin"
+            }
+            if File.Exists("/etc/ld.so.cache") {
+                args.AddRange([]string{"--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache"})
             }
             for tool in[]string{"bash", "git", "env", "bwrap", "setsid"} {
                 args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})

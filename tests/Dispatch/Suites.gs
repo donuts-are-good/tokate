@@ -103,7 +103,6 @@ internal class SuiteDriver {
     }
 
     private func RunJob(job SuiteJob) Result {
-        // Isolate fixture processes; only public CLI scenarios test Tokate's sandbox contract.
         let args = List[string]{"--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid"}
         for path in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives"} {
             if Directory.Exists(path) {

@@ -6,9 +6,13 @@ import System.Collections.Generic
 import System.Diagnostics
 import System.Globalization
 import System.IO
+import System.Runtime.InteropServices
 import System.Security.Cryptography
 import System.Text
 import System.Text.Json.Nodes
+
+@DllImport("libc", EntryPoint: "close")
+func CloseFixtureInput(descriptor int32) int32;
 
 internal partial class Fixture {
     internal func Codex(args[]string) int32 {
@@ -126,16 +130,25 @@ internal partial class Fixture {
             }
         }
         Check.That(filesystem, "Missing filesystem boundary")
-        if Check.Text(State["mode"]) == "blocked_input" {
-            State["exec_count"] = JsonValue.Create(1)
+        let count = Check.Text(State["exec_count"])
+        State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
+        let mode = Check.Text(State["mode"])
+        if mode == "blocked_input" || mode == "closed_input" {
             Save()
             Console.Write("synthetic-blocked-prefix")
             Console.Out.Flush()
             Console.Error.Write("synthetic-blocked-error")
             Console.Error.Flush()
-            using let child = Process.Start("/usr/bin/sleep", "120") ??
-                throw Exception("Cannot start blocked-input child")
+            let childInfo = ProcessStartInfo("/usr/bin/sleep")
+            childInfo.ArgumentList.Add("120")
+            childInfo.RedirectStandardInput = true
+            using let child = Process.Start(childInfo) ?? throw Exception("Cannot start blocked-input child")
+            child.StandardInput.Close()
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            if mode == "closed_input" {
+                Check.That(CloseFixtureInput(0) == 0, "Cannot close synthetic harness stdin")
+                return 0
+            }
             child.WaitForExit()
             return 0
         }
@@ -145,8 +158,6 @@ internal partial class Fixture {
         let prompts = State["prompts"]?.AsArray() ?? JsonArray()
         prompts.Add(JsonValue.Create(prompt) as JsonNode)
         State["prompts"] = prompts
-        let count = Check.Text(State["exec_count"])
-        State["exec_count"] = JsonValue.Create(count == "" ? 1: Int32.Parse(count) + 1)
         let requested = JsonArray()
         for arg in args {
             let value JsonNode = JsonValue.Create(arg) ?? throw Exception("Missing argument")
@@ -160,10 +171,8 @@ internal partial class Fixture {
             }
         }
         Save()
-        let mode = Check.Text(State["mode"])
         if mode == "capture_write_failure" {
-            using let child = Process.Start("/usr/bin/sleep", "120") ??
-                throw Exception("Cannot start capture-write child")
+            using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start capture child")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
             Console.Write(String('x', 131072))
             Console.Out.Flush()
@@ -171,9 +180,9 @@ internal partial class Fixture {
             return 0
         }
         if mode.StartsWith("capture_") {
-            let prefix = mode == "capture_unicode" ? String('é', 32 * 1024 * 1024): String(
-                'x',
-                32 * 1024 * 1024 - (mode == "capture_scalar" ? 1: 3)
+            let prefix = mode == "capture_unicode" ? String('é', 32 * 1024 * 1024): (
+                mode == "capture_scalar" ? String('x', 8191) + Char.ConvertFromUtf32(0x10400) +
+                    String('x', 32 * 1024 * 1024 - 8194): String('x', 32 * 1024 * 1024 - 3)
             )
             let tail = mode == "capture_scalar" ? Char.ConvertFromUtf32(0x10400): "ABC"
             Console.Write(prefix + tail + String('x', 8192) + "after-cap-marker")

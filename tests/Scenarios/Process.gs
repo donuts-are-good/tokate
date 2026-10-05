@@ -11,14 +11,14 @@ import System.Text.Json.Nodes
 internal class ProcessChecks {
     shared {
         internal func All(binary string) {
-            InputDeadline(binary)
+            InputFailures(binary)
             Captures(binary)
             CaptureWriteFailure(binary)
             CaptureSafety(binary)
             AbruptStop(binary)
         }
 
-        private func InputDeadline(binary string) {
+        private func InputFailures(binary string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Reload()
@@ -27,26 +27,86 @@ internal class ProcessChecks {
             )
             flow.Save()
             flow.Approve()
-            let run = flow.Claim(seconds: "1")
-            flow.Mode("blocked_input")
-            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Runtime limit reached")
-            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
-            Check.That(
-                Check.Text(saved["failure_reason"]) == "inference_interrupted" && saved["inference_exit_code"] == nil,
-                "Blocked stdin fabricated completion"
-            )
-            Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "synthetic-blocked-prefix")
-            Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-blocked-error")
-            TestProcess.Collected(
-                File.ReadAllText(Path.Combine(flow.Bin, "child.pid")),
-                "Blocked-input child survived deadline"
-            )
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Blocked stdin repeated inference")
-            flow.NoPr()
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for outcome in[]string{"timeout", "cancel", "closed"} {
+                baseline.Restore()
+                let run = flow.Claim(seconds: outcome == "timeout" ? "1": "30")
+                flow.Mode(outcome == "closed" ? "closed_input": "blocked_input")
+                let result = outcome == "cancel" ? CancelInput(flow, run): flow.Call([]string{"work", "--run", run}, 1)
+                Check.That(result.Code == 1, "Interrupted stdin became success")
+                Check.Contains(
+                    result.Error.ToLowerInvariant(),
+                    outcome == "timeout" ? "runtime limit reached": (outcome == "cancel" ? "cancelled": "broken pipe")
+                )
+                let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+                Check.That(
+                    Check.Text(saved["failure_reason"]) == "inference_interrupted" &&
+                        saved["inference_exit_code"] == nil &&
+                        saved["turn_completed"] == nil &&
+                        saved["usage"] == nil,
+                    "Interrupted stdin fabricated completion"
+                )
+                Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "synthetic-blocked-prefix")
+                Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-blocked-error")
+                TestProcess.Collected(
+                    File.ReadAllText(Path.Combine(flow.Bin, "child.pid")),
+                    "Child survived interrupted stdin"
+                )
+                flow.Call([]string{"work", "--run", run}, 1)
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Interrupted stdin repeated inference")
+                flow.NoPr()
+            }
             Console.WriteLine(
-                "PASS CLI work stops blocked 1 MiB prompt input, retains evidence and collects descendants"
+                "PASS CLI work stops blocked and closed prompt input on deadline, Ctrl+C and broken pipe without extra inference"
             )
+        }
+
+        private func CancelInput(flow NativeFixture, run string) Result {
+            let info = ProcessStartInfo(flow.Binary)
+            info.UseShellExecute = false
+            info.RedirectStandardInput = true
+            info.RedirectStandardOutput = true
+            info.RedirectStandardError = true
+            info.Environment.Clear()
+            for entry in flow.Temp.Env {
+                info.Environment[entry.Key] = entry.Value
+            }
+            for arg in[]string{"work", "--run", run} {
+                info.ArgumentList.Add(arg)
+            }
+            using let process = Process.Start(info) ?? throw Exception("Cannot start input cancellation")
+            process.StandardInput.Close()
+            let output = Chan[string](1)
+            let error = Chan[string](1)
+            go TestProcess.Read(process.StandardOutput, output)
+            go TestProcess.Read(process.StandardError, error)
+            try {
+                let child = Path.Combine(flow.Bin, "child.pid")
+                let evidence = Path.Combine(run, "events.jsonl")
+                var ready bool
+                for i in 0 ... 1000 {
+                    if File.Exists(child) && FileInfo(child).Length > 0 && File.Exists(evidence) && File.ReadAllText(
+                        evidence
+                    )
+                        .Contains("synthetic-blocked-prefix") {
+                        ready = true
+                        break
+                    }
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                    }
+                }
+                Check.That(ready, "Blocked-input capture did not become ready")
+                Check.Success(TestProcess.Run("/usr/bin/kill", []string{"-INT", process.Id.ToString()}, flow.Temp.Env))
+                Check.That(process.WaitForExit(10000), "Blocked-input cancellation did not finish")
+                return Result{Code: process.ExitCode, Output: <-output, Error: <-error}
+            } finally {
+                if !process.HasExited {
+                    process.Kill(true)
+                    process.WaitForExit()
+                }
+            }
         }
 
         private func Captures(binary string) {
@@ -80,7 +140,10 @@ internal class ProcessChecks {
                         )
                     } else if mode == "capture_scalar" {
                         Check.That(
-                            text.Length == 32 * 1024 * 1024 - 1 && text[text.Length - 1] == 'x',
+                            text.Length == 32 * 1024 * 1024 - 1 && text[text.Length - 1] == 'x' && text.Substring(
+                                8191,
+                                2
+                            ) == Char.ConvertFromUtf32(0x10400),
                             "Capture split a supplementary scalar"
                         )
                     } else {

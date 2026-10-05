@@ -68,7 +68,6 @@ internal class TestProcess {
                 info.WorkingDirectory = cwd
             }
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
-            // Preserve a BOM in raw Git filenames when fixture tools forward subprocess output.
             using let outputReader = StreamReader(process.StandardOutput.BaseStream, UTF8Encoding(false), false)
             let output = Chan[string](1)
             let error = Chan[string](1)
