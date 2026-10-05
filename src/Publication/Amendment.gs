@@ -542,12 +542,7 @@ internal class Amendment {
                 updatedReceipt["amendment"] = PublicRecord(amendment)
                 Synchronization.Keep(updatedReceipt, Synchronization.History(amendment.Element()))
                 if run.Number("version") == 1 {
-                    let report = Summary(
-                        amendment.Text("previous"),
-                        amendment.Text("commit"),
-                        amendment.Number("seconds"),
-                        J.Get(amendment.Element(), "tools")
-                    )
+                    let report = PrBody.AmendmentReport(J.Parse(J.Write(updatedReceipt)))
                     amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
                         PrBody.VerificationReport(run, record),
