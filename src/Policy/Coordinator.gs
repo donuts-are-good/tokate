@@ -163,10 +163,21 @@ internal class Coordinator {
                 var pull = pulls.Count == 0 ? JsonElement{}: pulls[0]
                 if pull.ValueKind != JsonValueKind.Undefined {
                     let body = J.Text(pull, "body")
-                    let receiptMarker = "<!-- tokate-receipt:" + J.Write(receipt) + " -->"
+                    let sameReceipt = RequestData.Canonical(PrBody.Receipt(body)) == RequestData.Canonical(
+                        J.Parse(J.Write(receipt))
+                    )
                     if !body.Contains(marker) || J.Text(J.Get(pull, "head"), "sha") != J.Text(metadata, "head") ||
-                        !body.Contains(receiptMarker) {
+                        !sameReceipt {
                         throw Exception("Existing PR differs from this contribution")
+                    }
+                    let report = PrBody.ReportText(body, PrBody.OriginalReport(metadata))
+                    if report != PrBody.CoordinatedReport(metadata) &&
+                        (
+                        J.Get(metadata, "summary")
+                            .ValueKind != JsonValueKind.Undefined ||
+                            report != PrBody.OriginalReport(metadata)
+                    ) {
+                        throw Exception("Existing PR summary differs from this publication intent")
                     }
                 }
                 Revalidate(repo, number, state, actor, donor)
@@ -326,6 +337,9 @@ internal class Coordinator {
             amendment.Fields["previous"] = J.Text(metadata, "previous")
             amendment.Fields["seconds"] = J.Number(metadata, "seconds")
             amendment.Fields["tools"] = J.Get(metadata, "tools")
+            if J.Get(metadata, "summary").ValueKind != JsonValueKind.Undefined {
+                amendment.Fields["public_summary"] = J.Get(metadata, "summary")
+            }
             if J.Text(metadata, "sync") != "" {
                 amendment.Fields["sync"] = J.Text(metadata, "sync")
             }
@@ -353,7 +367,10 @@ internal class Coordinator {
                 J.Text(metadata, "previous"),
                 J.Text(metadata, "head"),
                 J.Number(metadata, "seconds"),
-                J.Get(metadata, "tools")
+                J.Get(metadata, "tools"),
+                J.Get(metadata, "summary"),
+                false,
+                old
             )
             let oldCanonical = RequestData.Canonical(oldReceipt)
             let candidateCanonical = RequestData.Canonical(receipt)
@@ -364,14 +381,28 @@ internal class Coordinator {
                 if oldCanonical != RequestData.Canonical(ContributionReceipt.FromState(value)) {
                     throw Exception("PR receipt differs from saved previous or candidate state")
                 }
-                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? PrBody.OriginalReport(old):
+                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? PrBody.CoordinatedReport(old):
                 Amendment.Summary(
+                    J.Text(current, "previous"),
+                    J.Text(current, "head"),
+                    J.Number(current, "seconds"),
+                    J.Get(current, "tools"),
+                    J.Get(current, "summary"),
+                    false,
+                    old
+                )
+                let legacyReport = J.Items(J.Get(value, "amendments")).Count == 0 ? PrBody.OriginalReport(old):
+                Amendment.LegacySummary(
                     J.Text(current, "previous"),
                     J.Text(current, "head"),
                     J.Number(current, "seconds"),
                     J.Get(current, "tools")
                 )
-                if PrBody.ReportText(body, PrBody.OriginalReport(old)) != previousReport {
+                let observedReport = PrBody.ReportText(body, PrBody.OriginalReport(old))
+                let priorSummary = J.Items(J.Get(value, "amendments")).Count == 0 ? J.Get(old, "summary"):
+                J.Get(current, "summary")
+                if observedReport != previousReport &&
+                    (priorSummary.ValueKind != JsonValueKind.Undefined || observedReport != legacyReport) {
                     throw Exception("Previous PR report differs from current contribution")
                 }
                 let updated = PrBody.ReplaceBody(body, PrBody.OriginalReport(old), report, receipt)
@@ -436,6 +467,9 @@ internal class Coordinator {
                 "verification_provenance",
                 "donor-reported; exact-commit owner CI required"
             )
+            if J.Get(metadata, "summary").ValueKind != JsonValueKind.Undefined {
+                entry["summary"] = J.Get(metadata, "summary")
+            }
             if J.Text(metadata, "sync") != "" {
                 entry["sync"] = J.Text(metadata, "sync")
             }
@@ -548,9 +582,9 @@ internal class Coordinator {
         ) string {
             let values = Dictionary[string, string]()
             values["issue"] = J.Number(J.Get(record, "issue"), "number").ToString()
-            values["report"] = PrBody.Report(PrBody.OriginalReport(metadata))
+            values["report"] = PrBody.Report(PrBody.CoordinatedReport(metadata))
             values["donor"] = donor
-            values["model"] = "donor-reported tools: " + J.Write(J.Get(metadata, "tools"))
+            values["model"] = "see original donor-reported tools in report"
             values["effort"] = "per-tool declaration; not independently attested"
             values["seconds"] = "donor-reported or unknown; reservation is not a compute budget"
             values["base"] = J.Text(J.Get(record, "approval"), "base")

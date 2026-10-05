@@ -53,7 +53,14 @@ internal class AmendmentFlow {
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
             var body = Check.Text(pull["body"])
             if legacy {
-                body = body.Replace("<!-- tokate-report:start -->\n", "").Replace("\n<!-- tokate-report:end -->", "")
+                let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+                let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+                if body.Contains("<!-- tokate-run:") {
+                    body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(
+                        start,
+                        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue\'s acceptance criteria and limitations."
+                    )
+                }
             }
             pull["body"] = JsonValue.Create("Owner review before\n" + body + "\nOwner review after")
             flow.Save()
@@ -477,7 +484,7 @@ internal class AmendmentFlow {
                         pull["body"] = JsonValue.Create(
                             failure == "report-edited" ?
                             Check.Text(pull["body"]).Replace(
-                                "The coordinator did not observe coding execution.",
+                                "coordinator did not observe execution.",
                                 "Incorrect attribution."
                             ):
                             Check.Text(pull["body"]).Replace("tokate-receipt:", "edited-receipt:")

@@ -67,6 +67,7 @@ internal class SuiteCatalog {
                     DonorSelectionChecks.All(binary)
                     VerificationChecks.All()
                     SuiteChecks.All()
+                    PublicDescriptions.All(binary)
                     for name in NativeFlow.SerialGroups {
                         NativeFlow.All(binary, name)
                     }

@@ -885,8 +885,8 @@ internal partial class NativeFlow : NativeFixture {
         let saved = Check.Json(File.ReadAllText(Path.Combine(run, "publication.json")))
         let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
         Check.That(Check.Text(saved["body"]) == body, "Saved publication body differs")
-        Check.Contains(body, "Independent owner verification: 1/1 checks passed")
-        Check.Contains(body, "input_tokens")
+        Check.Contains(body, "Tokate observed locally: 1/1 checks passed")
+        Check.Contains(body, "input: 100")
         for value in[]string{
             "synthetic-raw",
             "synthetic-usage-secret",

@@ -432,13 +432,15 @@ internal class Correction {
                 throw Exception("Correction verification budget exceeds original owner limit")
             }
             let tools = Tools(args.Get("tools"), J.Get(record, "policy"))
+            let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             let current = Path.Combine(directory, "correction.json")
             if File.Exists(current) {
                 let saved = Data.Read(current)
                 if saved.Text("commit") == commit {
-                    if saved.Number("seconds") != seconds || RequestData.Canonical(
-                        J.Get(saved.Element(), "tools")
-                    ) != RequestData.Canonical(tools) {
+                    if !RequestData.Same(J.Get(saved.Element(), "public_summary"), summary) || saved.Number(
+                        "seconds"
+                    ) != seconds ||
+                        RequestData.Canonical(J.Get(saved.Element(), "tools")) != RequestData.Canonical(tools) {
                         throw Exception("Saved correction budget or provenance changed")
                     }
                     if saved.Text("state") != "verified" {
@@ -470,6 +472,9 @@ internal class Correction {
             correction.Fields["uuid"] = Guid.NewGuid().ToString("D")
             correction.Fields["commit"] = commit
             correction.Fields["seconds"] = seconds
+            if summary.ValueKind != JsonValueKind.Undefined {
+                correction.Fields["public_summary"] = summary
+            }
             correction.Fields["tools"] = tools
             correction.Fields["state"] = "validating"
             correction.Fields["failure_stage"] = "candidate_validation"

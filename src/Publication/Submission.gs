@@ -30,6 +30,7 @@ internal class Submission {
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
             }
+            PublicSummary.Bind(run, patch)
             Commands.Git(
                 checkout,
                 "-c",
@@ -50,6 +51,10 @@ internal class Submission {
                 run.Text("base"),
                 run.Text("commit")
             )
+            let summary = PublicSummary.ForHead(run, run.Text("commit"))
+            if summary.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = summary
+            }
             run.Fields["verification_provenance"] = "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
@@ -241,19 +246,22 @@ internal class Submission {
                     "action",
                     "publish",
                     "metadata",
-                    J.Map(
-                        "fork",
-                        run.Text("head_repo"),
-                        "branch",
-                        run.Text("branch"),
-                        "head",
-                        run.Text("commit"),
-                        "source",
-                        run.Text("source"),
-                        "tools",
-                        J.Get(run.Element(), "tools"),
-                        "verification",
-                        "donor-reported-pass"
+                    PublicSummary.Attach(
+                        J.Map(
+                            "fork",
+                            run.Text("head_repo"),
+                            "branch",
+                            run.Text("branch"),
+                            "head",
+                            run.Text("commit"),
+                            "source",
+                            run.Text("source"),
+                            "tools",
+                            J.Get(run.Element(), "tools"),
+                            "verification",
+                            "donor-reported-pass"
+                        ),
+                        PublicSummary.ForHead(run, run.Text("commit"))
                     )
                 )
             )

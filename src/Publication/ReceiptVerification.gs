@@ -95,7 +95,7 @@ internal class ReceiptVerification {
             }
             let amendment = J.Get(receipt, "amendment")
             if amendment.ValueKind != JsonValueKind.Undefined {
-                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))))
+                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))), J.Text(receipt, "head"))
                 RepositoryIdentity.CommitSha(J.Text(receipt, "original_head"))
                 if J.Text(amendment, "sync") != "" {
                     Synchronization.Live(
@@ -116,9 +116,19 @@ internal class ReceiptVerification {
                     J.Text(amendment, "previous"),
                     J.Text(receipt, "head"),
                     J.Number(amendment, "seconds"),
+                    J.Get(amendment, "tools"),
+                    J.Get(amendment, "summary"),
+                    true
+                )
+                let observedReport = PrBody.ReportText(body, report)
+                let legacy = Amendment.LegacySummary(
+                    J.Text(amendment, "previous"),
+                    J.Text(receipt, "head"),
+                    J.Number(amendment, "seconds"),
                     J.Get(amendment, "tools")
                 )
-                if PrBody.ReportText(body, report) != report {
+                if observedReport != report &&
+                    (J.Get(amendment, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }
             }
@@ -244,14 +254,28 @@ internal class ReceiptVerification {
             policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
             let amendment = J.Get(receipt, "amendment")
             if current.GetRawText() != contribution.GetRawText() {
-                Amendment.ValidateReceipt(amendment, policy)
+                Amendment.ValidateReceipt(amendment, policy, exactHead)
                 let report = Amendment.Summary(
+                    J.Text(amendment, "previous"),
+                    exactHead,
+                    J.Number(amendment, "seconds"),
+                    J.Get(amendment, "tools"),
+                    J.Get(current, "summary"),
+                    false,
+                    metadata
+                )
+                if !RequestData.Same(J.Get(amendment, "summary"), J.Get(current, "summary")) {
+                    throw Exception("PR amendment summary differs from coordination authority")
+                }
+                let observedReport = PrBody.ReportText(J.Text(pull, "body"), report)
+                let legacy = Amendment.LegacySummary(
                     J.Text(amendment, "previous"),
                     exactHead,
                     J.Number(amendment, "seconds"),
                     J.Get(amendment, "tools")
                 )
-                if PrBody.ReportText(J.Text(pull, "body"), report) != report {
+                if observedReport != report &&
+                    (J.Get(current, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
                     throw Exception("PR amendment report differs from coordination authority")
                 }
                 let failure = "Amendment receipt differs from current coordination record"

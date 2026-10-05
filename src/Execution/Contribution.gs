@@ -30,7 +30,10 @@ internal class Contribution {
                 if coding.Git(checkout, "status", "--porcelain") == "" {
                     throw Exception("No changes returned. No PR will be opened.")
                 }
+                PublicSummary.Capture(directory, checkout, run)
                 candidate = Snapshot(checkout, run, coding)
+                PublicSummary.Bind(run, candidate)
+                run.Save(directory)
                 let candidatePath = Path.Combine(directory, "candidate.patch")
                 if !File.Exists(candidatePath) {
                     File.WriteAllText(candidatePath, candidate)

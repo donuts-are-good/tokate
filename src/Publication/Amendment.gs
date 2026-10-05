@@ -19,8 +19,8 @@ internal class Amendment {
             policy.ValidateEditingTools(tools, "Version-1 amendments permit only declared codex/openai tools")
         }
 
-        internal func ValidateReceipt(value JsonElement, policy Policy) {
-            RequestData.Keys(value, "id,previous,seconds,tools,sync")
+        internal func ValidateReceipt(value JsonElement, policy Policy, head string) {
+            RequestData.Keys(value, "id,previous,seconds,tools,sync,summary")
             var id Guid
             let seconds = J.Number(value, "seconds")
             if !Guid.TryParseExact(J.Text(value, "id"), "D", out id) || seconds < 1 || seconds > J.Number(
@@ -30,13 +30,48 @@ internal class Amendment {
                 throw Exception("Invalid amendment receipt or verification budget")
             }
             RepositoryIdentity.CommitSha(J.Text(value, "previous"))
+            let summary = J.Get(value, "summary")
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, head)
+            }
             Tools(policy, J.Get(value, "tools"))
             if J.Get(value, "sync").ValueKind != JsonValueKind.Undefined {
                 RepositoryIdentity.CommitSha(J.Text(value, "sync"))
             }
         }
 
-        internal func Summary(previous string, head string, seconds int32, tools JsonElement) string ->
+        internal func Summary(
+            previous string,
+            head string,
+            seconds int32,
+            tools JsonElement,
+            summary JsonElement = default(JsonElement),
+            observed bool = false,
+            original JsonElement = default(JsonElement)
+        ) string {
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, head)
+            }
+            return PublicSummary.Report(
+                summary,
+                observed ?
+                "Tokate observed locally: all original owner checks passed on this amended candidate.":
+                "Donor-reported: all original owner checks passed locally; coordinator did not observe execution."
+            ) +
+                "\n\n- Review amendment: " +
+                previous +
+                " → " +
+                head +
+                "; separate " +
+                seconds.ToString() +
+                " second verification budget; no inference launched by amend.\n" +
+                "- Original execution and usage cover original work only." +
+                PublicSummary.Tools(tools, "Amendment donor-reported tools") +
+                (original.ValueKind == JsonValueKind.Undefined ? "": PrBody.OriginalProvenance(original))
+        }
+
+        // Exact previous rendering is retained only to recognize legacy owned reports.
+        internal func LegacySummary(previous string, head string, seconds int32, tools JsonElement) string ->
         "Review amendment: " +
             previous +
             " → " +
@@ -287,11 +322,15 @@ internal class Amendment {
             let seconds = args.Number("seconds")
             let sync = args.Get("sync") == "" ? "": RepositoryIdentity.CommitSha(args.Need("sync"))
             let tools = args.Get("tools") == "" ? J.Parse("[]"): RequestData.FileData(args.Need("tools"), 8192)
+            let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             let location = Path.Combine(directory, "amendments", commit)
             var amendment Data
             if Directory.Exists(location) {
                 amendment = Data.Load(location)
-                if amendment.Text("sync") != sync || amendment.Number("seconds") != seconds || RequestData.Canonical(
+                if !RequestData.Same(J.Get(amendment.Element(), "public_summary"), summary) || amendment.Text(
+                    "sync"
+                ) != sync ||
+                    amendment.Number("seconds") != seconds || RequestData.Canonical(
                     J.Get(amendment.Element(), "tools")
                 ) != RequestData.Canonical(tools) {
                     throw Exception("Saved amendment budget or editing provenance changed")
@@ -339,6 +378,9 @@ internal class Amendment {
                 amendment.Fields["previous"] = run.Text("commit")
                 amendment.Fields["commit"] = commit
                 amendment.Fields["seconds"] = seconds
+                if summary.ValueKind != JsonValueKind.Undefined {
+                    amendment.Fields["public_summary"] = summary
+                }
                 amendment.Fields["tools"] = tools
                 amendment.Fields["pr"] = number
                 amendment.Fields["expected"] = run.Number("version") == 2 ? J.Text(authority, "sha"): ""
@@ -524,7 +566,9 @@ internal class Amendment {
                         amendment.Text("previous"),
                         amendment.Text("commit"),
                         amendment.Number("seconds"),
-                        J.Get(amendment.Element(), "tools")
+                        J.Get(amendment.Element(), "tools"),
+                        J.Get(amendment.Element(), "public_summary"),
+                        true
                     )
                     amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
@@ -542,7 +586,10 @@ internal class Amendment {
                             amendment.Text("previous"),
                             amendment.Text("commit"),
                             amendment.Number("seconds"),
-                            J.Get(amendment.Element(), "tools")
+                            J.Get(amendment.Element(), "tools"),
+                            J.Get(amendment.Element(), "public_summary"),
+                            false,
+                            J.Get(original, "metadata")
                         ),
                         J.Parse(J.Write(updatedReceipt))
                     )
@@ -556,23 +603,26 @@ internal class Amendment {
                         "action",
                         "amend",
                         "metadata",
-                        J.Map(
-                            "fork",
-                            run.Text("head_repo"),
-                            "branch",
-                            run.Text("branch"),
-                            "previous",
-                            amendment.Text("previous"),
-                            "head",
-                            amendment.Text("commit"),
-                            "pr",
-                            amendment.Number("pr"),
-                            "seconds",
-                            amendment.Number("seconds"),
-                            "tools",
-                            J.Get(amendment.Element(), "tools"),
-                            "verification",
-                            "donor-reported-pass"
+                        PublicSummary.Attach(
+                            J.Map(
+                                "fork",
+                                run.Text("head_repo"),
+                                "branch",
+                                run.Text("branch"),
+                                "previous",
+                                amendment.Text("previous"),
+                                "head",
+                                amendment.Text("commit"),
+                                "pr",
+                                amendment.Number("pr"),
+                                "seconds",
+                                amendment.Number("seconds"),
+                                "tools",
+                                J.Get(amendment.Element(), "tools"),
+                                "verification",
+                                "donor-reported-pass"
+                            ),
+                            J.Get(amendment.Element(), "public_summary")
                         )
                     )
                 }
@@ -759,7 +809,7 @@ internal class Amendment {
             if amendment.Text("sync") != "" {
                 fields["sync"] = amendment.Text("sync")
             }
-            return fields
+            return PublicSummary.Attach(fields, J.Get(amendment.Element(), "public_summary"))
         }
 
         private func Complete(directory string, location string, run Data, amendment Data, pull JsonElement) {

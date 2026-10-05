@@ -42,6 +42,45 @@ internal class PrBody {
                 " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
         }
 
+        internal func ManagedReport(run Data, record JsonElement) string {
+            let count = Verification.Results(run, record)
+            return PublicSummary.Report(
+                PublicSummary.ForHead(run, run.Text("commit")),
+                "Tokate observed locally: " + count.ToString() + "/" + count.ToString() +
+                    " checks passed on this candidate."
+            ) +
+                (
+                run.Flag("recovered") ?
+                "\n- Recovery: original verification failed; verification-only recovery passed without new inference.": ""
+            )
+        }
+
+        internal func CoordinatedReport(metadata JsonElement) string {
+            let summary = J.Get(metadata, "summary")
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, J.Text(metadata, "head"))
+            }
+            var report = PublicSummary.Report(
+                summary,
+                "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
+            )
+            return report + OriginalProvenance(metadata)
+        }
+
+        internal func OriginalProvenance(metadata JsonElement) string {
+            var report = "\n\n- Original source: " +
+                (J.Text(metadata, "source") == "tokate" ? "managed Tokate": "external") +
+                "; coding execution and usage are donor-reported to the coordinator." +
+                PublicSummary.Tools(J.Get(metadata, "tools"), "Original donor-reported tools")
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                report += "\n\n- Correction: separate " + J.Number(correction, "seconds").ToString() +
+                    " second verification budget; original declarations cover only the original completed turn." +
+                    PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
+            }
+            return report
+        }
+
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))
 
         internal func ReceiptText(
