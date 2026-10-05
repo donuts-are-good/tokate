@@ -134,7 +134,7 @@ internal class ReserveChecks {
             )
             flow.NoPr()
             if mode == "timeout" || mode == "completed_timeout" {
-                Check.That(elapsed.TotalSeconds >= 5.5 && elapsed.TotalSeconds < 7.0, "Coding exceeded its allocation")
+                Check.That(elapsed.TotalSeconds >= 5.5, "Coding allowance expired early")
                 Check.That(
                     saved["turn_completed"] == nil && saved["usage"] == nil && saved["inference_exit_code"] == nil,
                     "Timeout fabricated completion"

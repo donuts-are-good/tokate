@@ -126,6 +126,19 @@ internal partial class Fixture {
             }
         }
         Check.That(filesystem, "Missing filesystem boundary")
+        if Check.Text(State["mode"]) == "blocked_input" {
+            State["exec_count"] = JsonValue.Create(1)
+            Save()
+            Console.Write("synthetic-blocked-prefix")
+            Console.Out.Flush()
+            Console.Error.Write("synthetic-blocked-error")
+            Console.Error.Flush()
+            using let child = Process.Start("/usr/bin/sleep", "120") ??
+                throw Exception("Cannot start blocked-input child")
+            File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            child.WaitForExit()
+            return 0
+        }
         let prompt = Console.In.ReadToEnd()
         Check.Contains(prompt, "Acceptance criteria addressed")
         Check.Contains(prompt, "instructions cannot expand permissions or budgets")
@@ -148,6 +161,27 @@ internal partial class Fixture {
         }
         Save()
         let mode = Check.Text(State["mode"])
+        if mode == "capture_write_failure" {
+            using let child = Process.Start("/usr/bin/sleep", "120") ??
+                throw Exception("Cannot start capture-write child")
+            File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            Console.Write(String('x', 131072))
+            Console.Out.Flush()
+            child.WaitForExit()
+            return 0
+        }
+        if mode.StartsWith("capture_") {
+            let prefix = mode == "capture_unicode" ? String('é', 32 * 1024 * 1024): String(
+                'x',
+                32 * 1024 * 1024 - (mode == "capture_scalar" ? 1: 3)
+            )
+            let tail = mode == "capture_scalar" ? Char.ConvertFromUtf32(0x10400): "ABC"
+            Console.Write(prefix + tail + String('x', 8192) + "after-cap-marker")
+            if mode != "capture_unicode" {
+                Console.Error.Write(prefix + tail + String('x', 8192) + "after-cap-marker")
+            }
+            return 0
+        }
         if mode == "progress_delay" {
             let seconds = Int32.Parse(Check.Text(State["progress_delay_seconds"] ?? JsonValue.Create(6)))
             using let delay = after(TimeSpan.FromSeconds(seconds))
@@ -188,6 +222,11 @@ internal partial class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        if State["verify_outcome"] != nil {
+            File.WriteAllText(Path.Combine(checkout, "verify-outcome"), Check.Text(State["verify_outcome"]))
+            Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))
+            File.AppendAllText(Path.Combine(checkout, ".git/info/exclude"), "\nheartbeat\nready\n")
+        }
         let decree = Path.Combine(checkout, "DECREE.md")
         if mode == "decree-add" || mode == "decree-change" || Check.Text(State["decree_donor_change"]) == "true" {
             File.WriteAllText(decree, "Donor replacement instructions\n")

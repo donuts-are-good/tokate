@@ -4,7 +4,6 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
-import Tokate
 
 internal class OverlapFlow : IDisposable {
     internal let Test CoordinationFixture

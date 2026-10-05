@@ -807,9 +807,6 @@ internal partial class Fixture {
             }
             let pull = selected ?? throw Exception("Missing PR")
             if method == "PATCH" {
-                if Check.Text(State["mode"]) == "body_fail" {
-                    return Response(500)
-                }
                 pull["body"] = body["body"]?.DeepClone()
                 if Check.Text(State["mode"]) == "lost_body_response" {
                     State["mode"] = JsonValue.Create("")

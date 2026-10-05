@@ -7,7 +7,6 @@ import System.Diagnostics
 import System.IO
 import System.Text
 import System.Text.RegularExpressions
-import Tokate
 
 internal class ProgressChecks {
     shared {
@@ -95,7 +94,9 @@ internal class ProgressChecks {
                     }
                 }
                 if cancel {
-                    Check.That(KillGroup(process.Id, 2) == 0, "Cannot cancel progress fixture")
+                    Check.Success(
+                        TestProcess.Run("/usr/bin/kill", []string{"-INT", process.Id.ToString()}, flow.Temp.Env)
+                    )
                 }
                 Check.That(process.WaitForExit(30000), "Progress fixture failed to stop")
             } finally {

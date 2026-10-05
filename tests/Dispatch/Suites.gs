@@ -2,10 +2,10 @@ package TokateTests
 
 import Gsharp.Concurrency
 import System
+import System.Collections.Generic
 import System.Diagnostics
 import System.Globalization
 import System.IO
-import Tokate
 
 internal class SuiteJob {
     internal var Name string = ""
@@ -15,7 +15,7 @@ internal class SuiteJob {
 
 internal class SuiteResult {
     internal var Name string = ""
-    internal var Result CommandResult = CommandResult()
+    internal var Result Result = Result()
     internal var Failure Exception?
     internal var Seconds float64
 }
@@ -89,23 +89,70 @@ internal class SuiteDriver {
             let result = SuiteResult{Name: job.Name}
             let clock = Stopwatch.StartNew()
             try {
-                result.Result = Verification.Run(Checkout, job.Command, true, job.Seconds)
-                if result.Result.Code != 0 || result.Result.Truncated || result.Result.ReadFailed {
+                result.Result = RunJob(job)
+                if result.Result.Code != 0 {
                     throw Exception("Suite " + job.Name + " failed with exit " + result.Result.Code.ToString())
                 }
             } catch (error Exception) {
-                if error is CommandInterrupted interrupted {
-                    result.Result = interrupted.Result
-                }
-                if error is CommandInputInterrupted interruptedInput {
-                    result.Result = interruptedInput.Result
-                }
                 result.Failure = error
                 Stop()
             }
             result.Seconds = clock.Elapsed.TotalSeconds
             results <- result
         }
+    }
+
+    private func RunJob(job SuiteJob) Result {
+        // Isolate fixture processes; only public CLI scenarios test Tokate's sandbox contract.
+        let args = List[string]{"--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid"}
+        for path in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives"} {
+            if Directory.Exists(path) {
+                args.AddRange([]string{"--ro-bind", path, path})
+            }
+        }
+        for path in[]string{
+            "/etc/ld.so.cache",
+            "/etc/nsswitch.conf",
+            "/etc/hosts",
+            "/etc/resolv.conf",
+            "/etc/ssl/certs/ca-certificates.crt"
+        } {
+            if File.Exists(path) {
+                args.AddRange([]string{"--ro-bind", path, path})
+            }
+        }
+        args.AddRange(
+            []string{
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--tmpfs",
+                "/var/tmp",
+                "--bind",
+                Checkout,
+                Checkout,
+                "--ro-bind",
+                Path.Combine(Checkout, ".git"),
+                Path.Combine(Checkout, ".git"),
+                "--chdir",
+                Checkout,
+                "--"
+            }
+        )
+        args.AddRange(job.Command)
+        return TestProcess.Run(
+            "/usr/bin/bwrap",
+            args.ToArray(),
+            Dictionary[string, string]{
+                ["PATH"] = "/usr/local/bin:/usr/bin:/bin",
+                ["HOME"] = "/tmp",
+                ["LANG"] = "C.UTF-8"
+            },
+            seconds: job.Seconds
+        )
     }
 
     internal func Run(report SuiteReport? = nil) {

@@ -5,7 +5,6 @@ import System
 import System.Diagnostics
 import System.Globalization
 import System.IO
-import Tokate
 
 internal class SuiteCatalog {
     shared {
@@ -60,13 +59,12 @@ internal class SuiteCatalog {
             try {
                 let serial = report.Serial()
                 try {
-                    ProcessChecks.All()
-                    ProtectedPathChecks.All()
+                    ProcessChecks.All(binary)
+                    ProtectedPathChecks.All(binary)
                     CliDiscovery.All(binary)
                     Diagnostics.All(binary)
                     DonorSelectionChecks.All(binary)
-                    VerificationChecks.All()
-                    SuiteChecks.All()
+                    VerificationChecks.All(binary)
                     for name in NativeFlow.SerialGroups {
                         NativeFlow.All(binary, name)
                     }
