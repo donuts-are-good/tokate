@@ -259,19 +259,35 @@ internal class Amendment {
             )
         }
 
-        private func Archive(directory string) {
+        private func Archive(directory string, run Data) {
+            LocalPaths.DirectoryPath(directory)
             let archive = Path.Combine(directory, "original-evidence")
+            if FileInfo(archive).LinkTarget != nil {
+                throw Exception("Original evidence archive must not be a link")
+            }
             if Directory.Exists(archive) {
+                OriginalEvidence.Load(directory, run)
                 return
             }
             let staging = Path.Combine(directory, "archive-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(staging)
-            for file in Directory.EnumerateFiles(directory) {
-                if Path.GetFileName(file) != ".lock" {
-                    File.Copy(file, Path.Combine(staging, Path.GetFileName(file)))
+            Directory.CreateDirectory(
+                staging,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            try {
+                for file in Directory.EnumerateFiles(directory) {
+                    if Path.GetFileName(file) != ".lock" {
+                        OriginalEvidence.CopyFile(file, Path.Combine(staging, Path.GetFileName(file)))
+                    }
+                }
+                OriginalEvidence.VerificationArtifacts(directory, staging)
+                OriginalEvidence.Seal(staging)
+                Directory.Move(staging, archive)
+            } finally {
+                if Directory.Exists(staging) {
+                    Directory.Delete(staging, true)
                 }
             }
-            Directory.Move(staging, archive)
         }
 
         internal func Run(args Args) {
@@ -290,6 +306,7 @@ internal class Amendment {
             let location = Path.Combine(directory, "amendments", commit)
             var amendment Data
             if Directory.Exists(location) {
+                OriginalEvidence.Load(directory, run)
                 amendment = Data.Load(location)
                 if amendment.Text("sync") != sync || amendment.Number("seconds") != seconds || RequestData.Canonical(
                     J.Get(amendment.Element(), "tools")
@@ -332,7 +349,7 @@ internal class Amendment {
                     run.Text("commit")
                 )
                 let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
-                Archive(directory)
+                Archive(directory, run)
                 Directory.CreateDirectory(location)
                 amendment = Data()
                 amendment.Fields["id"] = Guid.NewGuid().ToString("D")

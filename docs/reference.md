@@ -232,6 +232,10 @@ provenance. Failed checks need a corrected commit. After interrupted publication
 explicitly repeat the identical command to inspect state and resume applied work;
 v2 awaits its coordinator. Writes are not atomic; inspect uncertain remote state.
 
+`original-evidence` preserves the original records and verification log directories
+under a checked manifest. Linked evidence paths and changed or incomplete archives
+block amendment and retry; the archive is never silently rebuilt.
+
 ## Synchronize with upstream
 
 Prepare a local merge retaining the published head and exact current target;
