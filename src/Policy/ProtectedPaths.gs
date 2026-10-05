@@ -35,7 +35,7 @@ internal class ProtectedPaths {
             }
         }
 
-        private func Relative(path string) {
+        internal func Relative(path string) {
             for segment in path.Split('/') {
                 if segment == "" || segment == "." || segment == ".." || segment.Contains('\0') {
                     throw Exception("Expected a literal repository-relative slash path")
@@ -84,7 +84,7 @@ internal class ProtectedPaths {
             return ancestor ? 1: 0
         }
 
-        private func AddTree(entries Dictionary[string, string], path string, mode string, type string, sha string) {
+        internal func AddTree(entries Dictionary[string, string], path string, mode string, type string, sha string) {
             Relative(path)
             RepositoryIdentity.CommitSha(sha)
             if !(
@@ -97,7 +97,7 @@ internal class ProtectedPaths {
             }
         }
 
-        private func CompleteTree(entries Dictionary[string, string]) {
+        internal func CompleteTree(entries Dictionary[string, string]) {
             if entries.Count > 100000 {
                 throw Exception("Protected tree exceeds bounded evidence")
             }
@@ -137,36 +137,6 @@ internal class ProtectedPaths {
                     throw Exception("Invalid protected tree evidence")
                 }
                 AddTree(entries, line.Substring(tab + 1), fields[0], fields[1], fields[2])
-            }
-            CompleteTree(entries)
-            return entries
-        }
-
-        internal func RemoteTree(repo string, head string) Dictionary[string, string] {
-            let commit = GitHub.Api(
-                "repos/" + RepositoryIdentity.Repo(repo) + "/git/commits/" + RepositoryIdentity.CommitSha(head)
-            )
-            if J.Text(commit, "sha") != head {
-                throw Exception("Mismatched protected commit evidence")
-            }
-            let sha = RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha"))
-            let value = GitHub.Api("repos/" + repo + "/git/trees/" + sha + "?recursive=1")
-            if J.Text(value, "sha") != sha || J.Get(value, "truncated").ValueKind != JsonValueKind.False || J.Get(
-                value,
-                "tree"
-            )
-                .ValueKind != JsonValueKind.Array {
-                throw Exception("Missing, truncated or mismatched protected tree evidence")
-            }
-            let entries = Dictionary[string, string](StringComparer.Ordinal)
-            for entry in J.Items(J.Get(value, "tree")) {
-                AddTree(
-                    entries,
-                    J.Text(entry, "path"),
-                    J.Text(entry, "mode"),
-                    J.Text(entry, "type"),
-                    J.Text(entry, "sha")
-                )
             }
             CompleteTree(entries)
             return entries
@@ -241,66 +211,6 @@ internal class ProtectedPaths {
                 Relative(paths[i])
                 Check(policy, approval, paths[i])
             }
-        }
-
-        internal func Remote(
-            repo string,
-            policy JsonElement,
-            approval JsonElement,
-            base string,
-            fork string,
-            head string
-        ) {
-            for path in Diff(repo, base, fork, head) {
-                Check(policy, approval, path)
-            }
-        }
-
-        internal func Diff(repo string, base string, fork string, head string) HashSet[string] {
-            RepositoryIdentity.Repo(repo)
-            RepositoryIdentity.Repo(fork)
-            RepositoryIdentity.CommitSha(base)
-            RepositoryIdentity.CommitSha(head)
-            let comparison = GitHub.Api("repos/" + repo + "/compare/" + base + "..." + fork.Split('/')[0] + ":" + head)
-            let files = J.Get(comparison, "files")
-            let commits = J.Items(J.Get(comparison, "commits"))
-            if J.Text(comparison, "status") != "ahead" || J.Get(comparison, "behind_by")
-                .ValueKind != JsonValueKind.Number ||
-                J.Number(comparison, "behind_by") != 0 || J.Text(J.Get(comparison, "base_commit"), "sha") != base ||
-                J.Text(J.Get(comparison, "merge_base_commit"), "sha") != base || commits.Count == 0 || J.Text(
-                commits[commits.Count - 1],
-                "sha"
-            ) != head ||
-                files.ValueKind != JsonValueKind.Array ||
-                files.GetArrayLength() == 0 || files.GetArrayLength() >= 300 {
-                throw Exception("Missing, truncated or mismatched approved-base-to-head diff evidence")
-            }
-            let filenames = HashSet[string](StringComparer.Ordinal)
-            let endpoints = HashSet[string](StringComparer.Ordinal)
-            for file in files.EnumerateArray() {
-                let path = J.Text(file, "filename")
-                Relative(path)
-                if !filenames.Add(path) {
-                    throw Exception("Duplicate GitHub file diff evidence")
-                }
-                endpoints.Add(path)
-                let status = J.Text(file, "status")
-                if status != "added" &&
-                    status != "removed" &&
-                    status != "modified" &&
-                    status != "renamed" &&
-                    status != "changed" &&
-                    status != "copied" {
-                    throw Exception("Missing GitHub file diff status")
-                }
-                let previous = J.Get(file, "previous_filename")
-                if status == "renamed" || previous.ValueKind != JsonValueKind.Undefined {
-                    let name = J.Text(file, "previous_filename")
-                    Relative(name)
-                    endpoints.Add(name)
-                }
-            }
-            return endpoints
         }
     }
 }

@@ -264,13 +264,13 @@ internal class Synchronization {
                 ProtectedPaths.EqualTrees(
                     policy,
                     approval,
-                    ProtectedPaths.RemoteTree(repo, baseline),
+                    GitHubPathEvidence.Tree(repo, baseline),
                     ProtectedPaths.LocalTree(checkout, previous)
                 )
                 ProtectedPaths.EqualTrees(
                     policy,
                     approval,
-                    ProtectedPaths.RemoteTree(repo, upstream),
+                    GitHubPathEvidence.Tree(repo, upstream),
                     ProtectedPaths.LocalTree(checkout, candidate)
                 )
                 baseline = upstream
@@ -280,7 +280,7 @@ internal class Synchronization {
             ProtectedPaths.EqualTrees(
                 policy,
                 approval,
-                ProtectedPaths.RemoteTree(repo, baseline),
+                GitHubPathEvidence.Tree(repo, baseline),
                 ProtectedPaths.LocalTree(checkout, head)
             )
         }
@@ -309,14 +309,14 @@ internal class Synchronization {
                 ProtectedPaths.EqualTrees(
                     policy,
                     approval,
-                    ProtectedPaths.RemoteTree(repo, baseline),
-                    ProtectedPaths.RemoteTree(fork, previous)
+                    GitHubPathEvidence.Tree(repo, baseline),
+                    GitHubPathEvidence.Tree(fork, previous)
                 )
                 ProtectedPaths.EqualTrees(
                     policy,
                     approval,
-                    ProtectedPaths.RemoteTree(repo, upstream),
-                    ProtectedPaths.RemoteTree(fork, candidate)
+                    GitHubPathEvidence.Tree(repo, upstream),
+                    GitHubPathEvidence.Tree(fork, candidate)
                 )
                 baseline = upstream
                 predecessor = candidate
@@ -325,8 +325,8 @@ internal class Synchronization {
             ProtectedPaths.EqualTrees(
                 policy,
                 approval,
-                ProtectedPaths.RemoteTree(repo, baseline),
-                ProtectedPaths.RemoteTree(fork, head)
+                GitHubPathEvidence.Tree(repo, baseline),
+                GitHubPathEvidence.Tree(fork, head)
             )
         }
 
