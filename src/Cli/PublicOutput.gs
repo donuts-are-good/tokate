@@ -192,6 +192,10 @@ internal class PublicOutput {
             let verification = J.Get(value, "verification")
             result["verification"] = Rows(verification, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(verification).Count
+            if V1Continuation.Has(run) {
+                result["predecessor"] = J.Get(value, "continuation")
+                result["continuation_phase"] = run.Text("continuation_phase")
+            }
             let usage = J.Map()
             for key in[]string{"input_tokens", "cached_input_tokens", "output_tokens"} {
                 let item = J.Get(J.Get(value, "usage"), key)

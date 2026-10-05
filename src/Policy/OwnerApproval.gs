@@ -34,11 +34,33 @@ internal class OwnerApproval {
             if args.Command == "assign" && !GitHub.HasLabel(issue) {
                 throw Exception("Approve the issue first")
             }
+            var predecessor JsonElement
+            if args.Get("continue-approval") != "" {
+                let requested = args.Need("donor")
+                donor = RepositoryIdentity.Login(requested == "@me" ? J.Text(GitHub.Api("user"), "login"): requested)
+                predecessor = Approved(repo, number, donor)
+                if J.Text(predecessor, "sha") != args.Need("continue-approval") {
+                    throw CliFailure(
+                        "stale_approval",
+                        "Continuation requires the current valid, unrevoked predecessor approval"
+                    )
+                }
+                V1Continuation.SupportedApproval(J.Get(predecessor, "approval"))
+            }
+            let continuing = predecessor.ValueKind != JsonValueKind.Undefined
             let authority = J.Text(info, "default_branch")
-            let branch = ApprovalBase.Select(args, authority)
+            let branch = continuing ? J.Text(J.Get(predecessor, "approval"), "base_branch"): ApprovalBase.Select(
+                args,
+                authority
+            )
             let authorityBase = GitHub.Branch(repo, authority)
-            let revision = branch == authority ? authorityBase: GitHub.Branch(repo, branch)
+            let revision = continuing ? J.Text(J.Get(predecessor, "approval"), "base"): (
+                branch == authority ? authorityBase: GitHub.Branch(repo, branch)
+            )
             let policy = Policy.Load(repo, authorityBase)
+            if continuing && J.Number(policy.Value, "version") != 1 {
+                throw Exception("Continuation is limited to unpublished same-donor version-1 managed work")
+            }
             if policy.Eligibility != "" {
                 if args.Get("donor") != "" || args.Command == "assign" {
                     throw Exception("Task-scoped approval cannot assign a donor")
@@ -56,7 +78,7 @@ internal class OwnerApproval {
                 "Approving target " + branch + " at " + revision + "; policy/template authority: " + authority
             )
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
-            if policy.Eligibility == "" {
+            if policy.Eligibility == "" && !continuing {
                 var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
                 let others = List[string]()
                 var found bool
@@ -120,6 +142,35 @@ internal class OwnerApproval {
                 "nonce",
                 Guid.NewGuid().ToString("N")
             )
+            if continuing {
+                let prior = J.Get(predecessor, "approval")
+                for key in[]string{
+                    "repo",
+                    "donor",
+                    "base",
+                    "base_branch",
+                    "issue_hash",
+                    "policy_hash",
+                    "template_hash",
+                    "authority_branch",
+                    "decree"
+                } {
+                    approval[key] = J.Get(prior, key)
+                }
+                approval["predecessor_approval"] = J.Text(predecessor, "sha")
+                approval["donor_id"] = RepositoryIdentity.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
+                approval["repo_id"] = RepositoryIdentity.PositiveId(J.Get(info, "id"))
+                for key in[]string{"donor_id", "repo_id"} {
+                    if J.Get(prior, key).ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(
+                        J.Get(prior, key)
+                    ) != Convert.ToInt64(approval[key]) {
+                        throw CliFailure("stale_approval", "Predecessor numeric identity changed: " + key)
+                    }
+                }
+                if J.Text(Approved(repo, number, donor), "sha") != J.Text(predecessor, "sha") {
+                    throw CliFailure("stale_approval", "Predecessor changed during continuation approval")
+                }
+            }
             if J.Number(policy.Value, "version") == 2 {
                 approval["version"] = 2
                 if policy.Eligibility != "" {
@@ -136,6 +187,9 @@ internal class OwnerApproval {
                 return
             }
             let old = GitHub.Api("repos/" + repo + "/git/ref/heads/" + ApprovalRef(number), missing: true)
+            if continuing && J.Text(J.Get(old, "object"), "sha") != J.Text(predecessor, "sha") {
+                throw CliFailure("stale_approval", "Predecessor changed before continuation grant creation")
+            }
             let parents = List[string]{revision}
             if old.ValueKind != JsonValueKind.Undefined {
                 parents.Add(J.Text(J.Get(old, "object"), "sha"))
@@ -168,6 +222,12 @@ internal class OwnerApproval {
                     parents
                 )
             )
+            if continuing && J.Text(Approved(repo, number, donor), "sha") != J.Text(predecessor, "sha") {
+                throw CliFailure(
+                    "stale_approval",
+                    "Predecessor was changed or revoked before continuation grant issuance"
+                )
+            }
             if old.ValueKind == JsonValueKind.Undefined {
                 GitHub.Api(
                     "repos/" + repo + "/git/refs",
@@ -180,7 +240,9 @@ internal class OwnerApproval {
                     "PATCH"
                 )
             }
-            GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
+            if !continuing {
+                GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
+            }
             Terminal.Message("Approved https://github.com/" + repo + "/issues/" + number.ToString() + " for @" + donor)
         }
 

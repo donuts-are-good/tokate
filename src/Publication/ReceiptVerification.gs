@@ -27,6 +27,17 @@ internal class ReceiptVerification {
                 RepositoryIdentity.Login(J.Text(receipt, "donor"))
             )
             let approval = J.Get(record, "approval")
+            let predecessor = J.Get(receipt, "predecessor")
+            if J.Text(approval, "predecessor_approval") != "" && predecessor.ValueKind == JsonValueKind.Undefined {
+                throw Exception("Continuation receipt omitted interrupted-origin provenance")
+            }
+            if predecessor.ValueKind != JsonValueKind.Undefined {
+                V1Continuation.Grant(record, J.Text(predecessor, "approval"), J.Get(author, "id"))
+                V1Continuation.Receipt(predecessor, J.Text(receipt, "import_manifest_sha256"), approval)
+                if !PrBody.ReportText(body, "").Contains(PrBody.ContinuationReport(predecessor).Trim()) {
+                    throw Exception("PR report omitted interrupted-origin provenance")
+                }
+            }
             if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
                 receipt,
                 "policy"

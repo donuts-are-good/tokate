@@ -14,6 +14,11 @@ internal class ContributionClaim {
             let donor = RepositoryIdentity.Login(J.Text(viewer, "login"))
             let record = OwnerApproval.Approved(repo, number, donor)
             let approval = J.Get(record, "approval")
+            if J.Text(approval, "predecessor_approval") != "" && args.Get("continue-from") == "" {
+                throw Exception(
+                    "This continuation grant requires explicit --continue-from; request ordinary fresh approval to start from the base without importing"
+                )
+            }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             policy.Digest = J.Text(approval, "policy_hash")
             let selection = DonorSelection.Resolve(args, policy)
@@ -38,7 +43,11 @@ internal class ContributionClaim {
                     J.Text(selection, "availability") + "."
             )
             if args.Command == "work" {
-                DonorSelection.Confirm(args, selection)
+                if args.Get("continue-from") != "" {
+                    V1Continuation.Confirm(args, selection)
+                } else {
+                    DonorSelection.Confirm(args, selection)
+                }
             }
             let run = Data()
             run.Fields["version"] = 1
@@ -64,8 +73,30 @@ internal class ContributionClaim {
             run.Fields["network"] = network
             run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
             run.Fields["state"] = "preparing"
+            if args.Get("continue-from") != "" {
+                let sourceDirectory = LocalPaths.DirectoryPath(args.Need("continue-from"))
+                run.Fields["continuation_source"] = sourceDirectory
+                {
+                    using let sourceLease = V1Continuation.SourceLease(sourceDirectory)
+                    let source = V1Continuation.Source(sourceDirectory, run, record)
+                    run.Fields["continuation"] = V1Continuation.Provenance(source)
+                    run.Fields["continuation_source_metadata_sha256"] = Correction.FileHash(
+                        Path.Combine(sourceDirectory, "run.json")
+                    )
+                    run.Fields["id"] = Data.Hash(run.Text("approval") + ":" + source.Text("id")).Substring(0, 32)
+                }
+            }
             let directory = Preparation.RunDirectory(args, run.Text("id"))
             PublicOutput.RunDirectory = directory
+            if V1Continuation.Has(run) &&
+                (Directory.Exists(directory) || File.Exists(directory) || FileInfo(directory).LinkTarget != nil) {
+                throw CliFailure(
+                    "invalid_state",
+                    "Existing continuation preparation: " +
+                        directory +
+                        ". Inspect status --run DIR, then use prepare --run DIR before work --run DIR. No new reservation was created."
+                )
+            }
             Preparation.Select(run, args.Get("fork"))
             Directory.CreateDirectory(
                 directory,
@@ -75,6 +106,9 @@ internal class ContributionClaim {
             using let lease = Preparation.Lease(directory)
             Terminal.Step("Preparing contribution. Run: " + directory)
             Preparation.Initialize(directory, run, args.Get("fork"))
+            if V1Continuation.Has(run) {
+                V1Continuation.Capture(directory, run, record)
+            }
             Preparation.Complete(directory, run)
             Terminal.Message("Claimed issue #" + number.ToString() + ". Run: " + directory)
             return directory
@@ -101,6 +135,20 @@ internal class ContributionClaim {
                 throw CliFailure("stale_approval", "Approval was replaced. This run cannot be published.")
             }
             let approval = J.Get(record, "approval")
+            if J.Text(approval, "predecessor_approval") != "" && !V1Continuation.Has(run) {
+                throw Exception("Continuation grant lost its explicit predecessor/import state")
+            }
+            if V1Continuation.Has(run) {
+                RuntimeBudget.Validate(run)
+                if run.Number("verification_reserve") < 1 {
+                    throw Exception("Continuation requires its separately selected positive verification reserve")
+                }
+                V1Continuation.Grant(
+                    record,
+                    J.Text(J.Get(run.Element(), "continuation"), "approval"),
+                    J.Get(run.Element(), "donor_id")
+                )
+            }
             if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != J.Text(
                 approval,
                 "base_branch"

@@ -45,6 +45,9 @@ internal class SuiteCatalog {
                 case "Preparation" {
                     PreparationChecks.All(binary)
                 }
+                case "Continuation" {
+                    ContinuationChecks.All(binary)
+                }
                 case "Targets" {
                     TargetBranches.All(binary)
                 }
@@ -94,6 +97,7 @@ internal class SuiteCatalog {
                     Job("Decree"),
                     Job("Targets"),
                     Job("Preparation"),
+                    Job("Continuation"),
                     Job("Overlaps")
                 }
                 SuiteDriver(data.Root, jobs).Run(report)
