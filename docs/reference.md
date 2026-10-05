@@ -235,6 +235,8 @@ v2 awaits its coordinator. Writes are not atomic; inspect uncertain remote state
 `original-evidence` preserves the original records and verification log directories
 under a checked manifest. Linked evidence paths and changed or incomplete archives
 block amendment and retry; the archive is never silently rebuilt.
+Older amendment archives remain unsealed with logs in the run directory. Tokate
+checks preserved records and log paths without reconstructing or sealing history.
 
 ## Synchronize with upstream
 

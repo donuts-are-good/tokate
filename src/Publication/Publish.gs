@@ -72,8 +72,10 @@ internal class Publication {
             }
             let baseRepo = J.Text(J.Get(base, "repo"), "full_name")
             let mergedAt = J.Get(pull, "merged_at").ValueKind
-            if J.Text(base, "ref") != run.Text("base_branch") ||
-                (baseRepo != "" && !RepositoryIdentity.SameRepo(baseRepo, run.Text("repo"))) ||
+            if J.Text(base, "ref") != run.Text("base_branch") || !RepositoryIdentity.SameRepo(
+                baseRepo,
+                run.Text("repo")
+            ) ||
                 J.Text(pull, "state") != "open" || !J.Bool(pull, "draft") || J.Bool(pull, "merged") ||
                 (mergedAt != JsonValueKind.Undefined && mergedAt != JsonValueKind.Null) ||
                 J.Number(pull, "number") < 1 {
@@ -113,20 +115,25 @@ internal class Publication {
                 throw Exception("Only a successful saved run can be published")
             }
             let marker = "<!-- tokate-run:" + run.Text("id") + " -->"
-            var expectedReceipt = J.Parse(J.Write(ContributionReceipt.Native(run, run.Text("commit"))))
+            let fields = ContributionReceipt.Native(run, run.Text("commit"))
             let amendments = J.Items(J.Get(run.Element(), "amendments"))
             if amendments.Count > 0 {
-                OriginalEvidence.Load(directory, run)
                 let latest = amendments[amendments.Count - 1]
                 let amendment = Data.Load(Path.Combine(directory, "amendments", run.Text("commit")))
+                let original = OriginalEvidence.Amended(directory, run, amendment)
                 if amendment.Text("state") != "published" || amendment.Text("commit") != run.Text("commit") || J.Text(
                     latest,
                     "head"
                 ) != run.Text("commit") || J.Text(latest, "id") != amendment.Text("id") {
                     throw Exception("Saved published amendment differs from current contribution")
                 }
-                expectedReceipt = PrBody.Receipt(amendment.Text("body"))
+                fields["original_head"] = original.Text("commit")
+                let publicAmendment = J.Parse(J.Write(Amendment.PublicRecord(amendment)))
+                Amendment.ValidateReceipt(publicAmendment, Policy(J.Write(J.Get(record, "policy"))))
+                fields["amendment"] = publicAmendment
+                Synchronization.Keep(fields, Synchronization.History(amendment.Element()))
             }
+            let expectedReceipt = J.Parse(J.Write(fields))
             let existing = Find(run, expectedReceipt)
             if existing.ValueKind != JsonValueKind.Undefined {
                 ProtectedPaths.Remote(

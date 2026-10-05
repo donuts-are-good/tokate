@@ -997,6 +997,7 @@ internal partial class NativeFlow : NativeFixture {
             "head",
             "author-id",
             "base-repo",
+            "missing-base-repo",
             "merged-at",
             "ambiguous",
             "later-page",
@@ -1044,6 +1045,9 @@ internal partial class NativeFlow : NativeFixture {
                 }
                 case "base-repo" {
                     (pull["base"] ?? throw Exception("Missing base"))["repo"] = Check.Map("full_name", "other/project")
+                }
+                case "missing-base-repo" {
+                    (pull["base"] ?? throw Exception("Missing base")).AsObject().Remove("repo")
                 }
                 case "merged-at" {
                     pull["merged_at"] = JsonValue.Create(DateTimeOffset.UtcNow.ToString("O"))

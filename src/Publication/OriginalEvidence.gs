@@ -126,42 +126,122 @@ internal class OriginalEvidence {
             }
             let original = Data.Load(archive)
             if run != nil {
-                for key in[]string{
-                    "version",
-                    "id",
-                    "repo",
-                    "issue",
-                    "donor",
-                    "donor_id",
-                    "head_repo",
-                    "approval",
-                    "state_sha",
-                    "base",
-                    "base_branch",
-                    "policy_hash",
-                    "branch",
-                    "model",
-                    "effort",
-                    "seconds",
-                    "network",
-                    "source",
-                    "tools",
-                    "usage",
-                    "execution_seconds",
-                    "elapsed_seconds",
-                    "codex_version",
-                    "inference_exit_code",
-                    "turn_completed"
-                } {
-                    if key == "repo" || key == "head_repo" {
-                        if !RepositoryIdentity.SameRepo(original.Text(key), run.Text(key)) {
-                            throw Exception("Saved original authority changed: " + key)
-                        }
-                    } else if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
-                        throw Exception("Saved original authority or execution attribution changed: " + key)
+                Authority(original, run)
+            }
+            return original
+        }
+
+        private func Authority(original Data, run Data) {
+            for key in[]string{
+                "version",
+                "id",
+                "repo",
+                "issue",
+                "donor",
+                "donor_id",
+                "head_repo",
+                "approval",
+                "state_sha",
+                "base",
+                "base_branch",
+                "policy_hash",
+                "branch",
+                "model",
+                "effort",
+                "seconds",
+                "network",
+                "source",
+                "tools",
+                "usage",
+                "execution_seconds",
+                "elapsed_seconds",
+                "codex_version",
+                "inference_exit_code",
+                "turn_completed"
+            } {
+                if key == "repo" || key == "head_repo" {
+                    if !RepositoryIdentity.SameRepo(original.Text(key), run.Text(key)) {
+                        throw Exception("Saved original authority changed: " + key)
+                    }
+                } else if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
+                    throw Exception("Saved original authority or execution attribution changed: " + key)
+                }
+            }
+        }
+
+        internal func Amended(directory string, run Data, amendment Data? = nil) Data {
+            let archive = LocalPaths.DirectoryPath(Path.Combine(directory, "original-evidence"))
+            let history = J.Items(J.Get(run.Element(), "amendments"))
+            var first = amendment
+            if history.Count > 0 {
+                let location = LocalPaths.DirectoryPath(
+                    Path.Combine(directory, "amendments", RepositoryIdentity.CommitSha(J.Text(history[0], "head")))
+                )
+                if FileInfo(Path.Combine(location, "run.json")).LinkTarget != nil {
+                    throw Exception("Saved original amendment must not be a link")
+                }
+                first = Data.Load(location)
+                if first.Text("id") != J.Text(history[0], "id") {
+                    throw Exception("Saved first amendment differs from contribution history")
+                }
+            }
+            let sealPath = Path.Combine(archive, "seal.json")
+            if File.Exists(Path.Combine(archive, "manifest.json")) || File.Exists(sealPath) {
+                let original = Load(directory, run)
+                let digest = Data.Read(sealPath).Text("manifest_sha256")
+                for saved in[]Data? {first, amendment} {
+                    if saved != nil && saved.Fields.ContainsKey("original_evidence_sha256") && saved.Text(
+                        "original_evidence_sha256"
+                    ) != digest {
+                        throw Exception("Saved original evidence seal changed")
+                    }
+                }
+                return original
+            }
+            let inventory = Inventory(archive)
+            let original = Data.Load(archive)
+            Authority(original, run)
+            let failure = "Original evidence lacks its required seal; refusing archive downgrade"
+            if first == nil || first.Fields.ContainsKey("original_evidence_sha256") ||
+                (amendment != nil && amendment.Fields.ContainsKey("original_evidence_sha256")) ||
+                original.Text("commit") != first.Text("previous") || first.Number("pr") < 1 || File.Exists(
+                Path.Combine(archive, "archive.json")
+            ) ||
+                File.Exists(Path.Combine(directory, "correction.json")) {
+                throw Exception(failure)
+            }
+            if run.Number("version") == 1 &&
+                (original.Text("state") != "published" || original.Number("pr") != first.Number("pr")) {
+                throw Exception(failure)
+            }
+            RepositoryIdentity.CommitSha(original.Text("commit"))
+            for file in inventory {
+                if file.Key.Contains('/') {
+                    throw Exception(failure)
+                }
+            }
+            if !RequestData.Same(J.Get(original.Element(), "verification"), J.Get(run.Element(), "verification")) {
+                throw Exception("Legacy original verification records changed")
+            }
+            VerificationReferences(directory, J.Get(original.Element(), "verification"))
+            for name in[]string{
+                "events.jsonl",
+                "changes.patch",
+                "candidate.patch",
+                "verification.json",
+                "report.md",
+                "pr-body.md",
+                "publication.json"
+            } {
+                if inventory.ContainsKey(name) {
+                    let path = Path.Combine(directory, name)
+                    if FileInfo(path).LinkTarget != nil || !File.Exists(path) ||
+                        FileHash(path) != FileHash(Path.Combine(archive, name)) {
+                        throw Exception("Legacy original evidence differs from preserved run records")
                     }
                 }
             }
+            Terminal.Message("Legacy original evidence is unsealed; preserved logs remain in the run directory")
             return original
         }
     }

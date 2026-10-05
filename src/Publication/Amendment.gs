@@ -259,15 +259,16 @@ internal class Amendment {
             )
         }
 
-        private func Archive(directory string, run Data) {
+        private func Archive(directory string, run Data) string {
             LocalPaths.DirectoryPath(directory)
             let archive = Path.Combine(directory, "original-evidence")
             if FileInfo(archive).LinkTarget != nil {
                 throw Exception("Original evidence archive must not be a link")
             }
             if Directory.Exists(archive) {
-                OriginalEvidence.Load(directory, run)
-                return
+                OriginalEvidence.Amended(directory, run)
+                let seal = Path.Combine(archive, "seal.json")
+                return File.Exists(seal) ? Data.Read(seal).Text("manifest_sha256"): ""
             }
             let staging = Path.Combine(directory, "archive-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(
@@ -288,6 +289,7 @@ internal class Amendment {
                     Directory.Delete(staging, true)
                 }
             }
+            return Data.Read(Path.Combine(archive, "seal.json")).Text("manifest_sha256")
         }
 
         internal func Run(args Args) {
@@ -306,8 +308,8 @@ internal class Amendment {
             let location = Path.Combine(directory, "amendments", commit)
             var amendment Data
             if Directory.Exists(location) {
-                OriginalEvidence.Load(directory, run)
                 amendment = Data.Load(location)
+                OriginalEvidence.Amended(directory, run, amendment)
                 if amendment.Text("sync") != sync || amendment.Number("seconds") != seconds || RequestData.Canonical(
                     J.Get(amendment.Element(), "tools")
                 ) != RequestData.Canonical(tools) {
@@ -349,9 +351,12 @@ internal class Amendment {
                     run.Text("commit")
                 )
                 let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
-                Archive(directory, run)
+                let archive = Archive(directory, run)
                 Directory.CreateDirectory(location)
                 amendment = Data()
+                if archive != "" {
+                    amendment.Fields["original_evidence_sha256"] = archive
+                }
                 amendment.Fields["id"] = Guid.NewGuid().ToString("D")
                 amendment.Fields["previous"] = run.Text("commit")
                 amendment.Fields["commit"] = commit

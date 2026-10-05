@@ -880,7 +880,7 @@ internal partial class Fixture {
                 "repo",
                 Check.Map("full_name", headLogin + "/project", "owner", Check.Map("login", headLogin, "id", 123))
             )
-            body["base"] = Check.Map("ref", Check.Text(body["base"]))
+            body["base"] = Check.Map("ref", Check.Text(body["base"]), "repo", Check.Map("full_name", repo))
             let pulls = State["pulls"]?.AsArray() ?? JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls
