@@ -377,7 +377,9 @@ internal class PublicOutput {
                 }
                 Actions.Add(known ? []string{"tokate", "help", Command, "--json"}: []string{"tokate", "help", "--json"})
             } else if code == "missing_tools" {
-                if Command != "doctor" {
+                if Command == "claude-check" {
+                    Actions.Add([]string{"tokate", "help", "claude-check", "--json"})
+                } else if Command != "doctor" {
                     let diagnostic = Startup.NeedsCatalog(Command, options) ? "--managed": (
                         Command == "external" ||
                             Command == "amend" ||

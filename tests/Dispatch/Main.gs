@@ -95,6 +95,14 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 1 && args[0] == "--claude-gate" {
+            ClaudeChecks.All(binary, false)
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--claude-boundary" {
+            ClaudeChecks.Boundary()
+            return 0
+        }
         if args.Length == 2 && args[0] == "--suite" {
             SuiteCatalog.Select(binary, args[1])
             return 0

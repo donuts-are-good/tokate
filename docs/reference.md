@@ -334,3 +334,9 @@ bash scripts/verify.sh
 The verification script runs the formatter, build and full suite. Check managed
 isolation separately with `artifacts/linux-x64/tokate doctor` and compatible native
 Codex on PATH; simulated checks do not prove that boundary.
+
+## Native Claude diagnostics
+
+`tokate claude-check --model claude-opus-4-6 --effort high --json` checks the
+pinned native interfaces without inference. Managed Claude execution remains
+disabled. See [the capability contract and evidence limits](claude-native.md).

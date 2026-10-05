@@ -110,6 +110,9 @@ func Dispatch(options Args) int32 {
         PublicOutput.ResultData = J.Map("version", ApplicationInfo.Version(), "installation", options.Command)
         return Installation.Run(options.Command)
     }
+    if options.Command == "claude-check" {
+        return ClaudeCheck.Check(options)
+    }
     if options.Command != "doctor" && options.Command != "defaults" {
         Startup.Check(options)
     }

@@ -74,6 +74,7 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
+            CliOption("binary", "PATH", "Explicitly installed native Claude executable; no implicit installation"),
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
             CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
             CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
@@ -132,6 +133,15 @@ internal class Cli {
             CliOption("ascii", "", "Use ASCII ornaments; preserve names and URLs verbatim"),
         }
         internal let Commands[]CliCommand = []CliCommand{
+            CliCommand(
+                "claude-check",
+                "binary,model,effort",
+                "model,effort",
+                "Check pinned native Claude interfaces in a synthetic profile; managed inference stays disabled.",
+                "--model claude-opus-4-6 --effort high [--binary PATH]",
+                "claude-check --model claude-opus-4-6 --effort high",
+                effects: "local_read local_write"
+            ),
             CliCommand(
                 "doctor",
                 "owner,managed,external,auth,non-interactive",

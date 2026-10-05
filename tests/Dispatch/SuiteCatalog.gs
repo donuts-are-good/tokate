@@ -65,6 +65,7 @@ internal class SuiteCatalog {
                     CliDiscovery.All(binary)
                     Diagnostics.All(binary)
                     DonorSelectionChecks.All(binary)
+                    ClaudeChecks.All(binary)
                     VerificationChecks.All()
                     SuiteChecks.All()
                     for name in NativeFlow.SerialGroups {

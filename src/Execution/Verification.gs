@@ -294,7 +294,10 @@ internal class Verification {
             seconds int32,
             outputPath string = "",
             errorPath string = "",
-            budget RuntimeBudget? = nil
+            budget RuntimeBudget? = nil,
+            nativeExecutable string = "",
+            input string? = nil,
+            cancellation Chan[bool]? = nil
         ) CommandResult {
             if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
                 throw Exception(
@@ -362,12 +365,18 @@ internal class Verification {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
             }
-            let cancellation = Chan[bool](1)
+            if nativeExecutable != "" {
+                args.AddRange([]string{"--ro-bind", nativeExecutable, "/opt/tokate-claude"})
+                for entry in ClaudeNative.Environment() {
+                    args.AddRange([]string{"--setenv", entry.Key, entry.Value})
+                }
+            }
+            let signal = cancellation ?? Chan[bool](1)
             let onCancel = ConsoleCancelEventHandler(
                 (sender Object?, event ConsoleCancelEventArgs) -> {
                     event.Cancel = true
                     select {
-                        case cancellation <- true { }
+                        case signal <- true { }
                         default { }
                     }
                 }
@@ -411,14 +420,16 @@ internal class Verification {
                             "--bind",
                             checkout,
                             checkout,
-                            "--ro-bind",
-                            git,
-                            git,
                             "--chdir",
-                            checkout,
-                            "--"
+                            checkout
                         }
                     )
+                    if nativeExecutable == "" {
+                        args.AddRange([]string{"--ro-bind", git, git})
+                    } else {
+                        args.AddRange([]string{"--tmpfs", git})
+                    }
+                    args.Add("--")
                     args.AddRange(command)
                     result = Commands.Run(
                         "/usr/bin/bwrap",
@@ -426,10 +437,11 @@ internal class Verification {
                         checkout,
                         seconds: seconds,
                         isolated: true,
-                        cancellation: cancellation,
+                        cancellation: signal,
                         outputPath: outputPath,
                         errorPath: errorPath,
-                        budget: budget
+                        budget: budget,
+                        input: input
                     )
                 } catch (error Exception) {
                     CleanupRuntime(storage.FullName, error)
@@ -446,7 +458,7 @@ internal class Verification {
                     throw CommandInterrupted(error, result)
                 }
                 select {
-                    case <- cancellation {
+                    case <- signal {
                         result.Code = nil
                         throw CommandInterrupted(Exception("Verification cancelled"), result)
                     }
