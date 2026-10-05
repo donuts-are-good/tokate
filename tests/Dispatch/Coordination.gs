@@ -51,6 +51,9 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Coordination/" + name) {
+                    continue
+                }
                 if name.StartsWith("Eligibility", StringComparison.Ordinal) {
                     EligibilityChecks.All(binary, name)
                     continue

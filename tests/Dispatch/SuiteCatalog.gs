@@ -46,10 +46,14 @@ internal class SuiteCatalog {
                     OverlapChecks.All(binary)
                 }
                 case "Preparation" {
-                    PreparationChecks.All(binary)
+                    if CiShard.Include("Preparation") {
+                        PreparationChecks.All(binary)
+                    }
                 }
                 case "Targets" {
-                    TargetBranches.All(binary)
+                    if CiShard.Include("Targets") {
+                        TargetBranches.All(binary)
+                    }
                 }
                 default {
                     throw Exception("Unknown suite selector: " + name)
@@ -63,15 +67,31 @@ internal class SuiteCatalog {
             try {
                 let serial = report.Serial()
                 try {
-                    ProcessChecks.All()
-                    ProtectedPathChecks.All()
-                    CliDiscovery.All(binary)
-                    Diagnostics.All(binary)
-                    DonorSelectionChecks.All(binary)
-                    VerificationChecks.All()
-                    SuiteChecks.All()
+                    if CiShard.Include("Process") {
+                        ProcessChecks.All()
+                    }
+                    if CiShard.Include("ProtectedPaths") {
+                        ProtectedPathChecks.All()
+                    }
+                    if CiShard.Include("CliDiscovery") {
+                        CliDiscovery.All(binary)
+                    }
+                    if CiShard.Include("Diagnostics") {
+                        Diagnostics.All(binary)
+                    }
+                    if CiShard.Include("DonorSelection") {
+                        DonorSelectionChecks.All(binary)
+                    }
+                    if CiShard.Include("Verification") {
+                        VerificationChecks.All()
+                    }
+                    if CiShard.Include("SuiteDriver") {
+                        SuiteChecks.All()
+                    }
                     for name in NativeFlow.SerialGroups {
-                        NativeFlow.All(binary, name)
+                        if CiShard.Include("Native/" + name) {
+                            NativeFlow.All(binary, name)
+                        }
                     }
                 } finally {
                     report.Finish(serial)
@@ -103,17 +123,19 @@ internal class SuiteCatalog {
                 SuiteDriver(data.Root, jobs).Run(report)
                 let installer = report.Serial()
                 try {
-                    Installer.Lifecycle(project, binary)
-                    Console.WriteLine(
-                        "PASS installer lifecycle, failed updates, credential boundary, and offline removal"
-                    )
-                    Installer.ShellDetection(project, binary)
-                    Installer.RefuseInvalidPath(project)
-                    Console.WriteLine("PASS installer rejects symlink and directory replacement")
-                    Installer.RefuseUnsupportedPlatform(project, binary)
-                    Console.WriteLine(
-                        "PASS unsupported architecture/libc refusal preserves installations and permits removal"
-                    )
+                    if CiShard.Include("Installer") {
+                        Installer.Lifecycle(project, binary)
+                        Console.WriteLine(
+                            "PASS installer lifecycle, failed updates, credential boundary, and offline removal"
+                        )
+                        Installer.ShellDetection(project, binary)
+                        Installer.RefuseInvalidPath(project)
+                        Console.WriteLine("PASS installer rejects symlink and directory replacement")
+                        Installer.RefuseUnsupportedPlatform(project, binary)
+                        Console.WriteLine(
+                            "PASS unsupported architecture/libc refusal preserves installations and permits removal"
+                        )
+                    }
                 } finally {
                     report.Finish(installer)
                 }
@@ -135,7 +157,8 @@ internal class SuiteCatalog {
             Command: []string{
                 "/bin/sh",
                 "-c",
-                "cd .git/data && exec artifacts/tests/tokate-tests --suite \"$$1\"",
+                "cd .git/data && exec env TOKATE_CI_SHARD=" + CiShard.Spec() +
+                    " artifacts/tests/tokate-tests --suite \"$$1\"",
                 "suite",
                 name
             }

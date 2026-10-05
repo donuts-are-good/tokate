@@ -589,6 +589,13 @@ internal class SynchronizationChecks {
                         if (partition == 1 && index > 21) || (partition == 2 && index <= 21) {
                             continue
                         }
+                        matched = true
+                        matchedSelectors.Add(version)
+                        matchedSelectors.Add(mode)
+                        matchedSelectors.Add(version + "/" + mode)
+                        if !CiShard.Include("Synchronization/" + version + "/" + mode) {
+                            continue
+                        }
                         let target = mode == "selected-target" || mode == "authority-policy" ? "release/review": ""
                         let key = version + "/" + target
                         if !preparations.ContainsKey(key) {
@@ -600,10 +607,6 @@ internal class SynchronizationChecks {
                             )
                         }
                         Run(preparations[key], version == "v2", mode)
-                        matched = true
-                        matchedSelectors.Add(version)
-                        matchedSelectors.Add(mode)
-                        matchedSelectors.Add(version + "/" + mode)
                         Console.WriteLine("PASS synchronization " + version + "/" + mode)
                     }
                 }
