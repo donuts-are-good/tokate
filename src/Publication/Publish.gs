@@ -9,9 +9,7 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
-        internal func Usage(run Data) string {
-            return PublicSummary.Usage(J.Get(run.Element(), "usage"))
-        }
+        internal func Usage(run Data) string -> PublicSummary.Usage(J.Get(run.Element(), "usage"))
 
         internal func Find(run Data) JsonElement {
             let query = "?state=all&head=" + Uri.EscapeDataString(run.Text("donor") + ":" + run.Text("branch")) +

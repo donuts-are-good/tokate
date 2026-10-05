@@ -117,7 +117,7 @@ internal class RequestData {
             for tool in items {
                 Keys(tool, "harness,provider,model,effort,usage,coding_seconds")
                 for name in[]string{"harness", "provider", "model", "effort"} {
-                    Token(J.Text(tool, name))
+                    PublicSummary.Identifier(Token(J.Text(tool, name)))
                 }
                 let number = J.Get(tool, "coding_seconds")
                 var seconds int64

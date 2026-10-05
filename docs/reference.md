@@ -337,9 +337,11 @@ Codex on PATH; simulated checks do not prove that boundary.
 
 ### Public PR summaries
 
-Managed execution writes a dedicated `tokate-public-summary.json` in the checkout.
+Managed tasks request a dedicated `tokate-public-summary.json` in the checkout.
 Tokate reads at most 4096 UTF-8 bytes, removes this untracked artifact before staging,
-and binds its validated contents to the candidate patch. It never generates public
+and binds its validated contents to the candidate patch. Managed summaries allow
+4046 serialized bytes, reserving 50 bytes for the commit head within the final
+4096-byte bound. Tokate never generates public
 summaries from private harness reports, logs or prompts. A repository-owned file at
 that name or a symlink is refused.
 

@@ -70,7 +70,6 @@ internal class Amendment {
                 (original.ValueKind == JsonValueKind.Undefined ? "": PrBody.OriginalProvenance(original))
         }
 
-        // Exact previous rendering is retained only to recognize legacy owned reports.
         internal func LegacySummary(previous string, head string, seconds int32, tools JsonElement) string ->
         "Review amendment: " +
             previous +
@@ -527,13 +526,18 @@ internal class Amendment {
                 throw Exception("Remote branch and PR head disagree")
             }
             let receipt = PrBody.Receipt(J.Text(pull, "body"))
+            let previousReceipt = PrBody.Receipt(amendment.Text("previous_body"))
+            let legacyReport = run.Number("version") == 1 ? PrBody.LegacyVerificationReport(
+                run,
+                record,
+                previousReceipt
+            ):
+            PrBody.OriginalReport(J.Get(J.Get(J.Get(authority, "state"), "contribution"), "metadata"))
             if amendment.Text("state") == "verified" {
                 if remote != amendment.Text("previous") || J.Text(receipt, "head") != amendment.Text("previous") {
                     throw Exception("Remote changed before amendment publication intent")
                 }
-                if RequestData.Canonical(receipt) != RequestData.Canonical(
-                    PrBody.Receipt(amendment.Text("previous_body"))
-                ) {
+                if RequestData.Canonical(receipt) != RequestData.Canonical(previousReceipt) {
                     throw Exception("Previous receipt changed after amendment acceptance")
                 }
                 let intent = J.Map(
@@ -572,7 +576,7 @@ internal class Amendment {
                     )
                     amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
-                        PrBody.VerificationReport(run, record),
+                        legacyReport,
                         report,
                         J.Parse(J.Write(updatedReceipt))
                     )
@@ -644,9 +648,6 @@ internal class Amendment {
                 amendment.Save(location)
                 File.WriteAllText(Path.Combine(location, "publication.json"), J.Write(amendment.Element()) + "\n")
             }
-            let previousReceipt = PrBody.Receipt(amendment.Text("previous_body"))
-            let legacyReport = run.Number("version") == 1 ? PrBody.VerificationReport(run, record):
-            PrBody.OriginalReport(J.Get(J.Get(J.Get(authority, "state"), "contribution"), "metadata"))
             let previousOwned = PrBody.Owned(amendment.Text("previous_body"), legacyReport)
             let owned = PrBody.Owned(J.Text(pull, "body"), legacyReport)
             if owned != previousOwned && owned != PrBody.Owned(amendment.Text("body"), legacyReport) {

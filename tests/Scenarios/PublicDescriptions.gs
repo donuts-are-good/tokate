@@ -2,6 +2,7 @@ package TokateTests
 
 import System
 import System.IO
+import System.Text
 import System.Text.Json
 import System.Text.Json.Nodes
 import Tokate
@@ -315,13 +316,89 @@ internal class PublicDescriptions {
             let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
             let path = Path.Combine(flow.Temp.Root, "summary.json")
             File.WriteAllText(path, Summary("Add final corrected result text.", head).ToJsonString())
-            flow.Call([]string{"recover", "--run", run, "--commit", head, "--seconds", "30", "--summary", path})
+            let tools = "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+            let toolsPath = Path.Combine(flow.Temp.Root, "correction-tools.json")
+            File.WriteAllText(toolsPath, tools)
+            flow.Call(
+                []string{
+                    "recover",
+                    "--run",
+                    run,
+                    "--commit",
+                    head,
+                    "--seconds",
+                    "30",
+                    "--summary",
+                    path,
+                    "--tools",
+                    toolsPath
+                }
+            )
             let body = Body(flow)
             Check.Contains(body, "- Add final corrected result text.")
             Check.Contains(body, "Tokate observed locally")
             Check.Contains(body, "Donor-reported correction tools")
             Check.Contains(body, "cover only the original completed turn")
             Check.That(!body.Contains("- Add a result containing"), "Correction reused original summary")
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            let receiptPrefix = "<!-- tokate-receipt:"
+            let receiptStart = body.IndexOf(receiptPrefix, StringComparison.Ordinal) + receiptPrefix.Length
+            let receiptEnd = body.IndexOf(" -->", receiptStart, StringComparison.Ordinal)
+            let correction = J.Get(J.Parse(body.Substring(receiptStart, receiptEnd - receiptStart)), "correction")
+            let legacy = "Explicit donor correction " + J.Text(correction, "uuid") +
+                ": donor-reported correction tools: " +
+                tools +
+                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
+                "Tokate observed independent verification locally on exact corrected commit " +
+                head +
+                ", tree " +
+                J.Text(correction, "tree") +
+                ". Separate verification budget: 30 seconds.\n\n" +
+                "Generated a patch for the approved issue. Independent owner verification: 1/1 checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+            let prefix = "<!-- tokate-report:start -->"
+            let suffix = "<!-- tokate-report:end -->"
+            let start = body.IndexOf(prefix, StringComparison.Ordinal)
+            let end = body.IndexOf(suffix, StringComparison.Ordinal) + suffix.Length
+            flow.Reload()
+            let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing corrected PR")
+            pull["body"] = JsonValue.Create(
+                "Maintainer before\n" + body.Remove(start, end - start).Insert(start, legacy) + "\nMaintainer after"
+            )
+            flow.Save()
+            File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final amended result text\n")
+            flow.Git("-C", checkout, "add", "-A")
+            flow.Git(
+                "-C",
+                checkout,
+                "-c",
+                "user.name=Donor",
+                "-c",
+                "user.email=donor@example.test",
+                "commit",
+                "-m",
+                "Review corrected result"
+            )
+            let amended = flow.Git("-C", checkout, "rev-parse", "HEAD")
+            File.WriteAllText(path, Summary("Update final result text after review.", amended).ToJsonString())
+            let args = []string{"amend", "--run", run, "--commit", amended, "--seconds", "30", "--summary", path}
+            flow.Mode("lost_body_response")
+            flow.Call(args, 1)
+            flow.Mode("")
+            flow.Call(args)
+            let reviewed = Body(flow)
+            Check.Contains(reviewed, "Maintainer before")
+            Check.Contains(reviewed, "Maintainer after")
+            Check.Contains(reviewed, "- Update final result text after review.")
+            Check.That(
+                !reviewed.Contains("Explicit donor correction " + J.Text(correction, "uuid")),
+                "Legacy correction prose survived outside the current report"
+            )
+            let reportStart = reviewed.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length
+            let reportEnd = reviewed.IndexOf(suffix, StringComparison.Ordinal)
+            Check.That(
+                !reviewed.Substring(reportStart, reportEnd - reportStart).Contains("\"harness\""),
+                "Legacy tool JSON survived in the current report"
+            )
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         }
 
@@ -341,6 +418,98 @@ internal class PublicDescriptions {
                     Check.Contains(Body(flow), "Change summary unavailable for this candidate")
                 } else {
                     flow.NoPr()
+                }
+            }
+        }
+
+        private func BoundedArtifact() JsonNode {
+            let value = Check.Map(
+                "changes",
+                Check.Json("[]"),
+                "verification",
+                Check.Json("[]"),
+                "limitations",
+                Check.Json("[]")
+            )
+            for key in[]string{"changes", "verification", "limitations"} {
+                let items = value[key]?.AsArray() ?? throw Exception("Missing summary list")
+                let prefix = key == "changes" ? "Fix final result behavior. ": "Fixture observation. "
+                for i in 0 ... (key == "limitations" ? 4: 8) {
+                    items.Add(JsonValue.Create(prefix + String('x', 200 - prefix.Length)) as JsonNode)
+                }
+            }
+            let size = Encoding.UTF8.GetByteCount(J.Write(J.Parse(value.ToJsonString())))
+            let limits = value["limitations"]?.AsArray() ?? throw Exception("Missing limits")
+            let text = Check.Text(limits[0])
+            limits[0] = JsonValue.Create(text.Substring(0, text.Length - size + 4046))
+            return value
+        }
+
+        private func ManagedBounds(binary string) {
+            for oversized in[]bool{false, true} {
+                using let flow = NativeFixture(binary)
+                flow.Initialize()
+                flow.Approve()
+                let run = flow.Claim()
+                let value = BoundedArtifact()
+                if oversized {
+                    let limits = value["limitations"]?.AsArray() ?? throw Exception("Missing limits")
+                    limits[0] = JsonValue.Create(Check.Text(limits[0]) + "x")
+                }
+                flow.Reload()
+                flow.State["public_summary"] = JsonValue.Create(value.ToJsonString())
+                flow.Save()
+                flow.Call([]string{"work", "--run", run}, oversized ? 1: 0)
+                if oversized {
+                    flow.NoPr()
+                    Check.That(
+                        Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["commit"] == nil,
+                        "Oversized summary reached a publication commit"
+                    )
+                    Check.That(
+                        !File.Exists(Path.Combine(run, "changes.patch")),
+                        "Oversized summary reached independent verification"
+                    )
+                } else {
+                    Check.Contains(Body(flow), "Fix final result behavior.")
+                    flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                }
+            }
+        }
+
+        private func UnsafeRequests(binary string) {
+            using let flow = CoordinationFixture(binary)
+            flow.Initialize(false)
+            flow.Flow.SetModelPolicy("unrestricted", "omit")
+            flow.Flow.Approve()
+            let claim = flow.Claim()
+            let head = flow.Flow.Git("-C", flow.Flow.Upstream, "rev-parse", "HEAD")
+            for action in[]string{"publish", "amend"} {
+                for model in[]string{"ghp_SYNTHETIC", "sk-synthetic"} {
+                    let request = flow.PublishRequest(claim, head)
+                    let metadata = request["metadata"] ?? throw Exception("Missing metadata")
+                    let tool = metadata["tools"]?[0] ?? throw Exception("Missing tool declaration")
+                    tool["model"] = JsonValue.Create(model)
+                    if action == "amend" {
+                        request["action"] = JsonValue.Create(action)
+                        metadata.AsObject().Remove("source")
+                        metadata["previous"] = JsonValue.Create(head)
+                        metadata["pr"] = JsonValue.Create(10)
+                        metadata["seconds"] = JsonValue.Create(30)
+                    }
+                    let path = Path.Combine(flow.Flow.Temp.Root, "request.json")
+                    File.WriteAllText(path, request.ToJsonString())
+                    flow.Flow.ResetTraffic()
+                    Check.Contains(
+                        flow
+                            .Flow
+                            .Call([]string{"request", "--repo", "owner/project", "--issue", "1", "--file", path}, 1)
+                            .Error,
+                        "invalid public identifier"
+                    )
+                    flow.Flow.Reload()
+                    Check.That(flow.Flow.State["request_comments"] == nil, "Unsafe tool data was posted")
+                    Check.That(flow.Flow.State["api_calls"]?.AsArray().Count == 0, "Unsafe tool data reached GitHub")
                 }
             }
         }
@@ -367,6 +536,14 @@ internal class PublicDescriptions {
             if selected == "" || selected == "MissingAndUnsafe" {
                 MissingAndUnsafe(binary)
                 Console.WriteLine("PASS missing summary fallback and unsafe publication refusal")
+            }
+            if selected == "" || selected == "ManagedBounds" {
+                ManagedBounds(binary)
+                Console.WriteLine("PASS managed summary byte boundary before candidate publication")
+            }
+            if selected == "" || selected == "UnsafeRequests" {
+                UnsafeRequests(binary)
+                Console.WriteLine("PASS unsafe public tool identifiers refused before request comments")
             }
         }
     }

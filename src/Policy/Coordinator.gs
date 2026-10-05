@@ -363,7 +363,7 @@ internal class Coordinator {
             let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             let body = J.Text(pull, "body")
             let oldReceipt = PrBody.Receipt(body)
-            let report = Amendment.Summary(
+            var report = Amendment.Summary(
                 J.Text(metadata, "previous"),
                 J.Text(metadata, "head"),
                 J.Number(metadata, "seconds"),
@@ -374,8 +374,20 @@ internal class Coordinator {
             )
             let oldCanonical = RequestData.Canonical(oldReceipt)
             let candidateCanonical = RequestData.Canonical(receipt)
-            if oldCanonical == candidateCanonical && PrBody.ReportText(body, PrBody.OriginalReport(old)) != report {
-                throw Exception("Candidate PR report differs from saved amendment intent")
+            if oldCanonical == candidateCanonical {
+                let observedReport = PrBody.ReportText(body, PrBody.OriginalReport(old))
+                if observedReport != report {
+                    if J.Get(metadata, "summary").ValueKind != JsonValueKind.Undefined || observedReport !=
+                    Amendment.LegacySummary(
+                        J.Text(metadata, "previous"),
+                        J.Text(metadata, "head"),
+                        J.Number(metadata, "seconds"),
+                        J.Get(metadata, "tools")
+                    ) {
+                        throw Exception("Candidate PR report differs from saved amendment intent")
+                    }
+                    report = observedReport
+                }
             }
             if oldCanonical != candidateCanonical {
                 if oldCanonical != RequestData.Canonical(ContributionReceipt.FromState(value)) {

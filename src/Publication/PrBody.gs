@@ -42,6 +42,26 @@ internal class PrBody {
                 " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
         }
 
+        internal func LegacyVerificationReport(run Data, record JsonElement, receipt JsonElement) string {
+            let report = VerificationReport(run, record)
+            let correction = J.Get(receipt, "correction")
+            if correction.ValueKind == JsonValueKind.Undefined {
+                return report
+            }
+            let tools = J.Get(correction, "tools")
+            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
+            "donor-reported correction tools: " + J.Write(tools)
+            return "Explicit donor correction " + J.Text(correction, "uuid") +
+                ": " +
+                editing +
+                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
+                "Tokate observed independent verification locally on exact corrected commit " +
+                J.Text(correction, "head") + ", tree " + J.Text(correction, "tree") +
+                ". Separate verification budget: " +
+                J
+                .Number(correction, "seconds").ToString() + " seconds.\n\n" + report
+        }
+
         internal func ManagedReport(run Data, record JsonElement) string {
             let count = Verification.Results(run, record)
             return PublicSummary.Report(
@@ -60,11 +80,11 @@ internal class PrBody {
             if summary.ValueKind != JsonValueKind.Undefined {
                 PublicSummary.Validate(summary, J.Text(metadata, "head"))
             }
-            var report = PublicSummary.Report(
+            return PublicSummary.Report(
                 summary,
                 "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
-            )
-            return report + OriginalProvenance(metadata)
+            ) +
+                OriginalProvenance(metadata)
         }
 
         internal func OriginalProvenance(metadata JsonElement) string {

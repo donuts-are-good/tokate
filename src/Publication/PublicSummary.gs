@@ -6,13 +6,13 @@ import System.IO
 import System.Text.Json
 import System.Text.RegularExpressions
 
-// Only this dedicated public artifact is read. Private reports and logs are never summary inputs.
 internal class PublicSummary {
     shared {
         internal let Artifact string = "tokate-public-summary.json"
 
         internal func Validate(value JsonElement, head string = "") {
-            RequestData.Parse(J.Write(value), 4096)
+            let limit = J.Get(value, "head").ValueKind == JsonValueKind.Undefined ? 4046: 4096
+            RequestData.Parse(J.Write(value), limit)
             RequestData.Keys(value, "head,changes,verification,limitations")
             if head != "" && J.Text(value, "head") != head {
                 throw Exception("Public summary does not describe the current candidate")
