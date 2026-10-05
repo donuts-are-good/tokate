@@ -36,6 +36,9 @@ internal class SuiteCatalog {
                 case "Amendment" {
                     AmendmentFlow.All(binary)
                 }
+                case "Repair" {
+                    RepairChecks.All(binary)
+                }
                 case "Decree" {
                     DecreeFlow.All(binary)
                 }
@@ -91,6 +94,7 @@ internal class SuiteCatalog {
                     Job("Coordination"),
                     Job("Correction"),
                     Job("Amendment"),
+                    Job("Repair"),
                     Job("Decree"),
                     Job("Targets"),
                     Job("Preparation"),

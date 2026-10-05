@@ -172,6 +172,10 @@ func Main(args[]string) int32 {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--repairs" {
+            RepairChecks.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--decree" {
             DecreeFlow.All(binary, args.Length == 2 ? args[1]: "")
             return 0

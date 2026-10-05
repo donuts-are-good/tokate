@@ -203,7 +203,7 @@ internal class Terminal {
         }
 
         internal func Foreground() bool -> Array.IndexOf(
-            []string{"work", "recover", "external", "amend", "publish", "submit"},
+            []string{"work", "recover", "external", "amend", "repair", "publish", "submit"},
             PublicOutput.Command
         ) >= 0
 

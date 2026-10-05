@@ -105,6 +105,16 @@ it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API output and retry limits](reference.md#automate-commands) and
 [ApiTransport.gs](../src/GitHub/ApiTransport.gs).
 
+Version-1 `repair` uses a separate evidence directory when the original private
+run is unavailable. It stores the exact original public receipt, numeric donor and
+repository identities, live owner grant, candidate snapshot, new verification logs
+and publication intent. It starts no inference and never reconstructs or attests
+original private logs, usage or checks. The public repair provenance discloses this
+gap; original public execution observations describe original work only. An exact
+head lease plus ancestry validation protects branch publication, and saved intent
+allows explicit publication resume without repeating passed verification. CI and
+owner review remain required. See [Repair.gs](../src/Publication/Repair.gs).
+
 Version-2 `request --file FILE` writes a local posting intent and lock beside the
 request file. The intent contains the canonical repository/issue, numeric actor,
 exact validated payload and binding hash, with no credentials or API response logs.
