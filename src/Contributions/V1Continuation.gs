@@ -269,11 +269,17 @@ internal class V1Continuation {
 
         private func Excluded(path string) bool {
             for part in path.Split('/') {
-                if part == ".env" || part.StartsWith(".env.", StringComparison.Ordinal) {
+                let name = part.ToLowerInvariant()
+                if name == ".env" || name.StartsWith(".env.", StringComparison.Ordinal) {
                     return true
                 }
                 if Array.IndexOf(
                     []string{
+                        ".envrc",
+                        ".npmrc",
+                        ".pypirc",
+                        ".gitconfig",
+                        ".docker",
                         ".git",
                         ".verification-data",
                         ".agents",
@@ -319,7 +325,7 @@ internal class V1Continuation {
                         ".pytest_cache",
                         ".gradle"
                     },
-                    part
+                    name
                 ) >= 0 {
                     return true
                 }
