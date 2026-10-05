@@ -59,7 +59,7 @@ internal class AccessState {
             let identity = J.Get(approval, "repo_id")
             if declaration.ValueKind == JsonValueKind.Undefined &&
                 mode.ValueKind == JsonValueKind.Undefined &&
-                identity.ValueKind == JsonValueKind.Undefined {
+                (identity.ValueKind == JsonValueKind.Undefined || J.Number(approval, "version") == 1) {
                 return false
             }
             RequestData.Parse(J.Write(approval), 1024 * 1024)

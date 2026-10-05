@@ -202,10 +202,15 @@ internal class Submission {
                 writer.Flush()
                 file.Flush(true)
             }
+            WriteRequest(repo, issue, actor, value, expires)
+            Terminal.Message("Request posted; coordinator outcome is recorded in the issue state ref")
+        }
+
+        internal func WriteRequest(repo string, issue int32, actor JsonElement, request JsonElement, expires int64) {
             try {
                 let posted = GitHub.Api(
                     "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
-                    J.Map("body", "/tokate " + RequestData.Canonical(value)),
+                    J.Map("body", "/tokate " + RequestData.Canonical(request)),
                     expires: expires
                 )
                 let failure = "Comment write response lacks exact request evidence"
@@ -217,55 +222,61 @@ internal class Submission {
                     posted,
                     "body"
                 ) != "/tokate " +
-                    RequestData.Canonical(value) {
+                    RequestData.Canonical(request) {
                     throw Exception(failure)
                 }
                 RepositoryIdentity.PositiveId(J.Get(posted, "id"))
             } catch (error Exception) {
                 let latest = CoordinationState.Load(repo, issue)
-                if RequestData.Recorded(latest.Value(), actor, value)
+                if RequestData.Recorded(latest.Value(), actor, request)
                     .ValueKind == JsonValueKind.Undefined &&
-                    !Posted(repo, issue, actor, value) {
+                    !Posted(repo, issue, actor, request) {
                     throw Exception(
                         "Uncertain request write; no unique canonical evidence. No POST retry made. " + error.Message
                     )
                 }
             }
-            Terminal.Message("Request posted; coordinator outcome is recorded in the issue state ref")
         }
 
-        private func PublicationRequest(run Data) JsonElement -> J.Parse(
-            J.Write(
-                J.Map(
-                    "uuid",
-                    run.Text("publication_uuid"),
-                    "expected",
-                    run.Text("state_sha"),
-                    "approval",
-                    run.Text("approval"),
-                    "action",
-                    "publish",
-                    "metadata",
-                    PublicSummary.Attach(
-                        J.Map(
-                            "fork",
-                            run.Text("head_repo"),
-                            "branch",
-                            run.Text("branch"),
-                            "head",
-                            run.Text("commit"),
-                            "source",
-                            run.Text("source"),
-                            "tools",
-                            J.Get(run.Element(), "tools"),
-                            "verification",
-                            "donor-reported-pass"
-                        ),
-                        PublicSummary.ForHead(run, run.Text("commit"))
+        internal func PublicationRequest(run Data, correction Data? = nil) JsonElement {
+            let metadata = J.Map(
+                "fork",
+                run.Text("head_repo"),
+                "branch",
+                run.Text("branch"),
+                "head",
+                correction?.Text("commit") ?? run.Text("commit"),
+                "source",
+                run.Text("source"),
+                "tools",
+                J.Get(run.Element(), "tools"),
+                "verification",
+                "donor-reported-pass"
+            )
+            if correction != nil {
+                metadata["correction"] = Correction.Provenance(correction)
+            }
+            var summary = PublicSummary.ForHead(run, run.Text("commit"))
+            if let current = correction {
+                summary = PublicSummary.ForHead(current, current.Text("commit"))
+            }
+            return J.Parse(
+                J.Write(
+                    J.Map(
+                        "uuid",
+                        correction?.Text("publication_uuid") ?? run.Text("publication_uuid"),
+                        "expected",
+                        run.Text("state_sha"),
+                        "approval",
+                        run.Text("approval"),
+                        "action",
+                        "publish",
+                        "metadata",
+                        PublicSummary.Attach(metadata, summary)
                     )
                 )
             )
-        )
+        }
 
         internal func Submit(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))

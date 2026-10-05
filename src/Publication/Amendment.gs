@@ -293,19 +293,37 @@ internal class Amendment {
             )
         }
 
-        private func Archive(directory string) {
+        private func Archive(directory string, run Data) string {
+            LocalPaths.DirectoryPath(directory)
             let archive = Path.Combine(directory, "original-evidence")
+            if FileInfo(archive).LinkTarget != nil {
+                throw Exception("Original evidence archive must not be a link")
+            }
             if Directory.Exists(archive) {
-                return
+                OriginalEvidence.Amended(directory, run)
+                let seal = Path.Combine(archive, "seal.json")
+                return File.Exists(seal) ? Data.Read(seal).Text("manifest_sha256"): ""
             }
             let staging = Path.Combine(directory, "archive-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(staging)
-            for file in Directory.EnumerateFiles(directory) {
-                if Path.GetFileName(file) != ".lock" {
-                    File.Copy(file, Path.Combine(staging, Path.GetFileName(file)))
+            Directory.CreateDirectory(
+                staging,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            try {
+                for file in Directory.EnumerateFiles(directory) {
+                    if Path.GetFileName(file) != ".lock" {
+                        OriginalEvidence.CopyFile(file, Path.Combine(staging, Path.GetFileName(file)))
+                    }
+                }
+                OriginalEvidence.VerificationArtifacts(directory, staging)
+                OriginalEvidence.Seal(staging)
+                Directory.Move(staging, archive)
+            } finally {
+                if Directory.Exists(staging) {
+                    Directory.Delete(staging, true)
                 }
             }
-            Directory.Move(staging, archive)
+            return Data.Read(Path.Combine(archive, "seal.json")).Text("manifest_sha256")
         }
 
         internal func Run(args Args) {
@@ -326,6 +344,7 @@ internal class Amendment {
             var amendment Data
             if Directory.Exists(location) {
                 amendment = Data.Load(location)
+                OriginalEvidence.Amended(directory, run, amendment)
                 if !RequestData.Same(J.Get(amendment.Element(), "public_summary"), summary) || amendment.Text(
                     "sync"
                 ) != sync ||
@@ -370,9 +389,12 @@ internal class Amendment {
                     run.Text("commit")
                 )
                 let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
-                Archive(directory)
+                let archive = Archive(directory, run)
                 Directory.CreateDirectory(location)
                 amendment = Data()
+                if archive != "" {
+                    amendment.Fields["original_evidence_sha256"] = archive
+                }
                 amendment.Fields["id"] = Guid.NewGuid().ToString("D")
                 amendment.Fields["previous"] = run.Text("commit")
                 amendment.Fields["commit"] = commit
@@ -566,14 +588,7 @@ internal class Amendment {
                 updatedReceipt["amendment"] = PublicRecord(amendment)
                 Synchronization.Keep(updatedReceipt, Synchronization.History(amendment.Element()))
                 if run.Number("version") == 1 {
-                    let report = Summary(
-                        amendment.Text("previous"),
-                        amendment.Text("commit"),
-                        amendment.Number("seconds"),
-                        J.Get(amendment.Element(), "tools"),
-                        J.Get(amendment.Element(), "public_summary"),
-                        true
-                    )
+                    let report = PrBody.AmendmentReport(J.Parse(J.Write(updatedReceipt)))
                     amendment.Fields["body"] = PrBody.ReplaceBody(
                         J.Text(pull, "body"),
                         legacyReport,
@@ -702,7 +717,7 @@ internal class Amendment {
                     amendment.Text("commit")
                 )
             } else {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     run.Text("repo"),
                     policy.Value,
                     J.Get(record, "approval"),

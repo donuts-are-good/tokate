@@ -27,6 +27,17 @@ internal class ReceiptVerification {
                 RepositoryIdentity.Login(J.Text(receipt, "donor"))
             )
             let approval = J.Get(record, "approval")
+            let predecessor = J.Get(receipt, "predecessor")
+            if J.Text(approval, "predecessor_approval") != "" && predecessor.ValueKind == JsonValueKind.Undefined {
+                throw Exception("Continuation receipt omitted interrupted-origin provenance")
+            }
+            if predecessor.ValueKind != JsonValueKind.Undefined {
+                V1Continuation.Grant(record, J.Text(predecessor, "approval"), J.Get(author, "id"))
+                V1Continuation.Receipt(predecessor, J.Text(receipt, "import_manifest_sha256"), approval)
+                if !PrBody.ReportText(body, "").Contains(PrBody.ContinuationReport(predecessor).Trim()) {
+                    throw Exception("PR report omitted interrupted-origin provenance")
+                }
+            }
             if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
                 receipt,
                 "policy"
@@ -84,7 +95,7 @@ internal class ReceiptVerification {
                     )
                 }
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
@@ -112,16 +123,15 @@ internal class ReceiptVerification {
                         ready: ready
                     )
                 }
-                let report = Amendment.Summary(
-                    J.Text(amendment, "previous"),
-                    J.Text(receipt, "head"),
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools"),
-                    J.Get(amendment, "summary"),
-                    true
-                )
+                let report = PrBody.AmendmentReport(receipt)
                 let observedReport = PrBody.ReportText(body, report)
-                let legacy = Amendment.LegacySummary(
+                let prior = J.Get(receipt, "predecessor")
+                let legacy = (
+                    prior.ValueKind == JsonValueKind.Undefined ? "":
+                    PrBody.ContinuationReport(prior)
+                ) +
+                    Amendment
+                    .LegacySummary(
                     J.Text(amendment, "previous"),
                     J.Text(receipt, "head"),
                     J.Number(amendment, "seconds"),
@@ -329,7 +339,7 @@ internal class ReceiptVerification {
                     exactHead
                 )
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     approval,

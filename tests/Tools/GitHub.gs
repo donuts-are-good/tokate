@@ -107,6 +107,9 @@ internal partial class Fixture {
         let actor = Check.Text(State["self_owned"]) == "true" ? "owner": token == nil ? File.ReadAllText(
             Path.Combine(config, "identity")
         ): (token == "fixture-owner" ? "owner": "donor")
+        let actorId = State["viewer_id"] ?? JsonValue.Create(
+            actor == "owner" && Check.Text(State["self_owned"]) != "true" ? 1: 123
+        ) as JsonNode
         if args[0] == "auth" {
             Check.That(
                 args.Length == 3 && args[1] == "git-credential" && args[2] == "get",
@@ -169,14 +172,7 @@ internal partial class Fixture {
         }
         if path == "user" {
             return Answer(
-                Check.Map(
-                    "login",
-                    State["viewer_login"] ?? JsonValue.Create(actor) as JsonNode,
-                    "id",
-                    State["viewer_id"] ?? JsonValue.Create(
-                        actor == "owner" && Check.Text(State["self_owned"]) != "true" ? 1: 123
-                    ) as JsonNode
-                )
+                Check.Map("login", State["viewer_login"] ?? JsonValue.Create(actor) as JsonNode, "id", actorId)
             )
         }
         if path.StartsWith("user/repos?") {
@@ -475,6 +471,9 @@ internal partial class Fixture {
             if file == "access.json" && State["access_override"] != nil {
                 content = Check.Text(State["access_override"])
             }
+            if file == "state.json" && State["coordination_state_override"] != nil {
+                content = Check.Text(State["coordination_state_override"])
+            }
             return Answer(
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )
@@ -515,7 +514,7 @@ internal partial class Fixture {
                     "body",
                     Check.Text(body["body"]),
                     "user",
-                    Check.Map("login", actor, "id", 123),
+                    Check.Map("login", actor, "id", actorId),
                     "issue_url",
                     "https://api.github.com/repos/owner/project/issues/1"
                 )
@@ -543,7 +542,28 @@ internal partial class Fixture {
                     Save()
                     return 1
                 }
-                return Answer(comment)
+                let response = comment.DeepClone()
+                switch Check.Text(State["request_response_fault"]) {
+                    case "issue" {
+                        response["issue_url"] = JsonValue.Create("https://api.github.com/repos/owner/project/issues/2")
+                    }
+                    case "repo" {
+                        response["issue_url"] = JsonValue.Create("https://api.github.com/repos/other/project/issues/1")
+                    }
+                    case "author" {
+                        (response["user"] ?? throw Exception("Missing response author"))["id"] = JsonValue.Create(999)
+                    }
+                    case "body" {
+                        response["body"] = JsonValue.Create("/tokate {}")
+                    }
+                    case "id" {
+                        response["id"] = JsonValue.Create(0)
+                    }
+                }
+                if Check.Text(State["request_response_missing"]) == "true" {
+                    comments.AsObject().Remove((100 + count).ToString())
+                }
+                return Answer(response)
             }
             if method != "GET" {
                 if tail.EndsWith("/assignees") {
@@ -795,7 +815,25 @@ internal partial class Fixture {
                     pulls.Add(pull.DeepClone())
                 }
             }
-            return Answer(pulls)
+            if Check.Text(State["pull_history_invalid"]) == "true" {
+                return Answer(Check.Map("message", "Unexpected PR response"))
+            }
+            let pageField = Array.Find(query, field -> field.StartsWith("page=", StringComparison.Ordinal)) ?? "page=1"
+            let sizeField = Array.Find(query, field -> field.StartsWith("per_page=", StringComparison.Ordinal)) ??
+                "per_page=30"
+            let page = Int32.Parse(pageField.Substring(5))
+            let size = Int32.Parse(sizeField.Substring(9))
+            let rows = JsonArray()
+            if Check.Text(State["pull_history_unbounded"]) == "true" {
+                for i in 0 ... size {
+                    rows.Add(pulls[0]?.DeepClone())
+                }
+            } else {
+                for i in(page - 1) * size ... Math.Min(page * size, pulls.Count) {
+                    rows.Add(pulls[i]?.DeepClone())
+                }
+            }
+            return Answer(rows)
         }
         if tail.StartsWith("pulls/") {
             let number = tail.Split('/')[1]
@@ -833,7 +871,7 @@ internal partial class Fixture {
             body["number"] = JsonValue.Create(number)
             body["html_url"] = JsonValue.Create("https://github.com/owner/project/pull/" + number.ToString())
             body["state"] = JsonValue.Create("open")
-            body["user"] = Check.Map("login", actor, "id", 123)
+            body["user"] = Check.Map("login", actor, "id", actorId)
             body["head"] = Check.Map(
                 "sha",
                 Git(headLogin == "owner" ? "upstream": "fork", []string{"rev-parse", branch}),
@@ -842,7 +880,7 @@ internal partial class Fixture {
                 "repo",
                 Check.Map("full_name", headLogin + "/project", "owner", Check.Map("login", headLogin, "id", 123))
             )
-            body["base"] = Check.Map("ref", Check.Text(body["base"]))
+            body["base"] = Check.Map("ref", Check.Text(body["base"]), "repo", Check.Map("full_name", repo))
             let pulls = State["pulls"]?.AsArray() ?? JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls

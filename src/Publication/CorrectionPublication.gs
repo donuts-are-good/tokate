@@ -8,26 +8,6 @@ import System.Text.RegularExpressions
 
 internal class CorrectionPublication {
     shared {
-        internal func Pulls(run Data) List[JsonElement] {
-            let pulls = List[JsonElement]()
-            for page in 1 ... 21 {
-                let rows = J.Items(
-                    GitHub.Api(
-                        "repos/" + RepositoryIdentity.Repo(run.Text("repo")) +
-                            "/pulls?state=all&head=" +
-                            Uri.EscapeDataString(run.Text("donor") + ":" + run.Text("branch")) +
-                            "&per_page=100&page=" +
-                            page.ToString()
-                    )
-                )
-                pulls.AddRange(rows)
-                if rows.Count < 100 {
-                    return pulls
-                }
-            }
-            throw Exception("interrupted_publication: matching PR history is incomplete; refusing publication")
-        }
-
         internal func Remote(run Data, correction Data?, initial bool = false) string {
             let reference = GitHub.Api(
                 "repos/" + RepositoryIdentity.Repo(run.Text("head_repo")) + "/git/ref/heads/" + run.Text("branch"),
@@ -60,58 +40,8 @@ internal class CorrectionPublication {
             return receipt
         }
 
-        internal func Match(run Data, correction Data, pull JsonElement) {
-            let marker = run.Number("version") == 1 ? "<!-- tokate-run:" + run.Text("id") + " -->":
-            "<!-- tokate-v2:" + run.Text("id") + " -->"
-            let body = J.Text(pull, "body")
-            let receiptFailure = "interrupted_publication: physical PR receipt differs from the saved correction"
-            let receipt = RequestData.Parse(PrBody.ReceiptText(body, receiptFailure, receiptFailure))
-            let expected = J.Parse(J.Write(Receipt(run, correction)))
-            if !RequestData.Same(receipt, expected) {
-                throw Exception(receiptFailure)
-            }
-            let head = J.Get(pull, "head")
-            let headRepo = J.Get(head, "repo")
-            let author = J.Get(pull, "user")
-            let base = J.Get(pull, "base")
-            let commit = correction.Text("commit")
-            let branch = run.Text("branch")
-            let fork = run.Text("head_repo")
-            let target = run.Text("base_branch")
-            let failure = "interrupted_publication: physical PR differs from exact saved run/head/receipt"
-            if !body.Contains(marker) || body.IndexOf(marker, StringComparison.Ordinal) !=
-            body.LastIndexOf(marker, StringComparison.Ordinal) {
-                throw Exception(failure)
-            }
-            if J.Text(head, "sha") != commit || J.Text(head, "ref") != branch {
-                throw Exception(failure)
-            }
-            if !RepositoryIdentity.SameRepo(J.Text(headRepo, "full_name"), fork) {
-                throw Exception(failure)
-            }
-            if !String.Equals(J.Text(author, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) &&
-                run.Number("version") == 1 {
-                throw Exception(failure)
-            }
-            if J.Text(base, "ref") != target || J.Text(pull, "state") != "open" || !J.Bool(pull, "draft") {
-                throw Exception(failure)
-            }
-        }
-
-        private func Existing(run Data, correction Data) JsonElement {
-            let pulls = Pulls(run)
-            if pulls.Count > 1 {
-                throw Exception("interrupted_publication: ambiguous physical PRs; intent preserved")
-            }
-            if pulls.Count == 0 {
-                return JsonElement{}
-            }
-            Match(run, correction, pulls[0])
-            return pulls[0]
-        }
-
         private func CheckSaved(directory string, run Data, correction Data) JsonElement {
-            let original = Correction.OriginalRun(directory, run)
+            let original = OriginalEvidence.Load(directory, run)
             Correction.Completed(Path.Combine(directory, "original-evidence"), original)
             let failure = "Only the saved verified exact correction can be published"
             if correction.Text("state") != "verified" || run.Text("commit") != correction.Text("commit") {
@@ -252,7 +182,7 @@ internal class CorrectionPublication {
                 Preview(Path.Combine(directory, "publication.json"), J.Write(J.Get(intent, "request")) + "\n")
                 Preview(Path.Combine(directory, "pr-body.md"), J.Text(J.Get(intent, "request"), "body"), false)
                 var remote = Remote(run, correction)
-                let existing = Existing(run, correction)
+                let existing = Publication.Find(run, expectedReceipt)
                 if existing.ValueKind != JsonValueKind.Undefined {
                     if remote != correction.Text("commit") {
                         throw Exception("Physical PR and contribution branch disagree")
@@ -276,7 +206,7 @@ internal class CorrectionPublication {
                 }
                 Correction.Authority(directory, run)
                 Correction.Exact(directory, run, correction, record)
-                let raced = Existing(run, correction)
+                let raced = Publication.Find(run, expectedReceipt)
                 if raced.ValueKind != JsonValueKind.Undefined {
                     Complete(directory, run, correction, raced)
                     return
@@ -285,12 +215,12 @@ internal class CorrectionPublication {
                 try {
                     GitHub.Api("repos/" + run.Text("repo") + "/pulls", J.Get(intent, "request"))
                 } catch (error Exception) {
-                    let found = Existing(run, correction)
+                    let found = Publication.Find(run, expectedReceipt)
                     if found.ValueKind == JsonValueKind.Undefined {
                         throw error
                     }
                 }
-                let created = Existing(run, correction)
+                let created = Publication.Find(run, expectedReceipt)
                 if created.ValueKind == JsonValueKind.Undefined || Remote(run, correction) != correction.Text(
                     "commit"
                 ) {
@@ -322,41 +252,6 @@ internal class CorrectionPublication {
             Correction.Save(directory, correction)
             Publication.SavePr(directory, run, pull)
         }
-
-        private func Request(run Data, correction Data) JsonElement -> J.Parse(
-            J.Write(
-                J.Map(
-                    "uuid",
-                    correction.Text("publication_uuid"),
-                    "expected",
-                    run.Text("state_sha"),
-                    "approval",
-                    run.Text("approval"),
-                    "action",
-                    "publish",
-                    "metadata",
-                    PublicSummary.Attach(
-                        J.Map(
-                            "fork",
-                            run.Text("head_repo"),
-                            "branch",
-                            run.Text("branch"),
-                            "head",
-                            correction.Text("commit"),
-                            "source",
-                            run.Text("source"),
-                            "tools",
-                            J.Get(run.Element(), "tools"),
-                            "verification",
-                            "donor-reported-pass",
-                            "correction",
-                            Correction.Provenance(correction)
-                        ),
-                        PublicSummary.ForHead(correction, correction.Text("commit"))
-                    )
-                )
-            )
-        )
 
         private func V2Authority(directory string, run Data, correction Data) CoordinationState {
             let viewer = GitHub.Api("user")
@@ -394,37 +289,13 @@ internal class CorrectionPublication {
             let contributionOutcome = J.Get(contribution, "outcome")
             let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
             let parents = J.Items(J.Get(commit, "parents"))
-            let binding = Data.Hash(
-                RequestData.Canonical(
-                    J.Parse(
-                        J.Write(
-                            J.Map(
-                                "actor",
-                                actor,
-                                "expected",
-                                run.Text("state_sha"),
-                                "approval",
-                                run.Text("approval"),
-                                "request",
-                                request
-                            )
-                        )
-                    )
-                )
-            )
-            var outcome bool
-            for old in J.Items(J.Get(value, "outcomes")) {
-                if J.Text(old, "uuid") == correction.Text("publication_uuid") && J.Text(old, "binding") == binding &&
-                    RequestData.Same(J.Get(old, "outcome"), contributionOutcome) {
-                    outcome = true
-                }
-            }
+            let outcome = RequestData.Recorded(value, actor, request)
             let failure = "Stale coordination revision; only the exact saved publication transition can resume"
             let expected = run.Text("state_sha")
             if parents.Count != 1 || J.Text(parents[0], "sha") != expected {
                 throw CliFailure("stale_approval", failure)
             }
-            if !RequestData.Same(request, Request(run, correction)) {
+            if !RequestData.Same(request, Submission.PublicationRequest(run, correction)) {
                 throw CliFailure("stale_approval", failure)
             }
             let publicationId = correction.Text("publication_uuid")
@@ -433,7 +304,9 @@ internal class CorrectionPublication {
                 contributor != actor.ToString() {
                 throw CliFailure("stale_approval", failure)
             }
-            if !RequestData.Same(J.Get(contribution, "metadata"), J.Get(request, "metadata")) || !outcome {
+            if !RequestData.Same(J.Get(contribution, "metadata"), J.Get(request, "metadata")) ||
+                outcome.ValueKind != JsonValueKind.Object ||
+                !RequestData.Same(outcome, contributionOutcome) {
                 throw CliFailure("stale_approval", failure)
             }
             return state
@@ -464,7 +337,7 @@ internal class CorrectionPublication {
                 if intent.ValueKind == JsonValueKind.Undefined {
                     Correction.Authority(directory, run)
                     correction.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")
-                    let request = Request(run, correction)
+                    let request = Submission.PublicationRequest(run, correction)
                     RequestData.Parse(J.Write(request))
                     RequestData.Request(request)
                     correction.Fields["publication"] = J.Map("stage", "prepared", "request", request)
@@ -472,7 +345,7 @@ internal class CorrectionPublication {
                     intent = J.Get(correction.Element(), "publication")
                     File.WriteAllText(Path.Combine(directory, "request.json"), J.Write(request) + "\n")
                     File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(request) + "\n")
-                } else if !RequestData.Same(J.Get(intent, "request"), Request(run, correction)) {
+                } else if !RequestData.Same(J.Get(intent, "request"), Submission.PublicationRequest(run, correction)) {
                     throw Exception("Saved version-2 publication intent changed")
                 }
                 Preview(Path.Combine(directory, "request.json"), J.Write(J.Get(intent, "request")) + "\n")
@@ -480,7 +353,7 @@ internal class CorrectionPublication {
                 let state = V2Authority(directory, run, correction)
                 let stage = J.Text(intent, "stage")
                 var remote = Remote(run, correction, stage == "prepared")
-                let existing = Existing(run, correction)
+                let existing = Publication.Find(run, J.Parse(J.Write(Receipt(run, correction))))
                 if state.Sha != run.Text("state_sha") {
                     if existing.ValueKind == JsonValueKind.Undefined || remote != correction.Text("commit") || J.Number(
                         J.Get(J.Get(state.Value(), "contribution"), "outcome"),
@@ -530,17 +403,13 @@ internal class CorrectionPublication {
                     J.Get(run.Element(), "donor_id")
                 )
                 SetStage(directory, correction, "request_pending")
-                try {
-                    GitHub.Api(
-                        "repos/" + run.Text("repo") + "/issues/" + run.Number("issue").ToString() + "/comments",
-                        J.Map("body", "/tokate " + RequestData.Canonical(J.Get(intent, "request"))),
-                        expires: CoordinationState.Unix(J.Get(latest.Value(), "reservation"), "expires")
-                    )
-                } catch (error Exception) {
-                    if !Posted(run, J.Get(intent, "request")) {
-                        throw error
-                    }
-                }
+                Submission.WriteRequest(
+                    run.Text("repo"),
+                    run.Number("issue"),
+                    J.Get(run.Element(), "donor_id"),
+                    J.Get(intent, "request"),
+                    CoordinationState.Unix(J.Get(latest.Value(), "reservation"), "expires")
+                )
                 SetStage(directory, correction, "requested")
                 Terminal.Message("Exact correction publication request posted. The coordinator remains publisher.")
             } catch (error Exception) {

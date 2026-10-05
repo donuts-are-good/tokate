@@ -18,6 +18,10 @@ internal class ContributionReceipt {
                 receipt["seconds"] = run.Number("seconds")
                 receipt["network"] = run.Flag("network")
                 receipt["policy"] = run.Text("policy_hash")
+                if V1Continuation.Has(run) {
+                    receipt["predecessor"] = J.Get(run.Element(), "continuation")
+                    receipt["import_manifest_sha256"] = run.Text("continuation_manifest_sha256")
+                }
             }
             return receipt
         }

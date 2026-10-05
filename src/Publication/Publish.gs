@@ -11,12 +11,77 @@ internal class Publication {
     shared {
         internal func Usage(run Data) string -> PublicSummary.Usage(J.Get(run.Element(), "usage"))
 
-        internal func Find(run Data) JsonElement {
-            let query = "?state=all&head=" + Uri.EscapeDataString(run.Text("donor") + ":" + run.Text("branch")) +
-                "&base=" +
-                Uri.EscapeDataString(run.Text("base_branch"))
-            let pulls = J.Items(GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")) + "/pulls" + query))
-            return pulls.Count == 0 ? JsonElement{}: pulls[0]
+        internal func Pulls(run Data) List[JsonElement] {
+            let pulls = List[JsonElement]()
+            for page in 1 ... 21 {
+                let response = GitHub.Api(
+                    "repos/" + RepositoryIdentity.Repo(run.Text("repo")) +
+                        "/pulls?state=all&head=" +
+                        Uri.EscapeDataString(run.Text("donor") + ":" + run.Text("branch")) +
+                        "&per_page=100&page=" +
+                        page.ToString()
+                )
+                if response.ValueKind != JsonValueKind.Array {
+                    throw Exception("interrupted_publication: matching PR history is invalid; refusing publication")
+                }
+                let rows = J.Items(response)
+                pulls.AddRange(rows)
+                if rows.Count < 100 {
+                    return pulls
+                }
+            }
+            throw Exception("interrupted_publication: matching PR history is incomplete; refusing publication")
+        }
+
+        internal func Match(run Data, pull JsonElement, expectedReceipt JsonElement) {
+            let marker = run.Number("version") == 1 ? "<!-- tokate-run:" + run.Text("id") + " -->":
+            "<!-- tokate-v2:" + run.Text("id") + " -->"
+            let body = J.Text(pull, "body")
+            let failure = "interrupted_publication: physical PR differs from exact saved run/head/receipt"
+            let receipt = RequestData.Parse(PrBody.ReceiptText(body, failure, failure))
+            if !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), J.Text(expectedReceipt, "repo")) {
+                throw Exception(failure)
+            }
+            let comparable = Dictionary[string, Object?]()
+            for field in receipt.EnumerateObject() {
+                comparable[field.Name] = field.Name == "repo" ? J.Text(expectedReceipt, "repo"): field.Value
+            }
+            if !RequestData.Same(J.Parse(J.Write(comparable)), expectedReceipt) || !body.Contains(marker) ||
+                body.IndexOf(marker, StringComparison.Ordinal) != body.LastIndexOf(marker, StringComparison.Ordinal) {
+                throw Exception(failure)
+            }
+            let head = J.Get(pull, "head")
+            let base = J.Get(pull, "base")
+            if J.Text(head, "sha") != run.Text("commit") || J.Text(head, "ref") != run.Text("branch") ||
+                !RepositoryIdentity.SameRepo(J.Text(J.Get(head, "repo"), "full_name"), run.Text("head_repo")) {
+                throw Exception(failure)
+            }
+            if run.Number("version") == 1 && !RepositoryIdentity.SameDonor(J.Get(pull, "user"), run) {
+                throw Exception(failure)
+            }
+            let baseRepo = J.Text(J.Get(base, "repo"), "full_name")
+            let mergedAt = J.Get(pull, "merged_at").ValueKind
+            if J.Text(base, "ref") != run.Text("base_branch") || !RepositoryIdentity.SameRepo(
+                baseRepo,
+                run.Text("repo")
+            ) ||
+                J.Text(pull, "state") != "open" || !J.Bool(pull, "draft") || J.Bool(pull, "merged") ||
+                (mergedAt != JsonValueKind.Undefined && mergedAt != JsonValueKind.Null) ||
+                J.Number(pull, "number") < 1 {
+                throw Exception(failure)
+            }
+        }
+
+        internal func Find(run Data, expectedReceipt JsonElement) JsonElement {
+            let pulls = Pulls(run)
+            if pulls.Count > 1 {
+                throw Exception("interrupted_publication: ambiguous physical PRs; intent preserved")
+            }
+            if pulls.Count == 0 {
+                return JsonElement{}
+            }
+            Match(run, pulls[0], expectedReceipt)
+            return pulls[0]
         }
 
         internal func Publish(directory string) {
@@ -39,14 +104,28 @@ internal class Publication {
                 throw Exception("Only a successful saved run can be published")
             }
             let marker = "<!-- tokate-run:" + run.Text("id") + " -->"
-            let existing = Find(run)
-            if existing.ValueKind != JsonValueKind.Undefined {
-                if !J.Text(existing, "body").Contains(marker) || J.Text(J.Get(existing, "head"), "sha") != run.Text(
-                    "commit"
-                ) {
-                    throw Exception("Another PR or commit already owns this branch")
+            let fields = ContributionReceipt.Native(run, run.Text("commit"))
+            let amendments = J.Items(J.Get(run.Element(), "amendments"))
+            if amendments.Count > 0 {
+                let latest = amendments[amendments.Count - 1]
+                let amendment = Data.Load(Path.Combine(directory, "amendments", run.Text("commit")))
+                let original = OriginalEvidence.Amended(directory, run, amendment)
+                if amendment.Text("state") != "published" || amendment.Text("commit") != run.Text("commit") || J.Text(
+                    latest,
+                    "head"
+                ) != run.Text("commit") || J.Text(latest, "id") != amendment.Text("id") {
+                    throw Exception("Saved published amendment differs from current contribution")
                 }
-                ProtectedPaths.Remote(
+                fields["original_head"] = original.Text("commit")
+                let publicAmendment = J.Parse(J.Write(Amendment.PublicRecord(amendment)))
+                Amendment.ValidateReceipt(publicAmendment, Policy(J.Write(J.Get(record, "policy"))), run.Text("commit"))
+                fields["amendment"] = publicAmendment
+                Synchronization.Keep(fields, Synchronization.History(amendment.Element()))
+            }
+            let expectedReceipt = J.Parse(J.Write(fields))
+            let existing = Find(run, expectedReceipt)
+            if existing.ValueKind != JsonValueKind.Undefined {
+                GitHubPathEvidence.Check(
                     run.Text("repo"),
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
@@ -157,6 +236,7 @@ internal class Publication {
             )
             ContributionClaim.Recheck(run)
             let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
+            Match(run, pull, J.Parse(J.Write(receipt)))
             SavePr(directory, run, pull)
         }
 

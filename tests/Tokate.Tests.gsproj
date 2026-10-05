@@ -20,6 +20,7 @@
     <Compile Include="../src/Cli/CliFailure.gs" />
     <Compile Include="../src/Contributions/Data.gs" />
     <Compile Include="../src/GitHub/GitHub.gs" />
+    <Compile Include="../src/GitHub/GitHubPathEvidence.gs" />
     <Compile Include="../src/Policy/Policy.gs" />
     <Compile Include="../src/Policy/ProtectedPaths.gs" />
     <Compile Include="../src/Policy/Decree.gs" />
