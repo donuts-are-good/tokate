@@ -770,6 +770,9 @@ internal class ContinuationChecks {
                 File.WriteAllText(cache, "source-only output")
                 if tracked {
                     flow.Git("-C", checkout, "add", ".verification-data/private")
+                } else {
+                    File.WriteAllText(Path.Combine(checkout, ".ENV"), "synthetic-secret")
+                    File.WriteAllText(Path.Combine(checkout, ".npmrc"), "synthetic-token")
                 }
                 File.Delete(cache)
                 Check.Success(TestProcess.Run("/usr/bin/mkfifo", []string{cache}, flow.Temp.Env))
@@ -778,6 +781,12 @@ internal class ContinuationChecks {
                     Check.That(
                         !Directory.Exists(Path.Combine(Fresh(flow, source), "checkout/.verification-data")),
                         "Untracked generated workspace was imported"
+                    )
+                    Check.That(
+                        !File.Exists(Path.Combine(Fresh(flow, source), "checkout/.ENV")) && !File.Exists(
+                            Path.Combine(Fresh(flow, source), "checkout/.npmrc")
+                        ),
+                        "Source credential files were imported"
                     )
                 }
                 Check.That(File.Exists(cache), "Source generated evidence was removed")
