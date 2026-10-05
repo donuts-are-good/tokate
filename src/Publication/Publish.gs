@@ -57,7 +57,7 @@ internal class Publication {
                 ) {
                     throw Exception("Another PR or commit already owns this branch")
                 }
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     run.Text("repo"),
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
