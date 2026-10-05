@@ -30,6 +30,17 @@ internal class ReceiptVerification {
                 RepositoryIdentity.Login(J.Text(receipt, "donor"))
             )
             let approval = J.Get(record, "approval")
+            let predecessor = J.Get(receipt, "predecessor")
+            if J.Text(approval, "predecessor_approval") != "" && predecessor.ValueKind == JsonValueKind.Undefined {
+                throw Exception("Continuation receipt omitted interrupted-origin provenance")
+            }
+            if predecessor.ValueKind != JsonValueKind.Undefined {
+                V1Continuation.Grant(record, J.Text(predecessor, "approval"), J.Get(author, "id"))
+                V1Continuation.Receipt(predecessor, J.Text(receipt, "import_manifest_sha256"), approval)
+                if !PrBody.ReportText(body, "").Contains(PrBody.ContinuationReport(predecessor).Trim()) {
+                    throw Exception("PR report omitted interrupted-origin provenance")
+                }
+            }
             if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
                 receipt,
                 "policy"
@@ -115,19 +126,8 @@ internal class ReceiptVerification {
                         ready: ready
                     )
                 }
-                let report = Amendment.Summary(
-                    J.Text(amendment, "previous"),
-                    J.Text(receipt, "head"),
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools")
-                )
-                let repair = J.Get(receipt, "repair")
-                let exactReport = repair.ValueKind != JsonValueKind.Undefined && J.Text(repair, "id") == J.Text(
-                    amendment,
-                    "id"
-                ) ?
-                report + "\n\n" + Repair.Summary(repair): report
-                if PrBody.ReportText(body, exactReport) != exactReport {
+                let report = PrBody.AmendmentReport(receipt)
+                if PrBody.ReportText(body, report) != report {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }
             }
