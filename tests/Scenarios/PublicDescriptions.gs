@@ -515,33 +515,35 @@ internal class PublicDescriptions {
         }
 
         internal func All(binary string, selected string = "") {
-            if selected == "" || selected == "Validation" {
+            if selected == "Validation" || (selected == "" && CiShard.Include("PublicDescriptions/Validation")) {
                 Validation()
                 Console.WriteLine("PASS public summary validation, bounds, stale binding and unsafe synthetic text")
             }
-            if selected == "" || selected == "Managed" {
+            if selected == "Managed" || (selected == "" && CiShard.Include("PublicDescriptions/Managed")) {
                 Managed(binary)
                 Console.WriteLine(
                     "PASS managed publication and amendment summaries, receipt and maintainer preservation"
                 )
             }
-            if selected == "" || selected == "External" {
+            if selected == "External" || (selected == "" && CiShard.Include("PublicDescriptions/External")) {
                 External(binary)
                 Console.WriteLine("PASS external publication summary and compact provenance")
             }
-            if selected == "" || selected == "Recovery" {
+            if selected == "Recovery" || (selected == "" && CiShard.Include("PublicDescriptions/Recovery")) {
                 Recovery(binary)
                 Console.WriteLine("PASS correction publication summary and distinct original provenance")
             }
-            if selected == "" || selected == "MissingAndUnsafe" {
+            if selected == "MissingAndUnsafe" ||
+                (selected == "" && CiShard.Include("PublicDescriptions/MissingAndUnsafe")) {
                 MissingAndUnsafe(binary)
                 Console.WriteLine("PASS missing summary fallback and unsafe publication refusal")
             }
-            if selected == "" || selected == "ManagedBounds" {
+            if selected == "ManagedBounds" || (selected == "" && CiShard.Include("PublicDescriptions/ManagedBounds")) {
                 ManagedBounds(binary)
                 Console.WriteLine("PASS managed summary byte boundary before candidate publication")
             }
-            if selected == "" || selected == "UnsafeRequests" {
+            if selected == "UnsafeRequests" ||
+                (selected == "" && CiShard.Include("PublicDescriptions/UnsafeRequests")) {
                 UnsafeRequests(binary)
                 Console.WriteLine("PASS unsafe public tool identifiers refused before request comments")
             }

@@ -509,6 +509,9 @@ internal class CommandTrafficChecks {
                 if selected != "" && selected != name {
                     continue
                 }
+                if !CiShard.Include("Traffic/" + name) {
+                    continue
+                }
                 switch name {
                     case "RequestReuse" {
                         RequestReuse(binary)

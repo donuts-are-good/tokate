@@ -1382,6 +1382,9 @@ internal class CorrectionChecks {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Correction/" + name) {
+                    continue
+                }
                 switch name {
                     case "DecreeEdits" {
                         DecreeEdits(binary)

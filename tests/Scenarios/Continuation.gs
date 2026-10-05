@@ -820,6 +820,9 @@ internal class ContinuationChecks {
                 if selected != "" && name != selected {
                     continue
                 }
+                if selected == "" && !CiShard.Include("Continuation/" + name) {
+                    continue
+                }
                 switch name {
                     case "Flow" {
                         Flow(binary)
