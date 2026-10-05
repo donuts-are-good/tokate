@@ -134,13 +134,14 @@ internal class LocalCodex {
             independent.Flow.VerificationPolicy(
                 "set -eu; test -r .git/config; test ! -w .git/config; for private in " +
                     quoted +
-                    "; do test ! -r \"$$private\"; done; touch independent-writable"
+                    "; do test ! -r \"$$private\"; done; touch independent-writable; printf independent-runtime-excluded"
             )
             independent.Flow.Approve()
             let request = independent.Claim()
             let run = independent.Prepare()
             let head = independent.Candidate(request)
             independent.Flow.Call([]string{"external", "--run", run, "--commit", head})
+            Check.Contains(File.ReadAllText(Path.Combine(run, "verification.json")), "independent-runtime-excluded")
             independent.Flow.NoInference()
             let unsupported = Path.Combine(flow.Bin, "unsupported-launcher")
             let marker = Path.Combine(flow.Temp.Root, "launcher-discovery-ran")
