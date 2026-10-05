@@ -222,7 +222,8 @@ internal class Verification {
             directory string,
             network bool,
             seconds int32,
-            budget RuntimeBudget? = nil
+            budget RuntimeBudget? = nil,
+            mountDirectory string = ""
         ) CommandResult {
             let checkout = LocalPaths.DirectoryPath(directory)
             let root = LocalPaths.DirectoryPath(storage)
@@ -257,7 +258,16 @@ internal class Verification {
                 for word in J.Items(command) {
                     words.Add(word.GetString() ?? "")
                 }
-                let result = Run(checkout, words.ToArray(), network, seconds, outputPath, errorPath, budget)
+                let result = Run(
+                    checkout,
+                    words.ToArray(),
+                    network,
+                    seconds,
+                    outputPath,
+                    errorPath,
+                    budget,
+                    mountDirectory
+                )
                 check["state"] = "completed"
                 check["exit_code"] = result.Code
                 Evidence(check, result)
@@ -294,7 +304,8 @@ internal class Verification {
             seconds int32,
             outputPath string = "",
             errorPath string = "",
-            budget RuntimeBudget? = nil
+            budget RuntimeBudget? = nil,
+            mountDirectory string = ""
         ) CommandResult {
             if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
                 throw Exception(
@@ -302,10 +313,13 @@ internal class Verification {
                 )
             }
             let checkout = Validate(directory, budget)
+            let mounted = mountDirectory == "" ? checkout: Validate(mountDirectory, budget)
             for path in[]string{outputPath, errorPath} {
                 if path != "" {
                     let parent = LocalPaths.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
-                    if parent == checkout || parent.StartsWith(checkout + "/") {
+                    if parent == checkout || parent.StartsWith(checkout + "/") ||
+                        parent == mounted ||
+                        parent.StartsWith(mounted + "/") {
                         throw Exception("Verification evidence must be outside the checkout")
                     }
                     for visible in[]string{
@@ -378,7 +392,10 @@ internal class Verification {
                 var result CommandResult
                 try {
                     let runtimeStorage = LocalPaths.DirectoryPath(storage.FullName)
-                    if runtimeStorage == checkout || runtimeStorage.StartsWith(checkout + "/") {
+                    if runtimeStorage == checkout || runtimeStorage.StartsWith(checkout + "/") ||
+                        runtimeStorage == mounted ||
+                        runtimeStorage
+                        .StartsWith(mounted + "/") {
                         throw Exception("Verification runtime storage must be outside the checkout: " + runtimeStorage)
                     }
                     for path in[]string{
@@ -410,12 +427,12 @@ internal class Verification {
                             "/var/tmp",
                             "--bind",
                             checkout,
-                            checkout,
+                            mounted,
                             "--ro-bind",
                             git,
-                            git,
+                            Path.Combine(mounted, ".git"),
                             "--chdir",
-                            checkout,
+                            mounted,
                             "--"
                         }
                     )

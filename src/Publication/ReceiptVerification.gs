@@ -8,7 +8,10 @@ internal class ReceiptVerification {
         internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data {
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
             let body = J.Text(pull, "body")
-            let receipt = J.Parse(PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"))
+            let receipt = RequestData.Parse(
+                PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"),
+                1024 * 1024
+            )
             if J.Number(receipt, "version") == 2 {
                 return ReceiptVerification.VerifyV2(repo, number, pull, receipt, ready, paths)
             }
@@ -127,6 +130,9 @@ internal class ReceiptVerification {
                 if PrBody.ReportText(body, report) != report {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }
+            }
+            if J.Get(receipt, "repair").ValueKind != JsonValueKind.Undefined {
+                Repair.Receipt(repo, pull, receipt, record)
             }
             if history.GetArrayLength() > 0 {
                 if J.Text(

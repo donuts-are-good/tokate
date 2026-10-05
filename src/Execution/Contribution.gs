@@ -54,26 +54,35 @@ internal class Contribution {
             let verification = List[Object]()
             run.Fields["verification"] = verification
             run.Save(directory)
-            for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                total.Remaining()
-                run.Fields["verification"] = verification
-                run.Save(directory)
-                let check = Terminal.Verify(
-                    directory,
-                    verification,
-                    command,
-                    checkout,
-                    run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                    seconds,
-                    total
-                )
-                if check.Code != 0 {
-                    run.Fields["failure_reason"] = "verification_failed"
-                    throw CliFailure(
-                        "verification_failed",
-                        "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+            File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
+            {
+                using let workspace = VerificationWorkspace.Create(checkout, total)
+                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                    total.Remaining()
+                    run.Fields["verification"] = verification
+                    run.Save(directory)
+                    let check = Terminal.Verify(
+                        directory,
+                        verification,
+                        command,
+                        checkout,
+                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                        seconds,
+                        total,
+                        workspace: workspace
                     )
+                    if check.Code != 0 {
+                        run.Fields["failure_reason"] = "verification_failed"
+                        throw CliFailure(
+                            "verification_failed",
+                            "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+                        )
+                    }
                 }
+                PublicOutput.FailureCode = "invalid_state"
+                run.Fields["failure_stage"] = "changed_candidate"
+                run.Fields["failure_reason"] = "candidate_changed"
+                workspace.Unchanged(total)
             }
             run.Fields["verification"] = verification
             PublicOutput.FailureCode = "invalid_state"

@@ -61,12 +61,19 @@ internal class PrBody {
             let prior = J.Get(receipt, "predecessor")
             let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
             let amendment = J.Get(receipt, "amendment")
-            return origin + Amendment.Summary(
+            let report = origin + Amendment.Summary(
                 J.Text(amendment, "previous"),
                 J.Text(receipt, "head"),
                 J.Number(amendment, "seconds"),
                 J.Get(amendment, "tools")
             )
+            let repair = J.Get(receipt, "repair")
+            return repair.ValueKind != JsonValueKind.Undefined && J.Text(repair, "id") == J.Text(
+                amendment,
+                "id"
+            ) ? report +
+                "\n\n" +
+                Repair.Summary(repair): report
         }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))

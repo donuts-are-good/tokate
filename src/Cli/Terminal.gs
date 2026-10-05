@@ -203,7 +203,7 @@ internal class Terminal {
         }
 
         internal func Foreground() bool -> Array.IndexOf(
-            []string{"work", "recover", "external", "amend", "publish", "submit"},
+            []string{"work", "recover", "external", "amend", "repair", "publish", "submit"},
             PublicOutput.Command
         ) >= 0
 
@@ -233,11 +233,13 @@ internal class Terminal {
             network bool,
             seconds int32,
             budget RuntimeBudget? = nil,
-            progressBudget RuntimeBudget? = nil
+            progressBudget RuntimeBudget? = nil,
+            workspace VerificationWorkspace? = nil
         ) CommandResult {
             let name = "Verification " + (results.Count + 1).ToString() + ": " + PublicOutput.Prose(Command(command))
             let timing = progressBudget ?? budget ?? RuntimeBudget(Stopwatch.StartNew(), seconds)
             try {
+                workspace?.CheckCancellation()
                 var result CommandResult
                 Message(name, "cyan", true)
                 {
@@ -245,7 +247,16 @@ internal class Terminal {
                         "Owner verification " + (results.Count + 1).ToString(),
                         timing
                     )
-                    result = Verification.Check(storage, results, command, directory, network, seconds, budget)
+                    result = Verification.Check(
+                        storage,
+                        results,
+                        command,
+                        workspace?.Checkout ?? directory,
+                        network,
+                        seconds,
+                        budget,
+                        workspace?.Original ?? ""
+                    )
                 }
                 Message(
                     name + " - " + (result.Code == 0 ? "passed": "failed") + " (exit " + result.Code.ToString() +

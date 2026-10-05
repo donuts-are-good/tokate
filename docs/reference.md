@@ -286,6 +286,45 @@ block amendment and retry; the archive is never silently rebuilt.
 Older amendment archives remain unsealed with logs in the run directory. Tokate
 checks preserved records and log paths without reconstructing or sealing history.
 
+## Repair when the original local run is unavailable
+
+For an existing open, unmerged **v1 draft PR**, prepare a separate, self-contained
+Git checkout from its exact remote head. Apply the owner-reviewed correction and,
+when needed, merge the current target. Commit the result and leave the checkout
+clean. The owner must explicitly authorize exact correction C and current target U
+using the existing synchronization grant command:
+
+```sh
+tokate authorize-sync --repo OWNER/REPO --pr 10 --commit C --upstream U
+tokate repair --repo OWNER/REPO --pr 10 --run REPAIR_DIR --path CHECKOUT --commit C --sync G --seconds N
+```
+
+`REPAIR_DIR` is a new, empty evidence directory outside the candidate checkout;
+it is not a replacement original run. The authenticated numeric donor must match
+the PR author and own the original writable branch repository. The exact receipt,
+issue, approval, approved base, policy, template and live owner grant must agree.
+Ambiguous ownership markers, legacy unmarked reports, v2, closed, merged and
+ready-for-review PRs are refused. No handoff, inference, automatic merge or
+reconstruction of private logs, usage or verification is performed.
+
+Repair checks the complete candidate diff and protected trees, then runs every
+original owner command independently with a separate positive `--seconds` budget
+bounded by owner `max_seconds`. Network requires explicit `--allow-network` and
+owner permission. The new report and receipt disclose unavailable original
+private state and bind new verification to C. Original public observations remain
+claims about original work only. Publication preserves maintainer text and Tokate
+ownership markers; an exact head lease and ancestry checks prevent replacing a
+changed remote branch. Required CI and final owner review remain outstanding.
+
+`repair.json`, `candidate.patch`, verification logs and `publication.json` preserve
+the same intent across interruption. Explicitly repeat the identical command to
+inspect and resume publication without repeating passed checks. Failed or
+interrupted verification refuses a repeat; inspect the evidence and prepare a
+new corrected commit and owner grant in a new evidence directory. Writes are not
+atomic: a lost push or body response can leave a temporarily invalid receipt.
+Changed authority, candidate or owned regions block resume. Use `verify-pr` to
+validate the exact remote receipt and `checks` to inspect CI; pending is not success.
+
 ## Synchronize with upstream
 
 Prepare a local merge retaining the published head and exact current target;
@@ -364,6 +403,18 @@ prose to 2048 characters and summary lists to 64 entries with total counts.
 `truncated` signals omitted summaries. Paths, hashes, identities, scripts and
 arguments stay complete; oversized safe output fails with exit 1, possibly after
 effects completed. Inspect state before reinvoking.
+
+Owner verification, including review amendments, runs in one private disposable
+copy of the exact candidate. Commands run in order and share that copy; Git
+metadata is read-only, and verification cannot write the saved checkout. The
+copy is removed on success, failure or handled interruption. Tracked candidate
+changes still fail verification. Logs and results remain in the run; ignored
+and untracked donor files are never cleaned.
+
+`status --run DIR` reports `storage.retained_bytes` and `storage.checkout_bytes`
+(regular-file bytes without following symlinks), plus `storage.next_safe_cleanup`.
+Keep runs for recovery and amendment. After acceptance and evidence backup, deletion
+of a completed run must be explicit: later amendment will no longer be available.
 
 Managed summaries include total `seconds`, `coding_seconds`, `verification_reserve`,
 safe check arguments/exit codes and private `data.artifacts` paths, excluding raw
