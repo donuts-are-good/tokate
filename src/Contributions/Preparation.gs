@@ -123,7 +123,7 @@ internal class Preparation {
             if savedState != "preparing" && savedState != "claimed" {
                 throw Exception(failure)
             }
-            if fields.ContainsKey("codex_version") || fields.ContainsKey("commit") {
+            if fields.ContainsKey("codex_version") || fields.ContainsKey("pi_version") || fields.ContainsKey("commit") {
                 throw Exception(failure)
             }
             let eventsPath = Path.Combine(directory, "events.jsonl")
@@ -438,7 +438,7 @@ internal class Preparation {
             ): branch.Code != 1 {
                 Reject(checkout)
             }
-            if run.Text("source") != "external" {
+            if run.Text("source") != "external" && run.Text("harness") != "pi" {
                 for file in Commands.Git(checkout, "ls-files").Split('\n') {
                     if file.StartsWith(".codex/") || file.Contains("/.codex/") {
                         throw Exception("Repository Codex configuration is not supported in donor runs")

@@ -345,3 +345,7 @@ every publication path or prevent inclusion of already tracked files.
 Users should be able to compare this document with the source for the version
 they run. Update it whenever discovery, authentication, data handling, or
 publication behavior changes.
+
+Managed pi uses a separate SDK bridge and outer bubblewrap boundary; it imports no
+user settings or authentication. Endpoint/runtime paths remain in private run state.
+See [pi filesystem/network limits and evidence](pi.md).

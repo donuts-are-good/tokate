@@ -64,6 +64,12 @@ internal class DonorSelection {
         internal func Resolve(args Args, policy Policy) JsonElement {
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
+            if harness == "pi" {
+                return PiHarness.Select(args, policy)
+            }
+            if args.Get("endpoint") != "" || args.Get("pi-root") != "" || args.Get("node") != "" {
+                throw Exception("Pi runtime options require the pi harness")
+            }
             if harness != "codex" || provider != "openai" {
                 throw Exception(
                     "Unsupported managed harness/provider: choose codex/openai explicitly. No inference started."
@@ -224,6 +230,16 @@ internal class DonorSelection {
             }
             if harness != run.Text("harness") || provider != run.Text("provider") {
                 throw Exception(failure)
+            }
+            if harness == "pi" {
+                if run.Number("version") != 2 || provider != "local-chat-completions" || J.Text(
+                    selected,
+                    "policy_hash"
+                ) != policy.Digest {
+                    throw Exception(failure)
+                }
+                PiHarness.ValidateSaved(run, policy)
+                return
             }
             if J.Text(selected, "policy_hash") != policy.Digest ||
                 harness != "codex" ||

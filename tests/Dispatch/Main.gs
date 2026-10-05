@@ -75,6 +75,19 @@ func Main(args[]string) int32 {
             VerificationChecks.All()
             return 0
         }
+        if args.Length == 1 && args[0] == "--pi" {
+            PiChecks.All()
+            return 0
+        }
+        if args.Length == 3 && args[0] == "--pi-real" {
+            PiBoundary.Probe(args[1], args[2])
+            Console.WriteLine("PASS installed pi SDK and isolation probe")
+            return 0
+        }
+        if args.Length == 6 && args[0] == "--pi-bridge" {
+            PiChecks.Bridge(args[1], args[2], args[3], args[4], args[5])
+            return 0
+        }
         if args.Length == 1 && args[0] == "--process" {
             ProcessChecks.All()
             return 0

@@ -10,6 +10,9 @@
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../templates/pi-bridge.mjs" LogicalName="Tokate.templates.pi-bridge.mjs" />
+    <Compile Include="../src/Execution/PiBoundary.gs" />
+    <Compile Include="../src/Execution/PiEvidence.gs" />
     <Compile Include="../src/Execution/Verification.gs" />
     <Compile Include="../src/Execution/LocalPaths.gs" />
     <Compile Include="../src/Execution/Process.gs" />

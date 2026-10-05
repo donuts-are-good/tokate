@@ -101,6 +101,11 @@ internal class V2Preparation {
                 run.Fields["harness"] = J.Text(selection, "harness")
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
+                if J.Text(selection, "harness") == "pi" {
+                    run.Fields["pi_endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
+                    run.Fields["pi_root"] = args.Need("pi-root")
+                    run.Fields["pi_node"] = args.Need("node")
+                }
             }
             let directory = Preparation.RunDirectory(args, run.Text("id"))
             PublicOutput.RunDirectory = directory

@@ -61,6 +61,7 @@ internal class SuiteCatalog {
                 let serial = report.Serial()
                 try {
                     ProcessChecks.All()
+                    PiChecks.All()
                     ProtectedPathChecks.All()
                     CliDiscovery.All(binary)
                     Diagnostics.All(binary)

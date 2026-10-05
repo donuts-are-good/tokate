@@ -197,6 +197,10 @@ internal class Worker {
             }
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
+            if run.Text("harness") == "pi" {
+                PiHarness.Execute(directory, run, record, prompt)
+                return
+            }
             let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw CliFailure(

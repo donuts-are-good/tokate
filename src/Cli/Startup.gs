@@ -96,7 +96,11 @@ internal class Startup {
             }
             let names = List[string]{"setsid", "gh"}
             let catalog = NeedsCatalog(command, options)
-            if catalog {
+            var pi = options.Get("harness") == "pi"
+            if options.Get("run") != "" && command == "work" {
+                pi = Data.Load(Path.GetFullPath(options.Need("run"))).Text("harness") == "pi"
+            }
+            if catalog && !pi {
                 names.Add("codex")
                 names.Add("/usr/bin/env")
             }

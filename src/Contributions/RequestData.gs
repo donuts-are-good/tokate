@@ -109,6 +109,13 @@ internal class RequestData {
             return value
         }
 
+        internal func ModelIdentifier(value string) string {
+            if !Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$") {
+                throw Exception("Invalid model identifier")
+            }
+            return value
+        }
+
         internal func Tools(value JsonElement) {
             let items = J.Items(value)
             if value.ValueKind != JsonValueKind.Array || items.Count < 1 || items.Count > 16 {
@@ -116,9 +123,10 @@ internal class RequestData {
             }
             for tool in items {
                 Keys(tool, "harness,provider,model,effort,usage,coding_seconds")
-                for name in[]string{"harness", "provider", "model", "effort"} {
+                for name in[]string{"harness", "provider", "effort"} {
                     Token(J.Text(tool, name))
                 }
+                ModelIdentifier(J.Text(tool, "model"))
                 let number = J.Get(tool, "coding_seconds")
                 var seconds int64
                 if number.ValueKind != JsonValueKind.Undefined &&

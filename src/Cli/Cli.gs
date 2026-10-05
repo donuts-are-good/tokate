@@ -88,9 +88,12 @@ internal class Cli {
                 "Owner-selected target; default: upstream default branch (prompt on a terminal)"
             ),
             CliOption("model", "MODEL", "Owner-approved model"),
-            CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra"),
-            CliOption("harness", "HARNESS", "Explicit harness; managed execution supports codex"),
-            CliOption("provider", "PROVIDER", "Explicit provider; managed execution supports openai"),
+            CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
+            CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
+            CliOption("endpoint", "URL", "Private pi no-auth loopback Chat Completions base URL"),
+            CliOption("pi-root", "DIR", "Donor-installed pi node_modules directory; no installation"),
+            CliOption("node", "FILE", "Donor-installed Node executable for pi"),
+            CliOption("provider", "PROVIDER", "Managed provider: openai or local-chat-completions"),
             CliOption(
                 "availability",
                 "STATUS",
@@ -170,7 +173,7 @@ internal class Cli {
             ),
             CliCommand(
                 "select",
-                "repo,harness,provider,model,effort,availability,non-interactive",
+                "repo,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive",
                 "repo",
                 "Select under current owner policy and offline harness capabilities; no inference or reservation.",
                 "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
@@ -228,7 +231,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,harness,provider,model,effort,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
+                "run,repo,issue,state,source,tools,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       tokate prepare --run DIR",
@@ -335,7 +338,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,harness,provider,model,effort,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network",
+                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network",
                 "repo,issue",
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]",
@@ -345,9 +348,9 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,harness,provider,model,effort,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run",
+                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run",
                 "repo,issue",
-                "Run inference with your Codex allowance and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
+                "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
                 ,
@@ -713,7 +716,10 @@ internal class Cli {
             if args.Get("base-branch") != "" {
                 RepositoryIdentity.Branch(args.Get("base-branch"))
             }
-            if args.Get("model") != "" && !Regex.IsMatch(args.Get("model"), "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
+            if args.Get("model") != "" && !Regex.IsMatch(
+                args.Get("model"),
+                args.Get("harness") == "pi" ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            ) {
                 throw Exception("Invalid model name: --model")
             }
             for key in[]string{"harness", "provider"} {
@@ -759,7 +765,17 @@ internal class Cli {
             }
             if args.Command == "prepare" && args.Get("source") == "external" {
                 args.Need("tools")
-                for key in[]string{"harness", "provider", "model", "effort", "availability", "non-interactive"} {
+                for key in[]string{
+                    "harness",
+                    "provider",
+                    "model",
+                    "effort",
+                    "endpoint",
+                    "pi-root",
+                    "node",
+                    "availability",
+                    "non-interactive"
+                } {
                     if args.Get(key) != "" {
                         throw Exception("External declarations use --tools; selection option conflicts: --" + key)
                     }
