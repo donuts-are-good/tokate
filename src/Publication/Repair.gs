@@ -462,29 +462,35 @@ internal class Repair {
             intent.Write(path)
             try {
                 Terminal.Step("Verifying repair independently. No coding inference will run.")
-                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                    let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                    if remaining < 1 {
-                        throw CliFailure("verification_failed", "Repair verification budget exhausted")
-                    }
-                    intent.Fields["verification"] = results
-                    intent.Write(path)
-                    let result = Terminal.Verify(
-                        directory,
-                        results,
-                        command,
-                        intent.Text("checkout"),
-                        intent.Flag("network"),
-                        remaining,
-                        progressBudget: RuntimeBudget(timer, seconds)
-                    )
-                    intent.Write(path)
-                    if result.Code != 0 {
-                        throw CliFailure(
-                            "verification_failed",
-                            "Repair owner verification failed; saved progress retained"
+                let budget = RuntimeBudget(timer, seconds)
+                {
+                    using let workspace = VerificationWorkspace.Create(intent.Text("checkout"), budget)
+                    for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                        let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                        if remaining < 1 {
+                            throw CliFailure("verification_failed", "Repair verification budget exhausted")
+                        }
+                        intent.Fields["verification"] = results
+                        intent.Write(path)
+                        let result = Terminal.Verify(
+                            directory,
+                            results,
+                            command,
+                            intent.Text("checkout"),
+                            intent.Flag("network"),
+                            remaining,
+                            budget: budget,
+                            workspace: workspace
                         )
+                        intent.Write(path)
+                        if result.Code != 0 {
+                            throw CliFailure(
+                                "verification_failed",
+                                "Repair owner verification failed; saved progress retained"
+                            )
+                        }
                     }
+                    workspace.Unchanged(budget)
                 }
                 Candidate(directory, intent, record)
                 Verification.Results(intent, record)
@@ -578,7 +584,6 @@ internal class Repair {
                 }
                 Authority(intent)
                 Candidate(directory, intent, record)
-                // An exact lease protects the original head even if it moves between the read and push.
                 Commands.Git(
                     intent.Text("checkout"),
                     "-c",
