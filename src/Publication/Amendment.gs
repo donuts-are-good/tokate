@@ -259,19 +259,37 @@ internal class Amendment {
             )
         }
 
-        private func Archive(directory string) {
+        private func Archive(directory string, run Data) string {
+            LocalPaths.DirectoryPath(directory)
             let archive = Path.Combine(directory, "original-evidence")
+            if FileInfo(archive).LinkTarget != nil {
+                throw Exception("Original evidence archive must not be a link")
+            }
             if Directory.Exists(archive) {
-                return
+                OriginalEvidence.Amended(directory, run)
+                let seal = Path.Combine(archive, "seal.json")
+                return File.Exists(seal) ? Data.Read(seal).Text("manifest_sha256"): ""
             }
             let staging = Path.Combine(directory, "archive-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(staging)
-            for file in Directory.EnumerateFiles(directory) {
-                if Path.GetFileName(file) != ".lock" {
-                    File.Copy(file, Path.Combine(staging, Path.GetFileName(file)))
+            Directory.CreateDirectory(
+                staging,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            try {
+                for file in Directory.EnumerateFiles(directory) {
+                    if Path.GetFileName(file) != ".lock" {
+                        OriginalEvidence.CopyFile(file, Path.Combine(staging, Path.GetFileName(file)))
+                    }
+                }
+                OriginalEvidence.VerificationArtifacts(directory, staging)
+                OriginalEvidence.Seal(staging)
+                Directory.Move(staging, archive)
+            } finally {
+                if Directory.Exists(staging) {
+                    Directory.Delete(staging, true)
                 }
             }
-            Directory.Move(staging, archive)
+            return Data.Read(Path.Combine(archive, "seal.json")).Text("manifest_sha256")
         }
 
         internal func Run(args Args) {
@@ -291,6 +309,7 @@ internal class Amendment {
             var amendment Data
             if Directory.Exists(location) {
                 amendment = Data.Load(location)
+                OriginalEvidence.Amended(directory, run, amendment)
                 if amendment.Text("sync") != sync || amendment.Number("seconds") != seconds || RequestData.Canonical(
                     J.Get(amendment.Element(), "tools")
                 ) != RequestData.Canonical(tools) {
@@ -332,9 +351,12 @@ internal class Amendment {
                     run.Text("commit")
                 )
                 let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
-                Archive(directory)
+                let archive = Archive(directory, run)
                 Directory.CreateDirectory(location)
                 amendment = Data()
+                if archive != "" {
+                    amendment.Fields["original_evidence_sha256"] = archive
+                }
                 amendment.Fields["id"] = Guid.NewGuid().ToString("D")
                 amendment.Fields["previous"] = run.Text("commit")
                 amendment.Fields["commit"] = commit
