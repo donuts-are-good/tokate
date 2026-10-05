@@ -584,9 +584,16 @@ internal class AmendmentFlow {
                 } else if failure == "mutating-check" {
                     let amended = Edit(flow, run, "Trigger candidate mutation", "mutate")
                     Amend(flow, run, amended, 1)
-                    Check.Contains(
-                        Check.Text(Saved(Path.Combine(run, "amendments", amended))["error"]),
-                        "clean checkout"
+                    let saved = Saved(Path.Combine(run, "amendments", amended))
+                    Check.That(
+                        Check.Text(saved["failure_stage"]) == "changed_candidate" && Check.Text(
+                            saved["failure_reason"]
+                        ) == "candidate_changed",
+                        "Verifier mutation did not fail candidate validation"
+                    )
+                    Check.That(
+                        flow.Git("-C", Path.Combine(run, "checkout"), "status", "--porcelain") == "",
+                        "Verification changed the original candidate checkout"
                     )
                     continue
                 }
