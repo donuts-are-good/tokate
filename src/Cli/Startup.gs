@@ -100,7 +100,7 @@ internal class Startup {
                 names.Add("codex")
                 names.Add("/usr/bin/env")
             }
-            if options.Get("run") != "" {
+            if options.Get("run") != "" && command != "repair" {
                 let run = Data.Load(Path.GetFullPath(options.Need("run")))
                 if command == "work" && run.Number("version") == 2 && run.Text("source") != "tokate" {
                     throw CliFailure("invalid_state", "External work uses external --run; inference is never launched")
@@ -113,6 +113,7 @@ internal class Startup {
                 command == "publish" ||
                 command == "submit" ||
                 command == "amend" ||
+                command == "repair" ||
                 command == "recover" {
                 names.Add("git")
             }
@@ -122,6 +123,7 @@ internal class Startup {
             let independent = command == "work" ||
                 command == "external" ||
                 command == "amend" ||
+                command == "repair" ||
                 (command == "recover" && options.Get("prepare") != "true")
             if catalog || independent {
                 names.Add("/usr/bin/setsid")

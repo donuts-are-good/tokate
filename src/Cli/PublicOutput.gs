@@ -333,6 +333,14 @@ internal class PublicOutput {
         }
 
         internal func Next(options Args?, code string) {
+            if options != nil && options.Command == "repair" && code == "" {
+                Actions.Add(
+                    []string{"tokate", "verify-pr", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
+                )
+                Actions.Add(
+                    []string{"tokate", "checks", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
+                )
+            }
             if RunDirectory != "" {
                 try {
                     let run = Data.Load(RunDirectory)
@@ -381,6 +389,7 @@ internal class PublicOutput {
                 if Command != "doctor" {
                     let diagnostic = Startup.NeedsCatalog(Command, options) ? "--managed": (
                         Command == "external" ||
+                            Command == "repair" ||
                             Command == "amend" ||
                             Command == "recover" ||
                             Command == "submit" ||
