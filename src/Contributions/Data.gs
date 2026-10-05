@@ -9,11 +9,16 @@ import System.Text.Json
 
 internal class Data {
     internal let Fields Dictionary[string, Object?] = Dictionary[string, Object?]()
-    internal func Text(key string) string -> J.Text(Element(), key)
+    internal func Text(key string) string -> J.Text(Field(key), key)
 
-    internal func Number(key string) int32 -> J.Number(Element(), key)
+    internal func Number(key string) int32 -> J.Number(Field(key), key)
 
-    internal func Flag(key string) bool -> J.Bool(Element(), key)
+    internal func Flag(key string) bool -> J.Bool(Field(key), key)
+
+    private func Field(key string) JsonElement {
+        var value Object?
+        return Fields.TryGetValue(key, out value) ? J.Parse(J.Write(J.Map(key, value))): JsonElement{}
+    }
 
     internal func Element() JsonElement -> J.Parse(J.Write(Fields))
 
