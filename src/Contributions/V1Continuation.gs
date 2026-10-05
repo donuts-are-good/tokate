@@ -345,7 +345,7 @@ internal class V1Continuation {
             ) >= 0
         }
 
-        private func OpenAt(directory int32, path string, flags int64, mode int64 = 0, resolve int64 = 12) int32 {
+        private func OpenAt(directory int32, path string, flags int64, mode int64 = 0, resolve int64 = 13) int32 {
             let how = Marshal.AllocHGlobal(24)
             try {
                 Marshal.WriteInt64(how, 0, flags)
