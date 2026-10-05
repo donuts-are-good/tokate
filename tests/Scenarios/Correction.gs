@@ -605,8 +605,8 @@ internal class CorrectionChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy(
-                "printf completed-first-check",
-                second: "printf synthetic-interrupted-check; printf synthetic-interrupted-error >&2; sleep 3 && printf completed-second-check"
+                "mkdir build-output; printf generated > build-output/data; printf completed-first-check",
+                second: "test -s build-output/data; printf synthetic-interrupted-check; printf synthetic-interrupted-error >&2; sleep 3 && printf completed-second-check"
             )
             flow.Approve()
             let run = flow.Claim()
@@ -625,6 +625,10 @@ internal class CorrectionChecks {
             Check.Contains(Check.Text(failed["verification"]?[1]?["output"]), "synthetic-interrupted-check")
             Check.Contains(Check.Text(failed["verification"]?[1]?["error"]), "synthetic-interrupted-error")
             Check.Contains(Check.Text(failed["error"]), "Runtime limit")
+            Check.That(
+                !Directory.Exists(Path.Combine(run, "checkout/build-output")),
+                "Interrupted correction build output retained"
+            )
             let evidence = File.ReadAllText(Path.Combine(run, "correction.json"))
             Recover(flow, run, commit, 1, seconds: "1")
             Check.That(

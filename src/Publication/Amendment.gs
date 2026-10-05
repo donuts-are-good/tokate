@@ -426,31 +426,40 @@ internal class Amendment {
                 let results = List[Object]()
                 try {
                     Terminal.Step("Verifying review amendment independently. No inference will run.")
-                    for command in J.Items(J.Get(policy.Value, "verification")) {
-                        let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                        if remaining < 1 {
-                            throw CliFailure("verification_failed", "Amendment verification budget exhausted")
-                        }
-                        amendment.Fields["verification"] = results
-                        PublicOutput.FailureCode = "verification_failed"
-                        amendment.Fields["failure_stage"] = "owner_verification"
-                        amendment.Fields["failure_reason"] = "verification_failed"
-                        amendment.Save(location)
-                        let result = Terminal.Verify(
-                            location,
-                            results,
-                            command,
-                            checkout,
-                            run.Flag("network") && J.Bool(policy.Value, "allow_network"),
-                            remaining,
-                            progressBudget: RuntimeBudget(timer, seconds)
-                        )
-                        if result.Code != 0 {
-                            throw CliFailure(
-                                "verification_failed",
-                                "Amendment owner verification failed; saved progress retained"
+                    let budget = RuntimeBudget(timer, seconds)
+                    {
+                        using let workspace = VerificationWorkspace.Create(checkout, budget)
+                        for command in J.Items(J.Get(policy.Value, "verification")) {
+                            let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                            if remaining < 1 {
+                                throw CliFailure("verification_failed", "Amendment verification budget exhausted")
+                            }
+                            amendment.Fields["verification"] = results
+                            PublicOutput.FailureCode = "verification_failed"
+                            amendment.Fields["failure_stage"] = "owner_verification"
+                            amendment.Fields["failure_reason"] = "verification_failed"
+                            amendment.Save(location)
+                            let result = Terminal.Verify(
+                                location,
+                                results,
+                                command,
+                                checkout,
+                                run.Flag("network") && J.Bool(policy.Value, "allow_network"),
+                                remaining,
+                                budget: budget,
+                                workspace: workspace
                             )
+                            if result.Code != 0 {
+                                throw CliFailure(
+                                    "verification_failed",
+                                    "Amendment owner verification failed; saved progress retained"
+                                )
+                            }
                         }
+                        PublicOutput.FailureCode = "invalid_state"
+                        amendment.Fields["failure_stage"] = "changed_candidate"
+                        amendment.Fields["failure_reason"] = "candidate_changed"
+                        workspace.Unchanged(budget)
                     }
                     PublicOutput.FailureCode = "invalid_state"
                     amendment.Fields["failure_stage"] = "changed_candidate"

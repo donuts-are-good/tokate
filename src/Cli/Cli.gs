@@ -19,11 +19,19 @@ internal class CliOption {
         Choices = choices
     }
 
-    internal func Describe(command string) string -> command == "amend" && Name == "seconds" ?
-    "Separate positive verification budget; required, at most the owner limit": Description.Replace(
-        "{{seconds}}",
-        command == "recover" ? "300": "min(3600, owner limit)"
-    )
+    internal func Describe(command string) string {
+        if command == "repair" && Name == "run" {
+            return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
+        }
+        if command == "repair" && Name == "path" {
+            return "Clean, self-contained candidate checkout; required and separate from repair evidence"
+        }
+        return (command == "amend" || command == "repair") && Name == "seconds" ?
+        "Separate positive verification budget; required, at most the owner limit": Description.Replace(
+            "{{seconds}}",
+            command == "recover" ? "300": "min(3600, owner limit)"
+        )
+    }
 }
 
 internal class CliCommand {
@@ -274,6 +282,15 @@ internal class Cli {
                 "--repo OWNER/REPO --grant SHA",
                 "revoke-sync --repo owner/project --grant G",
                 effects: "local_read github_read github_write"
+            ),
+            CliCommand(
+                "repair",
+                "repo,pr,run,path,commit,sync,seconds,allow-network",
+                "repo,pr,run,path,commit,sync,seconds",
+                "Verify and repair a v1 draft PR when original private state is unavailable; no inference.",
+                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --path CHECKOUT --commit SHA --sync GRANT --seconds N [--allow-network]",
+                "repair --repo owner/project --pr 10 --run /path/to/repair --path /path/to/checkout --commit C --sync G --seconds 300",
+                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "amend",

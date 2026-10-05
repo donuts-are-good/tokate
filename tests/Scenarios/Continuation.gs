@@ -362,6 +362,14 @@ internal class ContinuationChecks {
                 "Amendment changed interrupted source branch"
             )
             Count(flow, 1, 2)
+            let repair = RepairCase.Create(flow, fresh)
+            repair.Call()
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            flow.Reload()
+            let repaired = Check.Text(flow.State["pulls"]?[0]?["body"])
+            Check.Contains(repaired, origin)
+            Check.Contains(repaired, "original private state was unavailable")
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Repair restarted coding inference")
         }
 
         private func Owner(binary string) {

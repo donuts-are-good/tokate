@@ -384,26 +384,35 @@ internal class Correction {
                 let results = List[Object]()
                 let timer = Stopwatch.StartNew()
                 var failed bool
-                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                    let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                    if remaining < 1 {
-                        throw CliFailure("verification_failed", "Correction verification budget exhausted")
+                File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results))
+                let budget = RuntimeBudget(timer, seconds)
+                {
+                    using let workspace = VerificationWorkspace.Create(checkout, budget)
+                    for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                        let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                        if remaining < 1 {
+                            throw CliFailure("verification_failed", "Correction verification budget exhausted")
+                        }
+                        correction.Fields["verification"] = results
+                        Save(directory, correction)
+                        let result = Terminal.Verify(
+                            attempt,
+                            results,
+                            command,
+                            checkout,
+                            run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                            remaining,
+                            budget: budget,
+                            workspace: workspace
+                        )
+                        correction.Fields["verification"] = results
+                        File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")
+                        Save(directory, correction)
+                        failed = failed || result.Code != 0
                     }
-                    correction.Fields["verification"] = results
-                    Save(directory, correction)
-                    let result = Terminal.Verify(
-                        attempt,
-                        results,
-                        command,
-                        checkout,
-                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                        remaining,
-                        progressBudget: RuntimeBudget(timer, seconds)
-                    )
-                    correction.Fields["verification"] = results
-                    File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")
-                    Save(directory, correction)
-                    failed = failed || result.Code != 0
+                    correction.Fields["failure_stage"] = "changed_candidate"
+                    correction.Fields["failure_reason"] = "candidate_changed"
+                    workspace.Unchanged(budget)
                 }
                 correction.Fields["verification_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 correction.Fields["failure_stage"] = "changed_candidate"
