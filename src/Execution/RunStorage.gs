@@ -5,13 +5,16 @@ import System.IO
 
 internal class RunStorage {
     shared {
-        private func Size(directory string) int64 {
+        private func Size(path string) int64 {
+            if FileInfo(path).LinkTarget != nil {
+                return 0
+            }
+            if !Directory.Exists(path) {
+                return FileInfo(path).Length
+            }
             var bytes int64
-            for entry in Directory.EnumerateFileSystemEntries(directory) {
-                if FileInfo(entry).LinkTarget != nil {
-                    continue
-                }
-                bytes += Directory.Exists(entry) ? Size(entry): FileInfo(entry).Length
+            for entry in Directory.EnumerateFileSystemEntries(path) {
+                bytes += Size(entry)
             }
             return bytes
         }
@@ -19,10 +22,18 @@ internal class RunStorage {
         internal func Summary(directory string, run Data) Object {
             let root = LocalPaths.DirectoryPath(directory)
             let checkout = Path.Combine(root, "checkout")
-            let checkoutBytes = Directory.Exists(checkout) && FileInfo(checkout).LinkTarget == nil ? Size(checkout): 0
+            var retainedBytes int64
+            var checkoutBytes int64
+            for entry in Directory.EnumerateFileSystemEntries(root) {
+                let bytes = Size(entry)
+                retainedBytes += bytes
+                if entry == checkout && Directory.Exists(entry) {
+                    checkoutBytes = bytes
+                }
+            }
             return J.Map(
                 "retained_bytes",
-                Size(root),
+                retainedBytes,
                 "checkout_bytes",
                 checkoutBytes,
                 "measurement",
