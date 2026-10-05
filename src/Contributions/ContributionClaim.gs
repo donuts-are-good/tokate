@@ -80,8 +80,8 @@ internal class ContributionClaim {
                     using let sourceLease = V1Continuation.SourceLease(sourceDirectory)
                     let source = V1Continuation.Source(sourceDirectory, run, record)
                     run.Fields["continuation"] = V1Continuation.Provenance(source)
-                    run.Fields["continuation_source_metadata_sha256"] = Correction.FileHash(
-                        Path.Combine(sourceDirectory, "run.json")
+                    run.Fields["continuation_source_metadata_sha256"] = Data.Hash(
+                        V1Continuation.Metadata(sourceDirectory)
                     )
                     run.Fields["id"] = Data.Hash(run.Text("approval") + ":" + source.Text("id")).Substring(0, 32)
                 }

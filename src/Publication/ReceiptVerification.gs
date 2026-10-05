@@ -123,12 +123,7 @@ internal class ReceiptVerification {
                         ready: ready
                     )
                 }
-                let report = Amendment.Summary(
-                    J.Text(amendment, "previous"),
-                    J.Text(receipt, "head"),
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools")
-                )
+                let report = PrBody.AmendmentReport(receipt)
                 if PrBody.ReportText(body, report) != report {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }

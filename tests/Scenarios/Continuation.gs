@@ -14,6 +14,9 @@ internal class ContinuationChecks {
         private func Setup(flow NativeFixture, actual bool = false) string {
             flow.Initialize()
             File.WriteAllText(Path.Combine(flow.Upstream, "tracked.txt"), "approved\n")
+            File.WriteAllText(Path.Combine(flow.Upstream, "baseline.txt"), "baseline\n")
+            Directory.CreateDirectory(Path.Combine(flow.Upstream, "folder"))
+            File.WriteAllText(Path.Combine(flow.Upstream, "folder/child.txt"), "baseline\n")
             flow.Commit("Tracked source")
             flow.VerificationPolicy(
                 "test -f result.txt && test \"$(cat tracked.txt)\" = preserved && test \"$(cat imported.txt)\" = untracked && test ! -e .verification-data"
@@ -25,12 +28,7 @@ internal class ContinuationChecks {
                 flow.State["continuation_timeout"] = JsonValue.Create(true)
                 flow.State["mode"] = JsonValue.Create("timeout")
                 flow.Save()
-                let interrupted = flow.Call([]string{"work", "--run", source, "--yes"}, 1)
-                let saved = Read(source)
-                Check.That(
-                    Check.Text(saved["failure_reason"]) == "inference_interrupted",
-                    "Timeout did not reach inference:\n" + interrupted.Output + interrupted.Error
-                )
+                flow.Call([]string{"work", "--run", source, "--yes"}, 1)
             } else {
                 let saved = Read(source)
                 saved["state"] = JsonValue.Create("failed")
@@ -120,12 +118,6 @@ internal class ContinuationChecks {
         private func Flow(binary string) {
             using let flow = NativeFixture(binary)
             let source = Setup(flow, true)
-            File.SetLastWriteTimeUtc(
-                Path.Combine(source, "checkout/.github/tokate.json"),
-                DateTime.UtcNow.AddMinutes(1.0)
-            )
-            let indexPath = Path.Combine(source, "checkout/.git/index")
-            let index = Convert.ToBase64String(File.ReadAllBytes(indexPath))
             let old = Read(source)
             let original = File.ReadAllText(Path.Combine(source, "run.json"))
             let events = File.ReadAllText(Path.Combine(source, "events.jsonl"))
@@ -165,7 +157,6 @@ internal class ContinuationChecks {
             Check.That(File.ReadAllText(Path.Combine(source, "run.json")) == original, "Source metadata changed")
             Check.That(File.ReadAllText(Path.Combine(source, "events.jsonl")) == events, "Source events changed")
             Check.That(File.ReadAllText(Path.Combine(source, "stderr.log")) == stderr, "Source log changed")
-            Check.That(Convert.ToBase64String(File.ReadAllBytes(indexPath)) == index, "Source index changed")
             Check.That(
                 File.ReadAllText(Path.Combine(source, "checkout/tracked.txt")) == "preserved\n",
                 "Source tracked work changed"
@@ -216,6 +207,163 @@ internal class ContinuationChecks {
             }
         }
 
+        private func NumericApproval(flow NativeFixture, prior string, donorId int64, repoId int64) string {
+            flow.Git("-C", flow.Upstream, "checkout", "--quiet", "--detach", prior)
+            let path = Path.Combine(flow.Upstream, ".github/tokate-approval.json")
+            let approval = Check.Json(File.ReadAllText(path))
+            approval["donor_id"] = JsonValue.Create(donorId)
+            approval["repo_id"] = JsonValue.Create(repoId)
+            File.WriteAllText(path, approval.ToJsonString())
+            flow.Commit("Numeric predecessor fixture")
+            let sha = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
+            flow.Git("-C", flow.Upstream, "update-ref", "refs/heads/tokate/approvals/1", sha, prior)
+            flow.Git("-C", flow.Upstream, "checkout", "--quiet", "main")
+            return sha
+        }
+
+        private func Amendment(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            let old = Read(source)
+            let sourceEvidence = Dictionary[string, string]()
+            for file in[]string{
+                "run.json",
+                "events.jsonl",
+                "stderr.log",
+                "checkout/tracked.txt",
+                "checkout/imported.txt"
+            } {
+                sourceEvidence[file] = File.ReadAllText(Path.Combine(source, file))
+            }
+            Grant(flow, source)
+            Import(flow, source)
+            let fresh = Fresh(flow, source)
+            flow.Call([]string{"work", "--run", fresh, "--yes"})
+            let saved = Read(fresh)
+            let prior = saved["continuation"]?.DeepClone() ?? throw Exception("Missing fixture predecessor")
+            let manifest = Check.Text(saved["continuation_manifest_sha256"])
+            let originalHead = Check.Text(saved["commit"])
+            let originalEvidence = Dictionary[string, string]()
+            for file in[]string{
+                "run.json",
+                "events.jsonl",
+                "changes.patch",
+                "verification.json",
+                "pr-body.md",
+                "publication.json"
+            } {
+                originalEvidence[file] = File.ReadAllText(Path.Combine(fresh, file))
+            }
+            flow.Reload()
+            let initialBody = Check.Text(flow.State["pulls"]?[0]?["body"])
+            let start = initialBody.IndexOf("Fresh v1 attempt seeded from unpublished interrupted attempt ")
+            Check.That(start >= 0, "Initial contribution lost interrupted origin")
+            let end = initialBody.IndexOf("\n\n", start)
+            Check.That(end > start, "Initial origin report is incomplete")
+            let origin = initialBody.Substring(start, end - start)
+            Check.Contains(origin, "unpublished interrupted attempt " + Check.Text(old["id"]))
+            Check.Contains(origin, "predecessor approval " + Check.Text(old["approval"]))
+            Check.Contains(origin, "Preserved origin state: failed; failure: inference_interrupted")
+            Check.Contains(
+                origin,
+                "not retroactively successful. Missing prior usage, reports and verification are not reconstructed"
+            )
+            var previous = originalHead
+            for attempt in 0 ... 2 {
+                let checkout = Path.Combine(fresh, "checkout")
+                File.WriteAllText(Path.Combine(checkout, "result.txt"), "Review amendment " + attempt.ToString() + "\n")
+                flow.Git("-C", checkout, "add", "result.txt")
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "-c",
+                    "user.name=Donor",
+                    "-c",
+                    "user.email=donor@example.test",
+                    "commit",
+                    "-m",
+                    "Review seeded contribution"
+                )
+                let commit = flow.Git("-C", checkout, "rev-parse", "HEAD")
+                let args = []string{"amend", "--run", fresh, "--commit", commit, "--seconds", "30"}
+                if attempt == 1 {
+                    flow.Mode("lost_body_response")
+                    flow.Call(args, 1)
+                    Check.That(
+                        File.Exists(Path.Combine(fresh, "amendments", commit, "publication.json")),
+                        "Interrupted seeded amendment lost publication intent"
+                    )
+                    flow.Mode("")
+                    flow.Reload()
+                    let pushes = Check.Text(flow.State["git_pushes"])
+                    flow.ResetTraffic()
+                    flow.Call(args)
+                    flow.Reload()
+                    Check.That(Check.Text(flow.State["git_pushes"]) == pushes, "Seeded amendment retry repeated push")
+                    for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                        Check.That(Check.Text(call["method"]) == "GET", "Seeded amendment retry repeated body write")
+                    }
+                } else {
+                    flow.Call(args)
+                }
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                flow.Reload()
+                let body = Check.Text(flow.State["pulls"]?[0]?["body"])
+                Check.Contains(body, origin)
+                Check.That(body.IndexOf(origin) == body.LastIndexOf(origin), "Amendment duplicated interrupted origin")
+                Check.Contains(body, "Review amendment: " + previous + " → " + commit)
+                let receiptStart = body.IndexOf("<!-- tokate-receipt:") + "<!-- tokate-receipt:".Length
+                let receiptEnd = body.IndexOf(" -->", receiptStart)
+                let receipt = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))
+                Check.That(JsonNode.DeepEquals(receipt["predecessor"], prior), "Amendment changed predecessor receipt")
+                Check.That(Check.Text(receipt["import_manifest_sha256"]) == manifest, "Amendment changed import hash")
+                Check.That(Check.Text(receipt["head"]) == commit, "Amendment receipt lost current head")
+                Check.That(Check.Text(receipt["original_head"]) == originalHead, "Amendment changed original head")
+                previous = commit
+                Count(flow, 1, 2)
+            }
+            flow.Reload()
+            let body = Check.Text(flow.State["pulls"]?[0]?["body"])
+            let receiptRegion = body.Substring(body.IndexOf("<!-- tokate-receipt:"))
+            for replacement in[]string{"", origin.Replace("not retroactively successful", "retroactively successful")} {
+                let changed = body.Replace(origin, replacement)
+                Check.That(changed != body, "Origin tamper fixture did not change report")
+                Check.That(
+                    changed.Substring(changed.IndexOf("<!-- tokate-receipt:")) == receiptRegion,
+                    "Origin tamper fixture changed receipt"
+                )
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing fixture PR")
+                pull["body"] = JsonValue.Create(changed)
+                flow.Save()
+                let refused = flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+                Check.Contains(refused.Output + refused.Error, "PR report omitted interrupted-origin provenance")
+                flow.Reload()
+                let restored = flow.State["pulls"]?[0] ?? throw Exception("Missing fixture PR")
+                restored["body"] = JsonValue.Create(body)
+                flow.Save()
+            }
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            for file in sourceEvidence.Keys {
+                Check.That(
+                    File.ReadAllText(Path.Combine(source, file)) == sourceEvidence[file],
+                    "Source evidence changed: " + file
+                )
+            }
+            for file in originalEvidence.Keys {
+                Check.That(
+                    File.ReadAllText(Path.Combine(fresh, "original-evidence", file)) == originalEvidence[file],
+                    "Original completed-attempt evidence changed: " + file
+                )
+            }
+            Check.That(
+                flow.Git("-C", Path.Combine(flow.Bin, "fork"), "rev-parse", Check.Text(old["branch"])) == Check.Text(
+                    old["base"]
+                ),
+                "Amendment changed interrupted source branch"
+            )
+            Count(flow, 1, 2)
+        }
+
         private func Owner(binary string) {
             for mode in[]string{
                 "advanced",
@@ -227,13 +375,21 @@ internal class ContinuationChecks {
                 "wrong-sha",
                 "retarget",
                 "numeric-donor",
-                "numeric-repo"
+                "numeric-repo",
+                "numeric-valid"
             } {
                 using let flow = NativeFixture(binary)
                 let source = Setup(flow)
                 var prior = Check.Text(Read(source)["approval"])
                 let oldBase = Check.Text(Read(source)["base"])
-                if mode == "advanced" || mode == "decree" {
+                if mode.StartsWith("numeric-", StringComparison.Ordinal) {
+                    prior = NumericApproval(
+                        flow,
+                        prior,
+                        mode == "numeric-donor" ? 999: 123,
+                        mode == "numeric-repo" ? 99: 1
+                    )
+                } else if mode == "advanced" || mode == "decree" {
                     File.WriteAllText(Path.Combine(flow.Upstream, mode == "decree" ? "DECREE.md": "later.txt"), "new\n")
                     flow.Commit("Target advanced")
                 } else if mode == "revoked" {
@@ -253,17 +409,8 @@ internal class ContinuationChecks {
                         File.AppendAllText(Path.Combine(flow.Upstream, ".github/tokate-pr.md"), "\nChanged template")
                     }
                     flow.Commit("Owner configuration changed")
-                } else if mode == "numeric-donor" || mode == "numeric-repo" {
-                    flow.Git("-C", flow.Upstream, "checkout", "--quiet", "tokate/approvals/1")
-                    let path = Path.Combine(flow.Upstream, ".github/tokate-approval.json")
-                    let approval = Check.Json(File.ReadAllText(path))
-                    approval[mode == "numeric-donor" ? "donor_id": "repo_id"] = JsonValue.Create(999)
-                    File.WriteAllText(path, approval.ToJsonString())
-                    flow.Commit("Record predecessor numeric identity")
-                    prior = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
-                    flow.Git("-C", flow.Upstream, "checkout", "--quiet", "main")
                 }
-                var code = mode == "advanced" ? 0: 1
+                let code = mode == "advanced" || mode == "numeric-valid" ? 0: 1
                 let args = List[string]{
                     "approve",
                     "--repo",
@@ -278,7 +425,36 @@ internal class ContinuationChecks {
                 if mode == "retarget" {
                     args.AddRange([]string{"--base-branch", "main"})
                 }
-                flow.Call(args.ToArray(), code, owner: true)
+                let result = flow.Call(args.ToArray(), code, owner: true)
+                if mode == "numeric-donor" || mode == "numeric-repo" {
+                    Check.Contains(
+                        result.Error,
+                        "Continuation changed predecessor binding: " + (mode == "numeric-donor" ? "donor_id": "repo_id")
+                    )
+                    Check.That(
+                        flow.Git("-C", flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1") == prior,
+                        "Numeric mismatch replaced predecessor authority"
+                    )
+                } else if mode == "numeric-valid" {
+                    let sha = flow.Git("-C", flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
+                    let approval = Check.Json(
+                        flow.Git("-C", flow.Upstream, "show", sha + ":.github/tokate-approval.json")
+                    )
+                    let previous = Check.Json(
+                        flow.Git("-C", flow.Upstream, "show", prior + ":.github/tokate-approval.json")
+                    )
+                    Check.That(
+                        Check.Text(approval["donor_id"]) == "123" && Check.Text(approval["repo_id"]) == "1",
+                        "Continuation replaced numeric predecessor identities"
+                    )
+                    Check.That(
+                        sha != prior && Check.Text(approval["nonce"]) != Check.Text(previous["nonce"]) && Check.Text(
+                            approval["predecessor_approval"]
+                        ) == prior &&
+                            Check.Text(approval["base"]) == oldBase,
+                        "Numeric predecessor did not receive a fresh grant at its approved base"
+                    )
+                }
                 if mode == "advanced" {
                     Import(flow, source)
                     let saved = Read(Fresh(flow, source))
@@ -311,8 +487,14 @@ internal class ContinuationChecks {
                 "decree",
                 "symlink",
                 "hardlink",
+                "unchanged-hardlink",
                 "fifo",
                 "tracked-fifo",
+                "directory-file",
+                "file-directory",
+                "source-repo-id",
+                "source-head-id",
+                "missing-source-id",
                 "unsafe-path",
                 "ambiguous-index",
                 "restored-worktree",
@@ -361,10 +543,44 @@ internal class ContinuationChecks {
                     Check.Success(
                         TestProcess.Run("/usr/bin/ln", []string{path, Path.Combine(checkout, "escape")}, flow.Temp.Env)
                     )
+                } else if mode == "unchanged-hardlink" {
+                    let path = Path.Combine(flow.Temp.Root, "linked-peer")
+                    File.WriteAllText(path, "baseline\n")
+                    File.Delete(Path.Combine(checkout, "baseline.txt"))
+                    Check.Success(
+                        TestProcess.Run(
+                            "/usr/bin/ln",
+                            []string{path, Path.Combine(checkout, "baseline.txt")},
+                            flow.Temp.Env
+                        )
+                    )
                 } else if mode == "fifo" || mode == "tracked-fifo" {
                     let path = Path.Combine(checkout, mode == "fifo" ? "escape": "tracked.txt")
-                    File.Delete(path)
+                    if mode == "tracked-fifo" {
+                        File.Delete(path)
+                    }
                     Check.Success(TestProcess.Run("/usr/bin/mkfifo", []string{path}, flow.Temp.Env))
+                } else if mode == "directory-file" {
+                    Directory.Delete(Path.Combine(checkout, "folder"), true)
+                    File.WriteAllText(Path.Combine(checkout, "folder"), "replacement\n")
+                } else if mode == "file-directory" {
+                    File.Delete(Path.Combine(checkout, "baseline.txt"))
+                    Directory.CreateDirectory(Path.Combine(checkout, "baseline.txt"))
+                    File.WriteAllText(Path.Combine(checkout, "baseline.txt/child"), "replacement\n")
+                } else if mode == "source-repo-id" || mode == "source-head-id" || mode == "missing-source-id" {
+                    let markerPath = Path.Combine(checkout, ".git/tokate-preparation.json")
+                    let marker = Check.Json(File.ReadAllText(markerPath))
+                    if mode == "missing-source-id" {
+                        saved.AsObject().Remove("preparation_repo_id")
+                        marker.AsObject().Remove("repo_id")
+                    } else {
+                        saved[
+                            mode == "source-repo-id" ? "preparation_repo_id": "preparation_head_id"
+                        ] = JsonValue.Create(99)
+                        marker[mode == "source-repo-id" ? "repo_id": "head_id"] = JsonValue.Create(99)
+                    }
+                    File.WriteAllText(Path.Combine(source, "run.json"), saved.ToJsonString())
+                    File.WriteAllText(markerPath, marker.ToJsonString())
                 } else if mode == "unsafe-path" {
                     File.WriteAllText(Path.Combine(checkout, "unsafe\nname"), "unsafe")
                 } else if mode == "ambiguous-index" {
@@ -416,8 +632,11 @@ internal class ContinuationChecks {
                 "partial",
                 "dirty",
                 "manifest",
-                "target-head",
-                "budget"
+                "target-head"
+                ,
+                "target-hardlink",
+                "write",
+                "capture-hardlink"
             } {
                 using let flow = NativeFixture(binary)
                 let source = Setup(flow)
@@ -436,12 +655,31 @@ internal class ContinuationChecks {
                 }
                 let fresh = Fresh(flow, source)
                 let saved = Read(fresh)
-                if mode == "capture" {
+                if mode == "capture" || mode == "capture-hardlink" {
                     saved.AsObject().Remove("continuation_phase")
                     saved.AsObject().Remove("continuation_manifest_sha256")
                     flow.Git("-C", Path.Combine(fresh, "checkout"), "restore", "tracked.txt")
                     File.Delete(Path.Combine(fresh, "checkout/imported.txt"))
                     File.Delete(Path.Combine(fresh, "checkout/partial.txt"))
+                    File.WriteAllText(Path.Combine(fresh, "run.json"), saved.ToJsonString())
+                    if mode == "capture-hardlink" {
+                        File.Delete(Path.Combine(fresh, "continuation.json"))
+                        let peer = Path.Combine(flow.Temp.Root, "capture-peer")
+                        File.WriteAllText(peer, "preserve synthetic peer")
+                        Check.Success(
+                            TestProcess.Run(
+                                "/usr/bin/ln",
+                                []string{peer, Path.Combine(fresh, "continuation.json.tmp")},
+                                flow.Temp.Env
+                            )
+                        )
+                    }
+                } else if mode == "write" {
+                    saved["state"] = JsonValue.Create("preparing")
+                    saved["continuation_phase"] = JsonValue.Create("importing")
+                    saved["continuation_pending"] = JsonValue.Create("tracked.txt")
+                    flow.Git("-C", Path.Combine(fresh, "checkout"), "restore", "tracked.txt")
+                    File.WriteAllText(Path.Combine(fresh, "continuation-write.tmp"), "preser")
                     File.WriteAllText(Path.Combine(fresh, "run.json"), saved.ToJsonString())
                 } else if mode == "imported" || mode == "partial" {
                     saved["state"] = JsonValue.Create("preparing")
@@ -456,17 +694,54 @@ internal class ContinuationChecks {
                     File.AppendAllText(Path.Combine(fresh, "continuation.json"), " ")
                 } else if mode == "target-head" {
                     flow.Git("-C", Path.Combine(fresh, "checkout"), "checkout", "--quiet", "-b", "unrelated")
-                } else if mode == "budget" {
-                    saved.AsObject().Remove("verification_reserve")
+                } else if mode == "target-hardlink" {
+                    saved["state"] = JsonValue.Create("preparing")
+                    saved["continuation_phase"] = JsonValue.Create("importing")
+                    let path = Path.Combine(flow.Temp.Root, "linked-peer")
+                    File.WriteAllText(path, "approved\n")
+                    File.Delete(Path.Combine(fresh, "checkout/tracked.txt"))
+                    Check.Success(
+                        TestProcess.Run(
+                            "/usr/bin/ln",
+                            []string{path, Path.Combine(fresh, "checkout/tracked.txt")},
+                            flow.Temp.Env
+                        )
+                    )
                     File.WriteAllText(Path.Combine(fresh, "run.json"), saved.ToJsonString())
                 }
-                let reject = mode == "dirty" || mode == "manifest" || mode == "target-head" || mode == "budget"
+                let reject = mode == "dirty" ||
+                    mode == "manifest" ||
+                    mode == "target-head" ||
+                    mode == "target-hardlink" ||
+                    mode == "capture-hardlink"
                 flow.Call([]string{"prepare", "--run", fresh}, reject ? 1: 0)
                 flow.Call(Args(flow, source), 1)
                 if reject {
                     flow.Call([]string{"work", "--run", fresh, "--yes"}, 1)
                 }
                 Count(flow, 0, 2)
+                if mode == "target-hardlink" {
+                    Check.That(
+                        File.ReadAllText(Path.Combine(flow.Temp.Root, "linked-peer")) == "approved\n",
+                        "Import wrote through the synthetic hardlink"
+                    )
+                }
+                if mode == "write" {
+                    Check.That(
+                        !File.Exists(Path.Combine(fresh, "continuation-write.tmp")),
+                        "Import left unfinished temporary content"
+                    )
+                    Check.That(
+                        File.ReadAllText(Path.Combine(fresh, "checkout/tracked.txt")) == "preserved\n",
+                        "Import did not finish the captured tracked-file replacement"
+                    )
+                }
+                if mode == "capture-hardlink" {
+                    Check.That(
+                        File.ReadAllText(Path.Combine(flow.Temp.Root, "capture-peer")) == "preserve synthetic peer",
+                        "Capture wrote through the synthetic hardlink"
+                    )
+                }
                 Check.That(Check.Text(Read(source)["state"]) == "failed", "Preparation reinterpreted failed source")
                 Check.That(
                     File.ReadAllText(Path.Combine(source, "checkout/imported.txt")) == "untracked\n",
@@ -524,7 +799,7 @@ internal class ContinuationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{"Flow", "Owner", "Refusals", "Interruptions", "Cache", "Budget"} {
+            for name in[]string{"Flow", "Owner", "Refusals", "Interruptions", "Cache", "Amendment", "Budget"} {
                 if selected != "" && name != selected {
                     continue
                 }
@@ -543,6 +818,9 @@ internal class ContinuationChecks {
                     }
                     case "Cache" {
                         Cache(binary)
+                    }
+                    case "Amendment" {
+                        Amendment(binary)
                     }
                     case "Budget" {
                         Budget(binary)

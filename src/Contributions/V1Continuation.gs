@@ -13,6 +13,21 @@ import System.Text.RegularExpressions
 @DllImport("libc", EntryPoint: "fstat")
 func ContinuationStat(descriptor int32, buffer IntPtr) int32;
 
+@DllImport("libc", EntryPoint: "syscall", SetLastError: true)
+func ContinuationOpenAt(number int64, directory int32, path string, how IntPtr, size int64) int64;
+
+@DllImport("libc", EntryPoint: "mkdirat", SetLastError: true)
+func ContinuationMkdirAt(directory int32, path string, mode uint32) int32;
+
+@DllImport("libc", EntryPoint: "unlinkat", SetLastError: true)
+func ContinuationUnlinkAt(directory int32, path string, flags int32) int32;
+
+@DllImport("libc", EntryPoint: "fchmod", SetLastError: true)
+func ContinuationMode(descriptor int32, mode uint32) int32;
+
+@DllImport("libc", EntryPoint: "renameat", SetLastError: true)
+func ContinuationRenameAt(source int32, sourcePath string, target int32, targetPath string) int32;
+
 internal class V1Continuation {
     shared {
         private let Limit int32 = 32 * 1024 * 1024
@@ -43,6 +58,15 @@ internal class V1Continuation {
             Decree.Validate(J.Get(approval, "decree"))
         }
 
+        internal func BindIdentity(prior JsonElement, key string, value JsonElement) int64 {
+            let identity = RepositoryIdentity.PositiveId(value)
+            let expected = J.Get(prior, key)
+            if expected.ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(expected) != identity {
+                throw CliFailure("stale_approval", "Continuation changed predecessor binding: " + key)
+            }
+            return identity
+        }
+
         internal func Grant(record JsonElement, priorSha string, donorId JsonElement) JsonElement {
             let approval = J.Get(record, "approval")
             SupportedApproval(approval)
@@ -58,6 +82,8 @@ internal class V1Continuation {
             }
             let prior = J.Parse(GitHub.FileAt(J.Text(approval, "repo"), ".github/tokate-approval.json", priorSha))
             SupportedApproval(prior)
+            BindIdentity(prior, "donor_id", J.Get(approval, "donor_id"))
+            BindIdentity(prior, "repo_id", J.Get(approval, "repo_id"))
             for key in[]string{
                 "version",
                 "repo",
@@ -77,14 +103,6 @@ internal class V1Continuation {
             }
             if J.Text(approval, "nonce") == J.Text(prior, "nonce") {
                 throw Exception("Continuation requires a new approval nonce")
-            }
-            for key in[]string{"donor_id", "repo_id"} {
-                if J.Get(prior, key).ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(
-                    J.Get(prior, key)
-                ) != RepositoryIdentity
-                    .PositiveId(J.Get(approval, key)) {
-                    throw CliFailure("stale_approval", "Continuation changed predecessor identity: " + key)
-                }
             }
             let info = GitHub.Api("repos/" + J.Text(approval, "repo"))
             if RepositoryIdentity.PositiveId(J.Get(info, "id")) != RepositoryIdentity.PositiveId(
@@ -112,8 +130,7 @@ internal class V1Continuation {
 
         internal func Source(directory string, run Data, record JsonElement) Data {
             let source = Data()
-            for field in J.Parse(Encoding.UTF8.GetString(Bytes(Path.Combine(directory, "run.json"), 1048576)))
-                .EnumerateObject() {
+            for field in J.Parse(Metadata(directory)).EnumerateObject() {
                 source.Fields[field.Name] = field.Value.Clone()
             }
             let state = source.Text("state")
@@ -154,7 +171,23 @@ internal class V1Continuation {
                 throw Exception("Unsupported source attempt identity")
             }
             Preparation.Source(Path.Combine(directory, "checkout"), source)
-            Correction.Fork(source)
+            let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(source.Text("repo")))
+            let head = GitHub.Api("repos/" + RepositoryIdentity.Repo(source.Text("head_repo")))
+            let repoId = RepositoryIdentity.PositiveId(J.Get(upstream, "id"))
+            if repoId != RepositoryIdentity.PositiveId(J.Get(source.Element(), "preparation_repo_id")) ||
+                repoId != RepositoryIdentity.PositiveId(J.Get(J.Get(record, "approval"), "repo_id")) ||
+                RepositoryIdentity.PositiveId(J.Get(head, "id")) != RepositoryIdentity.PositiveId(
+                J.Get(source.Element(), "preparation_head_id")
+            ) {
+                throw Exception("Interrupted source repository identity changed; source is preserved")
+            }
+            RepositoryAccess.ValidateRepository(
+                source.Text("repo"),
+                source.Text("head_repo"),
+                J.Get(source.Element(), "donor_id"),
+                head,
+                upstream: upstream
+            )
             if CorrectionPublication.Pulls(source).Count != 0 {
                 throw Exception("Published contributions cannot be imported")
             }
@@ -243,6 +276,11 @@ internal class V1Continuation {
                     []string{
                         ".git",
                         ".verification-data",
+                        ".agents",
+                        ".aws",
+                        ".azure",
+                        ".kube",
+                        ".gcloud",
                         ".ssh",
                         ".gnupg",
                         ".secrets",
@@ -301,30 +339,59 @@ internal class V1Continuation {
             ) >= 0
         }
 
-        private func Open(path string) FileStream {
-            let descriptor = EvidenceOpen(path, 131072 | 2048)
-            if descriptor < 0 {
-                throw Exception("Cannot safely read continuation file: " + path)
+        private func OpenAt(directory int32, path string, flags int64, mode int64 = 0, resolve int64 = 12) int32 {
+            let how = Marshal.AllocHGlobal(24)
+            try {
+                Marshal.WriteInt64(how, 0, flags)
+                Marshal.WriteInt64(how, 8, mode)
+                Marshal.WriteInt64(how, 16, resolve)
+                return Convert.ToInt32(ContinuationOpenAt(437, directory, path, how, 24))
+            } finally {
+                Marshal.FreeHGlobal(how)
             }
-            let handle = SafeFileHandle(IntPtr(descriptor), true)
+        }
+
+        private func Root(directory string) SafeFileHandle {
+            let descriptor = OpenAt(-100, Path.GetFullPath(directory), 589824, resolve: 4)
+            if descriptor < 0 {
+                throw Exception("Continuation requires contained file access and real directories: " + directory)
+            }
+            return SafeFileHandle(IntPtr(descriptor), true)
+        }
+
+        private func Regular(handle SafeFileHandle, path string) {
             let stat = Marshal.AllocHGlobal(144)
             try {
-                if ContinuationStat(descriptor, stat) != 0 ||
+                if ContinuationStat(handle.DangerousGetHandle().ToInt32(), stat) != 0 ||
                     (Marshal.ReadInt32(stat, 24) & 61440) != 32768 ||
                     Marshal.ReadInt64(stat, 16) != 1 {
                     throw Exception("Continuation requires regular files without links: " + path)
                 }
-                return FileStream(handle, FileAccess.Read)
-            } catch (error Exception) {
-                handle.Dispose()
-                rethrow
             } finally {
                 Marshal.FreeHGlobal(stat)
             }
         }
 
-        private func Bytes(path string, limit int32 = 33554432)[]byte {
-            using let input = Open(path)
+        private func ReadFile(directory string, path string) SafeFileHandle {
+            PathName(path)
+            using let root = Root(directory)
+            let descriptor = OpenAt(root.DangerousGetHandle().ToInt32(), path, 526336)
+            if descriptor < 0 {
+                throw Exception("Cannot safely read continuation file: " + path)
+            }
+            let handle = SafeFileHandle(IntPtr(descriptor), true)
+            try {
+                Regular(handle, path)
+                return handle
+            } catch (error Exception) {
+                handle.Dispose()
+                throw error
+            }
+        }
+
+        private func Bytes(directory string, path string, limit int32 = 33554432)[]byte {
+            using let handle = ReadFile(directory, path)
+            using let input = FileStream(handle, FileAccess.Read)
             if !input.CanSeek || input.Length > limit {
                 throw Exception("Continuation file exceeds bounded regular-file capture: " + path)
             }
@@ -340,6 +407,94 @@ internal class V1Continuation {
                 output.Write(buffer, 0, count)
             }
             return output.ToArray()
+        }
+
+        internal func Metadata(directory string) string -> UTF8Encoding(false, true).GetString(
+            Bytes(directory, "run.json", 1024 * 1024)
+        )
+
+        private func Parent(directory string, path string) SafeFileHandle {
+            var current = Root(directory)
+            try {
+                for part in path.Split('/', StringSplitOptions.RemoveEmptyEntries) {
+                    var descriptor = OpenAt(current.DangerousGetHandle().ToInt32(), part, 589824)
+                    if descriptor < 0 && Marshal.GetLastWin32Error() == 2 {
+                        if ContinuationMkdirAt(current.DangerousGetHandle().ToInt32(), part, 493) != 0 &&
+                            Marshal.GetLastWin32Error() != 17 {
+                            throw Exception("Cannot create contained import directory: " + path)
+                        }
+                        descriptor = OpenAt(current.DangerousGetHandle().ToInt32(), part, 589824)
+                    }
+                    if descriptor < 0 {
+                        throw Exception("Unsafe import directory: " + path)
+                    }
+                    current.Dispose()
+                    current = SafeFileHandle(IntPtr(descriptor), true)
+                }
+                return current
+            } catch (error Exception) {
+                current.Dispose()
+                throw error
+            }
+        }
+
+        private func Present(directory int32, path string) bool {
+            let descriptor = OpenAt(directory, path, 526336)
+            if descriptor < 0 {
+                if Marshal.GetLastWin32Error() == 2 {
+                    return false
+                }
+                throw Exception("Unsafe continuation control or target file: " + path)
+            }
+            using let handle = SafeFileHandle(IntPtr(descriptor), true)
+            Regular(handle, path)
+            return true
+        }
+
+        private func Remove(directory int32, path string) {
+            if Present(directory, path) && ContinuationUnlinkAt(directory, path, 0) != 0 {
+                throw Exception("Cannot remove contained continuation file: " + path)
+            }
+        }
+
+        private func WriteFile(directory int32, path string, bytes[]byte, mode uint32) {
+            let descriptor = OpenAt(directory, path, 526529, mode)
+            if descriptor < 0 {
+                throw Exception("Cannot create contained continuation file: " + path)
+            }
+            using let handle = SafeFileHandle(IntPtr(descriptor), true)
+            Regular(handle, path)
+            using let output = FileStream(handle, FileAccess.Write)
+            output.Write(bytes, 0, bytes.Length)
+            if ContinuationMode(descriptor, mode) != 0 {
+                throw Exception("Cannot set contained continuation file mode: " + path)
+            }
+        }
+
+        private func Apply(directory string, run Data, entry JsonElement) {
+            let path = J.Text(entry, "path")
+            PathName(path)
+            let slash = path.LastIndexOf('/')
+            let name = slash < 0 ? path: path.Substring(slash + 1)
+            using let parent = Parent(Path.Combine(directory, "checkout"), slash < 0 ? "": path.Substring(0, slash))
+            let target = parent.DangerousGetHandle().ToInt32()
+            if J.Text(entry, "mode") == "deleted" {
+                Remove(target, name)
+                return
+            }
+            Present(target, name)
+            run.Fields["continuation_pending"] = path
+            run.Save(directory)
+            using let root = Root(directory)
+            let control = root.DangerousGetHandle().ToInt32()
+            let mode uint32 = J.Text(entry, "mode") == "100755" ? 493: 420
+            WriteFile(control, "continuation-write.tmp", Convert.FromBase64String(J.Text(entry, "content")), mode)
+            Present(target, name)
+            if ContinuationRenameAt(control, "continuation-write.tmp", target, name) != 0 {
+                throw Exception("Cannot replace contained import target: " + path)
+            }
+            run.Fields.Remove("continuation_pending")
+            run.Save(directory)
         }
 
         private func Blob(bytes[]byte) string {
@@ -376,7 +531,7 @@ internal class V1Continuation {
                 if Directory.Exists(entry) {
                     Files(root, path, files, visited, exclude, depth + 1)
                 } else {
-                    using let file = Open(entry)
+                    using let handle = ReadFile(root, path)
                     files.Add(path)
                 }
             }
@@ -419,20 +574,20 @@ internal class V1Continuation {
                 }
             }
             let files = HashSet[string](StringComparer.Ordinal)
-            Files(checkout, "", files, HashSet[string](StringComparer.Ordinal), exclude)
-            let changed = HashSet[string](StringComparer.Ordinal)
-            for entry in index {
-                var original string
-                if !baseline.TryGetValue(entry.Key, out original) || original != entry.Value {
-                    changed.Add(entry.Key)
+            let visited = HashSet[string](StringComparer.Ordinal)
+            Files(checkout, "", files, visited, exclude)
+            for entry in baseline {
+                let wasDirectory = entry.Value.StartsWith("040000 tree ")
+                let isDirectory = visited.Contains(entry.Key) && !files.Contains(entry.Key)
+                if visited.Contains(entry.Key) && wasDirectory != isDirectory {
+                    throw Exception("Continuation does not support file/directory replacement: " + entry.Key)
                 }
             }
+            let changed = HashSet[string](StringComparer.Ordinal)
             for path in Paths(
                 Commands.GitRaw(
                     checkout,
                     []string{
-                        "-c",
-                        "diff.autoRefreshIndex=false",
                         "diff",
                         "--no-ext-diff",
                         "--no-textconv",
@@ -464,11 +619,12 @@ internal class V1Continuation {
                 if Excluded(path) {
                     throw Exception("Tracked generated or credential path changes cannot be imported: " + path)
                 }
+                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 var mode = "deleted"
                 var content = ""
                 var blob = ""
                 if files.Contains(path) {
-                    let bytes = Bytes(Path.Combine(checkout, path), Limit - total)
+                    let bytes = Bytes(checkout, path, Limit - total)
                     total += bytes.Length
                     mode = (
                         File.GetUnixFileMode(Path.Combine(checkout, path)) & (
@@ -492,7 +648,6 @@ internal class V1Continuation {
                 if hasOriginal && original == current {
                     continue
                 }
-                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 entries.Add(J.Map("path", path, "mode", mode, "blob", blob, "content", content))
             }
             return J.Parse(J.Write(entries))
@@ -513,7 +668,7 @@ internal class V1Continuation {
                 if FileInfo(path).LinkTarget != nil {
                     throw Exception("Source evidence must not be linked")
                 }
-                result[name] = File.Exists(path) ? Convert.ToHexString(SHA256.HashData(Bytes(path)))
+                result[name] = File.Exists(path) ? Convert.ToHexString(SHA256.HashData(Bytes(directory, name)))
                     .ToLowerInvariant(): nil
             }
             return J.Parse(J.Write(result))
@@ -523,7 +678,7 @@ internal class V1Continuation {
             let sourceDirectory = run.Text("continuation_source")
             using let sourceLease = SourceLease(sourceDirectory)
             let source = Source(sourceDirectory, run, record)
-            let sourceText = Encoding.UTF8.GetString(Bytes(Path.Combine(sourceDirectory, "run.json"), 1024 * 1024))
+            let sourceText = Metadata(sourceDirectory)
             if Data.Hash(sourceText) != run.Text("continuation_source_metadata_sha256") || !RequestData.Same(
                 Provenance(source),
                 J.Get(run.Element(), "continuation")
@@ -559,17 +714,20 @@ internal class V1Continuation {
                 )
             )
             if File.Exists(path) {
-                if Encoding.UTF8.GetString(Bytes(path, 48 * 1024 * 1024)) != manifest {
+                if Encoding.UTF8.GetString(Bytes(directory, "continuation.json", 48 * 1024 * 1024)) != manifest {
                     throw Exception(
                         "Interrupted capture differs from source; inspect this saved preparation, no new reservation is created"
                     )
                 }
             } else {
-                if FileInfo(path).LinkTarget != nil || FileInfo(path + ".tmp").LinkTarget != nil {
-                    throw Exception("Unsafe capture manifest path")
+                using let root = Root(directory)
+                let control = root.DangerousGetHandle().ToInt32()
+                Remove(control, "continuation.json.tmp")
+                WriteFile(control, "continuation.json.tmp", Encoding.UTF8.GetBytes(manifest), 420)
+                if Present(control, "continuation.json") ||
+                    ContinuationRenameAt(control, "continuation.json.tmp", control, "continuation.json") != 0 {
+                    throw Exception("Capture manifest changed during preparation; inspect this saved run")
                 }
-                File.WriteAllText(path + ".tmp", manifest)
-                File.Move(path + ".tmp", path)
             }
             run.Fields["continuation"] = Provenance(source)
             run.Fields["continuation_manifest_sha256"] = Data.Hash(manifest)
@@ -578,7 +736,7 @@ internal class V1Continuation {
         }
 
         private func Manifest(directory string, run Data) JsonElement {
-            let text = Encoding.UTF8.GetString(Bytes(Path.Combine(directory, "continuation.json"), 48 * 1024 * 1024))
+            let text = Encoding.UTF8.GetString(Bytes(directory, "continuation.json", 48 * 1024 * 1024))
             if Data.Hash(text) != run.Text("continuation_manifest_sha256") {
                 throw Exception("Captured continuation manifest changed; inspect the original preparation")
             }
@@ -655,28 +813,28 @@ internal class V1Continuation {
             if run.Text("continuation_phase") == "imported" {
                 return
             }
-            run.Fields["continuation_phase"] = "importing"
-            run.Save(directory)
-            let checkout = Path.Combine(directory, "checkout")
-            for entry in J.Items(J.Get(manifest, "entries")) {
-                let path = Path.Combine(checkout, J.Text(entry, "path"))
-                if J.Text(entry, "mode") == "deleted" {
-                    File.Delete(path)
-                } else {
-                    Directory.CreateDirectory(Path.GetDirectoryName(path) ?? checkout)
-                    LocalPaths.DirectoryPath(Path.GetDirectoryName(path) ?? checkout)
-                    if FileInfo(path).LinkTarget != nil || Directory.Exists(path) {
-                        throw Exception("Unsafe import target")
-                    }
-                    File.WriteAllBytes(path, Convert.FromBase64String(J.Text(entry, "content")))
-                    File.SetUnixFileMode(
-                        path,
-                        J.Text(
-                            entry,
-                            "mode"
-                        ) == "100755" ? UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute: UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead
+            using let root = Root(directory)
+            let control = root.DangerousGetHandle().ToInt32()
+            let pending = run.Text("continuation_pending")
+            if pending != "" {
+                var known bool
+                for entry in J.Items(J.Get(manifest, "entries")) {
+                    known = known || J.Text(entry, "path") == pending
+                }
+                if !known {
+                    throw Exception(
+                        "Interrupted import has unidentified pending content; inspect this saved preparation"
                     )
                 }
+                Remove(control, "continuation-write.tmp")
+                run.Fields.Remove("continuation_pending")
+            } else if Present(control, "continuation-write.tmp") {
+                throw Exception("Unidentified import temporary file; inspect this saved preparation")
+            }
+            run.Fields["continuation_phase"] = "importing"
+            run.Save(directory)
+            for entry in J.Items(J.Get(manifest, "entries")) {
+                Apply(directory, run, entry)
             }
             Check(directory, run, record)
             run.Fields["continuation_phase"] = "imported"

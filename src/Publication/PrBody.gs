@@ -57,6 +57,18 @@ internal class PrBody {
         ) +
             ". The predecessor is not retroactively successful. Missing prior usage, reports and verification are not reconstructed. Usage and checks below describe the new attempt; all checks cover the complete final diff from the original approved base.\n\n"
 
+        internal func AmendmentReport(receipt JsonElement) string {
+            let prior = J.Get(receipt, "predecessor")
+            let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
+            let amendment = J.Get(receipt, "amendment")
+            return origin + Amendment.Summary(
+                J.Text(amendment, "previous"),
+                J.Text(receipt, "head"),
+                J.Number(amendment, "seconds"),
+                J.Get(amendment, "tools")
+            )
+        }
+
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))
 
         internal func ReceiptText(

@@ -158,15 +158,12 @@ internal class OwnerApproval {
                     approval[key] = J.Get(prior, key)
                 }
                 approval["predecessor_approval"] = J.Text(predecessor, "sha")
-                approval["donor_id"] = RepositoryIdentity.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
-                approval["repo_id"] = RepositoryIdentity.PositiveId(J.Get(info, "id"))
-                for key in[]string{"donor_id", "repo_id"} {
-                    if J.Get(prior, key).ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(
-                        J.Get(prior, key)
-                    ) != Convert.ToInt64(approval[key]) {
-                        throw CliFailure("stale_approval", "Predecessor numeric identity changed: " + key)
-                    }
-                }
+                approval["donor_id"] = V1Continuation.BindIdentity(
+                    prior,
+                    "donor_id",
+                    J.Get(GitHub.Api("users/" + donor), "id")
+                )
+                approval["repo_id"] = V1Continuation.BindIdentity(prior, "repo_id", J.Get(info, "id"))
                 if J.Text(Approved(repo, number, donor), "sha") != J.Text(predecessor, "sha") {
                     throw CliFailure("stale_approval", "Predecessor changed during continuation approval")
                 }
