@@ -135,6 +135,10 @@ func Main(args[]string) int32 {
             PreparationChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--continuation" {
+            ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if args.Length == 1 && args[0] == "--cli" {
             CliDiscovery.All(binary)
             return 0

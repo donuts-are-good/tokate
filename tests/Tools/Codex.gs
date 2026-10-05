@@ -170,6 +170,15 @@ internal partial class Fixture {
             if mode == "timeout" || mode == "completed_timeout" {
                 let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
                 File.WriteAllText(Path.Combine(partialCheckout, "partial.txt"), "partial-edit")
+                if Check.Text(State["continuation_timeout"]) == "true" {
+                    File.WriteAllText(Path.Combine(partialCheckout, "tracked.txt"), "preserved\n")
+                    File.WriteAllText(Path.Combine(partialCheckout, "imported.txt"), "untracked\n")
+                    Directory.CreateDirectory(Path.Combine(partialCheckout, ".verification-data"))
+                    File.WriteAllText(
+                        Path.Combine(partialCheckout, ".verification-data/private.log"),
+                        "source-only generated output"
+                    )
+                }
                 if mode == "completed_timeout" {
                     File.WriteAllText(args[Array.IndexOf(args, "--output-last-message") + 1], "Early successful report")
                 }

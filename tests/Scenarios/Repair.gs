@@ -461,6 +461,9 @@ internal class RepairChecks {
                     continue
                 }
                 matched = true
+                if selected == "" && !CiShard.Include("Repair/" + name) {
+                    continue
+                }
                 prepared.Restore()
                 let test = RepairCase.Create(flow, prepared.Run, name, name == "target-sync")
                 if name == "valid" || name == "target-sync" {
@@ -483,7 +486,7 @@ internal class RepairChecks {
                 }
                 Console.WriteLine("PASS repair " + name)
             }
-            if selected == "" || selected == "mutating" {
+            if selected == "mutating" || (selected == "" && CiShard.Include("Repair/mutating")) {
                 matched = true
                 using let mutating = PublishedContribution.Create(binary, mutating: true)
                 let test = RepairCase.Create(mutating.Coordination.Flow, mutating.Run, "mutating")
@@ -492,7 +495,7 @@ internal class RepairChecks {
                 test.Unpublished()
                 Console.WriteLine("PASS repair mutating")
             }
-            if selected == "" || selected == "interrupt" {
+            if selected == "interrupt" || (selected == "" && CiShard.Include("Repair/interrupt")) {
                 matched = true
                 using let interrupt = NativeFixture(binary)
                 let run = PublishedContribution.Original(interrupt, interruptible: true)

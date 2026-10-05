@@ -209,6 +209,55 @@ Inspect `status` and private evidence first. No recovery command starts inferenc
 | Interrupted fresh preparation | `tokate prepare --run DIR` inspects recorded fork, branch and checkout state without inference, checks or publication. |
 | Dirty, divergent or unidentified preparation | Inspect preserved work and use its original run, or move local files aside explicitly; do not delete branches to restart. |
 
+To seed a **fresh v1 attempt** from unpublished interrupted managed work, the
+owner first names its still-current, valid, unrevoked approval:
+
+```sh
+tokate approve --repo OWNER/REPO --issue 42 --donor DONOR --continue-approval PRIOR_APPROVAL_SHA
+```
+
+This grant retains the predecessor's exact original base, target branch, issue
+scope, policy, template and root owner instructions, with a fresh nonce and an
+explicit predecessor binding. It refuses changed or revoked authority and cannot
+be combined with `--base-branch`. Advancing the target's code alone does not
+change the imported work's approved base.
+
+The same authenticated numeric donor explicitly selects a new total budget and
+positive verification reserve, then confirms inference normally:
+
+```sh
+tokate work --repo OWNER/REPO --issue 42 --continue-from PRIOR_RUN_DIR --model MODEL --effort EFFORT --seconds 3600 --verification-reserve 1200 --yes
+```
+
+`claim` accepts the same import options to prepare without inference. This first
+bridge supports only stopped, unpublished same-donor v1 managed runs with the
+recorded preparation protections and explicit owner-instruction snapshot. V2
+lease continuation, published-PR handoff and unsupported legacy layouts are
+excluded. The source's exclusive lease must be free. Its checkout, branch,
+metadata, logs, failure and attribution remain preserved; no missing completion,
+usage, report or verification is reconstructed.
+
+Capture is limited to 1000 changed regular files, 32 MiB of edit bytes and 100000
+inventory paths. Protected paths, unsafe names, symbolic/hard links, mount
+crossings, submodules, file/directory replacements and inconsistent staged edits
+are refused. Known
+generated directories, including `.verification-data/`, `.tokate-scratch/`,
+credential homes, package caches and build output, are excluded by name without
+reading their contents; logs and runtime artifacts stay with the source. Approved
+bases that track excluded paths are unsupported. Git metadata is freshly prepared
+from the approved base; donor hooks, configuration and credentials are not copied.
+
+Interrupted capture/preparation retains one identified local attempt. Repeating
+the import command identifies it and refuses a new reservation. Inspect `status
+--run DIR`, explicitly use `prepare --run DIR`, then `work --run DIR --yes`.
+Preparation accepts only the captured edits or a consistent partial import;
+unrelated dirty work and changed manifests require explicit inspection. The
+manifest is checked again immediately before inference. Imported edits are
+untrusted task input: a new completed turn, every independent owner check on the
+complete final diff from the original base, exact-head receipt validation and
+owner review are still required. Private state and public provenance retain the
+interrupted predecessor; the fresh attempt does not make it retroactively successful.
+
 For an explicit correction **before first publication**:
 
 ```sh

@@ -177,7 +177,11 @@ internal class Worker {
             Terminal.Step("Checking owner approval and donor login...")
             let selected = J.Get(run.Element(), "selection")
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                DonorSelection.Confirm(options, selected)
+                if V1Continuation.Has(run) {
+                    V1Continuation.Confirm(options, selected)
+                } else {
+                    DonorSelection.Confirm(options, selected)
+                }
             }
             let record = ContributionClaim.Recheck(run)
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
