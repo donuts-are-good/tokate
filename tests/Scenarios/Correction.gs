@@ -597,7 +597,7 @@ internal class CorrectionChecks {
             )
             let run = flow.Prepare("tokate")
             flow.Flow.Mode(mode)
-            flow.Flow.Call([]string{"work", "--run", run}, 1)
+            flow.Flow.Call([]string{"work", "--run", run}, mode == "" ? 0: 1)
             return run
         }
 
@@ -902,6 +902,123 @@ internal class CorrectionChecks {
                 Recover(flow.Flow, run, commit, 1, flow.Tools)
                 flow.Expire()
                 flow.Flow.Call([]string{"submit", "--run", run}, 1)
+                Once(flow.Flow, 1)
+            }
+        }
+
+        private func PublicationResponses(binary string) {
+            for corrected in[]bool{false, true} {
+                let faults = corrected ? []string{"issue", "repo", "author", "body", "id"}: []string{"body"}
+                for fault in faults {
+                    using let flow = CoordinationFixture(binary)
+                    flow.Initialize()
+                    let run = ManagedRun(flow, corrected ? "staged_whitespace": "")
+                    if corrected {
+                        Prepared(flow.Flow, run)
+                        Recover(flow.Flow, run, Correct(flow.Flow, run))
+                    }
+                    flow.Flow.Mode("")
+                    let results = Check.Text(Read(run)["verification"])
+                    let before = File.ReadAllText(Path.Combine(run, "run.json"))
+                    flow.Flow.Reload()
+                    flow.Flow.State["request_response_fault"] = JsonValue.Create(fault)
+                    flow.Flow.State["request_response_missing"] = JsonValue.Create(true)
+                    flow.Flow.Save()
+                    let first = flow.Flow.Call([]string{"submit", "--run", run}, 1)
+                    let request = File.ReadAllText(Path.Combine(run, "request.json"))
+                    Check.Contains(first.Error, "Uncertain request write")
+                    Check.That(Check.Text(Read(run)["state"]) == "generated", "Inconsistent response published a run")
+                    if corrected {
+                        Check.That(
+                            Check.Text(Read(run, "correction.json")["publication"]?["stage"]) ==
+                            "request_pending",
+                            "Inconsistent successful POST was recorded as requested"
+                        )
+                    }
+                    flow.Flow.Reload()
+                    flow.Flow.State["request_response_fault"] = nil
+                    flow.Flow.State["request_response_missing"] = nil
+                    flow.Flow.Save()
+                    flow.Flow.Call([]string{"submit", "--run", run}, 1)
+                    flow.Flow.Reload()
+                    let comment = flow.Flow.State["request_comments"]?[0] ?? throw Exception("Missing posted comment")
+                    (flow.Flow.State["comments"] ?? throw Exception("Missing comments"))[
+                        Check.Text(comment["id"])
+                    ] = comment.DeepClone()
+                    flow.Flow.Save()
+                    flow.Flow.Call([]string{"submit", "--run", run})
+                    flow.Flow.Reload()
+                    Check.That(Check.Text(flow.Flow.State["request_count"]) == "1", "Response recovery duplicated POST")
+                    Check.That(Check.Text(Read(run)["verification"]) == results, "Response recovery reran verification")
+                    Check.That(
+                        File.ReadAllText(Path.Combine(run, "request.json")) == request,
+                        "Response recovery changed request"
+                    )
+                    let original = Check.Json(before)
+                    for field in[]string{"source", "tools", "correction", "commit", "state_sha"} {
+                        Check.That(
+                            Check.Text(Read(run)[field]) == Check.Text(original[field]),
+                            "Response recovery changed " + field
+                        )
+                    }
+                    Once(flow.Flow)
+                }
+            }
+        }
+
+        private func PublicationOutcomes(binary string) {
+            for fault in[]string{"duplicate", "binding", "outcome"} {
+                using let flow = CoordinationFixture(binary)
+                flow.Initialize()
+                let run = ManagedRun(flow, "staged_whitespace")
+                Prepared(flow.Flow, run)
+                Recover(flow.Flow, run, Correct(flow.Flow, run))
+                flow.Flow.Mode("")
+                flow.Flow.Call([]string{"submit", "--run", run})
+                flow.Flow.Reload()
+                flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
+                let state = flow.State()["state"] ?? throw Exception("Missing published state")
+                let outcomes = state["outcomes"]?.AsArray() ?? throw Exception("Missing outcomes")
+                let uuid = Check.Text(Read(run, "correction.json")["publication_uuid"])
+                var recorded JsonNode? = nil
+                for row in outcomes {
+                    if Check.Text(row["uuid"]) == uuid {
+                        recorded = row
+                    }
+                }
+                let result = recorded ?? throw Exception("Missing publication outcome")
+                switch fault {
+                    case "duplicate" {
+                        outcomes.Add(result.DeepClone())
+                    }
+                    case "binding" {
+                        result["binding"] = JsonValue.Create("changed-binding")
+                    }
+                    case "outcome" {
+                        result["outcome"] = Check.Map("status", "rejected")
+                    }
+                }
+                let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                let checks = Check.Text(Read(run, "correction.json")["verification"])
+                flow.Flow.Reload()
+                flow.Flow.State["coordination_state_override"] = JsonValue.Create(state.ToJsonString())
+                flow.Flow.Save()
+                flow.Flow.Call([]string{"submit", "--run", run}, 1)
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                    "Changed recorded outcome published a run"
+                )
+                flow.Flow.Reload()
+                flow.Flow.State["coordination_state_override"] = nil
+                flow.Flow.Save()
+                flow.Flow.Call([]string{"submit", "--run", run})
+                Check.That(Check.Text(Read(run)["state"]) == "published", "Exact recorded outcome was not recovered")
+                Check.That(
+                    Check.Text(Read(run, "correction.json")["verification"]) == checks,
+                    "Outcome recovery reran checks"
+                )
+                flow.Flow.Reload()
+                Check.That(Check.Text(flow.Flow.State["request_count"]) == "1", "Outcome recovery repeated request")
                 Once(flow.Flow, 1)
             }
         }
@@ -1248,6 +1365,8 @@ internal class CorrectionChecks {
                 "ManagedAbsent",
                 "Managed",
                 "InterruptedManaged",
+                "PublicationResponses",
+                "PublicationOutcomes",
                 "ChangedCandidate",
                 "LegacyAndArchive",
                 "AuthorityChanges",
@@ -1308,6 +1427,12 @@ internal class CorrectionChecks {
                     }
                     case "Managed" {
                         Managed(binary)
+                    }
+                    case "PublicationOutcomes" {
+                        PublicationOutcomes(binary)
+                    }
+                    case "PublicationResponses" {
+                        PublicationResponses(binary)
                     }
                     case "InterruptedManaged" {
                         InterruptedManaged(binary)

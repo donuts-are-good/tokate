@@ -1,16 +1,10 @@
 package Tokate
 
-import Microsoft.Win32.SafeHandles
 import System
 import System.Collections.Generic
 import System.Diagnostics
 import System.IO
-import System.Runtime.InteropServices
-import System.Security.Cryptography
 import System.Text.Json
-
-@DllImport("libc", EntryPoint: "open", SetLastError: true)
-func EvidenceOpen(path string, flags int32) int32;
 
 internal class Correction {
     shared {
@@ -114,7 +108,7 @@ internal class Correction {
             }
             let archive = Path.Combine(directory, "original-evidence")
             if Directory.Exists(archive) {
-                OriginalRun(directory, run)
+                OriginalEvidence.Load(directory, run)
                 let pinned = J.Parse(File.ReadAllText(Path.Combine(archive, "approval.json")))
                 for key in[]string{"approval", "policy", "template"} {
                     if RequestData.Canonical(J.Get(pinned, key)) != RequestData.Canonical(J.Get(record, key)) {
@@ -123,46 +117,6 @@ internal class Correction {
                 }
             }
             return record
-        }
-
-        internal func OriginalRun(directory string, run Data) Data {
-            let original = Original(directory)
-            for key in[]string{
-                "version",
-                "id",
-                "repo",
-                "issue",
-                "donor",
-                "donor_id",
-                "head_repo",
-                "approval",
-                "state_sha",
-                "base",
-                "base_branch",
-                "policy_hash",
-                "branch",
-                "model",
-                "effort",
-                "seconds",
-                "network",
-                "source",
-                "tools",
-                "usage",
-                "execution_seconds",
-                "elapsed_seconds",
-                "codex_version",
-                "inference_exit_code",
-                "turn_completed"
-            } {
-                if key == "repo" || key == "head_repo" {
-                    if !RepositoryIdentity.SameRepo(original.Text(key), run.Text(key)) {
-                        throw Exception("Saved original authority changed: " + key)
-                    }
-                } else if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
-                    throw Exception("Saved original authority or execution attribution changed: " + key)
-                }
-            }
-            return original
         }
 
         private func Activate(directory string, run Data, correction Data) {
@@ -174,33 +128,6 @@ internal class Correction {
             run.Fields.Remove("failure_reason")
             run.Fields.Remove("failure_stage")
             run.Save(directory)
-        }
-
-        internal func FileHash(path string) string {
-            using let stream = File.OpenRead(path)
-            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant()
-        }
-
-        private func CopyFile(source string, target string) {
-            let descriptor = EvidenceOpen(source, 131072 | 2048)
-            if descriptor < 0 {
-                throw Exception("Cannot safely capture original evidence: " + source)
-            }
-            using let handle = SafeFileHandle(IntPtr(descriptor), true)
-            using let input = FileStream(handle, FileAccess.Read)
-            if !input.CanSeek {
-                throw Exception("Original evidence must be a regular file: " + source)
-            }
-            using let output = FileStream(
-                target,
-                FileStreamOptions{
-                    Mode: FileMode.CreateNew,
-                    Access: FileAccess.Write,
-                    Share: FileShare.None,
-                    UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
-                }
-            )
-            input.CopyTo(output)
         }
 
         private func CopyTree(source string, target string, links List[Object], relative string = "") {
@@ -217,32 +144,19 @@ internal class Correction {
                 } else if Directory.Exists(entry) {
                     CopyTree(entry, Path.Combine(target, name), links, path)
                 } else {
-                    CopyFile(entry, Path.Combine(target, name))
+                    OriginalEvidence.CopyFile(entry, Path.Combine(target, name))
                 }
             }
-        }
-
-        private func Inventory(directory string) Dictionary[string, Object?] {
-            let files = Dictionary[string, Object?]()
-            for path in Directory.EnumerateFileSystemEntries(directory) {
-                if FileInfo(path).LinkTarget != nil {
-                    throw Exception("Original archive contains a link")
-                }
-                if Directory.Exists(path) {
-                    for entry in Inventory(path) {
-                        files[Path.GetFileName(path) + "/" + entry.Key] = entry.Value
-                    }
-                } else {
-                    files[Path.GetFileName(path)] = FileHash(path)
-                }
-            }
-            return files
         }
 
         internal func Archive(directory string, run Data, record JsonElement) {
+            LocalPaths.DirectoryPath(directory)
             let final = Path.Combine(directory, "original-evidence")
+            if FileInfo(final).LinkTarget != nil {
+                throw Exception("Original evidence archive must not be a link")
+            }
             if Directory.Exists(final) {
-                Original(directory)
+                OriginalEvidence.Load(directory)
                 return
             }
             let checkout = Verification.Validate(Path.Combine(directory, "checkout"))
@@ -272,21 +186,12 @@ internal class Correction {
                         throw Exception("Original saved records must not be links: " + file)
                     }
                     if File.Exists(source) {
-                        CopyFile(source, Path.Combine(temporary, file))
+                        OriginalEvidence.CopyFile(source, Path.Combine(temporary, file))
                     } else {
                         missing.Add(file)
                     }
                 }
-                for evidence in Directory.EnumerateDirectories(directory, "verification-*") {
-                    if FileInfo(evidence).LinkTarget != nil {
-                        throw Exception("Original verification evidence must not be links")
-                    }
-                    let target = Path.Combine(temporary, Path.GetFileName(evidence))
-                    Directory.CreateDirectory(target)
-                    for file in Directory.EnumerateFileSystemEntries(evidence) {
-                        CopyFile(file, Path.Combine(target, Path.GetFileName(file)))
-                    }
-                }
+                OriginalEvidence.VerificationArtifacts(directory, temporary)
                 File.WriteAllText(Path.Combine(temporary, "approval.json"), J.Write(record) + "\n")
                 File.WriteAllText(
                     Path.Combine(temporary, "staged.patch"),
@@ -345,35 +250,13 @@ internal class Correction {
                     ) +
                         "\n"
                 )
-                let inventory = Inventory(temporary)
-                let manifest = RequestData.Canonical(J.Parse(J.Write(inventory)))
-                File.WriteAllText(Path.Combine(temporary, "manifest.json"), manifest + "\n")
-                let seal = Data()
-                seal.Fields["manifest_sha256"] = Data.Hash(manifest)
-                seal.Write(Path.Combine(temporary, "seal.json"))
+                OriginalEvidence.Seal(temporary)
                 Directory.Move(temporary, final)
             } finally {
                 if Directory.Exists(temporary) {
                     Directory.Delete(temporary, true)
                 }
             }
-        }
-
-        internal func Original(directory string) Data {
-            let archive = LocalPaths.DirectoryPath(Path.Combine(directory, "original-evidence"))
-            let manifest = File.ReadAllText(Path.Combine(archive, "manifest.json")).TrimEnd('\n')
-            let seal = Data.Read(Path.Combine(archive, "seal.json"))
-            let inventory = Inventory(archive)
-            inventory.Remove("manifest.json")
-            inventory.Remove("seal.json")
-            if Data.Hash(manifest) != seal.Text("manifest_sha256") || RequestData.Canonical(
-                J.Parse(J.Write(inventory))
-            ) != manifest {
-                throw Exception(
-                    "Original evidence archive changed or is incomplete; no silent reconstruction is allowed"
-                )
-            }
-            return Data.Load(archive)
         }
 
         internal func Tools(path string, policy JsonElement) JsonElement {
@@ -415,7 +298,7 @@ internal class Correction {
             Completed(directory, run)
             let record = Authority(directory, run)
             if args.Get("prepare") == "true" {
-                if CorrectionPublication.Pulls(run).Count != 0 {
+                if Publication.Pulls(run).Count != 0 {
                     throw Exception("Contribution already has a physical PR; inspect publication instead")
                 }
                 CorrectionPublication.Remote(run, nil, true)
@@ -425,7 +308,7 @@ internal class Correction {
                 )
                 return
             }
-            Original(directory)
+            OriginalEvidence.Load(directory)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
@@ -478,7 +361,7 @@ internal class Correction {
             Directory.CreateDirectory(attempt)
             Save(directory, correction)
             try {
-                if CorrectionPublication.Pulls(run).Count != 0 {
+                if Publication.Pulls(run).Count != 0 {
                     throw Exception("Contribution already has a physical PR")
                 }
                 CorrectionPublication.Remote(run, correction, true)
