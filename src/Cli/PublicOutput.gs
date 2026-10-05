@@ -189,6 +189,7 @@ internal class PublicOutput {
                 result["verification_reserve"] = run.Number("verification_reserve")
             }
             result["run"] = directory
+            result["storage"] = RunStorage.Summary(directory, run)
             let verification = J.Get(value, "verification")
             result["verification"] = Rows(verification, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(verification).Count
