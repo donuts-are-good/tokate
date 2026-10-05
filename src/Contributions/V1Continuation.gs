@@ -188,7 +188,7 @@ internal class V1Continuation {
                 head,
                 upstream: upstream
             )
-            if CorrectionPublication.Pulls(source).Count != 0 {
+            if Publication.Pulls(source).Count != 0 {
                 throw Exception("Published contributions cannot be imported")
             }
             let reference = GitHub.Api(
@@ -584,10 +584,18 @@ internal class V1Continuation {
                 }
             }
             let changed = HashSet[string](StringComparer.Ordinal)
+            for entry in index {
+                var original string
+                if !baseline.TryGetValue(entry.Key, out original) || original != entry.Value {
+                    changed.Add(entry.Key)
+                }
+            }
             for path in Paths(
                 Commands.GitRaw(
                     checkout,
                     []string{
+                        "-c",
+                        "diff.autoRefreshIndex=false",
                         "diff",
                         "--no-ext-diff",
                         "--no-textconv",
