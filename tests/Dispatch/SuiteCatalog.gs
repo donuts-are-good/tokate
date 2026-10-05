@@ -87,7 +87,9 @@ internal class SuiteCatalog {
                     if CiShard.Include("Verification") {
                         VerificationChecks.All(binary)
                     }
-                    PublicDescriptions.All(binary)
+                    if CiShard.Include("PublicDescriptions") {
+                        PublicDescriptions.All(binary)
+                    }
                     for name in NativeFlow.SerialGroups {
                         if CiShard.Include("Native/" + name) {
                             NativeFlow.All(binary, name)
