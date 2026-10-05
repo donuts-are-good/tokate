@@ -600,13 +600,24 @@ internal class OverlapChecks {
         }
 
         internal func All(binary string) {
-            Inputs(binary)
+            if CiShard.Include("Overlaps/Inputs") {
+                Inputs(binary)
+            }
             for version in[]int32{1, 2} {
-                Files(binary, version)
-                Evidence(binary, version)
-                Gates(binary, version)
+                let prefix = "Overlaps/V" + version.ToString() + "/"
+                if CiShard.Include(prefix + "Files") {
+                    Files(binary, version)
+                }
+                if CiShard.Include(prefix + "Evidence") {
+                    Evidence(binary, version)
+                }
+                if CiShard.Include(prefix + "Gates") {
+                    Gates(binary, version)
+                }
                 for change in[]string{"head", "retarget", "target", "stale", "moved-before"} {
-                    Freshness(binary, version, change)
+                    if CiShard.Include(prefix + "Freshness/" + change) {
+                        Freshness(binary, version, change)
+                    }
                 }
             }
         }

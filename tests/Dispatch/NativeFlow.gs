@@ -85,6 +85,9 @@ internal partial class NativeFlow : NativeFixture {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Native/" + name) {
+                    continue
+                }
                 using let flow = NativeFlow(binary)
                 if Array.IndexOf(
                     []string{

@@ -254,6 +254,9 @@ internal class DecreeFlow : IDisposable {
 
         internal func Freshness(binary string, version int32) {
             for change in[]string{"add", "change", "delete", "unsupported", "unrelated"} {
+                if !CiShard.Include("Decree/Freshness/v" + version.ToString() + "/" + change) {
+                    continue
+                }
                 using let test = Create(binary, version)
                 if change != "add" {
                     test.Text(Exact)
@@ -300,6 +303,7 @@ internal class DecreeFlow : IDisposable {
                         test.Prompt(change == "delete" ? "": "New owner instructions\n", change != "delete")
                     }
                 }
+                Console.WriteLine("PASS DECREE v" + version.ToString() + " Freshness/" + change)
             }
         }
 
@@ -705,6 +709,9 @@ internal class DecreeFlow : IDisposable {
                     continue
                 }
                 matched = true
+                if name != "Freshness" && !CiShard.Include("Decree/" + name) {
+                    continue
+                }
                 for version in[]int32{1, 2} {
                     if (name == "ExternalProtection" && version != 2) ||
                         ((name == "LegacyRecovery" || name == "PublicationProtection") && version != 1) {
@@ -742,7 +749,9 @@ internal class DecreeFlow : IDisposable {
                             PublicationProtection(binary)
                         }
                     }
-                    Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
+                    if name != "Freshness" {
+                        Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
+                    }
                 }
             }
             Check.That(matched, "Unknown DECREE selector: " + selected)

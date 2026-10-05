@@ -900,6 +900,9 @@ internal class AmendmentFlow {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Amendment/" + name) {
+                    continue
+                }
                 switch name {
                     case "ArchiveRefusals" {
                         ArchiveRefusals(binary)
