@@ -69,6 +69,7 @@ internal partial class NativeFlow : NativeFixture {
                 "ReadTraffic",
                 "MutationTraffic",
                 "PublicationFailures",
+                "ExistingPublication",
                 "CanonicalVerification",
                 "CanonicalPublication",
                 "SelfOwnedFlow",
@@ -222,6 +223,9 @@ internal partial class NativeFlow : NativeFixture {
                     }
                     case "MutationTraffic" {
                         flow.MutationTraffic()
+                    }
+                    case "ExistingPublication" {
+                        flow.ExistingPublication()
                     }
                     case "PublicationFailures" {
                         flow.PublicationFailures()
