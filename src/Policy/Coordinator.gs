@@ -27,7 +27,7 @@ internal class Coordinator {
                 .ValueKind != JsonValueKind.Undefined {
                 throw Exception(failure)
             }
-            if J.Text(eventRepository, "full_name") != repo {
+            if !RepositoryIdentity.SameRepo(J.Text(eventRepository, "full_name"), repo) {
                 throw Exception("Event repository does not match coordinator repository")
             }
             let number = J.Number(eventIssue, "number")
@@ -38,15 +38,19 @@ internal class Coordinator {
             RepositoryIdentity.PositiveId(actor)
             let donor = RepositoryIdentity.Login(J.Text(canonicalUser, "login"))
             let info = RepositoryAccess.RequireOwner(repo)
-            let issueUrl = "https://api.github.com/repos/" + repo + "/issues/" + number.ToString()
             let eventActor = J.Get(J.Get(eventComment, "user"), "id")
-            if number < 1 || J.Get(eventRepository, "id").ToString() != J.Get(info, "id").ToString() || J.Get(
-                canonical,
-                "id"
-            )
-                .ToString() != commentId.ToString() || J.Text(canonical, "issue_url") != issueUrl ||
-                actor.ToString() != eventActor.ToString() || J.Text(canonical, "body") != J.Text(eventComment, "body") {
-                throw Exception("Comment author, content, repository or issue identity changed")
+            let identityFailure = "Comment author, content, repository or issue identity changed"
+            let eventRepositoryId = J.Get(eventRepository, "id").ToString()
+            let repositoryId = J.Get(info, "id").ToString()
+            let canonicalId = J.Get(canonical, "id").ToString()
+            if number < 1 || eventRepositoryId != repositoryId || canonicalId != commentId.ToString() {
+                throw Exception(identityFailure)
+            }
+            if !RepositoryIdentity.IsIssueUrl(J.Text(canonical, "issue_url"), repo, number) {
+                throw Exception(identityFailure)
+            }
+            if actor.ToString() != eventActor.ToString() || J.Text(canonical, "body") != J.Text(eventComment, "body") {
+                throw Exception(identityFailure)
             }
             let text = J.Text(canonical, "body")
             if !text.StartsWith("/tokate ", StringComparison.Ordinal) {
@@ -288,16 +292,24 @@ internal class Coordinator {
             Amendment.Tools(policy, J.Get(metadata, "tools"))
             let reservation = J.Get(value, "reservation")
             let branch = J.Text(metadata, "branch")
-            if J.Number(metadata, "seconds") > J.Number(policy.Value, "max_seconds") || J.Get(original, "actor")
-                .ToString() != actor.ToString() || J.Text(metadata, "previous") != CoordinationState.Head(value) ||
-                J.Number(metadata, "pr") != J.Number(J.Get(current, "outcome"), "pr") || J.Text(
-                metadata,
-                "fork"
-            ) != J.Text(old, "fork") || branch != J.Text(old, "branch") || branch != "tokate/v2-" + J.Text(
-                reservation,
-                "reservation"
-            ) {
-                throw Exception("Amendment differs from current published contribution authority")
+            let failure = "Amendment differs from current published contribution authority"
+            let originalActor = J.Get(original, "actor").ToString()
+            if J.Number(metadata, "seconds") > J.Number(policy.Value, "max_seconds") ||
+                originalActor != actor.ToString() {
+                throw Exception(failure)
+            }
+            let currentOutcome = J.Get(current, "outcome")
+            let publishedPr = J.Number(currentOutcome, "pr")
+            let publishedHead = CoordinationState.Head(value)
+            if J.Text(metadata, "previous") != publishedHead || J.Number(metadata, "pr") != publishedPr {
+                throw Exception(failure)
+            }
+            if !RepositoryIdentity.SameRepo(J.Text(metadata, "fork"), J.Text(old, "fork")) {
+                throw Exception(failure)
+            }
+            let expectedBranch = "tokate/v2-" + J.Text(reservation, "reservation")
+            if branch != J.Text(old, "branch") || branch != expectedBranch {
+                throw Exception(failure)
             }
             RepositoryAccess.ValidateFork(repo, metadata, actor)
             let history = Synchronization.Append(repo, Synchronization.History(current), J.Text(metadata, "sync"))

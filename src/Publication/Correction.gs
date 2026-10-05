@@ -96,15 +96,9 @@ internal class Correction {
             let owner = J.Get(J.Get(info, "owner"), "id").ToString()
             let donor = J.Get(run.Element(), "donor_id").ToString()
             let parent = J.Text(J.Get(info, "parent"), "full_name")
-            if !J.Bool(J.Get(info, "permissions"), "push") ||
-                owner != donor ||
-                (
-                run.Text("head_repo") != run.Text("repo") && !String.Equals(
-                    parent,
-                    run.Text("repo"),
-                    StringComparison.OrdinalIgnoreCase
-                )
-            ) {
+            let sameRepository = RepositoryIdentity.SameRepo(run.Text("head_repo"), run.Text("repo"))
+            let sameParent = String.Equals(parent, run.Text("repo"), StringComparison.OrdinalIgnoreCase)
+            if !J.Bool(J.Get(info, "permissions"), "push") || owner != donor || (!sameRepository && !sameParent) {
                 throw Exception("Fork ownership, write access or upstream changed")
             }
         }
@@ -160,7 +154,11 @@ internal class Correction {
                 "inference_exit_code",
                 "turn_completed"
             } {
-                if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
+                if key == "repo" || key == "head_repo" {
+                    if !RepositoryIdentity.SameRepo(original.Text(key), run.Text(key)) {
+                        throw Exception("Saved original authority changed: " + key)
+                    }
+                } else if !RequestData.Same(J.Get(original.Element(), key), J.Get(run.Element(), key)) {
                     throw Exception("Saved original authority or execution attribution changed: " + key)
                 }
             }

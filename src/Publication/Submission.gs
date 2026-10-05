@@ -96,9 +96,13 @@ internal class Submission {
                     if RepositoryIdentity.PositiveId(author) != RepositoryIdentity.PositiveId(actor) {
                         throw Exception(failure)
                     }
-                    let issueUrl = "https://api.github.com/repos/" + repo + "/issues/" + issue.ToString()
-                    if J.Text(canonical, "issue_url") != issueUrl || J.Text(canonical, "body") != body ||
-                        RequestData.Canonical(candidate) != RequestData.Canonical(request) {
+                    if !RepositoryIdentity.IsIssueUrl(J.Text(canonical, "issue_url"), repo, issue) {
+                        throw Exception(failure)
+                    }
+                    if J.Text(canonical, "body") != body {
+                        throw Exception(failure)
+                    }
+                    if RequestData.Canonical(candidate) != RequestData.Canonical(request) {
                         throw Exception(failure)
                     }
                     count++
@@ -135,8 +139,11 @@ internal class Submission {
             if File.Exists(journal) {
                 let saved = RequestData.FileData(journal, 16384)
                 let failure = "Saved request UUID binding changed; use a new file and UUID for new work"
-                if J.Text(saved, "repo") != repo || J.Number(saved, "issue") != issue || J.Get(saved, "actor")
-                    .ToString() != actor.ToString() || J.Text(saved, "binding") != binding {
+                if !RepositoryIdentity.SameRepo(J.Text(saved, "repo"), repo) || J.Number(saved, "issue") != issue {
+                    throw Exception(failure)
+                }
+                let savedActor = J.Get(saved, "actor").ToString()
+                if savedActor != actor.ToString() || J.Text(saved, "binding") != binding {
                     throw Exception(failure)
                 }
                 if RequestData.Canonical(J.Get(saved, "request")) != RequestData.Canonical(value) {
@@ -197,8 +204,7 @@ internal class Submission {
                     expires: expires
                 )
                 let failure = "Comment write response lacks exact request evidence"
-                let issueUrl = "https://api.github.com/repos/" + repo + "/issues/" + issue.ToString()
-                if J.Text(posted, "issue_url") != issueUrl {
+                if !RepositoryIdentity.IsIssueUrl(J.Text(posted, "issue_url"), repo, issue) {
                     throw Exception(failure)
                 }
                 let author = J.Get(J.Get(posted, "user"), "id")

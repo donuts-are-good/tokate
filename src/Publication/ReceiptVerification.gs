@@ -12,10 +12,9 @@ internal class ReceiptVerification {
             if J.Number(receipt, "version") == 2 {
                 return ReceiptVerification.VerifyV2(repo, number, pull, receipt, ready, paths)
             }
-            if J.Number(receipt, "version") != 1 || J.Text(receipt, "repo") != repo || J.Text(
-                J.Get(pull, "user"),
-                "login"
-            ) != J.Text(receipt, "donor") {
+            let author = J.Get(pull, "user")
+            if J.Number(receipt, "version") != 1 || !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) ||
+                J.Text(author, "login") != J.Text(receipt, "donor") {
                 throw Exception("PR author or repository does not match the receipt")
             }
             let head = J.Get(pull, "head")
@@ -203,7 +202,10 @@ internal class ReceiptVerification {
             let failure = "PR receipt lacks current exact-commit coordination authority"
             let receiptApproval = J.Text(receipt, "approval")
             let receiptReservation = J.Text(receipt, "reservation")
-            if J.Text(receipt, "repo") != repo || receiptApproval != approvalId || receiptReservation != reservationId {
+            if !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) {
+                throw CliFailure("stale_approval", failure)
+            }
+            if receiptApproval != approvalId || receiptReservation != reservationId {
                 throw CliFailure("stale_approval", failure)
             }
             let receiptHead = J.Text(receipt, "head")
@@ -211,7 +213,10 @@ internal class ReceiptVerification {
             if J.Number(outcome, "pr") != number || receiptHead != exactHead || physicalHead != exactHead {
                 throw CliFailure("stale_approval", failure)
             }
-            if J.Text(head, "ref") != branch || J.Text(headRepo, "full_name") != fork || J.Text(base, "ref") != target {
+            if J.Text(head, "ref") != branch || !RepositoryIdentity.SameRepo(J.Text(headRepo, "full_name"), fork) {
+                throw CliFailure("stale_approval", failure)
+            }
+            if J.Text(base, "ref") != target {
                 throw CliFailure("stale_approval", failure)
             }
             if AccessState.Task(approval) {

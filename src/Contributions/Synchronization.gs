@@ -94,15 +94,19 @@ internal class Synchronization {
             )
             var id Guid
             let approvalVersion = J.Number(value, "approval_version")
-            if J.Number(value, "version") != 1 || !Guid.TryParseExact(J.Text(value, "id"), "D", out id) || J.Text(
-                value,
-                "repo"
-            ) != repo ||
-                J.Number(value, "issue") < 1 || J.Number(value, "pr") < 1 ||
-                (approvalVersion != 1 && approvalVersion != 2) ||
-                J
-                .Get(value, "receipt").ValueKind != JsonValueKind.Object {
-                throw Exception("Invalid owner synchronization grant")
+            let failure = "Invalid owner synchronization grant"
+            if J.Number(value, "version") != 1 || !Guid.TryParseExact(J.Text(value, "id"), "D", out id) {
+                throw Exception(failure)
+            }
+            if !RepositoryIdentity.SameRepo(J.Text(value, "repo"), repo) {
+                throw Exception(failure)
+            }
+            if J.Number(value, "issue") < 1 || J.Number(value, "pr") < 1 {
+                throw Exception(failure)
+            }
+            if (approvalVersion != 1 && approvalVersion != 2) || J.Get(value, "receipt")
+                .ValueKind != JsonValueKind.Object {
+                throw Exception(failure)
             }
             Numeric(J.Get(value, "repository_id"))
             if !Regex.IsMatch(
@@ -188,7 +192,7 @@ internal class Synchronization {
                 if J.Text(value, "base") != approvedBase || J.Text(value, "target") != target {
                     throw Exception(failure)
                 }
-                if J.Text(value, "fork") != fork || J.Text(value, "branch") != branch {
+                if !RepositoryIdentity.SameRepo(J.Text(value, "fork"), fork) || J.Text(value, "branch") != branch {
                     throw Exception(failure)
                 }
                 let candidate = J.Text(value, "candidate")
@@ -199,7 +203,10 @@ internal class Synchronization {
                 if J.Text(receipt, "head") != J.Text(value, "previous") || J.Text(receipt, "approval") != approval {
                     throw Exception(failure)
                 }
-                if J.Number(receipt, "version") != approvalVersion || J.Text(receipt, "repo") != repo {
+                if J.Number(receipt, "version") != approvalVersion {
+                    throw Exception(failure)
+                }
+                if !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) {
                     throw Exception(failure)
                 }
                 if J.Number(receipt, "issue") != issue || J.Text(receipt, "donor") != donor {
@@ -343,12 +350,14 @@ internal class Synchronization {
                 throw Exception("Published head or receipt changed during synchronization authorization")
             }
             let reference = GitHub.Api("repos/" + J.Text(value, "fork") + "/git/ref/heads/" + J.Text(value, "branch"))
-            if J.Text(J.Get(reference, "object"), "sha") != J.Text(value, "previous") || J.Text(head, "ref") != J.Text(
-                value,
-                "branch"
-            ) ||
-                J.Text(J.Get(head, "repo"), "full_name") != J.Text(value, "fork") {
-                throw Exception("Canonical published donor branch changed during grant creation")
+            let branchFailure = "Canonical published donor branch changed during grant creation"
+            let remoteHead = J.Text(J.Get(reference, "object"), "sha")
+            if remoteHead != J.Text(value, "previous") || J.Text(head, "ref") != J.Text(value, "branch") {
+                throw Exception(branchFailure)
+            }
+            let headRepo = J.Text(J.Get(head, "repo"), "full_name")
+            if !RepositoryIdentity.SameRepo(headRepo, J.Text(value, "fork")) {
+                throw Exception(branchFailure)
             }
             Target(repo, approval, J.Text(value, "target"), J.Text(value, "upstream"))
             if J.Number(value, "approval_version") == 2 && CoordinationState.Load(repo, J.Number(value, "issue"))

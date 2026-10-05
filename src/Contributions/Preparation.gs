@@ -24,7 +24,7 @@ internal class Preparation {
             return Path.Combine(root, id)
         }
 
-        private func Identity(run Data) string -> Data.Hash(
+        private func Identity(run Data, normalized bool = true) string -> Data.Hash(
             J.Write(
                 J.Map(
                     "version",
@@ -32,7 +32,7 @@ internal class Preparation {
                     "id",
                     run.Text("id"),
                     "repo",
-                    run.Text("repo"),
+                    normalized ? run.Text("repo").ToLowerInvariant(): run.Text("repo"),
                     "issue",
                     run.Number("issue"),
                     "donor_id",
@@ -50,12 +50,17 @@ internal class Preparation {
                     "source",
                     run.Text("source"),
                     "fork",
-                    run.Text("requested_fork"),
+                    normalized ? run.Text("requested_fork").ToLowerInvariant(): run.Text("requested_fork"),
                     "head_repo",
-                    run.Text("head_repo")
+                    normalized ? run.Text("head_repo").ToLowerInvariant(): run.Text("head_repo")
                 )
             )
         )
+
+        private func Identified(run Data) bool {
+            let identity = run.Text("preparation_identity")
+            return identity == Identity(run) || identity == Identity(run, false)
+        }
 
         internal func Initialize(directory string, run Data, fork string) {
             for entry in Directory.EnumerateFileSystemEntries(directory) {
@@ -112,7 +117,7 @@ internal class Preparation {
             let savedState = run.Text("state")
             let fields = run.Fields
             let failure = "prepare --run requires recorded pre-inference preparation for this contribution; old runs and coding cannot be adopted"
-            if run.Number("preparation_version") != 1 || run.Text("preparation_identity") != Identity(run) {
+            if run.Number("preparation_version") != 1 || !Identified(run) {
                 throw Exception(failure)
             }
             if savedState != "preparing" && savedState != "claimed" {
@@ -154,7 +159,7 @@ internal class Preparation {
         }
 
         internal func Ready(directory string, run Data) {
-            if !run.Flag("preparation_complete") || run.Text("preparation_identity") != Identity(run) {
+            if !run.Flag("preparation_complete") || !Identified(run) {
                 throw Exception("Preparation is incomplete; use prepare --run " + directory + " before work")
             }
             let upstream = GitHub.Api("repos/" + run.Text("repo"))
@@ -238,7 +243,7 @@ internal class Preparation {
 
         private func Fork(directory string, run Data, upstream JsonElement) {
             let head = RepositoryIdentity.Repo(run.Text("preparation_head"))
-            if run.Text("head_repo") != head {
+            if !RepositoryIdentity.SameRepo(run.Text("head_repo"), head) {
                 throw Exception("Saved head repository differs from preparation identity")
             }
             var info = GitHub.Api("repos/" + head, missing: true)

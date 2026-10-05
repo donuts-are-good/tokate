@@ -72,6 +72,7 @@ internal partial class NativeFlow : NativeFixture {
                 "CanonicalVerification",
                 "CanonicalPublication",
                 "SelfOwnedFlow",
+                "RepositoryIdentity",
                 "PublicationRevocation",
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
@@ -230,6 +231,9 @@ internal partial class NativeFlow : NativeFixture {
                     }
                     case "CanonicalPublication" {
                         flow.CanonicalPublication()
+                    }
+                    case "RepositoryIdentity" {
+                        RepositoryIdentityChecks.All(binary)
                     }
                     case "SelfOwnedFlow" {
                         flow.SelfOwnedFlow()

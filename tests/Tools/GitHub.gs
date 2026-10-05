@@ -211,8 +211,9 @@ internal partial class Fixture {
         }
         let parts = path.Split('/')
         Check.That(parts[0] == "repos", "Expected repository API")
-        let repo = parts[1] + "/" + parts[2]
-        let folder = repo == "owner/project" ? "upstream": "fork"
+        let repo = (parts[1] + "/" + parts[2]).ToLowerInvariant()
+        let folder = State["repository_folders"]?[repo] is JsonNode selected ? Check.Text(selected):
+        repo == "owner/project" ? "upstream": "fork"
         let tail = String.Join("/", parts, 3, parts.Length - 3)
         if tail == "" {
             if folder == "fork" && State["fork_pending_reads"] != nil && Int32.Parse(
@@ -246,7 +247,12 @@ internal partial class Fixture {
                     "fork",
                     folder == "fork",
                     "permissions",
-                    Check.Map("push", State["fork_push"] ?? JsonValue.Create(actor == parts[1]) as JsonNode),
+                    Check.Map(
+                        "push",
+                        State["fork_push"] ?? JsonValue.Create(
+                            String.Equals(actor, parts[1], StringComparison.OrdinalIgnoreCase)
+                        ) as JsonNode
+                    ),
                     "parent",
                     Check.Map(
                         "full_name",

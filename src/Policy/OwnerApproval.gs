@@ -235,13 +235,15 @@ internal class OwnerApproval {
             if J.Number(approval, "version") != 1 {
                 throw Exception("Version-1 operations require a version-1 approval")
             }
-            if J.Text(approval, "repo") != repo || J.Number(approval, "issue") != number || !String.Equals(
-                J.Text(approval, "donor"),
-                donor,
-                StringComparison.OrdinalIgnoreCase
-            ) ||
-                J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
-                throw CliFailure("stale_approval", "Issue or assignment changed. The owner must approve again.")
+            let failure = "Issue or assignment changed. The owner must approve again."
+            if !RepositoryIdentity.SameRepo(J.Text(approval, "repo"), repo) || J.Number(approval, "issue") != number {
+                throw CliFailure("stale_approval", failure)
+            }
+            if !String.Equals(J.Text(approval, "donor"), donor, StringComparison.OrdinalIgnoreCase) {
+                throw CliFailure("stale_approval", failure)
+            }
+            if J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
+                throw CliFailure("stale_approval", failure)
             }
             let configuration = ApprovalBase.Check(repo, approval, 1)
             return J.Parse(

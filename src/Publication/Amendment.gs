@@ -66,11 +66,14 @@ internal class Amendment {
                 throw Exception(failure)
             }
             if !J.Text(pull, "body").Contains(marker) || J.Text(head, "ref") != run.Text("branch") ||
-                headRepo != run.Text("head_repo") {
+                !RepositoryIdentity.SameRepo(headRepo, run.Text("head_repo")) {
                 throw Exception(failure)
             }
             let baseRepo = J.Text(J.Get(base, "repo"), "full_name")
-            if J.Text(base, "ref") != run.Text("base_branch") || (baseRepo != "" && baseRepo != run.Text("repo")) {
+            if J.Text(base, "ref") != run.Text("base_branch") {
+                throw Exception(failure)
+            }
+            if baseRepo != "" && !RepositoryIdentity.SameRepo(baseRepo, run.Text("repo")) {
                 throw Exception(failure)
             }
             let headSha = J.Text(head, "sha")
@@ -93,7 +96,8 @@ internal class Amendment {
                 let owner = J.Text(J.Get(info, "owner"), "login")
                 let sameParent = String.Equals(parent, run.Text("repo"), StringComparison.OrdinalIgnoreCase)
                 let sameOwner = String.Equals(owner, run.Text("donor"), StringComparison.OrdinalIgnoreCase)
-                if !writable || (run.Text("head_repo") != run.Text("repo") && !sameParent) || !sameOwner {
+                let sameRepository = RepositoryIdentity.SameRepo(run.Text("head_repo"), run.Text("repo"))
+                if !writable || (!sameRepository && !sameParent) || !sameOwner {
                     throw Exception("Donor fork ownership or upstream changed")
                 }
                 SyncAuthority(run, amendment, record)
@@ -120,8 +124,10 @@ internal class Amendment {
                 originalActor != actor {
                 throw CliFailure("stale_approval", failure)
             }
-            if J.Text(metadata, "fork") != run.Text("head_repo") || J.Text(metadata, "branch") != run.Text("branch") ||
-                run.Text("branch") != "tokate/v2-" + run.Text("id") {
+            if !RepositoryIdentity.SameRepo(J.Text(metadata, "fork"), run.Text("head_repo")) {
+                throw CliFailure("stale_approval", failure)
+            }
+            if J.Text(metadata, "branch") != run.Text("branch") || run.Text("branch") != "tokate/v2-" + run.Text("id") {
                 throw CliFailure("stale_approval", failure)
             }
             if run.Text("base") != J.Text(approval, "base") || run.Text("base_branch") != target || run.Text(

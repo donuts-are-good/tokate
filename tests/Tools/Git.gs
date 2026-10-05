@@ -74,9 +74,12 @@ internal partial class Fixture {
         }
         let command = List[string]()
         for arg in args {
-            if arg == "https://github.com/owner/project.git" {
+            if String.Equals(arg, "https://github.com/owner/project.git", StringComparison.OrdinalIgnoreCase) {
                 command.Add(Path.Combine(Root, "upstream"))
-            } else if arg.StartsWith("https://github.com/donor/") && arg.EndsWith(".git") {
+            } else if arg.StartsWith("https://github.com/donor/", StringComparison.OrdinalIgnoreCase) && arg.EndsWith(
+                ".git",
+                StringComparison.Ordinal
+            ) {
                 command.Add(Path.Combine(Root, "fork"))
             } else {
                 command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)

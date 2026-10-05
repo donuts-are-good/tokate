@@ -83,7 +83,10 @@ internal class CorrectionPublication {
             body.LastIndexOf(marker, StringComparison.Ordinal) {
                 throw Exception(failure)
             }
-            if J.Text(head, "sha") != commit || J.Text(head, "ref") != branch || J.Text(headRepo, "full_name") != fork {
+            if J.Text(head, "sha") != commit || J.Text(head, "ref") != branch {
+                throw Exception(failure)
+            }
+            if !RepositoryIdentity.SameRepo(J.Text(headRepo, "full_name"), fork) {
                 throw Exception(failure)
             }
             if !String.Equals(J.Text(author, "login"), run.Text("donor"), StringComparison.OrdinalIgnoreCase) &&
