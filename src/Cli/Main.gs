@@ -23,7 +23,7 @@ func Main(args[]string) int32 {
         Cli.Validate(options)
         validated = true
         PublicOutput.Command = options.Command
-        if options.Get("run") != "" {
+        if options.Get("run") != "" && options.Command != "repair" {
             PublicOutput.RunDirectory = Path.GetFullPath(options.Need("run"))
             PublicOutput.FailureCode = "invalid_state"
         }
@@ -174,6 +174,8 @@ func Dispatch(options Args) int32 {
         Synchronization.Revoke(options)
     } else if options.Command == "amend" {
         Amendment.Run(options)
+    } else if options.Command == "repair" {
+        Repair.Run(options)
     } else if options.Command == "submit" {
         Submission.Submit(options)
     } else if options.Command == "approve" || options.Command == "assign" {

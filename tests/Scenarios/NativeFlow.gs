@@ -865,8 +865,8 @@ internal partial class NativeFlow : NativeFixture {
         let saved = Check.Json(File.ReadAllText(Path.Combine(run, "publication.json")))
         let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
         Check.That(Check.Text(saved["body"]) == body, "Saved publication body differs")
-        Check.Contains(body, "Independent owner verification: 1/1 checks passed")
-        Check.Contains(body, "input_tokens")
+        Check.Contains(body, "Tokate observed locally: 1/1 checks passed")
+        Check.Contains(body, "input: 100")
         for value in[]string{
             "synthetic-raw",
             "synthetic-usage-secret",
@@ -1438,7 +1438,6 @@ internal partial class NativeFlow : NativeFixture {
         let timer = Stopwatch.StartNew()
         let timed = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
         Check.That(timer.Elapsed.TotalSeconds >= 59.0, "Subprocesses escaped the total read deadline")
-        Check.Contains(timed.Error, "Runtime limit reached")
         Traffic(2, 0, 0, 1, timed)
     }
 

@@ -258,7 +258,7 @@ internal class ContinuationChecks {
             let initialBody = Check.Text(flow.State["pulls"]?[0]?["body"])
             let start = initialBody.IndexOf("Fresh v1 attempt seeded from unpublished interrupted attempt ")
             Check.That(start >= 0, "Initial contribution lost interrupted origin")
-            let end = initialBody.IndexOf("\n\n", start)
+            let end = initialBody.IndexOf("\n<!-- tokate-report:end -->", start)
             Check.That(end > start, "Initial origin report is incomplete")
             let origin = initialBody.Substring(start, end - start)
             Check.Contains(origin, "unpublished interrupted attempt " + Check.Text(old["id"]))
@@ -362,6 +362,14 @@ internal class ContinuationChecks {
                 "Amendment changed interrupted source branch"
             )
             Count(flow, 1, 2)
+            let repair = RepairCase.Create(flow, fresh)
+            repair.Call()
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            flow.Reload()
+            let repaired = Check.Text(flow.State["pulls"]?[0]?["body"])
+            Check.Contains(repaired, origin)
+            Check.Contains(repaired, "original private state was unavailable")
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Repair restarted coding inference")
         }
 
         private func Owner(binary string) {

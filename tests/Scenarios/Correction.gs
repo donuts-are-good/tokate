@@ -386,7 +386,7 @@ internal class CorrectionChecks {
                     "Correction usage replaced original usage"
                 )
                 let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
-                Check.Contains(body, declared ? "donor-reported correction tools": "manual/unknown")
+                Check.Contains(body, declared ? "Donor-reported correction tools": "manual/unknown")
             }
         }
 
@@ -605,8 +605,8 @@ internal class CorrectionChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.VerificationPolicy(
-                "printf completed-first-check",
-                second: "printf synthetic-interrupted-check; printf synthetic-interrupted-error >&2; sleep 3 && printf completed-second-check"
+                "mkdir build-output; printf generated > build-output/data; printf completed-first-check",
+                second: "test -s build-output/data; printf synthetic-interrupted-check; printf synthetic-interrupted-error >&2; sleep 3 && printf completed-second-check"
             )
             flow.Approve()
             let run = flow.Claim()
@@ -625,6 +625,10 @@ internal class CorrectionChecks {
             Check.Contains(Check.Text(failed["verification"]?[1]?["output"]), "synthetic-interrupted-check")
             Check.Contains(Check.Text(failed["verification"]?[1]?["error"]), "synthetic-interrupted-error")
             Check.Contains(Check.Text(failed["error"]), "Runtime limit")
+            Check.That(
+                !Directory.Exists(Path.Combine(run, "checkout/build-output")),
+                "Interrupted correction build output retained"
+            )
             let evidence = File.ReadAllText(Path.Combine(run, "correction.json"))
             Recover(flow, run, commit, 1, seconds: "1")
             Check.That(
@@ -898,7 +902,8 @@ internal class CorrectionChecks {
                     "v2 publication replay reran checks"
                 )
                 flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Correction editing is separate")
+                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Original donor-reported tools")
+                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Donor-reported correction tools")
                 Recover(flow.Flow, run, commit, 1, flow.Tools)
                 flow.Expire()
                 flow.Flow.Call([]string{"submit", "--run", run}, 1)

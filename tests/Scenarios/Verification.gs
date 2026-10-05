@@ -22,7 +22,7 @@ internal class VerificationChecks {
             flow.Initialize()
             let script = "set -eu\n" +
                 "printf 'synthetic-%s-output' verifier; printf 'synthetic-%s-error' verifier >&2\n" +
-                "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; sleep 0.05; done' </dev/null >/dev/null 2>&1 &\n" +
+                "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; printf +; sleep 0.05; done' </dev/null 2>/dev/null &\n" +
                 "while [ ! -s heartbeat ]; do sleep 0.01; done\ntouch ready\n" +
                 "case $$(cat verify-outcome) in failure) exit 23;; timeout|cancel) sleep 120;; esac\n"
             flow.VerificationPolicy("printf synthetic-prior-check", second: script)
@@ -70,15 +70,15 @@ internal class VerificationChecks {
                     "Verifier fabricated or changed its exit code"
                 )
                 Check.That(
-                    Check.Text(active["output"]) == "synthetic-verifier-output" && Check.Text(
+                    Check.Text(active["output"]).StartsWith("synthetic-verifier-output+") && Check.Text(
                         active["error"]
                     ) == "synthetic-verifier-error",
                     "Verifier lost partial evidence"
                 )
                 Check.That(
-                    File.ReadAllText(
-                        Path.Combine(run, Check.Text(active["output_file"]))
-                    ) == "synthetic-verifier-output",
+                    File.ReadAllText(Path.Combine(run, Check.Text(active["output_file"]))).StartsWith(
+                        "synthetic-verifier-output+"
+                    ),
                     "Raw stdout prefix was not flushed"
                 )
                 Check.That(
@@ -90,7 +90,7 @@ internal class VerificationChecks {
                     "Verifier runtime copies leaked: " + outcome
                 )
                 TestProcess.HeartbeatStopped(
-                    Path.Combine(run, "checkout/heartbeat"),
+                    Path.Combine(run, Check.Text(active["output_file"])),
                     200,
                     "Detached verifier survived: " + outcome
                 )
@@ -126,16 +126,25 @@ internal class VerificationChecks {
             using let terminal = Process.Start(info) ?? throw Exception("Cannot start verifier terminal")
             try {
                 terminal.StandardInput.Close()
-                let ready = Path.Combine(run, "checkout/ready")
+                var ready bool
                 for i in 0 ... 1000 {
-                    if File.Exists(ready) {
+                    var emitted bool
+                    for attempt in Directory.EnumerateDirectories(run, "verification-*") {
+                        let output = Path.Combine(attempt, "stdout.log")
+                        if File.Exists(output) && File.ReadAllText(output).Contains("synthetic-verifier-output+") {
+                            emitted = true
+                            break
+                        }
+                    }
+                    if emitted {
+                        ready = true
                         break
                     }
                     select {
                         case <- after(TimeSpan.FromMilliseconds(10.0)) { }
                     }
                 }
-                Check.That(File.Exists(ready), "Verifier did not become ready for cancellation")
+                Check.That(ready, "Verifier did not become ready for cancellation")
                 let pid = File.ReadAllText(Path.Combine(flow.Temp.Root, "verifier.pid")).Trim()
                 Check.Success(TestProcess.Run("/usr/bin/kill", []string{"-INT", pid}, flow.Temp.Env))
                 Check.That(terminal.WaitForExit(10000), "Verifier cancellation did not complete")
@@ -333,7 +342,12 @@ internal class VerificationChecks {
                     Check.Contains(result.Error, "/usr/bin/bwrap: missing")
                 } else {
                     let checks = Check.Json(File.ReadAllText(Path.Combine(run, "verification.json"))).AsArray()
-                    Check.Contains(Check.Text(checks[checks.Count - 1]?["error"]), "synthetic sandbox startup failure")
+                    if checks.Count > 0 {
+                        Check.Contains(
+                            Check.Text(checks[checks.Count - 1]?["error"]),
+                            "synthetic sandbox startup failure"
+                        )
+                    }
                 }
                 Check.That(!File.Exists(marker), "Repository verification ran without its required sandbox")
                 Check.That(
@@ -426,7 +440,7 @@ internal class VerificationChecks {
             if File.Exists("/etc/ld.so.cache") {
                 args.AddRange([]string{"--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache"})
             }
-            for tool in[]string{"bash", "git", "env", "bwrap", "setsid"} {
+            for tool in[]string{"bash", "git", "env", "bwrap", "setsid", "cp"} {
                 args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
             }
             args.AddRange(

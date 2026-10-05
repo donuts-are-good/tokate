@@ -22,6 +22,10 @@ internal class ExternalContribution {
             }
             let record = ContributionClaim.RecheckV2(run)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
+            let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
+            if summary.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = summary
+            }
             let metadata = J.Parse(
                 J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", commit))
             )
@@ -83,27 +87,37 @@ internal class ExternalContribution {
             run.Fields["failure_stage"] = "owner_verification"
             run.Fields["failure_reason"] = "verification_failed"
             run.Save(directory)
+            File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(results))
             try {
-                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                    let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                    if remaining < 1 {
-                        throw Exception("Verification budget exhausted")
-                    }
-                    let result = Terminal.Verify(
-                        directory,
-                        results,
-                        command,
-                        checkout,
-                        run.Flag("network"),
-                        remaining,
-                        progressBudget: RuntimeBudget(timer, run.Number("seconds"))
-                    )
-                    if result.Code != 0 {
-                        throw CliFailure(
-                            "verification_failed",
-                            "Independent external verification failed; no publication authority granted"
+                let budget = RuntimeBudget(timer, run.Number("seconds"))
+                {
+                    using let workspace = VerificationWorkspace.Create(checkout, budget)
+                    for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                        let remaining = run.Number("seconds") - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                        if remaining < 1 {
+                            throw Exception("Verification budget exhausted")
+                        }
+                        let result = Terminal.Verify(
+                            directory,
+                            results,
+                            command,
+                            checkout,
+                            run.Flag("network"),
+                            remaining,
+                            budget: budget,
+                            workspace: workspace
                         )
+                        if result.Code != 0 {
+                            throw CliFailure(
+                                "verification_failed",
+                                "Independent external verification failed; no publication authority granted"
+                            )
+                        }
                     }
+                    PublicOutput.FailureCode = "invalid_state"
+                    run.Fields["failure_stage"] = "changed_candidate"
+                    run.Fields["failure_reason"] = "candidate_changed"
+                    workspace.Unchanged(budget)
                 }
                 PublicOutput.FailureCode = "invalid_state"
                 run.Fields["failure_stage"] = "changed_candidate"

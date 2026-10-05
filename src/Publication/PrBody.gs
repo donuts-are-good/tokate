@@ -44,6 +44,66 @@ internal class PrBody {
                 " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
         }
 
+        internal func LegacyVerificationReport(run Data, record JsonElement, receipt JsonElement) string {
+            let report = VerificationReport(run, record)
+            let correction = J.Get(receipt, "correction")
+            if correction.ValueKind == JsonValueKind.Undefined {
+                return report
+            }
+            let tools = J.Get(correction, "tools")
+            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
+            "donor-reported correction tools: " + J.Write(tools)
+            return "Explicit donor correction " + J.Text(correction, "uuid") +
+                ": " +
+                editing +
+                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
+                "Tokate observed independent verification locally on exact corrected commit " +
+                J.Text(correction, "head") + ", tree " + J.Text(correction, "tree") +
+                ". Separate verification budget: " +
+                J
+                .Number(correction, "seconds").ToString() + " seconds.\n\n" + report
+        }
+
+        internal func ManagedReport(run Data, record JsonElement) string {
+            let count = Verification.Results(run, record)
+            return PublicSummary.Report(
+                PublicSummary.ForHead(run, run.Text("commit")),
+                "Tokate observed locally: " + count.ToString() + "/" + count.ToString() +
+                    " checks passed on this candidate."
+            ) +
+                (
+                run.Flag("recovered") ?
+                "\n- Recovery: original verification failed; verification-only recovery passed without new inference.": ""
+            ) +
+                (V1Continuation.Has(run) ? "\n\n" + ContinuationReport(J.Get(run.Element(), "continuation")).Trim(): "")
+        }
+
+        internal func CoordinatedReport(metadata JsonElement) string {
+            let summary = J.Get(metadata, "summary")
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, J.Text(metadata, "head"))
+            }
+            return PublicSummary.Report(
+                summary,
+                "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
+            ) +
+                OriginalProvenance(metadata)
+        }
+
+        internal func OriginalProvenance(metadata JsonElement) string {
+            var report = "\n\n- Original source: " +
+                (J.Text(metadata, "source") == "tokate" ? "managed Tokate": "external") +
+                "; coding execution and usage are donor-reported to the coordinator." +
+                PublicSummary.Tools(J.Get(metadata, "tools"), "Original donor-reported tools")
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                report += "\n\n- Correction: separate " + J.Number(correction, "seconds").ToString() +
+                    " second verification budget; original declarations cover only the original completed turn." +
+                    PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
+            }
+            return report
+        }
+
         internal func ContinuationReport(
             prior JsonElement
         ) string -> "Fresh v1 attempt seeded from unpublished interrupted attempt " +
@@ -61,12 +121,22 @@ internal class PrBody {
             let prior = J.Get(receipt, "predecessor")
             let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
             let amendment = J.Get(receipt, "amendment")
-            return origin + Amendment.Summary(
+            let report = Amendment.Summary(
                 J.Text(amendment, "previous"),
                 J.Text(receipt, "head"),
                 J.Number(amendment, "seconds"),
-                J.Get(amendment, "tools")
-            )
+                J.Get(amendment, "tools"),
+                J.Get(amendment, "summary"),
+                true
+            ) +
+                (origin == "" ? "": "\n\n" + origin.Trim())
+            let repair = J.Get(receipt, "repair")
+            return repair.ValueKind != JsonValueKind.Undefined && J.Text(repair, "id") == J.Text(
+                amendment,
+                "id"
+            ) ? report +
+                "\n\n" +
+                Repair.Summary(repair): report
         }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))

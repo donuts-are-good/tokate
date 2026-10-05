@@ -15,9 +15,11 @@ internal partial class NativeFlow : NativeFixture {
     shared {
         internal let SerialGroups[]string = []string{
             "ReadTraffic",
+            "GitEvidence",
             "TemporaryIsolation",
             "TemporaryHomeRejected",
-            "VerificationBoundary"
+            "VerificationBoundary",
+            "DisposableVerification"
         }
 
         internal func All(binary string, selected string = "", parallel bool = false) {
@@ -71,6 +73,7 @@ internal partial class NativeFlow : NativeFixture {
                 "PublicationRevocation",
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
+                "DisposableVerification",
                 "VerificationBoundary",
                 "VerificationNetwork",
                 "VerificationRecovery"
@@ -246,6 +249,9 @@ internal partial class NativeFlow : NativeFixture {
                     }
                     case "UnsupportedSandbox" {
                         flow.UnsupportedSandbox()
+                    }
+                    case "DisposableVerification" {
+                        DisposableVerificationChecks.All(binary)
                     }
                     case "VerificationBoundary" {
                         flow.VerificationBoundary()

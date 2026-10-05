@@ -30,7 +30,10 @@ internal class Contribution {
                 if coding.Git(checkout, "status", "--porcelain") == "" {
                     throw Exception("No changes returned. No PR will be opened.")
                 }
+                PublicSummary.Capture(directory, checkout, run)
                 candidate = Snapshot(checkout, run, coding)
+                PublicSummary.Bind(run, candidate)
+                run.Save(directory)
                 let candidatePath = Path.Combine(directory, "candidate.patch")
                 if !File.Exists(candidatePath) {
                     File.WriteAllText(candidatePath, candidate)
@@ -54,26 +57,35 @@ internal class Contribution {
             let verification = List[Object]()
             run.Fields["verification"] = verification
             run.Save(directory)
-            for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                total.Remaining()
-                run.Fields["verification"] = verification
-                run.Save(directory)
-                let check = Terminal.Verify(
-                    directory,
-                    verification,
-                    command,
-                    checkout,
-                    run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                    seconds,
-                    total
-                )
-                if check.Code != 0 {
-                    run.Fields["failure_reason"] = "verification_failed"
-                    throw CliFailure(
-                        "verification_failed",
-                        "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+            File.WriteAllText(Path.Combine(directory, "verification.json"), J.Write(verification))
+            {
+                using let workspace = VerificationWorkspace.Create(checkout, total)
+                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                    total.Remaining()
+                    run.Fields["verification"] = verification
+                    run.Save(directory)
+                    let check = Terminal.Verify(
+                        directory,
+                        verification,
+                        command,
+                        checkout,
+                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                        seconds,
+                        total,
+                        workspace: workspace
                     )
+                    if check.Code != 0 {
+                        run.Fields["failure_reason"] = "verification_failed"
+                        throw CliFailure(
+                            "verification_failed",
+                            "Owner verification failed. Inspect the private verification.json artifact before explicit recovery."
+                        )
+                    }
                 }
+                PublicOutput.FailureCode = "invalid_state"
+                run.Fields["failure_stage"] = "changed_candidate"
+                run.Fields["failure_reason"] = "candidate_changed"
+                workspace.Unchanged(total)
             }
             run.Fields["verification"] = verification
             PublicOutput.FailureCode = "invalid_state"

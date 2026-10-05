@@ -30,6 +30,7 @@ internal class Submission {
             if patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
                 throw Exception("Verified patch changed")
             }
+            PublicSummary.Bind(run, patch)
             Commands.Git(
                 checkout,
                 "-c",
@@ -50,6 +51,10 @@ internal class Submission {
                 run.Text("base"),
                 run.Text("commit")
             )
+            let summary = PublicSummary.ForHead(run, run.Text("commit"))
+            if summary.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = summary
+            }
             run.Fields["verification_provenance"] = "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
@@ -251,6 +256,10 @@ internal class Submission {
             if correction != nil {
                 metadata["correction"] = Correction.Provenance(correction)
             }
+            var summary = PublicSummary.ForHead(run, run.Text("commit"))
+            if let current = correction {
+                summary = PublicSummary.ForHead(current, current.Text("commit"))
+            }
             return J.Parse(
                 J.Write(
                     J.Map(
@@ -263,7 +272,7 @@ internal class Submission {
                         "action",
                         "publish",
                         "metadata",
-                        metadata
+                        PublicSummary.Attach(metadata, summary)
                     )
                 )
             )

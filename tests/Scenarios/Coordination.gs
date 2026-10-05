@@ -307,8 +307,8 @@ internal partial class CoordinationFlow : CoordinationFixture {
 
     internal func InterruptedVerification() {
         Flow.VerificationPolicy(
-            "printf synthetic-prior-check",
-            second: "printf 'synthetic-%s-prefix' external; printf 'synthetic-%s-error' external >&2; sleep 3"
+            "mkdir build-output; printf generated > build-output/data; printf synthetic-prior-check",
+            second: "test -s build-output/data; printf 'synthetic-%s-prefix' external; printf 'synthetic-%s-error' external >&2; sleep 3"
         )
         Flow.Approve()
         let claim = Claim()
@@ -336,6 +336,10 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Check.That(
             Flow.Git("-C", Path.Combine(run, "checkout"), "rev-parse", "HEAD") == commit,
             "External candidate lost"
+        )
+        Check.That(
+            !Directory.Exists(Path.Combine(run, "checkout/build-output")),
+            "Interrupted external build output retained"
         )
         Flow.NoPr()
         Flow.NoInference()

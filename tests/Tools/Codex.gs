@@ -255,6 +255,11 @@ internal partial class Fixture {
         } else if mode == "decree-rename-to" {
             File.Move(Path.Combine(checkout, "other.md"), decree)
         }
+        if mode == "disposable_verification" {
+            File.WriteAllText(Path.Combine(checkout, ".env"), "donor-private")
+            Directory.CreateDirectory(Path.Combine(checkout, "donor-cache"))
+            File.WriteAllText(Path.Combine(checkout, "donor-cache/data"), "donor-cache")
+        }
         if mode == "verification_recovery" {
             Directory.CreateDirectory(Path.Combine(checkout, ".tokate-scratch"))
             File.WriteAllText(Path.Combine(checkout, ".tokate-scratch/cache.json"), "unformatted browser cache")
@@ -336,6 +341,14 @@ internal partial class Fixture {
         if mode == "output_boundary" {
             Check.Contains(File.ReadAllText(Path.Combine(checkout, ".env")), "synthetic-repository-secret")
             Check.Contains(File.ReadAllText(Path.Combine(checkout, "ordinary.data")), "synthetic-repository-secret")
+        }
+        if Check.Text(State["public_summary"]) != "missing" {
+            File.WriteAllText(
+                Path.Combine(checkout, "tokate-public-summary.json"),
+                State["public_summary"] == nil ?
+                "{\"changes\":[\"Add a result containing the fixture completion text.\"],\"verification\":[],\"limitations\":[]}":
+                Check.Text(State["public_summary"])
+            )
         }
         File.WriteAllText(
             args[Array.IndexOf(args, "--output-last-message") + 1],

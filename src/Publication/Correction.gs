@@ -315,13 +315,15 @@ internal class Correction {
                 throw Exception("Correction verification budget exceeds original owner limit")
             }
             let tools = Tools(args.Get("tools"), J.Get(record, "policy"))
+            let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             let current = Path.Combine(directory, "correction.json")
             if File.Exists(current) {
                 let saved = Data.Read(current)
                 if saved.Text("commit") == commit {
-                    if saved.Number("seconds") != seconds || RequestData.Canonical(
-                        J.Get(saved.Element(), "tools")
-                    ) != RequestData.Canonical(tools) {
+                    if !RequestData.Same(J.Get(saved.Element(), "public_summary"), summary) || saved.Number(
+                        "seconds"
+                    ) != seconds ||
+                        RequestData.Canonical(J.Get(saved.Element(), "tools")) != RequestData.Canonical(tools) {
                         throw Exception("Saved correction budget or provenance changed")
                     }
                     if saved.Text("state") != "verified" {
@@ -353,6 +355,9 @@ internal class Correction {
             correction.Fields["uuid"] = Guid.NewGuid().ToString("D")
             correction.Fields["commit"] = commit
             correction.Fields["seconds"] = seconds
+            if summary.ValueKind != JsonValueKind.Undefined {
+                correction.Fields["public_summary"] = summary
+            }
             correction.Fields["tools"] = tools
             correction.Fields["state"] = "validating"
             correction.Fields["failure_stage"] = "candidate_validation"
@@ -379,26 +384,35 @@ internal class Correction {
                 let results = List[Object]()
                 let timer = Stopwatch.StartNew()
                 var failed bool
-                for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
-                    let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                    if remaining < 1 {
-                        throw CliFailure("verification_failed", "Correction verification budget exhausted")
+                File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results))
+                let budget = RuntimeBudget(timer, seconds)
+                {
+                    using let workspace = VerificationWorkspace.Create(checkout, budget)
+                    for command in J.Items(J.Get(J.Get(record, "policy"), "verification")) {
+                        let remaining = seconds - Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                        if remaining < 1 {
+                            throw CliFailure("verification_failed", "Correction verification budget exhausted")
+                        }
+                        correction.Fields["verification"] = results
+                        Save(directory, correction)
+                        let result = Terminal.Verify(
+                            attempt,
+                            results,
+                            command,
+                            checkout,
+                            run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
+                            remaining,
+                            budget: budget,
+                            workspace: workspace
+                        )
+                        correction.Fields["verification"] = results
+                        File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")
+                        Save(directory, correction)
+                        failed = failed || result.Code != 0
                     }
-                    correction.Fields["verification"] = results
-                    Save(directory, correction)
-                    let result = Terminal.Verify(
-                        attempt,
-                        results,
-                        command,
-                        checkout,
-                        run.Flag("network") && J.Bool(J.Get(record, "policy"), "allow_network"),
-                        remaining,
-                        progressBudget: RuntimeBudget(timer, seconds)
-                    )
-                    correction.Fields["verification"] = results
-                    File.WriteAllText(Path.Combine(attempt, "verification.json"), J.Write(results) + "\n")
-                    Save(directory, correction)
-                    failed = failed || result.Code != 0
+                    correction.Fields["failure_stage"] = "changed_candidate"
+                    correction.Fields["failure_reason"] = "candidate_changed"
+                    workspace.Unchanged(budget)
                 }
                 correction.Fields["verification_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
                 correction.Fields["failure_stage"] = "changed_candidate"

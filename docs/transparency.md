@@ -105,6 +105,16 @@ it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API output and retry limits](reference.md#automate-commands) and
 [ApiTransport.gs](../src/GitHub/ApiTransport.gs).
 
+Version-1 `repair` uses a separate evidence directory when the original private
+run is unavailable. It stores the exact original public receipt, numeric donor and
+repository identities, live owner grant, candidate snapshot, new verification logs
+and publication intent. It starts no inference and never reconstructs or attests
+original private logs, usage or checks. The public repair provenance discloses this
+gap; original public execution observations describe original work only. An exact
+head lease plus ancestry validation protects branch publication, and saved intent
+allows explicit publication resume without repeating passed verification. CI and
+owner review remain required. See [Repair.gs](../src/Publication/Repair.gs).
+
 Version-2 `request --file FILE` writes a local posting intent and lock beside the
 request file. The intent contains the canonical repository/issue, numeric actor,
 exact validated payload and binding hash, with no credentials or API response logs.
@@ -179,10 +189,13 @@ run artifacts. The namespace is not whole-harness data isolation: the trusted
 harness retains its host file access outside the private temporary directory.
 
 Independent owner verification directly invokes Linux bubblewrap and does not
-discover or launch Codex. Each command starts with an empty mount namespace:
-the canonical checkout is writable, its actual `.git` directory is read-only,
-and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
-`/etc/alternatives` are read-only when present.
+discover or launch Codex. Tokate copies the candidate checkout, including
+ignored and untracked files, into a private disposable host directory. Ordered
+checks share that copy; the saved checkout is not writable by verification.
+The copy is removed after success, failure or handled interruption. Each command
+starts with an empty mount namespace: the copy is writable and its `.git`
+directory is read-only. `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system
+tool links in `/etc/alternatives` are read-only when present.
 Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
 are copied into private invocation storage (at most 4 MiB each) and mounted
 read-only. Copies stay linked until process cleanup finishes and are then removed,
@@ -202,8 +215,12 @@ cleanup. Missing or unsupported bubblewrap fails closed without host execution.
 Nested sandbox probes remain permitted. This verifies a checkout; it makes no
 claim that coding work performed outside the managed path was sandboxed.
 
-Source: [Process.gs](../src/Execution/Process.gs), [Worker.gs](../src/Execution/Worker.gs),
-[Verification.gs](../src/Execution/Verification.gs), [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
+Source: [Process.gs](../src/Execution/Process.gs),
+[Worker.gs](../src/Execution/Worker.gs),
+[Verification.gs](../src/Execution/Verification.gs),
+[VerificationWorkspace.gs](../src/Execution/VerificationWorkspace.gs),
+[Publish.gs](../src/Publication/Publish.gs), and
+[Amendment.gs](../src/Publication/Amendment.gs).
 
 ## Files, logs, and network destinations
 
