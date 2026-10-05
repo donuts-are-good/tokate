@@ -103,7 +103,16 @@ internal class SuiteDriver {
     }
 
     private func RunJob(job SuiteJob) Result {
-        let args = List[string]{"--die-with-parent", "--new-session", "--unshare-user", "--unshare-pid"}
+        let args = List[string]{
+            "--die-with-parent",
+            "--new-session",
+            "--unshare-user",
+            "--unshare-pid",
+            "--unshare-ipc",
+            "--unshare-uts",
+            "--cap-drop",
+            "ALL"
+        }
         for path in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives"} {
             if Directory.Exists(path) {
                 args.AddRange([]string{"--ro-bind", path, path})
@@ -148,7 +157,9 @@ internal class SuiteDriver {
             Dictionary[string, string]{
                 ["PATH"] = "/usr/local/bin:/usr/bin:/bin",
                 ["HOME"] = "/tmp",
-                ["LANG"] = "C.UTF-8"
+                ["LANG"] = "C.UTF-8",
+                ["GIT_NO_REPLACE_OBJECTS"] = "1",
+                ["GIT_GRAFT_FILE"] = "/dev/null"
             },
             seconds: job.Seconds
         )
