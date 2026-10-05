@@ -50,6 +50,9 @@ internal class SuiteCatalog {
                         PreparationChecks.All(binary)
                     }
                 }
+                case "Continuation" {
+                    ContinuationChecks.All(binary)
+                }
                 case "Targets" {
                     if CiShard.Include("Targets") {
                         TargetBranches.All(binary)
@@ -118,6 +121,7 @@ internal class SuiteCatalog {
                     Job("Decree"),
                     Job("Targets"),
                     Job("Preparation"),
+                    Job("Continuation"),
                     Job("Overlaps")
                 }
                 SuiteDriver(data.Root, jobs).Run(report)

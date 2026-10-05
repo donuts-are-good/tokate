@@ -36,10 +36,44 @@ internal class PrBody {
             let recovery = run.Flag(
                 "recovered"
             ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
+            let imported = V1Continuation.Has(run) ? ContinuationReport(J.Get(run.Element(), "continuation")): ""
             return recovery +
+                imported +
                 "Generated a patch for the approved issue. Independent owner verification: " +
                 count.ToString() + "/" + count.ToString() +
                 " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+        }
+
+        internal func ContinuationReport(
+            prior JsonElement
+        ) string -> "Fresh v1 attempt seeded from unpublished interrupted attempt " +
+            J.Text(prior, "id") + " under predecessor approval " + J.Text(prior, "approval") +
+            ". Preserved origin state: " +
+            J.Text(prior, "state") + "; failure: " + J.Text(prior, "failure_reason") +
+            ". Prior donor-reported tool: " +
+            J.Text(prior, "harness") + "/" + J.Text(prior, "provider") + ", " + J.Text(prior, "model") + " / " + J.Text(
+            prior,
+            "effort"
+        ) +
+            ". The predecessor is not retroactively successful. Missing prior usage, reports and verification are not reconstructed. Usage and checks below describe the new attempt; all checks cover the complete final diff from the original approved base.\n\n"
+
+        internal func AmendmentReport(receipt JsonElement) string {
+            let prior = J.Get(receipt, "predecessor")
+            let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
+            let amendment = J.Get(receipt, "amendment")
+            let report = origin + Amendment.Summary(
+                J.Text(amendment, "previous"),
+                J.Text(receipt, "head"),
+                J.Number(amendment, "seconds"),
+                J.Get(amendment, "tools")
+            )
+            let repair = J.Get(receipt, "repair")
+            return repair.ValueKind != JsonValueKind.Undefined && J.Text(repair, "id") == J.Text(
+                amendment,
+                "id"
+            ) ? report +
+                "\n\n" +
+                Repair.Summary(repair): report
         }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))

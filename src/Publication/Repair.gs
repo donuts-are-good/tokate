@@ -559,15 +559,13 @@ internal class Repair {
                 )
                 fields["repair"] = provenance
                 Synchronization.Keep(fields, Synchronization.History(intent.Element()))
-                let report = Amendment.Summary(
-                    intent.Text("previous"),
-                    intent.Text("commit"),
-                    intent.Number("seconds"),
-                    J.Parse("[]")
-                ) +
-                    "\n\n" +
-                    Summary(J.Parse(J.Write(provenance)))
-                intent.Fields["body"] = PrBody.ReplaceBody(J.Text(pull, "body"), "", report, J.Parse(J.Write(fields)))
+                let receipt = J.Parse(J.Write(fields))
+                intent.Fields["body"] = PrBody.ReplaceBody(
+                    J.Text(pull, "body"),
+                    "",
+                    PrBody.AmendmentReport(receipt),
+                    receipt
+                )
                 intent.Fields["state"] = "publishing"
                 intent.Write(Path.Combine(directory, "repair.json"))
                 File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(intent.Element()) + "\n")
