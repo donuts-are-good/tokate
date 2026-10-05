@@ -131,12 +131,14 @@ internal class PrBody {
             ) +
                 (origin == "" ? "": "\n\n" + origin.Trim())
             let repair = J.Get(receipt, "repair")
-            return repair.ValueKind != JsonValueKind.Undefined && J.Text(repair, "id") == J.Text(
-                amendment,
-                "id"
-            ) ? report +
-                "\n\n" +
-                Repair.Summary(repair): report
+            if repair.ValueKind == JsonValueKind.Undefined {
+                return report
+            }
+            if J.Text(repair, "id") == J.Text(amendment, "id") {
+                return report + "\n\n" + Repair.Summary(repair)
+            }
+            return report + "\n\nEarlier repair on " + J.Text(repair, "head") +
+                ": original private state was unavailable. Its independent verification covered that earlier commit only; original logs, usage and verification were not reconstructed."
         }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))
