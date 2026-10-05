@@ -84,7 +84,7 @@ internal class ReceiptVerification {
                     )
                 }
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
@@ -305,7 +305,7 @@ internal class ReceiptVerification {
                     exactHead
                 )
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     approval,

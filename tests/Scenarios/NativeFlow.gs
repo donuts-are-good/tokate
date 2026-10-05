@@ -962,6 +962,137 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
+    internal func ExistingPublication() {
+        using let prepared = PublishedContribution.Create(Binary)
+        let flow = prepared.Coordination.Flow
+        let run = prepared.Run
+        for fault in[]string{
+            "exact",
+            "closed",
+            "merged",
+            "ready",
+            "receipt",
+            "marker",
+            "fork",
+            "author",
+            "base",
+            "head",
+            "author-id",
+            "base-repo",
+            "missing-base-repo",
+            "merged-at",
+            "ambiguous",
+            "later-page",
+            "unbounded",
+            "invalid"
+        } {
+            prepared.Restore()
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            saved["state"] = JsonValue.Create("generated")
+            saved.AsObject().Remove("pr")
+            saved.AsObject().Remove("pr_url")
+            File.WriteAllText(Path.Combine(run, "run.json"), saved.ToJsonString())
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            switch fault {
+                case "closed" {
+                    pull["state"] = JsonValue.Create("closed")
+                }
+                case "merged" {
+                    pull["merged"] = JsonValue.Create(true)
+                }
+                case "ready" {
+                    pull["draft"] = JsonValue.Create(false)
+                }
+                case "receipt" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]).Replace(Check.Text(saved["approval"]), Guid.NewGuid().ToString("D"))
+                    )
+                }
+                case "marker" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]) + "<!-- tokate-run:" + Check.Text(saved["id"]) + " -->"
+                    )
+                }
+                case "fork" {
+                    (pull["head"]?["repo"] ?? throw Exception("Missing fork"))["full_name"] = JsonValue.Create(
+                        "donor/other"
+                    )
+                }
+                case "author" {
+                    (pull["user"] ?? throw Exception("Missing author"))["login"] = JsonValue.Create("other")
+                }
+                case "author-id" {
+                    (pull["user"] ?? throw Exception("Missing author"))["id"] = JsonValue.Create(999)
+                }
+                case "base-repo" {
+                    (pull["base"] ?? throw Exception("Missing base"))["repo"] = Check.Map("full_name", "other/project")
+                }
+                case "missing-base-repo" {
+                    (pull["base"] ?? throw Exception("Missing base")).AsObject().Remove("repo")
+                }
+                case "merged-at" {
+                    pull["merged_at"] = JsonValue.Create(DateTimeOffset.UtcNow.ToString("O"))
+                }
+                case "base" {
+                    (pull["base"] ?? throw Exception("Missing base"))["ref"] = JsonValue.Create("other")
+                }
+                case "head" {
+                    (pull["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(
+                        Check.Text(saved["base"])
+                    )
+                }
+                case "ambiguous", "later-page" {
+                    let pulls = flow.State["pulls"]?.AsArray() ?? throw Exception("Missing PRs")
+                    let count = fault == "later-page" ? 101: 2
+                    for i in 1 ... count {
+                        let duplicate = pull.DeepClone()
+                        duplicate["number"] = JsonValue.Create(10 + i)
+                        pulls.Add(duplicate)
+                    }
+                }
+                case "unbounded" {
+                    flow.State["pull_history_unbounded"] = JsonValue.Create(true)
+                }
+                case "invalid" {
+                    flow.State["pull_history_invalid"] = JsonValue.Create(true)
+                }
+            }
+            flow.Save()
+            flow.ResetTraffic()
+            let result = flow.Call([]string{"publish", "--run", run}, fault == "exact" ? 0: 1)
+            flow.Reload()
+            var pages int32
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "PR recovery attempted a write")
+                if Check.Text(call["path"]).Contains("/pulls?") {
+                    pages++
+                }
+            }
+            if fault == "later-page" {
+                Check.That(pages == 2, "PR recovery failed to inspect later history")
+                Check.Contains(result.Error, "ambiguous")
+            }
+            if fault == "unbounded" {
+                Check.That(pages > 1 && pages <= 25, "PR history inspection was not bounded")
+                Check.Contains(result.Error, "history is incomplete")
+            }
+            if fault == "exact" {
+                Check.That(
+                    Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["state"]) == "published",
+                    "Exact open draft was not recovered"
+                )
+            } else {
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                    "Invalid PR was recorded as published"
+                )
+            }
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "PR recovery repeated inference")
+            Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "PR recovery duplicated PR")
+        }
+    }
+
     internal func CanonicalVerification() {
         using let flow = NativeFlow(Binary)
         flow.Initialize()
