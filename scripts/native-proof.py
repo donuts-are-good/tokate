@@ -71,7 +71,7 @@ def api_gate(account):
 
 
 class Owned:
-    def __init__(self, args, env, cwd, *, system=None, native=False):
+    def __init__(self, args, env, cwd, *, system=None):
         wrapper = ["/usr/bin/bwrap", "--die-with-parent", "--new-session",
                    "--bind", "/", "/", "--unshare-pid", "--as-pid-1", "--proc", "/proc",
                    "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/tokate-home"]
@@ -290,12 +290,12 @@ class Proof:
         return {"PATH": "/usr/bin:/bin", "HOME": str(root / "home"),
                 "CODEX_HOME": str(root / "native"), "LANG": "C.UTF-8"}
 
-    def process(self, root, args, **kwargs):
+    def process(self, root, args):
         require(not any((root / "checkout/.codex" / name).exists()
                         for name in ("config.toml", "hooks.json", "plugins")),
                 "Repository Codex configuration refused before native startup")
         return Owned([str(self.binary), *args], self.env(root), root / "checkout",
-                     system=self.system, **kwargs)
+                     system=self.system)
 
     def run(self, root, args, data=b"", seconds=10):
         return self.process(root, args).run(data, seconds)
@@ -705,7 +705,7 @@ class Proof:
         self.private(auth, json.dumps({"auth_mode": "apikey", "OPENAI_API_KEY": KEY}))
         before = auth.read_bytes()
         script = """import pathlib, socket, sys
-for name in sys.argv[1:]:
+for name in sys.argv[1:-1]:
     p = pathlib.Path(name)
     try:
         p.read_bytes()
@@ -728,7 +728,6 @@ else:
     raise SystemExit('repository networking reached fixture')
 pathlib.Path('boundary-ok').write_text('ok')
 """
-        script = script.replace("sys.argv[1:]", "sys.argv[1:-1]")
         helper = checkout / "helper.py"
         self.private(helper, script)
         args = ["sandbox", "-P", "tokate", "--include-managed-config", "-C", str(checkout),

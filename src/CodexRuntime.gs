@@ -75,7 +75,7 @@ internal class CodexRuntime {
                 throw CliFailure("missing_tools", "Install Codex and add codex to PATH.")
             }
             try {
-                let executable = Worker.CanonicalPath(selected)
+                let executable = LocalPaths.CanonicalPath(selected)
                 if Native(executable) {
                     return executable
                 }
@@ -103,7 +103,9 @@ internal class CodexRuntime {
                     "-linux-x64" {
                     throw Exception("Unsupported platform package")
                 }
-                let native = Worker.CanonicalPath(Path.Combine(platform, "vendor/x86_64-unknown-linux-musl/bin/codex"))
+                let native = LocalPaths.CanonicalPath(
+                    Path.Combine(platform, "vendor/x86_64-unknown-linux-musl/bin/codex")
+                )
                 if !Native(native) {
                     throw Exception("Missing native executable")
                 }

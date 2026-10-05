@@ -14,7 +14,7 @@ internal class LocalCodex {
             let node = Environment.GetEnvironmentVariable("TOKATE_PROOF_NODE") ??
                 throw Exception("Missing donor-local Node for installation proof")
             Check.Success(
-                Check.Run(
+                TestProcess.Run(
                     "/bin/sh",
                     []string{
                         "-c",
@@ -27,7 +27,7 @@ internal class LocalCodex {
             )
             File.CreateSymbolicLink(Path.Combine(flow.Bin, "node"), node)
             Check.Contains(
-                Check.Success(Check.Run(launcher, []string{"--version"}, flow.Temp.Env)),
+                Check.Success(TestProcess.Run(launcher, []string{"--version"}, flow.Temp.Env)),
                 "codex-cli 0.160.0"
             )
             let secrets = List[string]()
@@ -57,9 +57,9 @@ internal class LocalCodex {
             for selected in[]string{launcher, standalone} {
                 File.Delete(Path.Combine(flow.Bin, "codex"))
                 File.CreateSymbolicLink(Path.Combine(flow.Bin, "codex"), selected)
-                let doctor = CliDiscovery.Envelope(flow.Call([]string{"doctor", "--managed", "--json"}), "doctor", "ok")
+                let doctor = Check.Envelope(flow.Call([]string{"doctor", "--managed", "--json"}), "doctor", "ok")
                 Check.That(doctor["data"]?["tools"] != nil, "Doctor did not report capabilities")
-                let choice = CliDiscovery.Envelope(
+                let choice = Check.Envelope(
                     flow.Call(
                         []string{
                             "select",
@@ -113,7 +113,10 @@ internal class LocalCodex {
                 }
                 args.AddRange(secrets)
                 args.Add(runtime == native ? standalone: native)
-                Check.Contains(Check.Success(Check.Run(runtime, args.ToArray(), flow.Temp.Env)), "codex-cli 0.160.0")
+                Check.Contains(
+                    Check.Success(TestProcess.Run(runtime, args.ToArray(), flow.Temp.Env)),
+                    "codex-cli 0.160.0"
+                )
                 Check.That(
                     Convert.ToHexString(digest) == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(runtime))),
                     "Installed runtime changed"
@@ -143,9 +146,9 @@ internal class LocalCodex {
             File.SetUnixFileMode(unsupported, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             File.Delete(Path.Combine(flow.Bin, "codex"))
             File.CreateSymbolicLink(Path.Combine(flow.Bin, "codex"), unsupported)
-            let refusal = Check.Run(binary, []string{"doctor", "--managed", "--json"}, flow.Temp.Env)
+            let refusal = TestProcess.Run(binary, []string{"doctor", "--managed", "--json"}, flow.Temp.Env)
             Check.That(refusal.Code != 0, "Unsupported runtime was accepted")
-            CliDiscovery.Envelope(refusal, "doctor", "error", "verification_failed")
+            Check.Envelope(refusal, "doctor", "error", "verification_failed")
             Check.Contains(refusal.Output, "Unsupported managed Codex runtime layout")
             Check.That(!File.Exists(marker), "An arbitrary launcher was executed to discover runtime files")
             Check.That(File.ReadAllText(auth) == "synthetic-local-install-secret", "Harness authentication was changed")

@@ -326,21 +326,6 @@ h1 em {
 .button:hover {
     transform: translateY(-2px);
 }
-.primary {
-    background: var(--rust);
-    color: #fff5e8;
-}
-.primary:hover {
-    background: #7d3d27;
-}
-.secondary {
-    border: 1px solid var(--sage);
-    background: #f8edda85;
-    color: var(--ink);
-}
-.secondary:hover {
-    background: #e5d9c3;
-}
 .choices .button,
 .agent-help .button {
     min-width: 300px;
