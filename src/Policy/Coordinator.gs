@@ -495,7 +495,7 @@ internal class Coordinator {
                 )
             } else {
                 ValidateDiff(repo, record, metadata)
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
@@ -529,7 +529,7 @@ internal class Coordinator {
         }
 
         private func ValidateDiff(repo string, record JsonElement, metadata JsonElement) {
-            ProtectedPaths.Remote(
+            GitHubPathEvidence.Check(
                 repo,
                 J.Get(record, "policy"),
                 J.Get(record, "approval"),

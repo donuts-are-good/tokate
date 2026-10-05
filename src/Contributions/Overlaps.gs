@@ -207,7 +207,7 @@ internal class Overlaps {
                     "version,issue,approval,authority_revision,donor,base,base_branch,commit"
                 )
                 try {
-                    let files = ProtectedPaths.Diff(
+                    let files = GitHubPathEvidence.Diff(
                         repo,
                         binding.Text("base"),
                         J.Text(J.Get(head, "repo"), "full_name"),

@@ -668,7 +668,7 @@ internal class Amendment {
                     amendment.Text("commit")
                 )
             } else {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     run.Text("repo"),
                     policy.Value,
                     J.Get(record, "approval"),

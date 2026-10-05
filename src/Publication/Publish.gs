@@ -136,7 +136,7 @@ internal class Publication {
             let expectedReceipt = J.Parse(J.Write(fields))
             let existing = Find(run, expectedReceipt)
             if existing.ValueKind != JsonValueKind.Undefined {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     run.Text("repo"),
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
