@@ -7,8 +7,11 @@ with links to the source.
 
 ## Current harness discovery and settings
 
-Tokate uses the native Codex CLI with a ChatGPT login. Donors supply model and
-effort explicitly or explicitly save Tokate-owned defaults.
+Managed execution supports native Codex with a ChatGPT login and version-2
+[Pi local execution](pi.md) with a pinned SDK/runtime and an existing no-auth
+loopback endpoint. Donors select exact tools and models; Codex also supports
+explicitly saved Tokate-owned defaults. Pi requires explicit selection and
+`absent` effort. Its guide covers runtime discovery, isolation and evidence limits.
 
 - Help and shell completion use local command definitions without scanning tools,
   inspecting remotes, accessing GitHub, or starting inference. Invalid CLI inputs
@@ -21,23 +24,24 @@ effort explicitly or explicitly save Tokate-owned defaults.
   status, defaults and init do not probe unrelated tools or authentication.
   Tokate does not recursively search homes or open harness configuration files.
 - `tokate doctor --owner|--managed|--external` checks only the selected role's
-  tools. No flags retains the local managed probe without login. Managed and
+  tools; managed diagnostics cover Codex, not Pi readiness. No flags retains
+  the local Codex probe without login. Managed and
   external scopes probe their respective real sandboxes and applicable pinned
   `global.json` SDK/MSBuild startup; this does not validate dependency restore
   or builds. Tool startup, PATH, login and catalogs do not prove model access
   or remaining subscription allowance. See the
   [Linux support limits](reference.md#install-and-check-support).
 - Only explicit doctor `--auth` requests `gh auth status --hostname github.com`
-  and (for managed donors) `codex login status`. Diagnostics report sanitized
+  and (for managed Codex donors) `codex login status`. Diagnostics report sanitized
   statuses and repair actions, never raw tool authentication output. Tokate
   never opens authentication storage, installs tools or runs diagnostic inference.
-- Starting work invokes `codex login status` and checks the output for a ChatGPT
+- Starting Codex work invokes `codex login status` and checks the output for a ChatGPT
   login. Codex handles access to its own authentication storage. Tokate does not
   open that storage or request the credential value.
 - `defaults set|read|remove` handles only four donor-entered tokens in
   `~/.local/state/tokate/donor-defaults.json`, with bounded strict JSON, private
   file permissions and symlink refusal. It reads no harness settings or credentials.
-- `select`, new claims and managed v2 preparation check exact owner restrictions
+- Codex `select`, new claims and managed v2 preparation check exact owner restrictions
   and native Codex controls. `codex exec --help` and `codex debug models --bundled`
   run offline in an empty temporary `HOME`/`CODEX_HOME`, without inherited
   authentication. Only catalog model names and supported efforts are used; raw
@@ -49,7 +53,7 @@ effort explicitly or explicitly save Tokate-owned defaults.
   execution; saved runs never consult new defaults. Interactive choices require
   confirmation. Eligible explicit pairs and saved defaults need no repeated
   confirmation. Model failure never retries or falls back.
-  The agent invocation ignores user configuration and rules and supplies
+  The Codex agent invocation ignores user configuration and rules and supplies
   Tokate's own execution settings. This does not establish that every Codex
   subcommand ignores all configuration or authentication storage.
 
@@ -80,8 +84,9 @@ Source: [install.sh](../site/install.sh), [Installation.gs](../src/Cli/Installat
 
 GitHub operations use the donor's or owner's installed GitHub CLI. Git publishing
 delegates authentication to `gh auth git-credential`. Codex authenticates its own
-inference requests. Tokate does not copy credentials into task prompts, receipts,
-or a shared account.
+inference requests. Managed Pi imports no user authentication or settings; see its
+[SDK boundary](pi.md). Tokate does not copy credentials into task prompts,
+receipts or a shared account.
 
 Automated version-1 approval/reassignment and all version-2 coordination-state
 commits explicitly set both author and committer to `Tokate` with
@@ -139,13 +144,16 @@ explicitly saved Tokate defaults.
 | Agent shell commands | No inherited environment; fixed system `PATH`, scratch `HOME`, scratch `TMPDIR` |
 | Independent verification wrapper and owner commands | No inherited values; fixed system `PATH`, command scratch `HOME`/`TMPDIR`, `LANG=C.UTF-8`, `GIT_NO_REPLACE_OBJECTS=1`, and `GIT_GRAFT_FILE=/dev/null` |
 
+The table covers shared host commands and the Codex route; Pi's isolated SDK
+environment is described in its guide.
+
 `PATH` selects installed trusted tools, `HOME` locates tool-owned authentication,
 and `LANG` supplies locale. `CODEX_HOME` preserves an explicitly selected native
 harness home. GitHub token variables and configuration paths preserve GitHub
 CLI authentication; the D-Bus address and runtime directory preserve its Linux
 keyring interface. These GitHub requirements reach Git push so its existing
 GitHub credential helper can authenticate. They do not reach local Git or Codex.
-Codex API-key variables are not passed; Tokate requires its ChatGPT login.
+Codex API-key variables are not passed; the managed Codex route requires a ChatGPT login.
 
 All host commands also receive fixed Git/GitHub controls: `GH_HOST=github.com`,
 `GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1`,
@@ -163,15 +171,16 @@ verification, or publication. Blocked files, flags, and saved records remain for
 inspection. Version-1 publication also compares the canonical committed diff
 with the saved verified patch; pushes name the saved commit SHA explicitly.
 
-The trusted tool processes can still access their own host files and
+Host GitHub and Codex processes can still access their own host files and
 configuration. Narrow environments do not isolate the complete harness or
 make installed executables safe. Token values necessarily reach the GitHub
 CLI and its host-side Git publishing helper, and Tokate handles those narrowly
 selected environment values while launching them. They are not intentionally
 logged or copied into prompts or public metadata.
 
-The sandbox restricts repository commands, not the trusted harness host process
-that authenticates inference. Installed executables remain trusted code.
+For Codex, the sandbox restricts repository commands, not the trusted harness
+host process that authenticates inference. Pi uses a separate outer SDK boundary
+described in its guide. Installed executables remain trusted code.
 
 Managed Codex execution and sandbox probes run inside a bubblewrap mount
 namespace with a fresh private `/tmp`. Run directories,
@@ -273,15 +282,18 @@ reported and still requires exact-commit CI and owner review.
 - GitHub receives coordination records, branch commits, and the draft PR.
   The PR title comes from the approved public issue title, and its body comes
   from the approved public repository template with generated substitutions.
-  `report` contains a fixed patch/review statement and the number of independent
-  owner checks passed, not agent text, command arguments, or check output.
+  `report` contains the validated candidate-bound public summary when supplied,
+  or an explicit missing-summary review notice, plus bounded verification facts.
+  It is never generated from private agent reports, logs or prompts. See the
+  [public summary contract](reference.md#public-pr-summaries).
   Other substitutions contain the issue number, donor login, selected model and
   effort, elapsed seconds, base commit, policy digest, and only nonnegative
   integer `input_tokens`, `cached_input_tokens`, and `output_tokens` when supplied.
   Usage and model selection remain donor-reported, not independently attested.
-  The receipt contains only version, repository, issue, donor, approval revision,
+  The v1 receipt contains version, repository, issue, donor, approval revision,
   head commit, model, effort, time budget, network choice, and policy digest for
-  current approval/head validation. Amendment receipts add an original head
+  current approval/head validation; [v2 receipts](coordination-v2.md#external-or-tokate-launched-work)
+  also bind contribution and authoritative state. Amendment receipts add an original head
   (v1) and separate amendment UUID, previous head, verification budget and
   donor-declared editing tools. Original model/time/usage cover original work only.
   Report and receipt markers identify Tokate-owned body regions; owner edits
@@ -296,10 +308,11 @@ reported and still requires exact-commit CI and owner review.
   Branch names, Git commit contents, the approved issue title as commit message,
   and donor noreply commit identity are also public. Changes to tracked content
   and newly staged files become part of the PR and still require owner review.
-- Codex receives the approved issue and optional root `DECREE.md` owner instructions
-  through [shared task context](reference.md#owner-codebase-instructions), and accesses the checkout to perform the
-  task. Inference sends task context through the donor's Codex service. A local
-  CLI does not mean local inference or that repository content stays offline.
+- The selected managed harness receives the approved issue and optional root
+  `DECREE.md` through [shared task context](reference.md#owner-codebase-instructions)
+  and accesses the checkout. Codex sends inference context through the donor's
+  service; Pi sends it to the selected loopback endpoint. A local CLI or endpoint
+  does not guarantee offline processing; see [Pi network limits](pi.md).
 - Raw agent reports, event logs, stderr, verification output, arbitrary usage
   fields, and publication errors stay in local artifacts or terminal output.
   Publication does not read the raw report or copy these outputs into the PR.
@@ -307,8 +320,9 @@ reported and still requires exact-commit CI and owner review.
   request before Git push or PR creation. Inspect them together with
   `changes.patch` and the checkout; they also remain available after a publication
   failure. Version-1 `work` publishes automatically without another approval
-  prompt. Version-2 `work` saves a verified commit for `submit`. `publish --run DIR` regenerates content and retries publication
-  without inference. Explicit corrections instead retain an exact publication
+  prompt. Version-2 `work` saves a verified commit for `submit`. V1 `publish --run DIR`
+  regenerates content and retries publication without inference. Explicit
+  corrections instead retain an exact publication
   intent and inspect physical remote state before resuming; their previews must
   match that intent. Editing previews cannot change the request. Repository changes or an approved public template can nevertheless
   contain or reproduce sensitive content. There is no general secret scrubber.
@@ -323,7 +337,3 @@ This document is not a claim about their retention practices.
 Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
 [Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
 [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
-
-Managed pi uses a separate SDK bridge and outer bubblewrap boundary; it imports no
-user settings or authentication. Endpoint/runtime paths remain in private run state.
-See [pi filesystem/network limits and evidence](pi.md).

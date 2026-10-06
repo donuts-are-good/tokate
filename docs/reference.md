@@ -16,9 +16,18 @@ and a rolling CachyOS x86_64 host, not every distribution or end-to-end inferenc
 on every system. Blocked bubblewrap user namespaces, incompatible Codex permission
 profiles and inaccessible system toolchains prevent managed execution.
 
+Managed routes are native Codex with a ChatGPT login and version-2
+[Pi local execution](pi.md). Codex installation layouts are tested with 0.160.0;
+Pi requires pi, pi-ai and pi-agent-core 1.0.0, Node 26.10.0, bubblewrap and an
+already-running no-auth HTTP loopback Chat Completions endpoint. Tokate installs
+neither harness nor a model server. Pi policy, preparation and isolation details
+stay in its guide. Owners need neither harness; external coding tools use the
+[exact-commit contribution path](coordination-v2.md#external-or-tokate-launched-work).
+
 The installer needs `curl`, `tar`, `sha256sum` and standard system tools; no sudo,
-Codex or .NET runtime. It verifies the release archive checksum and binary version
-before replacing `~/.local/bin/tokate`. Checksums detect corruption, not a compromised
+coding harness or .NET runtime. It verifies the release archive checksum and
+binary version before replacing `~/.local/bin/tokate`. Checksums detect corruption,
+not a compromised
 release account. [Inspect the installer](../site/install.sh) or install a verified
 archive manually from [Releases](https://github.com/obselate/tokate/releases).
 
@@ -42,7 +51,7 @@ Help and completion require no login, GitHub access or inference.
 Issue commands accept `--repo OWNER/REPO --issue 42` or a GitHub issue URL:
 
 ```sh
-tokate work https://github.com/OWNER/REPO/issues/42 --model MODEL --effort EFFORT
+tokate coordination https://github.com/OWNER/REPO/issues/42
 ```
 
 Without `--repo`, Tokate uses the issue URL or unambiguous local GitHub remotes.
@@ -163,17 +172,21 @@ tokate doctor --managed --auth
 tokate select --repo OWNER/REPO --non-interactive
 ```
 
-Use your own GitHub account and ChatGPT login. Fresh preparation discovers a
-writable fork or creates one once; `--fork DONOR/NAME` selects a renamed fork.
-Ambiguous or incomplete discovery requires explicit selection. Managed execution supports native Codex/OpenAI.
+For managed Codex, use your own GitHub account and ChatGPT login. Fresh preparation
+discovers a writable fork or creates one once; `--fork DONOR/NAME` selects a renamed fork.
+Ambiguous or incomplete discovery requires explicit selection. For managed Pi,
+use the [existing runtime and endpoint prerequisites](pi.md); no ChatGPT login is
+required. Both routes keep the exact owner-approved tool selection.
 Credentials remain with their tools; never paste tokens into repository files.
 
-`doctor` defaults to managed diagnostics; `--owner` and `--external` select other
+`doctor` defaults to managed Codex diagnostics; `--owner` and `--external` select other
 scopes. It checks tool startup and applicable isolation without inference;
 `--auth` adds tool-owned login status. Run from the repository root to probe a
 pinned `global.json` SDK too. Missing, failed or skipped required probes block work.
 Diagnostics do not establish dependencies, build success, account permissions,
 model availability or remaining allowance. Repair prerequisites before donating.
+Pi selection and preparation perform its pinned SDK/isolation probes; Codex
+diagnostics do not establish Pi readiness or endpoint/model availability.
 
 Managed Codex supports Linux x64 native executables (including symlinks) and the
 official npm `bin/codex.js` launcher with a matching nested
@@ -184,11 +197,11 @@ native executable; it does not run launchers to discover files. Only that canoni
 executable is exposed read-only; Node, package directories, home settings, credentials
 and caches are not exposed. Offline selection uses the same native executable.
 Other launcher/runtime layouts are unsupported. Codex prerequisites apply only to
-the managed Codex route; owners and external donations do not require Codex.
+the managed Codex route; owners, managed Pi and external donations do not require Codex.
 
 Other tools and dependencies must work from standard system paths: repository
 commands cannot use unrelated home tools or caches. Managed runs, harness homes
-and tool installations must be outside `/tmp`. Run `tokate doctor --managed`
+and tool installations must be outside `/tmp`. For Codex, run `tokate doctor --managed`
 before donating; no global installation or sudo is required for Codex.
 
 ```sh
@@ -197,12 +210,14 @@ tokate defaults read
 tokate defaults remove
 ```
 
-Defaults store only donor choices locally. New work uses eligible defaults;
+Defaults store only donor choices locally. New Codex work uses eligible defaults;
 explicit model/effort options override them. `select` checks policy and the offline
 Codex catalog without reserving or spending usage. Catalog presence does not prove
 account availability; `--availability` is donor-reported. Missing/rejected choices
 require explicit selection; noninteractive/JSON mode never picks a substitute.
 Terminal choices require confirmation; `--yes` confirms, without choosing a replacement.
+Pi requires explicit selection with its runtime and endpoint options; follow its
+guide rather than assuming Codex catalog or defaults behavior applies.
 
 ## Allocate time and network consent
 
@@ -225,21 +240,39 @@ for credential, environment, filesystem and published-data boundaries.
 
 ## Run and inspect work
 
+For new version-2 work, first [claim through the coordinator](coordination-v2.md#requests-and-authoritative-state)
+and read the resulting state SHA. Managed Codex then uses:
+
 ```sh
-tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
+tokate prepare --repo OWNER/REPO --issue 42 --state STATE_SHA --source tokate \
+  --harness codex --provider openai --model MODEL --effort EFFORT \
+  --seconds 3600 --verification-reserve 1200
+tokate work --run DIR
+tokate submit --run DIR
 tokate status --run DIR
-tokate checks --run DIR --watch
 ```
+
+Use the run directory printed by `prepare`. Adjust budgets to fit owner policy.
+Submission is asynchronous. Read `tokate coordination --repo OWNER/REPO --issue 42`
+until publication records a PR, then use `tokate checks --repo OWNER/REPO --pr PR --watch`.
+Managed [Pi preparation](pi.md) uses the same work/submission sequence; external
+coding uses [prepare, external and submit](coordination-v2.md#external-or-tokate-launched-work).
 
 **Inference spends donor usage.** Obtain donor authorization before `work`.
 Tokate does not automatically retry failed inference or switch models. A new
 inference attempt after failure requires fresh owner approval.
 
-Version 1 prepares a checkout, runs inference and every owner check, then publishes
-a draft PR. Version 2 saves a verified commit; use `submit --run DIR` for coordinated
-publication. To reserve v1 work without inference, use `claim` with the same task
-options, then `work --run DIR`. Saved work retains its original selection; do not
-combine `--run` with new-claim options.
+Version 2 saves a verified commit; `submit` requests coordinated draft publication.
+Existing assignment-bound approvals still require their assigned donor. Legacy
+version 1 supports direct work after `approve --donor DONOR`:
+
+```sh
+tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
+```
+
+V1 prepares a checkout, runs inference and every owner check, then publishes a
+draft PR. Its `claim` command reserves without inference, followed by `work --run DIR`.
+Saved work retains its original selection; do not combine `--run` with new-claim options.
 
 Save the run directory (default `~/.local/state/tokate/runs/`, configurable
 with `--runs`). Keep raw events, reports, patches, logs and publication previews
@@ -447,7 +480,7 @@ tokate checks --repo OWNER/REPO --pr 10 --watch --timeout 1200
 
 These read-only GitHub checks validate approval, receipt and exact head; they do
 not execute PR code or attest model usage. Remote comparison requires fewer than
-300 files. `checks --run DIR` also saves local results. Exit 0 means passed,
+300 files. For a saved run that records its PR, `checks --run DIR` also saves local results. Exit 0 means passed,
 8 pending/watch timeout, 1 failure. **Pending, missing, cancelled or skipped required
 checks are not success.**
 
@@ -518,10 +551,6 @@ bash scripts/verify.sh
 The verification script runs the formatter, build and full suite. Check managed
 isolation separately with `artifacts/linux-x64/tokate doctor` and compatible native
 Codex on PATH; simulated checks do not prove that boundary.
-
-Managed pi local execution requires explicit version-2 policy, an existing pinned
-SDK/runtime and a donor-selected no-auth loopback endpoint. See [setup, isolation
-and release validation](pi.md).
 
 ### Public PR summaries
 

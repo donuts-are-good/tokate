@@ -1,116 +1,61 @@
 # Help a user with Tokate
 
-Tokate lets a donor use their own local Codex subscription to implement an issue approved by a repository owner. It runs local verification and opens a draft PR. The owner reviews and merges it. No subscription quota or credentials transfer between people.
+Tokate coordinates owner-approved issues, donor work, verification and draft PRs. Donors use their own accounts and tools; no subscription quota or credentials transfer. Owners review and merge.
 
-This guide is for helping someone set up or use Tokate. If you are already executing an approved donor task, implement that task within its permissions. Do not start another Tokate run, change owner policy, publish, or merge from inside the task.
+If you are executing an approved donor task, implement it within its permissions. Do not start another run, change owner policy, publish or merge from inside the task.
 
 ## Start here
 
-1. Identify the user's role: repository owner, donor, or both. Infer it from the conversation when possible.
-2. Confirm the upstream repository, issue, and GitHub usernames. Read the issue and existing configuration before suggesting changes. Ask only for missing information.
-3. Explain the next action in one or two sentences, perform authorized work, and report the result. Keep track of which account and repository each command affects.
-4. Use [README.md](README.md) for installation and [docs/reference.md](docs/reference.md) for commands and limits. Check `tokate --help` against the installed version.
+1. Infer the user's role. Confirm the repository, issue and active GitHub account; read the issue and policy. Ask only for missing information.
+2. Explain the next action briefly, perform authorized work and report the result. Track the affected account and repository; post comments only when authorized.
+3. Use [README.md](README.md) for installation and `tokate help COMMAND` for installed syntax. New setup uses version 2 with Trusted task eligibility; assignment-bound approvals remain supported.
 
-Supported: Linux x64, public GitHub repositories, and the native Codex CLI with a ChatGPT login. Owners do not need Codex installed.
+Supported: Linux x86_64, glibc 2.34+ and public GitHub repositories. Managed routes are native Codex with a ChatGPT login and version-2 [Pi](docs/pi.md) with its pinned SDK/runtime and existing no-auth loopback endpoint. Owners need neither harness. See [tested systems and limits](docs/reference.md#install-and-check-support).
 
 ## Guide a repository owner
 
-### 1. Inspect the project
-
-Find the default branch, existing build/test scripts, CI jobs, and contributor instructions. Inspect `.github/tokate.json` and `.github/tokate-pr.md` if present. Reuse existing checks and preserve local changes.
-
-Use `gh auth status` and `gh api user --jq .login` to confirm the active GitHub account. Owner approval needs repository write access.
-
-### 2. Set up appropriate checks and policy
-
-Run `tokate init` from the target repository only if its Tokate files do not exist. Otherwise edit the existing files.
-
-Customize `.github/tokate.json` for the actual project:
-
-| Field | What to choose |
-| --- | --- |
-| `models` | Exact model names and effort levels the owner accepts and the donor can use |
-| `max_seconds` | A bounded time budget covering the agent and independent verification |
-| `verification` | Nonempty argument arrays for commands that genuinely validate this project |
-| `required_checks` | Exact GitHub check names that must pass on the PR commit |
-| `allow_network` | False by default. Enable only when the task or build requires network access |
-
-Prefer the project's existing verification command. A small HTML/JS project might need page structure and `node --check`. A library might need a build and existing regression tests. Add a focused behavior check only where a real failure would otherwise go undetected. Do not create a large test suite just to adopt Tokate.
-
-Required checks must fail if their tools are missing or broken. A skipped syntax check is not a passed syntax check. Explain what the checks cannot prove, such as browser layout or gameplay behavior. Keep those items in the owner's review criteria.
-
-Run the selected checks before approval. Ensure CI runs on draft fork PRs with a stable job name, read-only permissions, and no secrets exposed to contributor code. Preserve the PR template placeholders. Commit the policy, template, and any agreed verification setup to the default branch before approving work.
-
-### 3. Approve a concrete task
-
-Help the owner write a small issue with the desired behavior, acceptance criteria, scope, and relevant failure cases. Have the donor comment if they are not eligible for assignment. Check existing comments before posting, and post only when authorized.
+1. Inspect the default branch, contributor instructions, checks and CI. Preserve local changes and customization. Confirm the account with `gh auth status` and `gh api user --jq .login`; owner actions need repository write access.
+2. Run `tokate doctor --owner --auth`, then `tokate init --repo OWNER/REPO` from the repository. Review model restrictions, existing checks, policy, workflow and permissions before confirming. Setup requires the matching stable release and hosted shared workflow. Use [owner setup](docs/reference.md#set-owner-policy-and-approve) for Actions prerequisites and fields.
+3. Run the checks and commit the reviewed configuration to the default authority branch before approval. Preserve template placeholders. Required checks must fail on broken tools; fork CI must be read-only without secrets. Leave unverified behavior in owner review criteria.
+4. Write a small issue with scope, acceptance criteria and failure cases. Initialize access once, approve the task and grant access:
 
 ```sh
-tokate approve --repo OWNER/REPO --issue ISSUE --donor DONOR
+tokate access --repo OWNER/REPO --operation init
+tokate approve --repo OWNER/REPO --issue ISSUE
+tokate access --repo OWNER/REPO --operation list
+tokate access --repo OWNER/REPO --operation trust --donor DONOR
 ```
 
-Send the donor the issue URL, allowed model/effort pair, and build prerequisites. Changing the issue title/body, policy, template, or assignment requires fresh approval. Additional comments alone do not invalidate approval.
+Use `--operation grant --donor DONOR --issue ISSUE` for one issue. Requests grant no access. See `tokate access --help` for revocation and eligibility modes. Task, policy or PR-format changes need fresh approval; revocation separately blocks work and publication.
 
-### 4. Review the result
-
-```sh
-tokate verify-pr --repo OWNER/REPO --pr PR
-tokate checks --repo OWNER/REPO --pr PR --watch
-```
-
-For a first-time donor, GitHub may wait for the owner to approve the fork workflow. Inspect the diff before approving it. Check acceptance criteria as well as CI. Leave final acceptance and merging with the owner.
+5. Share the issue, allowed selections and build prerequisites. Use `tokate verify-pr` and `tokate checks`; inspect the diff before approving fork workflows. Review acceptance criteria and [exact-commit CI](docs/reference.md#review-and-accept). The owner accepts and merges.
 
 ## Guide a donor
 
-### 1. Confirm readiness
-
-Use the donor's own GitHub and ChatGPT accounts. Never ask them to paste tokens or copy credentials into the repository.
-
-Run `tokate doctor`, then check the project's actual tool versions too. Doctor does not verify repository dependencies, model availability, or remaining subscription allowance. A tool appearing on PATH does not prove it starts.
-
-Managed Codex supports user-local Linux x64 native binaries and official npm launchers with their matching native platform executable; only the canonical executable is available read-only to repository commands. Other home-directory tools and package caches remain unavailable. Build tools need to work from standard system paths. Dependency downloads need both owner `allow_network: true` and donor `--allow-network`. Inference connectivity is separate from repository command network access.
-
-### 2. Check approval and prepare a fork
-
-Read the approved issue and policy. Confirm the assigned donor matches the active account. Do not grant approval on the owner's behalf.
+1. Use the donor's GitHub account and harness. Never request tokens or put credentials in files. Follow [Codex setup](docs/reference.md#prepare-donor-tools-and-defaults) or [Pi setup](docs/pi.md); `doctor --managed --auth` diagnoses Codex. Check project tools too; diagnostics do not prove dependencies, model availability or allowance.
+2. Read the approved issue and `tokate policy --repo OWNER/REPO`. For Trusted access, request it if needed:
 
 ```sh
-tokate policy --repo OWNER/REPO
-gh repo fork OWNER/REPO --clone=false
+tokate access --repo OWNER/REPO --operation request --issue ISSUE --scope trust
 ```
 
-Reuse an existing fork. Use `--fork DONOR/NAME` if it has a different name.
-
-### 3. Run once
-
-Use an allowed model and effort. Running this command spends the donor's allowance, so it needs the user's authorization to donate AI usage.
+Wait for the owner to grant access, then check eligibility and coordination:
 
 ```sh
-tokate work --repo OWNER/REPO --issue ISSUE --model MODEL --effort EFFORT
+tokate access --repo OWNER/REPO --operation check --issue ISSUE
+tokate coordination --repo OWNER/REPO --issue ISSUE
 ```
 
-Save the printed run directory. Tokate creates its own checkout, verifies the result, and publishes a draft PR. Do not run the task again just because output is quiet. Use `tokate claim` with the same options only when the user wants to reserve work for later, then `tokate work --run DIR` to execute that claim.
+3. Send [a claim request](docs/coordination-v2.md#requests-and-authoritative-state), wait for the coordinator and read the new state SHA. Use it for [managed preparation](docs/reference.md#run-and-inspect-work) or [external work](docs/coordination-v2.md#external-or-tokate-launched-work). Tokate discovers or creates a donor fork; `--fork DONOR/NAME` selects one explicitly.
+4. Explain [budgets and network consent](docs/reference.md#allocate-time-and-network-consent); obtain authorization to spend usage. Run `tokate work --run DIR` once, then `tokate submit --run DIR` for v2 publication. Save the run directory; quiet output does not justify restarting.
+5. Inspect local state with `tokate status --run DIR`. Wait for `tokate coordination --repo OWNER/REPO --issue ISSUE` to record the PR, then use `tokate checks --repo OWNER/REPO --pr PR --watch`. Report actual verification and owner action. Pending CI is not success. Keep logs private; reported usage does not prove model identity or billing.
 
-### 4. Report the outcome
+Build tools must be system-accessible. Downloads need owner `allow_network: true` and donor `--allow-network`; inference connectivity is separate. See [transparency](docs/transparency.md) and the Pi guide for isolation limits.
 
-```sh
-tokate status --run DIR
-tokate checks --run DIR --watch
-```
+## Legacy operations and recovery
 
-Report the PR URL, verification result, and any action needed from the owner. Keep logs private and remove secrets before sharing them. Report usage as supplied by the runner, not as independently proven model identity or billing.
+Assignment-bound policies require the approved assigned donor. [V1 direct work](docs/reference.md#run-and-inspect-work) publishes after verification; v2 requires reservation, preparation and submission. Do not silently upgrade policy.
 
-## Recover without wasting AI usage
+Inspect saved state before [recovery or correction](docs/reference.md#recover-or-correct-work); variants depend on policy version and completion. Use [amendments](docs/reference.md#amend-a-published-pr) for published work. Failed inference needs fresh approval. Preserve branches and evidence, repair prerequisites and return stale authority to the owner.
 
-| Situation | Next action |
-| --- | --- |
-| Missing or broken tool | Repair it before another run |
-| Donor cannot be assigned | Have the donor comment, then let the owner approve again |
-| Claim branch already exists | Find the existing run. Do not delete the branch and silently start another attempt |
-| Approval changed or was revoked | Stop and return to the owner |
-| Agent run failed | Inspect saved logs. A new inference attempt needs fresh owner approval |
-| Completed agent, verification failed | Fix the cause, then explicitly use `tokate recover --run DIR` to rerun all checks without inference under unchanged approval |
-| Successful run, publication failed | `tokate publish --run DIR` retries publication without inference |
-| CI pending | Check for fork-workflow approval, a missing job, or a job still running. Pending is not success |
-
-Never weaken owner checks, switch models silently, bypass the sandbox, or automatically retry failed runs to obtain a green result.
+Never weaken owner checks, switch tools or models silently, bypass isolation or automatically retry failed work to obtain a green result.

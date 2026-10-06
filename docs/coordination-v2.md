@@ -4,9 +4,10 @@ Version 2 coordinates contributions on GitHub independently of the coding tool.
 The repository owner installs a small workflow; there is no hosted service or
 polling daemon. Approval, donor eligibility, reservations,
 contribution records, exact-commit CI and owner review do not require Codex.
-Tokate-launched inference currently uses Codex. Other coding tools can contribute
-through the external exact-commit path; their managed launch integrations are
-not provided by this path.
+Managed execution supports native Codex with a ChatGPT login and
+[Pi local execution](pi.md) with its pinned SDK/runtime and existing no-auth
+loopback endpoint. Other coding tools can contribute through the external
+exact-commit path; this does not provide their managed launch integrations.
 
 ## Setup
 
@@ -57,7 +58,9 @@ The entry pins the central workflow to the release tag's resolved commit, the
 immutable numeric archive asset URL, archive SHA256 and exact binary member.
 Setup checks the checksum sidecar and verifies the running binary against that
 member before proposing files. It rejects unreleased, draft or prerelease versions.
-Review and install the entry as `.github/workflows/tokate-coordinator.yml` yourself;
+The matching release must already host the reviewed central reusable workflow;
+bootstrap refusal writes no adopter files. Review and install the entry as
+`.github/workflows/tokate-coordinator.yml` yourself;
 setup does not commit it. Ordinary public Actions runners suffice. The shared
 workflow passes the event file to the released binary, without checkout or donor
 code execution. Coordination uses contents write, issues read and pull-requests
@@ -70,11 +73,14 @@ GitHub-token-created PRs do not trigger `pull_request_target`; coordinator creat
 checks remain necessary, and later human events recheck admission. Completed
 receipts, CI readiness and final acceptance remain separate owner checks.
 
-Extend the existing policy explicitly, for example:
+For a task-scoped policy allowing managed Codex and external Claude work, for example:
 
 ```json
 {
   "version": 2,
+  "approval_scope": "task",
+  "eligibility": "trusted",
+  "model_policy": "whitelist",
   "models": {"gpt-6.1-sol": ["high"], "claude-sonnet-4-6": ["unknown"]},
   "allowed_tools": [
     {"harness": "codex", "provider": "openai"},
@@ -96,8 +102,9 @@ explicit `model_policy: "unrestricted"` permits any valid declared pair and requ
 omitted or empty `models`. External unknown model/effort values retain their legacy
 meaning and need an exact whitelist allowance when filtering is enabled. Under
 either explicit mode, external effort `"absent"` declares a known lack of an effort
-control and needs its exact pair in whitelist mode. Managed work rejects unknown
-or absent controls. Never substitute a declaration to satisfy policy.
+control and needs its exact pair in whitelist mode. Managed Codex rejects unknown
+or absent controls; managed Pi requires `absent` under its explicit model policy.
+See the [Pi policy requirements](pi.md). Never substitute a declaration to satisfy policy.
 
 Both policy versions support optional [`protected_paths`](reference.md#set-owner-policy-and-approve)
 with at most 64 literal paths, each at most 512 characters. Owners adopt it under
@@ -127,7 +134,7 @@ tokate approve --repo OWNER/REPO --issue 42
 
 Task-scoped approvals retain task fingerprint, target, policy, template,
 instructions and revocation checks. They neither assign a donor nor use issue
-assignment to authorize access. `--donor` and `assign` conflict with this opt-in.
+assignment to authorize access. `--donor` and `assign` conflict with task scope.
 New approvals bind the numeric repository ID. The independent `tokate/access`
 ref stores a bounded `access.json` with that ID and only current numeric account
 membership: persistent trust, denied status and issue numbers. Login arguments
@@ -166,9 +173,11 @@ Inspect current refs and saved artifacts before an explicit next operation.
 
 ## Requests and authoritative state
 
-An owner uses the existing `approve`/`assign` commands with a version-2 policy.
-`revoke` first serializes revocation in version-2 state, then removes the approval
-label. Donor requests cannot approve, accept, merge, assign or change policy.
+New task-scoped setup uses `approve --repo OWNER/REPO --issue 42` and separate
+[donor access](reference.md#set-owner-policy-and-approve). Legacy assignment-bound
+policies retain `approve --donor` and `assign`. `revoke` first serializes revocation
+in version-2 state, then removes the approval label. Donor requests cannot approve,
+accept, merge, assign or change policy.
 
 ```sh
 tokate coordination --repo OWNER/REPO --issue 42
@@ -276,9 +285,11 @@ Tokate cannot attest external identity or time. `max_seconds` bounds local
 verification, not independently unobservable external coding time.
 
 For Tokate-launched execution, prepare with `--source tokate` and exactly one
-`codex`/`openai` tool declaration, then `work --run RUN_DIR` and `submit --run
-RUN_DIR`. Omitting `--tools` uses explicit selection arguments or an eligible
-Tokate-owned donor default; see [donor selection](reference.md#prepare-donor-tools-and-defaults).
+`codex`/`openai` or `pi`/`local-chat-completions` tool declaration, then
+`work --run RUN_DIR` and `submit --run RUN_DIR`. Use the
+[Codex preparation sequence](reference.md#run-and-inspect-work) or [Pi guide](pi.md).
+Omitting `--tools` uses explicit selection arguments, or eligible Codex donor
+defaults; see [donor selection](reference.md#prepare-donor-tools-and-defaults).
 Optional `--verification-reserve N` allocates a positive part of the unchanged
 total budget to independent verification; see [budgets](reference.md#allocate-time-and-network-consent).
 The saved allocation is reused by `work --run` and cannot be overridden there.

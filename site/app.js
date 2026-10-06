@@ -43,21 +43,21 @@ const roles = {
         title: "For Project Owners",
         steps: [
             "Choose a small issue with a clear result",
-            "Set your checks and approve a donor",
+            "Set your checks, approve a task and grant donor access",
             "Review the tested pull request and decide what merges",
         ],
         anchor: "for-owners",
-        prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me set up my repository to receive donated inference\nI am the repository owner\nInspect my project, help me choose appropriate checks, and guide me through approving an issue for a donor",
+        prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me set up my repository to receive donated inference\nI am the repository owner\nInspect my project, help me choose existing checks, and guide me through setup, task approval and donor access with the matching stable release",
     },
     donor: {
         title: "For Donors",
         steps: [
-            "Install Tokate and sign in with your own accounts",
-            "Get assigned to an approved issue and run the task",
-            "Your AI works, then Tokate checks and opens a draft PR",
+            "Install Tokate and prepare your own coding tools",
+            "Get access and claim an approved task",
+            "Prepare, run and submit verified work for a draft PR",
         ],
         anchor: "for-donors",
-        prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me donate inference to a repository\nI am the donor\nConfirm my tools, the approved issue, and my assignment\nExplain the budget before starting a run",
+        prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me donate inference to a repository\nI am the donor\nConfirm my tools, the approved issue and my access\nGuide me through coordination, preparation, work and submission with the matching stable release\nExplain the budget before starting a run",
     },
 };
 let selectedRole = "owner";
