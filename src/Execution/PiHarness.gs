@@ -176,7 +176,8 @@ internal class PiHarness {
                             strictOutput: true,
                             outputPath: Path.Combine(directory, "events.jsonl"),
                             errorPath: Path.Combine(directory, "stderr.log"),
-                            budget: coding
+                            budget: coding,
+                            pidNamespace: true
                         )
                     }
                     run.Fields["output_truncated"] = result.OutputTruncated

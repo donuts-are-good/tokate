@@ -144,7 +144,7 @@ internal partial class Fixture {
             childInfo.RedirectStandardInput = true
             using let child = Process.Start(childInfo) ?? throw Exception("Cannot start blocked-input child")
             child.StandardInput.Close()
-            File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.HostPid(child))
             if mode == "closed_input" {
                 Check.That(CloseFixtureInput(0) == 0, "Cannot close synthetic harness stdin")
                 return 0
@@ -173,7 +173,7 @@ internal partial class Fixture {
         Save()
         if mode == "capture_write_failure" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start capture child")
-            File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.HostPid(child))
             Console.Write(String('x', 131072))
             Console.Out.Flush()
             child.WaitForExit()
@@ -209,7 +209,7 @@ internal partial class Fixture {
         }
         if mode == "timeout" || mode == "completed_timeout" || mode == "background" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
-            File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
+            File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.HostPid(child))
             if mode == "timeout" || mode == "completed_timeout" {
                 let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
                 File.WriteAllText(Path.Combine(partialCheckout, "partial.txt"), "partial-edit")
@@ -275,7 +275,10 @@ internal partial class Fixture {
                     FileInfo("/proc/self/ns/" + name).LinkTarget ?? throw Exception("Missing namespace")
                 )
             }
-            File.WriteAllText(Path.Combine(Root, "namespace-ready"), Environment.ProcessId.ToString())
+            File.WriteAllText(
+                Path.Combine(Root, "namespace-ready"),
+                FileInfo("/proc/self").LinkTarget ?? throw Exception("Missing owned task PID")
+            )
             let release = Path.Combine(Root, "namespace-release")
             let clock = System.Diagnostics.Stopwatch.StartNew()
             while !File.Exists(release) && clock.Elapsed.TotalSeconds < 5 {

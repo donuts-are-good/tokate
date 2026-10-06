@@ -166,15 +166,17 @@ internal class SuiteDriver {
     }
 
     internal func Run(report SuiteReport? = nil) {
-        let results = Chan[SuiteResult](2)
+        let workers = Math.Min(8, Math.Min(Environment.ProcessorCount, Jobs.Length))
+        let results = Chan[SuiteResult](workers)
         let onCancel = ConsoleCancelEventHandler(OnCancel)
         Console.CancelKeyPress += onCancel
         var failure Exception? = nil
         var completed int32
         try {
-            go Work(results)
-            go Work(results)
-            while completed < 2 {
+            for worker in 0 ... workers {
+                go Work(results)
+            }
+            while completed < workers {
                 let result = <-results
                 if result.Name == "" {
                     completed++

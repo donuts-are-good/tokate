@@ -5,6 +5,9 @@ import System.IO
 
 func Main(args[]string) int32 {
     try {
+        if args.Length == 1 && args[0] == "--discovery-holder" {
+            return CliDiscovery.Holder()
+        }
         let exe = Environment.ProcessPath ?? throw Exception("Missing process path")
         if Path.GetFileName(exe) == "curl" {
             return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")

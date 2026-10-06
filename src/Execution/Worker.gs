@@ -45,6 +45,7 @@ internal class Worker {
             }
             let wrapper = List[string]{
                 "--die-with-parent",
+                "--unshare-pid",
                 "--bind",
                 "/",
                 "/",
@@ -68,7 +69,8 @@ internal class Worker {
                 cancellation: cancellation,
                 outputPath: capture ? Path.Combine(directory, "events.jsonl"): "",
                 errorPath: capture ? Path.Combine(directory, "stderr.log"): "",
-                budget: budget
+                budget: budget,
+                pidNamespace: true
             )
         }
 

@@ -193,7 +193,8 @@ internal class PiBoundary {
                     checkout,
                     seconds: 30,
                     isolated: true,
-                    budget: budget
+                    budget: budget,
+                    pidNamespace: true
                 )
                 if result.Code != 0 ||
                     result.Truncated ||
