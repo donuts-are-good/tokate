@@ -195,7 +195,7 @@ internal class Diagnostics {
             Check.That(!File.Exists(calls), "Rejected external saved work probed managed tools")
             let owner = Call(binary, temp, []string{"doctor", "--owner", "--non-interactive"})
             Check.That(
-                Check.Text(owner["data"]?["scope"]) == "owner" && owner["data"]?["tools"]?.AsArray().Count == 2,
+                Check.Text(owner["data"]?["scope"]) == "owner" && owner["data"]?["tools"]?.AsArray().Count == 4,
                 "Owner checked donor tools"
             )
             Check.That(Check.Text(owner["data"]?["authentication_requested"]) == "false", "Implicit authentication")
@@ -353,8 +353,29 @@ internal class Diagnostics {
             File.Copy("/usr/bin/setsid", runner)
             File.SetUnixFileMode(runner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             File.WriteAllText(Path.Combine(flow.Temp.Root, "broken-helper"), "")
-            for helper in[]string{"/usr/bin/env", "/usr/bin/setsid", "/usr/bin/bwrap"} {
-                Check.Envelope(FixedCall(binary, flow, helper, []string{"doctor", "--owner"}), "doctor", "ok")
+            for helper in[]string{"/usr/bin/env", "/usr/bin/unshare", "/usr/bin/setsid", "/usr/bin/bwrap"} {
+                let cleanup = helper == "/usr/bin/env" || helper == "/usr/bin/unshare"
+                let owner = Check.Envelope(
+                    FixedCall(binary, flow, helper, []string{"doctor", "--owner"}),
+                    "doctor",
+                    cleanup ? "error": "ok",
+                    cleanup ? "missing_tools": ""
+                )
+                if cleanup {
+                    Check.That(
+                        Check.Text(Row(owner, helper)["status"]) == "failed" && Check.Text(
+                            Row(owner, "setsid")["status"]
+                        ) == "skipped",
+                        "Owner diagnostics misattributed a failed cleanup helper"
+                    )
+                    let discovery = Check.Envelope(
+                        FixedCall(binary, flow, helper, []string{"policy"}),
+                        "policy",
+                        "error",
+                        "missing_tools"
+                    )
+                    Check.Contains(Check.Text(discovery["error"]?["message"]), "PID namespace")
+                }
                 if helper != "/usr/bin/bwrap" {
                     let selection = Check.Envelope(
                         FixedCall(
@@ -386,17 +407,23 @@ internal class Diagnostics {
                     "Broken fixed helper was reported as a sandbox failure"
                 )
                 if helper == "/usr/bin/env" {
-                    let external = FixedCall(binary, flow, helper, []string{"doctor", "--external"})
-                    Check.That(
-                        external.Code == 0,
-                        "Independent diagnostics failed without env:\n" + external.Output + external.Error
+                    let external = Check.Envelope(
+                        FixedCall(binary, flow, helper, []string{"doctor", "--external"}),
+                        "doctor",
+                        "error",
+                        "missing_tools"
                     )
-                    Check.Envelope(external, "doctor", "ok")
+                    Check.That(
+                        Check.Text(Row(external, helper)["status"]) == "failed" && Check.Text(
+                            Row(external, "sandbox")["status"]
+                        ) == "skipped",
+                        "External diagnostics omitted the failed cleanup helper"
+                    )
                 }
             }
             flow.NoInference()
             Console.WriteLine(
-                "PASS fixed helper failures are diagnosed before catalog or sandbox use; owner and external scopes stay independent"
+                "PASS fixed cleanup, catalog and sandbox helpers fail before dependent probes; no inference"
             )
         }
 
