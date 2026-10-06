@@ -21,7 +21,7 @@ curl -qfsSL https://tokate.dev/install.sh | sh
 Installs for your user and sets up PATH. Open a new terminal if prompted.
 Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved work.
 
-The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. The initial observed systems are Ubuntu 24.04 x86_64 CI and a CachyOS rolling x86_64 host; the glibc minimum does not establish support for every distribution. ARM64, musl, Windows, and macOS are not supported. Tokate-launched execution uses native Codex with a ChatGPT login. Owners can explicitly opt into [version-2 coordination and external coding tools](docs/coordination-v2.md); default version-1 setup is unchanged. See the [support limits](docs/reference.md#install-and-check-support).
+The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. The initial observed systems are Ubuntu 24.04 x86_64 CI and a CachyOS rolling x86_64 host; the glibc minimum does not establish support for every distribution. ARM64, musl, Windows, and macOS are not supported. Managed Codex execution requires a ChatGPT login and supports user-local native binaries and npm installations. Owners can explicitly opt into [version-2 coordination and external coding tools](docs/coordination-v2.md); default version-1 setup is unchanged. See the [support limits](docs/reference.md#install-and-check-support).
 
 ## For Owners:
 

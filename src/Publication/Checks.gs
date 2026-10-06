@@ -61,10 +61,6 @@ internal class Checks {
                         pending = true
                     }
                 }
-                let latest = GitHub.Api(pullPath)
-                if J.Text(J.Get(latest, "head"), "sha") != run.Text("commit") {
-                    throw Exception("PR changed while reading checks")
-                }
                 let live = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
                 if live.Text("commit") != run.Text("commit") {
                     throw Exception("PR authority changed while reading checks")

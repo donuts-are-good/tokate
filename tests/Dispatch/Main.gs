@@ -24,6 +24,10 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 4 && args[0] == "--local-codex" {
+            LocalCodex.All(binary, args[1], args[2], args[3])
+            return 0
+        }
         if args.Length == 1 && args[0] == "--process" {
             ProcessChecks.All(binary)
             return 0

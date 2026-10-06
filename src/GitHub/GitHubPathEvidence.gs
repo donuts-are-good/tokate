@@ -23,7 +23,7 @@ internal class GitHubPathEvidence {
                 throw Exception("Missing, truncated or mismatched protected tree evidence")
             }
             let entries = Dictionary[string, string](StringComparer.Ordinal)
-            for entry in J.Items(J.Get(value, "tree")) {
+            for entry in J.Get(value, "tree").EnumerateArray() {
                 ProtectedPaths.AddTree(
                     entries,
                     J.Text(entry, "path"),
