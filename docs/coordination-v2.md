@@ -187,7 +187,7 @@ tokate request --repo OWNER/REPO --issue 42 --file claim.json
 
 The CLI posts `/tokate ` followed by strict JSON; it does not acquire authority
 locally. Read `coordination` after the workflow completes. The outcome records
-the reservation UUID, numeric actor, donor and trusted creation/expiry times.
+the stable contribution UUID, lease UUID, active attempt, numeric actor and expiry.
 Use the new state SHA to prepare work. The authenticated numeric comment author
 comes from a fresh canonical GitHub comment. Request actor fields are forbidden.
 Repository ID, issue URL, comment ID, author ID and unchanged comment body are
@@ -206,6 +206,28 @@ allowed metadata. The latest 32 successful outcomes are stored in the same atomi
 state update. Identical replay returns the recorded outcome without writes;
 changed actor/content fails. An evicted request remains stale and cannot repeat
 its effect. Replayed expired outcomes are historical results, not renewed authority.
+
+## Lease transitions
+
+Use the same request schema with `action` set to `renew`, `pause`, `resume` or
+`release` and empty `metadata`. Each new request needs the current state SHA
+and a new UUID. Saved requests are immutable; inspect current state after a lost
+response and redeliver only the exact original request.
+
+Renewal extends the lease without changing contribution identity, branch, PR,
+active attempt or saved time budgets. Pause reserves the contribution for the
+owner's `reservation_seconds` (default 24 hours) and fences out executing work.
+Resume grants a fresh attempt fence; it never resumes coding automatically.
+Release requires the current numeric lease owner even after eligibility revocation.
+Renewal, resume, preparation and publication require current eligibility.
+
+Release and expiry preserve saved work and publication evidence. Same-donor
+reacquisition keeps contribution identity with a fresh attempt. A different donor
+gets a new identity referencing the predecessor's immutable revision.
+Fresh preparation uses an attempt-specific directory and preserves previous runs.
+The stable branch can be reused only at the approved base without publication;
+otherwise saved-work continuation remains unsupported. Legacy v2 leases remain
+readable, but new lifecycle transitions require fresh owner approval.
 
 ## External or Tokate-launched work
 
@@ -274,9 +296,10 @@ comparisons reaching the 300-file truncation boundary are refused for owner revi
 Raw reports, check output, credentials and execution logs stay local.
 
 Before execution, publication and receipt validation, Tokate rechecks task,
-policy, template, eligibility, approval, reservation expiry and expected state.
+policy, template, eligibility and approval. Execution and publication also require
+a live active attempt; publication requests use the exact current state SHA.
 Before and after the PR write the coordinator revalidates authority and exact fork
-head. A changed/replaced/expired donor has no valid receipt. The PR write and
+head. A replaced contribution cannot authorize further publication. The PR write and
 state update cannot be atomic together: an interrupted response is recovered by
 finding the existing exact reservation/head/receipt PR. A race can leave a physical
 but unaccepted PR; it has no valid authoritative contribution and needs owner
@@ -288,12 +311,13 @@ tokate checks --repo OWNER/REPO --pr PR
 ```
 
 Version-2 receipts bind the expected predecessor state SHA and must match the
-current contribution state commit's sole parent, approval, reservation, fork,
+authenticated publication revision's sole parent, approval, contribution, fork,
 branch and exact PR commit. `checks` requires every owner check
 to pass on that commit and rechecks the head. Receipt validation is read-only and
-never executes donor code. Acceptance and merging remain owner actions. An expired
-reservation invalidates a receipt even when a physical PR remains; renewal is not
-implemented in this initial core.
+never executes donor code. Acceptance and merging remain owner actions. Published
+receipts remain verifiable across renewal, pause, release and expiry,
+subject to current approval, eligibility and exact-head checks. Historical
+publication evidence grants no current execution or publication authority.
 
 ## Review amendments
 

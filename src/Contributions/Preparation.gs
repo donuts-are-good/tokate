@@ -64,6 +64,9 @@ internal class Preparation {
 
         private func BoundIdentity(run Data, normalized bool = true) string {
             let identity = Identity(run, normalized)
+            if run.Text("attempt") != "" {
+                return Data.Hash(identity + ":" + run.Text("attempt"))
+            }
             return V1Continuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
@@ -103,14 +106,37 @@ internal class Preparation {
             )
         }
 
-        internal func Lease(directory string) FileStream {
-            LocalPaths.DirectoryPath(directory)
-            let path = Path.Combine(directory, ".lock")
-            if FileInfo(path).LinkTarget != nil || FileInfo(Path.Combine(directory, "run.json")).LinkTarget != nil ||
-                FileInfo(Path.Combine(directory, "run.json.tmp")).LinkTarget != nil {
-                Reject(directory)
+        internal func ControlPaths(directory string) {
+            try {
+                LocalPaths.DirectoryPath(directory)
+            } catch (error Exception) {
+                throw Exception(error.Message + "; saved run directory: " + directory, error)
             }
-            return File.Open(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)
+            for name in[]string{".lock", "run.json", "run.json.tmp"} {
+                let path = Path.Combine(directory, name)
+                if FileInfo(path).LinkTarget != nil {
+                    Reject(directory)
+                }
+                if File.Exists(path) || Directory.Exists(path) {
+                    let status = [256]byte
+                    if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
+                        (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
+                        (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
+                        BitConverter.ToUInt32(status, 16) != 1 {
+                        Reject(directory)
+                    }
+                }
+            }
+        }
+
+        internal func Lease(directory string) FileStream {
+            ControlPaths(directory)
+            return File.Open(
+                Path.Combine(directory, ".lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None
+            )
         }
 
         internal func Resume(path string) {
@@ -132,7 +158,7 @@ internal class Preparation {
             if savedState != "preparing" && savedState != "claimed" {
                 throw Exception(failure)
             }
-            if fields.ContainsKey("codex_version") || fields.ContainsKey("commit") {
+            if fields.ContainsKey("codex_version") || fields.ContainsKey("pi_version") || fields.ContainsKey("commit") {
                 throw Exception(failure)
             }
             let eventsPath = Path.Combine(directory, "events.jsonl")
@@ -376,6 +402,9 @@ internal class Preparation {
                 )
             }
             if J.Text(J.Get(reference, "object"), "sha") != run.Text("base") {
+                if run.Text("attempt") != "" {
+                    throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
+                }
                 Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
             }
         }
@@ -384,7 +413,25 @@ internal class Preparation {
             let reference = Reference(run)
             if !run.Flag("branch_creation_attempted") {
                 if reference.ValueKind != JsonValueKind.Undefined {
-                    Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                    if run.Text("attempt") == "" {
+                        Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                    }
+                    ContributionClaim.RecheckV2(run)
+                    CheckBranch(run)
+                    let pulls = J.Items(
+                        GitHub.Api(
+                            "repos/" + run.Text("repo") + "/pulls?state=all&head=" + Uri.EscapeDataString(
+                                run.Text("donor") + ":" + run.Text("branch")
+                            )
+                        )
+                    )
+                    if pulls.Count != 0 {
+                        throw Exception("Partial publication is preserved; continuation remains unsupported until #14")
+                    }
+                    run.Fields["branch_creation_attempted"] = true
+                    run.Fields["branch_prepared"] = true
+                    run.Save(directory)
+                    return
                 }
                 run.Fields["branch_creation_attempted"] = true
                 run.Save(directory)
@@ -461,7 +508,7 @@ internal class Preparation {
             ): branch.Code != 1 {
                 Reject(checkout)
             }
-            if run.Text("source") != "external" {
+            if run.Text("source") != "external" && run.Text("harness") != "pi" {
                 for file in Commands.Git(checkout, "ls-files").Split('\n') {
                     if file.StartsWith(".codex/") || file.Contains("/.codex/") {
                         throw Exception("Repository Codex configuration is not supported in donor runs")

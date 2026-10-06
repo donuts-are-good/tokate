@@ -160,15 +160,9 @@ internal class ContributionClaim {
                 .Substring(0, 12) {
                 throw Exception("Invalid saved claim branch")
             }
-            let head = RepositoryIdentity.Repo(run.Text("head_repo"))
-            if run.Number("preparation_version") == 0 ||
-                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
-                RepositoryAccess.ValidateRepository(
-                    run.Text("repo"),
-                    head,
-                    J.Get(run.Element(), "donor_id"),
-                    GitHub.Api("repos/" + head)
-                )
+            RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
+                RepositoryAccess.ValidateRun(run)
             }
             Policy(J.Write(J.Get(record, "policy"))).Validate(
                 run.Text("model"),
@@ -186,16 +180,26 @@ internal class ContributionClaim {
             let value = state.Value()
             let saved = run.Element()
             let reservation = J.Get(value, "reservation")
-            if !RepositoryIdentity.SameDonor(viewer, run) || state.Sha != run.Text("state_sha") || J.Text(
-                value,
-                "approval_id"
-            ) != run.Text("approval") || J.Text(reservation, "reservation") != run.Text("id") {
+            if !RepositoryIdentity.SameDonor(viewer, run) ||
+                (!LeaseLifecycle.Supported(value) && state.Sha != run.Text("state_sha")) ||
+                J.Text(value, "approval_id") != run.Text("approval") || J.Text(reservation, "reservation") != run.Text(
+                "id"
+            ) {
                 throw CliFailure("stale_approval", "Saved run has stale coordination authority")
             }
             if AccessState.Task(J.Get(value, "approval")) {
                 RepositoryIdentity.PositiveId(J.Get(saved, "donor_id"))
             }
             state.Reservation(J.Get(viewer, "id"))
+            if LeaseLifecycle.Supported(value) &&
+                (
+                run.Text("attempt") == "" || run.Text("attempt") != J.Text(reservation, "attempt") ||
+                    RepositoryIdentity.PositiveId(J.Get(saved, "donor_id")) != RepositoryIdentity.PositiveId(
+                    J.Get(J.Get(value, "identity"), "actor")
+                )
+            ) {
+                throw CliFailure("stale_approval", "Saved execution attempt fence changed; old work is preserved")
+            }
             let record = state.Check(repo, run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
             let approval = J.Get(record, "approval")
             if run.Text("base") != J.Text(approval, "base") || run.Text("policy_hash") != J.Text(
@@ -217,10 +221,9 @@ internal class ContributionClaim {
                 (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
                 throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
-            let fork = RepositoryIdentity.Repo(run.Text("head_repo"))
-            if run.Number("preparation_version") == 0 ||
-                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
-                RepositoryAccess.ValidateRepository(repo, fork, J.Get(saved, "donor_id"), GitHub.Api("repos/" + fork))
+            RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
+                RepositoryAccess.ValidateRun(run)
             }
             policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             return record

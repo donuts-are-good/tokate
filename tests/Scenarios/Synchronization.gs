@@ -353,6 +353,8 @@ internal class SynchronizationChecks {
                         Check.Json(File.ReadAllText(coordination.Tools)),
                         "verification",
                         "donor-reported-pass",
+                        "attempt",
+                        Check.Text(state["state"]?["reservation"]?["attempt"]),
                         "sync",
                         grant
                     )
