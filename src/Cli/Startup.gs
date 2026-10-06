@@ -14,22 +14,27 @@ internal class ToolCheck {
 
 internal class Startup {
     shared {
+        private func Executable(path string) bool {
+            try {
+                return File.Exists(path) &&
+                    (
+                    File.GetUnixFileMode(path) & (
+                        UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
+                    )
+                ) != 0
+            } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+            return false
+        }
+
         internal func Find(name string) string {
             for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
                 if !Path.IsPathFullyQualified(entry) {
                     continue
                 }
                 let path = Path.Combine(entry, name)
-                try {
-                    if File.Exists(path) &&
-                        (
-                        File.GetUnixFileMode(path) & (
-                            UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
-                        )
-                    ) != 0 {
-                        return path
-                    }
-                } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+                if Executable(path) {
+                    return path
+                }
             }
             return ""
         }
@@ -55,7 +60,10 @@ internal class Startup {
                         tool.Hint = "Install util-linux at /usr/bin/setsid for catalog probes and independent verification."
                     }
                     case "/usr/bin/env" {
-                        tool.Hint = "Install coreutils at /usr/bin/env for managed catalog and sandbox probes."
+                        tool.Hint = "Install coreutils at /usr/bin/env for command cleanup and managed sandbox probes."
+                    }
+                    case "/usr/bin/unshare" {
+                        tool.Hint = "Install util-linux at /usr/bin/unshare and ensure user namespaces are supported for command cleanup."
                     }
                     case "bwrap" {
                         tool.Hint = "Install bubblewrap and add bwrap to PATH."
@@ -79,6 +87,10 @@ internal class Startup {
                 } else {
                     tool.Detail = tool.Hint
                 }
+                if tool.Path != "" && name.StartsWith("/") && !Executable(tool.Path) {
+                    tool.Status = "failed"
+                    tool.Detail = "Required helper is not executable. " + tool.Hint
+                }
                 tools.Add(tool)
             }
             return tools
@@ -94,11 +106,14 @@ internal class Startup {
             if command == "init" || command == "status" || command == "defaults" {
                 return []string{}
             }
-            let names = List[string]{"setsid", "gh"}
+            let names = List[string]{"setsid", "/usr/bin/env", "/usr/bin/unshare", "gh"}
             let catalog = NeedsCatalog(command, options)
-            if catalog {
+            var pi = options.Get("harness") == "pi"
+            if options.Get("run") != "" && command == "work" {
+                pi = Data.Load(Path.GetFullPath(options.Need("run"))).Text("harness") == "pi"
+            }
+            if catalog && !pi {
                 names.Add("codex")
-                names.Add("/usr/bin/env")
             }
             if options.Get("run") != "" && command != "repair" {
                 let run = Data.Load(Path.GetFullPath(options.Need("run")))
@@ -140,16 +155,21 @@ internal class Startup {
 
         private func ExecuteChecks(tools List[ToolCheck]) {
             var runner bool
+            var cleanup = true
             for tool in tools {
                 runner = runner || (tool.Name == "setsid" && tool.Path != "")
+                if tool.Name == "/usr/bin/env" || tool.Name == "/usr/bin/unshare" {
+                    cleanup = cleanup && tool.Path != "" && tool.Status != "failed"
+                }
             }
+            runner = runner && cleanup
             for tool in tools {
-                if tool.Path == "" {
+                if tool.Path == "" || tool.Status == "failed" {
                     continue
                 }
                 if !runner {
                     tool.Status = "skipped"
-                    tool.Detail = "Execution requires working setsid. " + tool.Hint
+                    tool.Detail = "Execution requires working command cleanup helpers. " + tool.Hint
                     continue
                 }
                 try {
@@ -277,14 +297,25 @@ internal class Startup {
                 options.Get("external") == "true" ? "external": "managed"
             )
             let tools = Scan(
-                doctorScope == "owner" ? []string{"setsid", "gh"}: (
+                doctorScope == "owner" ? []string{"setsid", "/usr/bin/env", "/usr/bin/unshare", "gh"}: (
                     doctorScope == "external" ? []string{
                         "setsid",
+                        "/usr/bin/env",
+                        "/usr/bin/unshare",
                         "git",
                         "gh",
                         "/usr/bin/setsid",
                         "/usr/bin/bwrap"
-                    }: []string{"setsid", "git", "gh", "codex", "/usr/bin/setsid", "/usr/bin/env", "bwrap"}
+                    }: []string{
+                        "setsid",
+                        "/usr/bin/env",
+                        "/usr/bin/unshare",
+                        "git",
+                        "gh",
+                        "codex",
+                        "/usr/bin/setsid",
+                        "bwrap"
+                    }
                 )
             )
             ExecuteChecks(tools)

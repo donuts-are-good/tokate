@@ -109,6 +109,8 @@ internal class RequestData {
             return value
         }
 
+        internal func ModelIdentifier(value string) string -> PublicSummary.Identifier(value, model: true)
+
         internal func Tools(value JsonElement) {
             let items = J.Items(value)
             if value.ValueKind != JsonValueKind.Array || items.Count < 1 || items.Count > 16 {
@@ -116,9 +118,10 @@ internal class RequestData {
             }
             for tool in items {
                 Keys(tool, "harness,provider,model,effort,usage,coding_seconds")
-                for name in[]string{"harness", "provider", "model", "effort"} {
+                for name in[]string{"harness", "provider", "effort"} {
                     PublicSummary.Identifier(Token(J.Text(tool, name)))
                 }
+                ModelIdentifier(J.Text(tool, "model"))
                 let number = J.Get(tool, "coding_seconds")
                 var seconds int64
                 if number.ValueKind != JsonValueKind.Undefined &&
@@ -231,10 +234,10 @@ internal class RequestData {
             }
             RepositoryIdentity.CommitSha(J.Text(value, "expected"))
             let metadata = J.Get(value, "metadata")
-            if J.Text(value, "action") == "claim" {
+            if J.Text(value, "action") == "claim" || LeaseLifecycle.Transition(J.Text(value, "action")) {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
-                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary")
+                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary,attempt")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
@@ -251,7 +254,7 @@ internal class RequestData {
                     Correction(correction, J.Text(metadata, "head"), JsonElement{})
                 }
             } else if J.Text(value, "action") == "amend" {
-                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync,summary")
+                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync,summary,attempt")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "previous"))

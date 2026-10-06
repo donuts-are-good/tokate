@@ -208,8 +208,51 @@ internal class ReceiptVerification {
             let exactHead = J.Text(outcome, "head")
             let donor = RepositoryIdentity.Login(J.Text(receipt, "donor"))
             let record = state.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
-            state.Reservation(J.Get(contribution, "actor"))
-            let stateCommit = GitHub.Api("repos/" + repo + "/git/commits/" + state.Sha)
+            if !LeaseLifecycle.Supported(value) {
+                state.Reservation(J.Get(contribution, "actor"))
+            }
+            let publicationRevision = J.Text(value, "publication_revision")
+            let authenticated = publicationRevision == "" ? state: CoordinationState.At(
+                repo,
+                J.Number(receipt, "issue"),
+                publicationRevision
+            )
+            if !RequestData.Same(J.Get(authenticated.Value(), "contribution"), contribution) || !RequestData.Same(
+                CoordinationState.Current(authenticated.Value()),
+                current
+            ) ||
+                J.Text(authenticated.Value(), "approval_id") != J.Text(value, "approval_id") || !RequestData.Same(
+                J.Get(authenticated.Value(), "identity"),
+                J.Get(value, "identity")
+            ) {
+                throw CliFailure("stale_approval", "Publication revision differs from current contribution evidence")
+            }
+            if LeaseLifecycle.Supported(authenticated.Value()) {
+                let publishedLease = J.Get(authenticated.Value(), "reservation")
+                let publishedIdentity = J.Get(authenticated.Value(), "identity")
+                if J.Text(publishedLease, "status") != "active" || J.Text(publishedLease, "attempt") == "" || J.Text(
+                    publishedIdentity,
+                    "id"
+                ) != J.Text(publishedLease, "reservation") || RepositoryIdentity.PositiveId(
+                    J.Get(publishedIdentity, "actor")
+                ) != RepositoryIdentity.PositiveId(J.Get(contribution, "actor")) || RepositoryIdentity.PositiveId(
+                    J.Get(publishedLease, "actor")
+                ) != RepositoryIdentity
+                    .PositiveId(J.Get(contribution, "actor")) {
+                    throw CliFailure(
+                        "stale_approval",
+                        "Publication revision lacks authenticated active attempt authority"
+                    )
+                }
+                LeaseLifecycle.Fence(
+                    authenticated,
+                    J.Get(current, "metadata").ValueKind == JsonValueKind.Object ? J.Text(
+                        J.Get(current, "metadata"),
+                        "attempt"
+                    ): J.Text(current, "attempt")
+                )
+            }
+            let stateCommit = GitHub.Api("repos/" + repo + "/git/commits/" + authenticated.Sha)
             let parents = J.Items(J.Get(stateCommit, "parents"))
             let expected = J.Text(receipt, "expected")
             if parents.Count != 1 || J.Text(parents[0], "sha") != expected || J.Text(current, "expected") != expected {
@@ -360,7 +403,9 @@ internal class ReceiptVerification {
                     throw Exception("Coordination authority changed during receipt validation")
                 }
                 live.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
-                live.Reservation(J.Get(contribution, "actor"))
+                if !LeaseLifecycle.Supported(live.Value()) {
+                    live.Reservation(J.Get(contribution, "actor"))
+                }
                 Synchronization.Live(
                     repo,
                     number,

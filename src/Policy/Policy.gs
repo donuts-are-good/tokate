@@ -70,7 +70,13 @@ internal class Policy {
         var count int32
         if models.ValueKind == JsonValueKind.Object {
             for model in models.EnumerateObject() {
-                if !Regex.IsMatch(model.Name, "^[A-Za-z0-9][A-Za-z0-9._-]*$") {
+                if !Regex.IsMatch(
+                    model.Name,
+                    J.Number(
+                        Value,
+                        "version"
+                    ) == 2 ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                ) {
                     throw Exception("Invalid model name")
                 }
                 let efforts = J.Items(model.Value)
@@ -172,7 +178,14 @@ internal class Policy {
         (J.Number(Value, "version") != 2 || (model != "unknown" && effort != "unknown"))
 
     internal func Validate(model string, effort string, seconds int32, network bool, external bool = false) {
-        if !Regex.IsMatch(model, "^[A-Za-z0-9][A-Za-z0-9._-]*$") || !ValidEffort(effort) {
+        if !Regex.IsMatch(
+            model,
+            external && J.Number(
+                Value,
+                "version"
+            ) == 2 ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        ) ||
+            !ValidEffort(effort) {
             throw Exception("Invalid model name or reasoning effort")
         }
         if !external && !ManagedPair(model, effort) {
@@ -180,6 +193,20 @@ internal class Policy {
         }
         if !Allows(model, effort) {
             throw Exception("Model/effort pair is not allowed by the repository policy")
+        }
+        ValidateBudget(seconds, network)
+    }
+
+    internal func ValidatePi(model string, effort string, seconds int32, network bool) {
+        RequestData.ModelIdentifier(model)
+        if J.Number(Value, "version") != 2 ||
+            !AllowsTool("pi", "local-chat-completions") ||
+            effort != "absent" ||
+            model == "unknown" ||
+            !Allows(model, effort) {
+            throw Exception(
+                "Managed pi requires version 2, exact pi/local-chat-completions permission, an exact model and allowed absent effort"
+            )
         }
         ValidateBudget(seconds, network)
     }
@@ -202,20 +229,28 @@ internal class Policy {
             throw Exception("Invalid contribution source")
         }
         if source == "tokate" {
-            if declarations.Count != 1 || J.Text(declarations[0], "harness") != "codex" || J.Text(
-                declarations[0],
-                "provider"
-            ) != "openai" {
-                throw Exception(
-                    "Tokate-launched execution currently supports one codex/openai declaration; other harnesses use external"
+            if declarations.Count != 1 ||
+                !(
+                (J.Text(declarations[0], "harness") == "codex" && J.Text(declarations[0], "provider") == "openai") ||
+                    (
+                    J.Text(declarations[0], "harness") == "pi" && J.Text(
+                        declarations[0],
+                        "provider"
+                    ) == "local-chat-completions"
                 )
+            ) {
+                throw Exception("Managed execution supports one codex/openai or pi/local-chat-completions declaration")
             }
         }
         for tool in declarations {
             if !AllowsTool(J.Text(tool, "harness"), J.Text(tool, "provider")) {
                 throw Exception("Declared harness/provider is not allowed by owner policy")
             }
-            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false, source == "external")
+            if source == "tokate" && J.Text(tool, "harness") == "pi" {
+                ValidatePi(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
+            } else {
+                Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false, source == "external")
+            }
         }
     }
 

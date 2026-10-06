@@ -266,7 +266,7 @@ internal class EligibilityChecks {
             let path = test.Event(claim)
             test.Flow.ResetTraffic()
             let acquired = test.Coordinate(path, traffic: true)
-            test.Flow.Traffic(27, 3, 15, 0, acquired)
+            test.Flow.Traffic(32, 3, 20, 0, acquired)
             let run = test.Prepare("tokate")
             test.Flow.Call([]string{"work", "--run", run})
             test.Flow.Call([]string{"submit", "--run", run})
@@ -344,7 +344,9 @@ internal class EligibilityChecks {
                             "tools",
                             JsonArray(),
                             "verification",
-                            "donor-reported-pass"
+                            "donor-reported-pass",
+                            "attempt",
+                            Check.Text(state["state"]?["reservation"]?["attempt"])
                         )
                     )
                 }

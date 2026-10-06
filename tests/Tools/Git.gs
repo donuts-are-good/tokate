@@ -47,6 +47,22 @@ internal partial class Fixture {
     }
 
     internal func RunGit(args[]string) int32 {
+        let treeTrace = Path.Combine(Root, "local-tree-heads.txt")
+        if File.Exists(treeTrace) && Array.IndexOf(args, "ls-tree") >= 0 && Array.IndexOf(args, "--full-tree") >= 0 {
+            File.AppendAllText(treeTrace, args[args.Length - 1] + "\n")
+        }
+        if Array.IndexOf(args, "ls-tree") >= 0 && Array.IndexOf(args, "--full-tree") >= 0 {
+            let fault = Check.Text(State["local_tree_fault"])
+            if fault == "truncated" || fault == "malformed" {
+                Console.Write(fault == "truncated" ? "100644 blob " + String('a', 40) + "\tresult.txt": "invalid\0")
+                return 0
+            }
+        }
+        if Check.Text(State["local_final_ancestry_fault"]) == "true" && Array.IndexOf(args, "merge-base") >= 0 &&
+            Array.IndexOf(args, "--is-ancestor") >= 0 && args[args.Length - 2] == args[args.Length - 1] {
+            Console.Error.WriteLine("Missing local synchronization ancestry evidence")
+            return 1
+        }
         let pathFault = Check.Text(State["git_diff_fault"])
         if pathFault != "" && Array.IndexOf(args, "--name-only") >= 0 && Array.IndexOf(args, "-z") >= 0 {
             if pathFault == "missing-nul" {

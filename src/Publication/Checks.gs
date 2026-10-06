@@ -27,9 +27,11 @@ internal class Checks {
                 throw Exception("No PR has been published for this run")
             }
             var previous string = ""
+            var initialVerified = directory == ""
             while true {
                 ApiTransport.CheckDeadline()
-                let verified = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
+                let verified = initialVerified ? run: ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
+                initialVerified = false
                 if verified.Text("commit") != run.Text("commit") {
                     throw Exception("Saved commit differs from PR receipt")
                 }

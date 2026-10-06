@@ -22,14 +22,20 @@ internal class Data {
 
     internal func Element() JsonElement -> J.Parse(J.Write(Fields))
 
-    internal func Save(directory string) -> Write(Path.Combine(directory, "run.json"))
+    internal func Save(directory string) {
+        Preparation.ControlPaths(directory)
+        Write(Path.Combine(directory, "run.json"))
+    }
 
     internal func Write(path string) {
         File.WriteAllText(path + ".tmp", J.Write(Fields) + "\n")
         File.Move(path + ".tmp", path, true)
     }
     shared {
-        internal func Load(directory string) Data -> Read(Path.Combine(directory, "run.json"))
+        internal func Load(directory string) Data {
+            Preparation.ControlPaths(directory)
+            return Read(Path.Combine(directory, "run.json"))
+        }
 
         internal func Read(path string) Data {
             let result = Data()

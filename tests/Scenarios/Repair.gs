@@ -218,13 +218,19 @@ internal class RepairChecks {
             }
         }
 
-        private func Valid(test RepairCase) {
+        private func Valid(test RepairCase, measure bool = false) {
+            if measure {
+                SynchronizationChecks.StartTreeTraffic(test.Flow)
+            }
             let result = test.Call()
             Check.That(
                 Check.Text(Check.Json(result.Output)["data"]?["repair"]?["state"]) == "published",
                 "Missing repair result"
             )
             let saved = test.Saved()
+            if measure {
+                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, true)
+            }
             let checks = Check.Text(saved["verification"])
             let id = Check.Text(saved["id"])
             Check.That(saved["verification"]?.AsArray().Count == 2, "Repair omitted full owner verification")
@@ -244,7 +250,13 @@ internal class RepairChecks {
                 body.Contains("<!-- tokate-run:") && Check.Text(pull["head"]?["sha"]) == test.Candidate,
                 "Repair lost head or marker"
             )
+            if measure {
+                SynchronizationChecks.StartTreeTraffic(test.Flow)
+            }
             test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            if measure {
+                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, false)
+            }
             test.Call()
             Check.That(
                 Check.Text(test.Saved()["verification"]) == checks && Check.Text(test.Saved()["id"]) == id,
@@ -569,7 +581,7 @@ internal class RepairChecks {
                     Legacy(test)
                     ChangedAfterVerification(test, "report")
                 } else if name == "valid" || name == "target-sync" {
-                    Valid(test)
+                    Valid(test, name == "target-sync")
                 } else if name == "race" {
                     Race(test)
                 } else if name == "verification" {

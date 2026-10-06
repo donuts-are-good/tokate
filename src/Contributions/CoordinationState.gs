@@ -89,16 +89,7 @@ internal class CoordinationState {
     }
 
     internal func Reservation(actor JsonElement) {
-        let value = Value()
-        let reservation = J.Get(value, "reservation")
-        if AccessState.Task(J.Get(value, "approval")) {
-            RepositoryIdentity.PositiveId(actor)
-            RepositoryIdentity.PositiveId(J.Get(reservation, "actor"))
-        }
-        let replaced = J.Get(reservation, "actor").ToString() != actor.ToString()
-        if replaced || Unix(reservation, "expires") <= DateTimeOffset.UtcNow.ToUnixTimeSeconds() {
-            throw CliFailure("stale_approval", "Reservation expired or belongs to a replaced donor")
-        }
+        LeaseLifecycle.Owner(this, actor, true)
     }
 
     shared {
@@ -118,7 +109,12 @@ internal class CoordinationState {
             if reference.ValueKind == JsonValueKind.Undefined {
                 return result
             }
-            result.Sha = RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
+            return At(repo, issue, J.Text(J.Get(reference, "object"), "sha"))
+        }
+
+        internal func At(repo string, issue int32, sha string) CoordinationState {
+            let result = CoordinationState()
+            result.Sha = RepositoryIdentity.CommitSha(sha)
             let value = RequestData.Parse(GitHub.FileAt(repo, "state.json", result.Sha), 1024 * 1024)
             let stateVersion = J.Number(value, "version")
             let stateRepo = J.Text(value, "repo")
@@ -142,6 +138,8 @@ internal class CoordinationState {
             state.Fields["approval"] = approval
             state.Fields["approval_id"] = Data.Hash(RequestData.Canonical(approved))
             state.Fields["revoked"] = false
+            state.Fields["identity"] = nil
+            state.Fields["publication_revision"] = nil
             state.Fields["reservation"] = nil
             state.Fields["contribution"] = nil
             state.Fields["amendments"] = []Object{}

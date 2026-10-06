@@ -67,7 +67,7 @@ internal class Coordinator {
                     if J.Text(old, "binding") != binding {
                         throw Exception("UUID replay changed actor or request contents")
                     }
-                    if AccessState.Task(J.Get(initial, "approval")) {
+                    if J.Text(request, "action") != "release" && AccessState.Task(J.Get(initial, "approval")) {
                         state.Check(repo, number, donor, actor)
                     }
                     if J.Text(request, "action") == "amend" {
@@ -83,39 +83,18 @@ internal class Coordinator {
             ) {
                 throw CliFailure("stale_approval", "Stale state or approval; evicted requests cannot repeat effects")
             }
-            let record = state.Check(repo, number, donor, actor)
+            let action = J.Text(request, "action")
+            let record = action == "release" ? JsonElement{}: state.Check(repo, number, donor, actor)
             var outcome Object = J.Map()
-            if J.Text(request, "action") == "claim" {
-                let reservation = J.Get(initial, "reservation")
-                let now = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-                if reservation.ValueKind == JsonValueKind.Object && CoordinationState.Unix(
-                    reservation,
-                    "expires"
-                ) > now {
-                    throw Exception("An unexpired reservation already owns this contribution")
-                }
-                let policy = J.Get(record, "policy")
-                let duration = J.Get(policy, "reservation_seconds").ValueKind == JsonValueKind.Undefined ? 86400:
-                J.Number(policy, "reservation_seconds")
-                outcome = J.Map(
-                    "reservation",
-                    J.Text(request, "uuid"),
-                    "donor",
-                    donor,
-                    "actor",
-                    actor,
-                    "created",
-                    now,
-                    "expires",
-                    now + duration
-                )
-                state.Fields["reservation"] = outcome
-                state.Fields["contribution"] = nil
-                state.Fields["amendments"] = []Object{}
+            let originalExpiry = J.Get(initial, "reservation")
+                .ValueKind == JsonValueKind.Object ? CoordinationState.Unix(J.Get(initial, "reservation"), "expires"): 0
+            if action == "claim" || LeaseLifecycle.Transition(action) {
+                outcome = LeaseLifecycle.Apply(state, request, actor, donor, J.Get(record, "policy"))
             } else if J.Text(request, "action") == "amend" {
                 outcome = Amend(repo, number, state, record, request, actor, donor)
             } else {
                 state.Reservation(actor)
+                LeaseLifecycle.Fence(state, J.Text(J.Get(request, "metadata"), "attempt"))
                 let value = state.Value()
                 if J.Get(value, "contribution").ValueKind == JsonValueKind.Object {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
@@ -235,6 +214,9 @@ internal class Coordinator {
                     "donor-reported; exact-commit owner CI required"
                 )
             }
+            if action == "publish" || action == "amend" {
+                state.Fields["publication_revision"] = nil
+            }
             let retained = List[Object]()
             for i in Math.Max(0, outcomes.Count - 31) ... outcomes.Count {
                 retained.Add(outcomes[i])
@@ -246,28 +228,46 @@ internal class Coordinator {
                 Revalidate(repo, number, state, actor, donor)
                 SyncProof(repo, record, updated, J.Get(request, "metadata"), J.Text(request, "expected"))
             }
-            if AccessState.Task(J.Get(updated, "approval")) {
+            if action == "claim" || LeaseLifecycle.Transition(action) || AccessState.Task(J.Get(updated, "approval")) {
                 let live = CoordinationState.Load(repo, number)
                 if live.Sha != state.Sha {
                     throw CliFailure("stale_approval", "Coordination changed before reservation update")
                 }
-                AccessState.Check(repo, number, J.Get(live.Value(), "approval"), actor)
+                if LeaseLifecycle.Transition(action) {
+                    LeaseLifecycle.Owner(live, actor)
+                }
+                if (action == "claim" || LeaseLifecycle.Transition(action)) && action != "release" {
+                    live.Check(repo, number, donor, actor)
+                } else if action != "release" {
+                    AccessState.Check(repo, number, J.Get(live.Value(), "approval"), actor)
+                }
             }
             try {
                 state.Write(
                     repo,
                     number,
                     J.Text(request, "expected"),
-                    CoordinationState.Unix(J.Get(updated, "reservation"), "expires")
+                    LeaseLifecycle.Transition(action) ? originalExpiry: CoordinationState.Unix(
+                        J.Get(updated, "reservation"),
+                        "expires"
+                    )
                 )
             } catch (error Exception) {
+                let inspected = CoordinationState.Load(repo, number)
+                let recorded = RequestData.Recorded(inspected.Value(), actor, request)
+                if recorded.ValueKind != JsonValueKind.Undefined {
+                    throw Exception(
+                        "Coordination write response was lost; exact UUID outcome is recorded. Inspect current state before redelivery.",
+                        error
+                    )
+                }
                 throw Exception(
                     error.Message +
                         "\nPR and coordination writes are not atomic. A physical PR may lack valid authority; inspect verify-pr and redeliver the same saved UUID request only after reading current state.",
                     error
                 )
             }
-            if AccessState.Task(J.Get(updated, "approval")) {
+            if LeaseLifecycle.Transition(action) || AccessState.Task(J.Get(updated, "approval")) {
                 let acquired = CoordinationState.Load(repo, number)
                 if acquired.Sha != state.Sha {
                     throw CliFailure(
@@ -275,8 +275,15 @@ internal class Coordinator {
                         "Coordination changed after reservation update; inspect current state"
                     )
                 }
-                acquired.Check(repo, number, donor, actor)
-                acquired.Reservation(actor)
+                if action == "release" {
+                    if !RequestData.Same(J.Get(acquired.Value(), "reservation"), J.Get(updated, "reservation")) ||
+                        J.Text(J.Get(acquired.Value(), "reservation"), "status") != "released" {
+                        throw Exception("Release outcome differs from recorded ownership evidence")
+                    }
+                } else {
+                    acquired.Check(repo, number, donor, actor)
+                    LeaseLifecycle.Owner(acquired, actor)
+                }
             }
             if J.Text(request, "action") == "amend" {
                 ReceiptVerification.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
@@ -294,6 +301,7 @@ internal class Coordinator {
             donor string
         ) Object {
             state.Reservation(actor)
+            LeaseLifecycle.Fence(state, J.Text(J.Get(request, "metadata"), "attempt"))
             let value = state.Value()
             let original = J.Get(value, "contribution")
             let current = CoordinationState.Current(value)
@@ -486,6 +494,9 @@ internal class Coordinator {
                 entry["sync"] = J.Text(metadata, "sync")
             }
             Synchronization.Keep(entry, history)
+            if LeaseLifecycle.Supported(value) {
+                entry["attempt"] = J.Text(J.Get(value, "reservation"), "attempt")
+            }
             retainedHistory.Add(entry)
             state.Fields["amendments"] = retainedHistory
             return outcome
