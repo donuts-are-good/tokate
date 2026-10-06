@@ -121,7 +121,8 @@ internal class ApiResponse {
 
 internal class ApiCache {
     internal var ETag string = ""
-    internal var Body JsonElement
+    internal var Body string = ""
+    internal var Bytes int64
 }
 
 internal class ApiDeadlineException : Exception {
@@ -131,6 +132,9 @@ internal class ApiDeadlineException : Exception {
 internal class ApiTransport {
     shared {
         private let Cache Dictionary[string, ApiCache] = Dictionary[string, ApiCache]()
+        private const CacheByteLimit int64 = 4 * 1024 * 1024
+        private const CacheEntryLimit int32 = 64
+        private var CacheBytes int64
         private let Clock Stopwatch = Stopwatch.StartNew()
         private var NextMutation double
         private var Reads int32
@@ -140,6 +144,30 @@ internal class ApiTransport {
         private var Deadline double = Double.PositiveInfinity
         private var NextPoll double
         private var NextRead double
+
+        private func RemoveCached(key string) {
+            var cached ApiCache
+            if Cache.Remove(key, out cached) {
+                CacheBytes -= cached.Bytes
+            }
+        }
+
+        private func Remember(key string, response ApiResponse) {
+            RemoveCached(key)
+            if !ValidETag(response.ETag) || response.Body.Trim() == "" {
+                return
+            }
+            let bytes = 2 * (Convert.ToInt64(response.Body.Length) + key.Length + response.ETag.Length) + 256
+            if bytes > CacheByteLimit {
+                return
+            }
+            if Cache.Count >= CacheEntryLimit || CacheBytes + bytes > CacheByteLimit {
+                Cache.Clear()
+                CacheBytes = 0
+            }
+            Cache[key] = ApiCache{ETag: response.ETag, Body: response.Body, Bytes: bytes}
+            CacheBytes += bytes
+        }
 
         internal func BeginDeadline(seconds int32) {
             Deadline = Clock.Elapsed.TotalSeconds + seconds
@@ -338,10 +366,10 @@ internal class ApiTransport {
                             "GitHub returned HTTP 304 without a matching in-memory body. Read failed closed."
                         )
                     }
-                    return cached.Body
+                    return J.Parse(cached.Body)
                 }
                 if response.Status == 404 && missing {
-                    Cache.Remove(key)
+                    RemoveCached(key)
                     return JsonElement{}
                 }
                 let success = response.Status >= 200 && response.Status < 300
@@ -353,10 +381,7 @@ internal class ApiTransport {
                         throw Failure(0, read, 0.0)
                     }
                     if read {
-                        Cache.Remove(key)
-                        if ValidETag(response.ETag) && value.ValueKind != JsonValueKind.Undefined {
-                            Cache[key] = ApiCache{ETag: response.ETag, Body: value}
-                        }
+                        Remember(key, response)
                     }
                     return value
                 }

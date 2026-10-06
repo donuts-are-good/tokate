@@ -12,6 +12,10 @@ import System.Text.Json.Nodes
 
 internal partial class Fixture {
     internal func Answer(value JsonNode) int32 {
+        let padding = Check.Text(State["response_padding"]?[ApiPath])
+        if padding != "" {
+            value["synthetic_padding"] = JsonValue.Create(String('x', Int32.Parse(padding)))
+        }
         let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
         let initial = State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
         Check.Text(State["etag_initial"])
