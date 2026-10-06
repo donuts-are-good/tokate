@@ -21,37 +21,22 @@ curl -qfsSL https://tokate.dev/install.sh | sh
 Installs for your user and sets up PATH. Open a new terminal if prompted.
 Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved work.
 
-The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. The initial observed systems are Ubuntu 24.04 x86_64 CI and a CachyOS rolling x86_64 host; the glibc minimum does not establish support for every distribution. ARM64, musl, Windows, and macOS are not supported. Managed Codex execution requires a ChatGPT login and supports user-local native binaries and npm installations. New setup uses [version-2 coordination](docs/coordination-v2.md) with Trusted task eligibility. See the [support limits](docs/reference.md#install-and-check-support).
+Requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. Tested observations cover Ubuntu 24.04 CI and a CachyOS rolling host; other distributions are not established. ARM64, musl, Windows and macOS are unsupported. Managed execution supports native Codex with a ChatGPT login, or [Pi local execution](docs/pi.md) with a pinned SDK/runtime and an existing no-auth loopback endpoint. See [prerequisites and support limits](docs/reference.md#install-and-check-support).
 
 ## For Owners:
 
-1. Check owner tools with `tokate doctor --owner --auth`, sign in with `gh auth login` if needed, and run `tokate init --repo OWNER/REPO` in your repository.
-2. Select unrestricted models or a whitelist, choose existing project checks, and review the complete policy, pinned workflow and permissions before confirming. Commit the two files; repeated setup preserves customization. A matching release must already include the central reusable workflow.
-   In Settings > Actions > Policies, permit `issue_comment`, `pull_request_target` and `workflow_call` for this entry, including external PR actors. Setup checks event policy; the default public-repository event block is enforced November 2, 2026.
-3. Initialize access once and approve task scope:
-
-```sh
-tokate access --repo OWNER/REPO --operation init
-tokate approve --repo OWNER/REPO --issue 42
-tokate access --repo OWNER/REPO --operation list
-tokate access --repo OWNER/REPO --operation trust --donor DONOR
-```
-
-Trusted is the default; newcomers request access and trusted donors claim approved available work. Use `grant --donor DONOR --issue 42` for one issue or `untrust --donor DONOR` to remove persistent trust. See `tokate init --help`, `tokate access --help` and the [owner policy instructions](docs/reference.md#set-owner-policy-and-approve).
-
-Review the resulting PR and [required checks](docs/reference.md#review-and-accept), then merge when satisfied.
+1. Follow the [owner guide](AGENTS.md#guide-a-repository-owner): check tools with `tokate doctor --owner --auth`, then run `tokate init --repo OWNER/REPO` in your repository.
+2. Review and commit the policy and pinned workflow with your project's existing checks. Setup requires a matching stable release with its hosted shared workflow; see [owner setup and Actions prerequisites](docs/reference.md#set-owner-policy-and-approve).
+3. Initialize access, approve task scope and trust donors or grant access to one issue. New setup defaults to version 2 and Trusted eligibility; newcomers request access before claiming work.
+4. Review the draft PR, receipt and [required checks](docs/reference.md#review-and-accept), then merge when satisfied.
 
 ## For Donors:
 
-1. Follow the [donor setup guide](AGENTS.md#guide-a-donor) to sign in and check your tools with `tokate doctor`.
-2. Request access with `tokate access --repo OWNER/REPO --operation request --issue 42 --scope trust`, then claim approved available work through [coordination](docs/coordination-v2.md#requests-and-authoritative-state). Legacy repositories still use assignment. Tokate discovers or creates your fork; use `--fork DONOR/NAME` for an explicit selection.
-3. Choose an allowed model/effort pair. For legacy version-1 repositories:
+1. Follow the [donor guide](AGENTS.md#guide-a-donor) for GitHub access and [Codex setup](docs/reference.md#prepare-donor-tools-and-defaults) or [Pi setup](docs/pi.md).
+2. Request access if needed, then [claim approved available work](docs/coordination-v2.md#requests-and-authoritative-state) through the coordinator.
+3. [Prepare, work and submit](docs/reference.md#run-and-inspect-work) with an allowed tool/model/effort selection and an agreed budget. Tokate discovers or creates your fork and verifies the result before coordinated draft publication.
 
-```sh
-tokate work --repo OWNER/REPO --issue 42 --model MODEL --effort EFFORT
-```
-
-For version 2, follow the linked preparation and submission commands. Your accounts and AI usage stay under your control.
+Existing assignment-bound repositories remain supported; see [legacy operations](AGENTS.md#legacy-operations-and-recovery). Your accounts and AI usage stay under your control.
 
 For assistants, every command accepts explicit `--json`; `tokate help --json` lists
 arguments and effects. See the [versioned output contract](docs/reference.md#automate-commands).

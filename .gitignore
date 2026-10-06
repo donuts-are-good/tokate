@@ -14,3 +14,5 @@ artifacts/
 
 /task.md
 /CONSTITUTION.md
+/.codex/hooks.json
+/.codex/load_constitution.py
