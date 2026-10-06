@@ -101,6 +101,20 @@ internal partial class Fixture {
                 command.Add(arg == "protocol.file.allow=never" ? "protocol.file.allow=always": arg)
             }
         }
+        if Check.Text(State["mode"]) == "reconcile_merge_pause" && command.Contains("merge") && command.Contains(
+            "--no-ff"
+        ) {
+            let entered = Path.Combine(Root, "reconcile-merge-entered")
+            if File.Exists(entered) {
+                File.WriteAllText(Path.Combine(Root, "reconcile-merge-repeated"), "")
+                return 91
+            }
+            File.WriteAllText(entered, "")
+            select {
+                case <- after(TimeSpan.FromSeconds(60.0)) { }
+            }
+            return 91
+        }
         if Check.Text(State["mode"]) == "slow_candidate" && command.Contains("diff") && command.Contains("--binary") {
             select {
                 case <- after(TimeSpan.FromSeconds(10.0)) { }

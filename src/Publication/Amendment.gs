@@ -117,7 +117,7 @@ internal class Amendment {
             return pull
         }
 
-        private func Authority(run Data, amendment Data?) JsonElement {
+        internal func Authority(run Data, amendment Data?) JsonElement {
             let viewer = GitHub.Api("user")
             if !RepositoryIdentity.SameDonor(viewer, run) {
                 throw CliFailure("authentication_required", "Use the same donor account and numeric identity")
@@ -513,7 +513,7 @@ internal class Amendment {
             }
         }
 
-        private func Remote(run Data, previous string, candidate string) string {
+        internal func Remote(run Data, previous string, candidate string) string {
             let reference = GitHub.Api("repos/" + run.Text("head_repo") + "/git/ref/heads/" + run.Text("branch"))
             let head = J.Text(J.Get(reference, "object"), "sha")
             if head != previous && head != candidate {

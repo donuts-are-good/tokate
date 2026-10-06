@@ -14,7 +14,7 @@ func DiscoveryPeer(socket int32, level int32, option int32, value[]byte, length[
 
 internal class CliDiscovery {
     shared {
-        private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external authorize-sync revoke-sync repair amend submit coordinate policy approve assign revoke claim work recover publish status verify-pr overlaps checks completion help --version"
+        private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external reconcile authorize-sync revoke-sync repair amend submit coordinate policy approve assign revoke claim work recover publish status verify-pr overlaps checks completion help --version"
             .Split(' ')
 
         private func Address(root string) UnixDomainSocketEndPoint -> UnixDomainSocketEndPoint(

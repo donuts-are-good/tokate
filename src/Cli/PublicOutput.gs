@@ -193,6 +193,12 @@ internal class PublicOutput {
             let verification = J.Get(value, "verification")
             result["verification"] = Rows(verification, "state,exit_code,output_truncated,error_truncated", true)
             result["verification_count"] = J.Items(verification).Count
+            if J.Get(value, "reconciliation").ValueKind == JsonValueKind.Object {
+                let local = Select(J.Get(value, "reconciliation"), "phase,previous,upstream,start,target,candidate")
+                local["local"] = true
+                local["verified"] = false
+                result["reconciliation"] = local
+            }
             if V1Continuation.Has(run) {
                 result["predecessor"] = J.Get(value, "continuation")
                 result["continuation_phase"] = run.Text("continuation_phase")
@@ -364,6 +370,15 @@ internal class PublicOutput {
                         }
                     }
                     Actions.Add([]string{"tokate", "status", "--run", RunDirectory, "--json"})
+                    if Command == "reconcile" {
+                        let intent = J.Get(run.Element(), "reconciliation")
+                        if code != "" &&
+                            code != "stale_approval" &&
+                            (J.Text(intent, "phase") == "fetching" || J.Text(intent, "phase") == "merging") {
+                            Actions.Add([]string{"tokate", "reconcile", "--run", RunDirectory, "--resume", "--json"})
+                        }
+                        return
+                    }
                     if run.Text("state") == "preparing" && run.Number("preparation_version") == 1 &&
                         code != "stale_approval" {
                         Actions.Add([]string{"tokate", "prepare", "--run", RunDirectory, "--json"})

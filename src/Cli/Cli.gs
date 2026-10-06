@@ -143,6 +143,11 @@ internal class Cli {
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
             CliOption("sync", "SHA", "Exact live owner synchronization grant"),
+            CliOption(
+                "resume",
+                "",
+                "Inspect saved reconciliation intent and physical Git state without repeating a merge"
+            ),
             CliOption("grant", "SHA", "Synchronization grant to revoke"),
             CliOption("upstream", "SHA", "Exact current trusted target revision"),
             CliOption("commit", "SHA", "Exact candidate commit to verify"),
@@ -266,6 +271,15 @@ internal class Cli {
                 "--run DIR --commit SHA [--summary FILE]",
                 "external --run /path/to/run --commit SHA"
                 ,
+                effects: "local_read local_write github_read"
+            ),
+            CliCommand(
+                "reconcile",
+                "run,resume",
+                "run",
+                "Merge the exact current target in a saved published workspace; no inference, checks or publication.",
+                "--run DIR [--resume]",
+                "reconcile --run /path/to/run",
                 effects: "local_read local_write github_read"
             ),
             CliCommand(

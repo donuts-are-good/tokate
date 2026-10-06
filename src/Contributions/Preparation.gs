@@ -472,7 +472,7 @@ internal class Preparation {
             }
         }
 
-        private func Metadata(checkout string) {
+        private func Metadata(checkout string, reconciliation bool = false) {
             let allowed = []string{
                 "core.repositoryformatversion=0",
                 "core.filemode=true",
@@ -481,13 +481,62 @@ internal class Preparation {
             }
             for entry in Commands.Git(checkout, "config", "--local", "--no-includes", "--list").Split('\n') {
                 if Array.IndexOf(allowed, entry) < 0 {
+                    if reconciliation {
+                        throw Exception(
+                            "Unsafe local Git configuration; inspect repository merge/filter programs and remove unsafe configuration explicitly before reconcile. Workspace preserved."
+                        )
+                    }
                     Reject(checkout)
                 }
             }
             for name in[]string{"info/attributes", "info/exclude", "hooks"} {
                 let path = Path.Combine(checkout, ".git", name)
                 if File.Exists(path) || (Directory.Exists(path) && Directory.GetFileSystemEntries(path).Length > 0) {
+                    if reconciliation {
+                        throw Exception(
+                            "Unsafe local Git attributes, excludes or hooks; inspect metadata explicitly before reconcile. Workspace preserved."
+                        )
+                    }
                     Reject(checkout)
+                }
+            }
+        }
+
+        internal func PublishedSource(checkout string, run Data) {
+            if run.Number("preparation_version") != 1 || !Identified(run) {
+                throw Exception(
+                    "Unidentified saved workspace; use its original prepared run and inspect saved evidence. Workspace preserved."
+                )
+            }
+            try {
+                let source = run.Text("source") == "external" ? Path.Combine(
+                    Path.GetDirectoryName(checkout) ?? "",
+                    "coding"
+                ): checkout
+                Owned(source, run)
+            } catch (error Exception) {
+                throw Exception(
+                    "Unidentified isolated checkout; inspect its preparation marker and use its original saved run. Workspace preserved.",
+                    error
+                )
+            }
+            Verification.Validate(checkout)
+            Metadata(checkout, reconciliation: true)
+            Verification.Candidate(checkout)
+            for entry in Commands.GitRaw(checkout, []string{"ls-files", "--stage", "-z"}).Split('\0') {
+                if !entry.StartsWith("160000 ", StringComparison.Ordinal) {
+                    continue
+                }
+                let tab = entry.IndexOf('\t')
+                if tab < 0 {
+                    throw Exception("Incomplete submodule index evidence; inspect the saved index before reconcile.")
+                }
+                let metadata = Path.Combine(checkout, entry.Substring(tab + 1), ".git")
+                if File.Exists(metadata) || Directory.Exists(metadata) || FileInfo(metadata).LinkTarget != nil {
+                    throw CliFailure(
+                        "invalid_state",
+                        "Initialized submodule metadata is unsupported for reconciliation; preserve and inspect submodule work separately before using this command."
+                    )
                 }
             }
         }

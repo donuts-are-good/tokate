@@ -340,9 +340,20 @@ validate the exact remote receipt and `checks` to inspect CI; pending is not suc
 
 ## Synchronize with upstream
 
-Prepare a local merge retaining the published head and exact current target;
-resolve conflicts explicitly with the owner. The owner grants exact candidate C
-and upstream U; the donor uses the printed grant G:
+Reconcile a published contribution with the current owner-selected target using
+the same donor account. The saved checkout must be clean, and its PR still open.
+Committed donor edits are preserved.
+
+```sh
+tokate reconcile --run DIR
+tokate reconcile --run DIR --resume
+```
+
+Resolve and commit conflicts in the saved checkout, then resume. Resume inspects
+the saved merge without repeating it. Changed authority, unsafe Git metadata,
+initialized submodules and unidentified checkouts require manual inspection.
+The result is local and unverified. The owner grants exact candidate C and target
+U; the donor uses grant G for independent verification and publication:
 
 ```sh
 tokate authorize-sync --repo OWNER/REPO --pr 10 --commit C --upstream U

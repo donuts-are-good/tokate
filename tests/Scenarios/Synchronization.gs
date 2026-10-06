@@ -1,7 +1,9 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.Collections.Generic
+import System.Diagnostics
 import System.IO
 import System.Text.Json.Nodes
 
@@ -269,6 +271,10 @@ internal class SynchronizationChecks {
 
         private func Run(preparation PublishedContribution, v2 bool, mode string) {
             preparation.Restore()
+            if mode.StartsWith("reconcile-", StringComparison.Ordinal) {
+                Reconcile(preparation, v2, mode.Substring("reconcile-".Length))
+                return
+            }
             let coordination = preparation.Coordination
             let flow = coordination.Flow
             let selected = mode == "selected-target" || mode == "authority-policy"
@@ -672,6 +678,273 @@ internal class SynchronizationChecks {
             }
         }
 
+        private func Reconcile(preparation PublishedContribution, v2 bool, mode string) {
+            let coordination = preparation.Coordination
+            let flow = coordination.Flow
+            let run = preparation.Run
+            let checkout = Path.Combine(run, "checkout")
+            let before = Saved(run)
+            let h = Check.Text(before["commit"])
+            let base = Check.Text(before["base"])
+            let verification = File.ReadAllText(Path.Combine(run, "verification.json"))
+            flow.Reload()
+            let inference = Check.Text(flow.State["exec_count"])
+            let pushes = Check.Text(flow.State["git_pushes"])
+            let selected = mode == "selected"
+            if selected {
+                flow.Git("-C", flow.Upstream, "checkout", "release/review")
+            }
+            let conflict = mode == "conflict" || mode == "protected"
+            let upstream = Upstream(flow, conflict: conflict || mode == "interruption")
+            var start = h
+            if mode == "edits" || conflict || mode == "interruption" {
+                PublishedContribution.Write(
+                    checkout,
+                    mode == "edits" ? "local.txt": "shared.txt",
+                    "committed donor work\n"
+                )
+                start = Commit(flow, checkout, "Committed local work")
+            }
+            var index = File.ReadAllBytes(Path.Combine(checkout, ".git/index"))
+            if mode == "dirty" {
+                PublishedContribution.Write(checkout, "private.txt", "uncommitted work\n")
+                File.AppendAllText(Path.Combine(checkout, "result.txt"), "staged local edit\n")
+                flow.Git("-C", checkout, "add", "result.txt")
+                File.AppendAllText(Path.Combine(checkout, "result.txt"), "unstaged local edit\n")
+                index = File.ReadAllBytes(Path.Combine(checkout, ".git/index"))
+            } else if mode == "driver" || mode == "filter" {
+                PublishedContribution.Write(
+                    checkout,
+                    ".gitattributes",
+                    "* " + (mode == "driver" ? "merge=hostile": "filter=hostile") + "\n"
+                )
+                Commit(flow, checkout, "Repository-selected program")
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "config",
+                    mode == "driver" ? "merge.hostile.driver": "filter.hostile.clean",
+                    "touch " + Path.Combine(flow.Temp.Root, "executed")
+                )
+            } else if mode == "metadata" {
+                File.WriteAllText(
+                    Path.Combine(checkout, ".git/objects/info/alternates"),
+                    flow.Upstream + "/.git/objects\n"
+                )
+            } else if mode == "submodule-filter" {
+                let module = Path.Combine(checkout, "module")
+                flow.Git("clone", flow.Upstream, module)
+                PublishedContribution.Write(module, ".gitattributes", "* filter=hostile\n")
+                Commit(flow, module, "Submodule attributes")
+                Commit(flow, checkout, "Embedded submodule")
+                flow.Git(
+                    "-C",
+                    module,
+                    "config",
+                    "filter.hostile.clean",
+                    "touch " + Path.Combine(flow.Temp.Root, "executed")
+                )
+                File.AppendAllText(Path.Combine(module, "shared.txt"), "dirty submodule work\n")
+            } else if mode == "unidentified" {
+                File.Delete(Path.Combine(run, v2 ? "coding": "checkout", ".git/tokate-preparation.json"))
+            } else if mode == "operation" {
+                Directory.CreateDirectory(Path.Combine(checkout, ".git/rebase-merge"))
+            } else if mode == "local-divergence" {
+                flow.Git("-C", checkout, "checkout", "--detach", base)
+            } else if mode == "fork-divergence" {
+                flow.Git(
+                    "-C",
+                    Path.Combine(flow.Bin, "fork"),
+                    "update-ref",
+                    "refs/heads/" + Check.Text(before["branch"]),
+                    base
+                )
+            } else if mode == "unpublished" || mode == "failed" {
+                before["state"] = JsonValue.Create(mode == "failed" ? "failed": "claimed")
+                Check.SaveJson(Path.Combine(run, "run.json"), before)
+            } else if mode == "closed" || mode == "merged" {
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull[mode == "closed" ? "state": "merged"] = mode == "closed" ? JsonValue.Create(
+                    "closed"
+                ): JsonValue.Create(true)
+                flow.Save()
+            }
+            let refuse = Array.IndexOf(
+                []string{
+                    "dirty",
+                    "driver",
+                    "filter",
+                    "metadata",
+                    "submodule-filter",
+                    "unidentified",
+                    "operation",
+                    "local-divergence",
+                    "fork-divergence",
+                    "unpublished",
+                    "failed",
+                    "closed",
+                    "merged",
+                    "donor"
+                },
+                mode
+            ) >= 0
+            flow.ResetTraffic()
+            if mode == "interruption" {
+                flow.State["mode"] = JsonValue.Create("reconcile_merge_pause")
+                flow.Save()
+                let entered = Path.Combine(flow.Bin, "reconcile-merge-entered")
+                let repeated = Path.Combine(flow.Bin, "reconcile-merge-repeated")
+                let info = ProcessStartInfo(flow.Binary)
+                info.UseShellExecute = false
+                info.RedirectStandardOutput = true
+                info.RedirectStandardError = true
+                info.Environment.Clear()
+                for entry in flow.Temp.Env {
+                    info.Environment[entry.Key] = entry.Value
+                }
+                info.ArgumentList.Add("reconcile")
+                info.ArgumentList.Add("--run")
+                info.ArgumentList.Add(run)
+                using let process = Process.Start(info) ?? throw Exception("Missing reconciliation process")
+                try {
+                    let watch = Stopwatch.StartNew()
+                    while !File.Exists(entered) && !process.HasExited {
+                        Check.That(watch.Elapsed.TotalSeconds < 20, "Reconciliation did not reach the Git merge")
+                        select {
+                            case <- after(TimeSpan.FromMilliseconds(10.0)) { }
+                        }
+                    }
+                    Check.That(File.Exists(entered) && !process.HasExited, "Reconciliation exited before Git merge interruption")
+                    Check.That(Check.Text(Saved(run)["reconciliation"]?["phase"]) == "merging", "Missing saved merge intent")
+                } finally {
+                    if !process.HasExited {
+                        try {
+                            process.Kill(true)
+                        } catch (error InvalidOperationException) { }
+                    }
+                    process.WaitForExit()
+                }
+                let physicalIndex = Convert.ToHexString(File.ReadAllBytes(Path.Combine(checkout, ".git/index")))
+                let physicalHead = flow.Git("-C", checkout, "rev-parse", "HEAD")
+                Check.That(physicalHead == start && !File.Exists(Path.Combine(checkout, ".git/MERGE_HEAD")), "Git merge ran before interruption")
+                flow.Call([]string{"reconcile", "--run", run, "--resume"}, 1)
+                Check.That(
+                    physicalHead == flow.Git("-C", checkout, "rev-parse", "HEAD") &&
+                        physicalIndex == Convert.ToHexString(File.ReadAllBytes(Path.Combine(checkout, ".git/index"))) &&
+                        !File.Exists(repeated),
+                    "Resume repeated interrupted merge or changed index"
+                )
+                return
+            }
+            let result = flow.Call(
+                []string{"reconcile", "--run", run, "--json"},
+                refuse || conflict ? 1: 0,
+                owner: mode == "donor"
+            )
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["exec_count"]) == inference && Check.Text(flow.State["git_pushes"]) == pushes,
+                "Reconciliation launched inference or pushed"
+            )
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "Reconciliation wrote remote authority")
+            }
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "verification.json")) == verification,
+                "Reconciliation ran verification"
+            )
+            Check.That(
+                Check.Text(Saved(run)["commit"]) == h && Check.Text(Saved(run)["base"]) == base,
+                "Reconciliation replaced published head or approved base"
+            )
+            Check.That(!File.Exists(Path.Combine(flow.Temp.Root, "executed")), "Repository-selected program executed")
+            if refuse {
+                Check.That(Saved(run)["reconciliation"] == nil, "Refusal created a merge intent")
+                if mode == "dirty" {
+                    Check.That(
+                        File.ReadAllText(Path.Combine(checkout, "private.txt")) == "uncommitted work\n" &&
+                            Convert.ToHexString(index) == Convert.ToHexString(
+                            File.ReadAllBytes(Path.Combine(checkout, ".git/index"))
+                        ),
+                        "Dirty refusal lost work"
+                    )
+                }
+                return
+            }
+            if conflict {
+                let pending = File.ReadAllText(Path.Combine(checkout, ".git/MERGE_HEAD"))
+                let unresolved = Convert.ToHexString(File.ReadAllBytes(Path.Combine(checkout, ".git/index")))
+                flow.Call([]string{"reconcile", "--run", run}, 1)
+                flow.Call([]string{"reconcile", "--run", run, "--resume"}, 1)
+                Check.That(
+                    File.ReadAllText(Path.Combine(checkout, ".git/MERGE_HEAD")) == pending && Convert.ToHexString(
+                        File.ReadAllBytes(Path.Combine(checkout, ".git/index"))
+                    ) == unresolved,
+                    "Resume discarded conflict state"
+                )
+                PublishedContribution.Write(checkout, "shared.txt", "explicit resolution\n")
+                if mode == "protected" {
+                    File.AppendAllText(Path.Combine(checkout, "protected/content"), "unapproved alteration\n")
+                }
+                Commit(flow, checkout, "Explicit conflict resolution")
+                if mode == "protected" {
+                    let rejected = flow.Call([]string{"reconcile", "--run", run, "--resume"}, 1)
+                    Check.Contains(rejected.Output + rejected.Error, "Synchronization changes protected owner content")
+                    return
+                }
+                flow.Call([]string{"reconcile", "--run", run, "--resume"})
+            } else {
+                let data = Check.Json(result.Output)["data"]
+                Check.That(
+                    Check.Text(data?["local"]) == "true" && Check.Text(data?["verified"]) == "false",
+                    "Candidate was not local and unverified"
+                )
+            }
+            let candidate = Check.Text(Saved(run)["reconciliation"]?["candidate"])
+            flow.Git("-C", checkout, "merge-base", "--is-ancestor", start, candidate)
+            flow.Git("-C", checkout, "merge-base", "--is-ancestor", upstream, candidate)
+            flow.Call([]string{"reconcile", "--run", run, "--resume"})
+            if mode == "moving-target" {
+                PublishedContribution.Write(flow.Upstream, "movement.txt", "target changed\n")
+                flow.Commit("Move target")
+            } else if mode == "moving-head" {
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let head = pull["head"] ?? throw Exception("Missing PR head")
+                head["sha"] = JsonValue.Create(base)
+                flow.Save()
+            } else if mode == "moving-approval" {
+                flow.Reload()
+                let issue = flow.State["issue"] ?? throw Exception("Missing issue")
+                issue["title"] = JsonValue.Create("Changed task")
+                flow.Save()
+            }
+            if mode.StartsWith("moving-", StringComparison.Ordinal) {
+                flow.Call([]string{"reconcile", "--run", run, "--resume"}, 1)
+                Check.That(
+                    flow.Git("-C", checkout, "rev-parse", "HEAD") == candidate,
+                    "Changed authority lost candidate"
+                )
+                return
+            }
+            if mode == "edits" {
+                Check.That(
+                    File.ReadAllText(Path.Combine(checkout, "local.txt")) == "committed donor work\n",
+                    "Merge lost committed edits"
+                )
+            }
+            let grant = Grant(flow, candidate, upstream)
+            Amend(flow, run, candidate, grant)
+            if v2 {
+                flow.Reload()
+                coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
+                Amend(flow, run, candidate, grant)
+            }
+            Check.That(Check.Text(Saved(run)["commit"]) == candidate, "Amend did not publish reconciled candidate")
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+        }
+
         internal func All(binary string, only string = "", partition int32 = 0) {
             let selectors = List[string](only.Split(','))
             let matchedSelectors = HashSet[string]()
@@ -725,7 +998,29 @@ internal class SynchronizationChecks {
                         "unresolved",
                         "after-push",
                         "after-coordinate",
-                        "state-mismatch"
+                        "state-mismatch",
+                        "reconcile-edits",
+                        "reconcile-selected",
+                        "reconcile-dirty",
+                        "reconcile-fork-divergence",
+                        "reconcile-driver",
+                        "reconcile-filter",
+                        "reconcile-metadata",
+                        "reconcile-submodule-filter",
+                        "reconcile-unidentified",
+                        "reconcile-operation",
+                        "reconcile-local-divergence",
+                        "reconcile-unpublished",
+                        "reconcile-failed",
+                        "reconcile-closed",
+                        "reconcile-merged",
+                        "reconcile-donor",
+                        "reconcile-moving-target",
+                        "reconcile-moving-head",
+                        "reconcile-moving-approval",
+                        "reconcile-conflict",
+                        "reconcile-interruption",
+                        "reconcile-protected"
                     } {
                         index++
                         if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
@@ -746,7 +1041,9 @@ internal class SynchronizationChecks {
                         if !CiShard.Include("Synchronization/" + version + "/" + mode) {
                             continue
                         }
-                        let target = mode == "selected-target" || mode == "authority-policy" ? "release/review": ""
+                        let target = mode == "selected-target" ||
+                            mode == "authority-policy" ||
+                            mode == "reconcile-selected" ? "release/review": ""
                         let key = version + "/" + target
                         if !preparations.ContainsKey(key) {
                             preparations[key] = PublishedContribution.Create(
