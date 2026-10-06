@@ -10,11 +10,12 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-    <Version>0.2.62</Version>
+    <Version>0.2.63</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.gs" />
     <EmbeddedResource Include="templates/*" />
+    <EmbeddedResource Include=".github/workflows/tokate-shared.yml" LogicalName="Tokate.templates.coordinator.yml" />
     <EmbeddedResource Include="site/install.sh" LogicalName="Tokate.templates.install.sh" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
   </ItemGroup>
