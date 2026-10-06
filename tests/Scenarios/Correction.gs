@@ -567,6 +567,14 @@ internal class CorrectionChecks {
                     Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "Uncertain missing PR was retried")
                 } else {
                     if mode == "push_fail_after_write" {
+                        let reportPath = Path.Combine(run, "original-evidence/report.md")
+                        let report = File.ReadAllText(reportPath)
+                        let stamp = File.GetLastWriteTimeUtc(reportPath)
+                        File.WriteAllText(reportPath, String('x', report.Length))
+                        File.SetLastWriteTimeUtc(reportPath, stamp)
+                        Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "archive changed")
+                        Check.Contains(Recover(flow, run, commit, 1).Error, "archive changed")
+                        File.WriteAllText(reportPath, report)
                         Recover(flow, run, commit)
                     }
                     flow.Call([]string{"publish", "--run", run})
@@ -674,6 +682,9 @@ internal class CorrectionChecks {
             let run = flow.Claim()
             flow.Mode("staged_whitespace")
             flow.Call([]string{"work", "--run", run}, 1)
+            let head = flow.Git("-C", Path.Combine(run, "checkout"), "rev-parse", "HEAD")
+            Check.Contains(Recover(flow, run, head, 1).Error, "original-evidence")
+            Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Missing archive accepted a candidate")
             let legacy = Read(run)
             for key in[]string{
                 "turn_completed",
@@ -688,6 +699,11 @@ internal class CorrectionChecks {
             File.WriteAllText(Path.Combine(run, "run.json"), legacy.ToJsonString())
             Prepared(flow, run)
             let commit = Correct(flow, run)
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            legacy["execution_seconds"] = JsonValue.Create(12345)
+            File.WriteAllText(Path.Combine(run, "run.json"), legacy.ToJsonString())
+            Check.Contains(Recover(flow, run, commit, 1).Error, "execution attribution changed: execution_seconds")
+            File.WriteAllText(Path.Combine(run, "run.json"), original)
             let reportPath = Path.Combine(run, "original-evidence/report.md")
             let report = File.ReadAllText(reportPath)
             File.AppendAllText(reportPath, "Archive was changed\n")

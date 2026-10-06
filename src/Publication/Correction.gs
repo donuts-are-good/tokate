@@ -97,7 +97,7 @@ internal class Correction {
             }
         }
 
-        internal func Authority(directory string, run Data) JsonElement {
+        internal func Authority(directory string, run Data, requireArchive bool = false) JsonElement {
             let record = ContributionClaim.Recheck(run)
             Fork(run)
             if run.Number("version") == 2 {
@@ -107,7 +107,7 @@ internal class Correction {
                 }
             }
             let archive = Path.Combine(directory, "original-evidence")
-            if Directory.Exists(archive) {
+            if requireArchive || Directory.Exists(archive) {
                 OriginalEvidence.Load(directory, run)
                 let pinned = J.Parse(File.ReadAllText(Path.Combine(archive, "approval.json")))
                 for key in[]string{"approval", "policy", "template"} {
@@ -296,7 +296,7 @@ internal class Correction {
             )
             let run = Data.Load(directory)
             Completed(directory, run)
-            let record = Authority(directory, run)
+            let record = Authority(directory, run, requireArchive: args.Get("prepare") != "true")
             if args.Get("prepare") == "true" {
                 if Publication.Pulls(run).Count != 0 {
                     throw Exception("Contribution already has a physical PR; inspect publication instead")
@@ -308,7 +308,6 @@ internal class Correction {
                 )
                 return
             }
-            OriginalEvidence.Load(directory)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
             if seconds > J.Number(J.Get(record, "policy"), "max_seconds") {
