@@ -50,7 +50,7 @@ work passes candidate capture, protected-path checks and independent verificatio
 before the coordinator opens a draft PR.
 
 The native proof uses the pinned SDK and a deterministic local server without
-model inference. Run it separately with an existing installation:
+model inference. From a source checkout built with `bash scripts/build.sh`, run:
 
 ```sh
 python3 scripts/pi-proof.py --pi-root /absolute/installed/node_modules \
