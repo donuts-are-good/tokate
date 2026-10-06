@@ -17,7 +17,7 @@ internal class CorrectionChecks {
             Check.That((flow.State["pulls"]?.AsArray().Count ?? 0) == prs, "Unexpected or duplicate PR")
         }
 
-        private func Correct(flow NativeFixture, run string, text string = "Explicit donor correction\n") string {
+        internal func Correct(flow NativeFixture, run string, text string = "Explicit donor correction\n") string {
             File.WriteAllText(Path.Combine(run, "checkout/result.txt"), text)
             return Commit(flow, run)
         }
@@ -40,7 +40,7 @@ internal class CorrectionChecks {
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
-        private func Recover(
+        internal func Recover(
             flow NativeFixture,
             run string,
             commit string,
@@ -147,6 +147,10 @@ internal class CorrectionChecks {
             Check.That(saved["previous_published_head"] == nil, "Unpublished candidate treated as previous PR")
             Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "manual/unknown")
             Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "cover only the original completed turn")
+            Check.That(
+                !File.ReadAllText(Path.Combine(run, "pr-body.md")).Contains("Fresh v1 attempt seeded"),
+                "Ordinary correction invented interrupted origin"
+            )
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             flow.Call([]string{"recover", "--run", run, "--prepare"}, 1)
             Recover(flow, run, commit, 1)

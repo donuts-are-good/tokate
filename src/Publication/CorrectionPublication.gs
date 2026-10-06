@@ -94,6 +94,7 @@ internal class CorrectionPublication {
         }
 
         private func NativeBody(run Data, correction Data, record JsonElement, receipt JsonElement) string {
+            let prior = J.Get(receipt, "predecessor")
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
             values["report"] = PrBody.Report(
@@ -106,7 +107,8 @@ internal class CorrectionPublication {
                     correction
                     .Number("seconds").ToString() +
                     " second verification budget; original declarations cover only the original completed turn." +
-                    PublicSummary.Tools(J.Get(correction.Element(), "tools"), "Donor-reported correction tools")
+                    PublicSummary.Tools(J.Get(correction.Element(), "tools"), "Donor-reported correction tools") +
+                    (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + PrBody.ContinuationReport(prior).Trim())
             )
             values["donor"] = run.Text("donor")
             values["model"] = PublicSummary.Identifier(run.Text("model"))

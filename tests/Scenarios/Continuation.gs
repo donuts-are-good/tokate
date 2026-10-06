@@ -207,6 +207,133 @@ internal class ContinuationChecks {
             }
         }
 
+        private func Correction(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow, true)
+            let old = Read(source)
+            Check.That(
+                Check.Text(old["state"]) == "failed" && old["usage"] == nil,
+                "Predecessor invented success or usage"
+            )
+            let sourceEvidence = Dictionary[string, string]()
+            for file in[]string{
+                "run.json",
+                "events.jsonl",
+                "stderr.log",
+                "checkout/tracked.txt",
+                "checkout/imported.txt"
+            } {
+                sourceEvidence[file] = File.ReadAllText(Path.Combine(source, file))
+            }
+            Grant(flow, source)
+            flow.Mode("staged_whitespace")
+            let fresh = Import(flow, source)
+            let imported = Read(fresh)
+            let prior = imported["continuation"]?.DeepClone() ?? throw Exception("Missing fixture predecessor")
+            let manifest = Check.Text(imported["continuation_manifest_sha256"])
+            let importEvidence = File.ReadAllText(Path.Combine(fresh, "continuation.json"))
+            Check.That(manifest != "", "Missing fixture import identity")
+            Check.That(
+                imported["usage"] == nil && imported["verification"] == nil && imported["turn_completed"] == nil,
+                "Continuation invented predecessor completion evidence"
+            )
+            Check.Contains(flow.Call([]string{"work", "--run", fresh, "--yes"}, 1).Error, "trailing whitespace")
+            let failed = Read(fresh)
+            Check.That(Check.Text(failed["turn_completed"]) == "true", "Correction lacks a completed fresh turn")
+            Check.That(!File.Exists(Path.Combine(fresh, "verification.json")), "Failed candidate ran checks")
+            Count(flow, 2, 2)
+            flow.NoPr()
+            let originalEvidence = Dictionary[string, string]()
+            for file in[]string{"run.json", "events.jsonl", "stderr.log", "report.md"} {
+                originalEvidence[file] = File.ReadAllText(Path.Combine(fresh, file))
+            }
+            flow.Call([]string{"recover", "--run", fresh, "--prepare"})
+            let commit = CorrectionChecks.Correct(flow, fresh)
+            CorrectionChecks.Recover(flow, fresh, commit)
+            Count(flow, 2, 2)
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            flow.Reload()
+            Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Correction did not publish exactly one PR")
+            let body = Check.Text(flow.State["pulls"]?[0]?["body"])
+            let prefix = "Fresh v1 attempt seeded from unpublished interrupted attempt "
+            let start = body.IndexOf(prefix)
+            Check.That(start >= 0, "Correction lost interrupted-origin paragraph")
+            Check.That(start == body.LastIndexOf(prefix), "Correction duplicated interrupted origin")
+            let end = body.IndexOf("\n<!-- tokate-report:end -->", start)
+            Check.That(end > start, "Correction interrupted-origin paragraph is incomplete")
+            let origin = body.Substring(start, end - start)
+            Check.Contains(origin, "unpublished interrupted attempt " + Check.Text(old["id"]))
+            Check.Contains(origin, "predecessor approval " + Check.Text(old["approval"]))
+            Check.Contains(origin, "Preserved origin state: failed; failure: inference_interrupted")
+            Check.Contains(origin, "The predecessor is not retroactively successful.")
+            Check.Contains(origin, "Missing prior usage, reports and verification are not reconstructed.")
+            Check.Contains(origin, "Usage and checks below describe the new attempt")
+            Check.Contains(body, "Correction: separate 30 second verification budget")
+            Check.Contains(body, "original declarations cover only the original completed turn")
+            Check.Contains(body, "| Donor-reported correction tools |")
+            Check.Contains(body, "| manual/unknown | unknown | unknown | unknown |")
+            let receiptStart = body.IndexOf("<!-- tokate-receipt:") + "<!-- tokate-receipt:".Length
+            let receiptEnd = body.IndexOf(" -->", receiptStart)
+            let receipt = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))
+            Check.That(JsonNode.DeepEquals(receipt["predecessor"], prior), "Correction changed predecessor receipt")
+            Check.That(Check.Text(receipt["import_manifest_sha256"]) == manifest, "Correction changed import identity")
+            Check.That(Check.Text(receipt["head"]) == commit, "Correction receipt lost current head")
+            Check.That(Check.Text(receipt["correction"]?["head"]) == commit, "Correction attribution lost exact head")
+            Check.That(receipt["correction"]?["tools"]?.AsArray().Count == 0, "Manual correction invented tools")
+            let corrected = Read(fresh)
+            Check.That(
+                JsonNode.DeepEquals(corrected["usage"], failed["usage"]),
+                "Correction changed current turn usage"
+            )
+            Check.That(
+                JsonNode.DeepEquals(corrected["execution_seconds"], failed["execution_seconds"]),
+                "Correction changed current execution attribution"
+            )
+            Check.That(corrected["verification"]?.AsArray().Count == 1, "Correction skipped original owner checks")
+            Check.That(
+                File.ReadAllText(Path.Combine(fresh, "continuation.json")) == importEvidence,
+                "Correction changed captured import manifest"
+            )
+            let receiptRegion = body.Substring(body.IndexOf("<!-- tokate-receipt:"))
+            for replacement in[]string{"", origin.Replace("not retroactively successful", "retroactively successful")} {
+                let changed = body.Replace(origin, replacement)
+                Check.That(changed != body, "Origin tamper fixture did not change report")
+                Check.That(
+                    changed.Substring(changed.IndexOf("<!-- tokate-receipt:")) == receiptRegion,
+                    "Origin tamper fixture changed receipt"
+                )
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing fixture PR")
+                pull["body"] = JsonValue.Create(changed)
+                flow.Save()
+                let refused = flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+                Check.Contains(refused.Output + refused.Error, "PR report omitted interrupted-origin provenance")
+                flow.Reload()
+                let restored = flow.State["pulls"]?[0] ?? throw Exception("Missing fixture PR")
+                restored["body"] = JsonValue.Create(body)
+                flow.Save()
+            }
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            for file in sourceEvidence.Keys {
+                Check.That(
+                    File.ReadAllText(Path.Combine(source, file)) == sourceEvidence[file],
+                    "Correction changed interrupted evidence: " + file
+                )
+            }
+            for file in originalEvidence.Keys {
+                Check.That(
+                    File.ReadAllText(Path.Combine(fresh, "original-evidence", file)) == originalEvidence[file],
+                    "Correction changed completed-attempt evidence: " + file
+                )
+            }
+            Check.That(
+                flow.Git("-C", Path.Combine(flow.Bin, "fork"), "rev-parse", Check.Text(old["branch"])) == Check.Text(
+                    old["base"]
+                ),
+                "Correction changed interrupted source branch"
+            )
+            Count(flow, 2, 2)
+        }
+
         private func NumericApproval(flow NativeFixture, prior string, donorId int64, repoId int64) string {
             flow.Git("-C", flow.Upstream, "checkout", "--quiet", "--detach", prior)
             let path = Path.Combine(flow.Upstream, ".github/tokate-approval.json")
@@ -816,7 +943,16 @@ internal class ContinuationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{"Flow", "Owner", "Refusals", "Interruptions", "Cache", "Amendment", "Budget"} {
+            for name in[]string{
+                "Flow",
+                "Owner",
+                "Refusals",
+                "Interruptions",
+                "Cache",
+                "Amendment",
+                "Correction",
+                "Budget"
+            } {
                 if selected != "" && name != selected {
                     continue
                 }
@@ -841,6 +977,9 @@ internal class ContinuationChecks {
                     }
                     case "Amendment" {
                         Amendment(binary)
+                    }
+                    case "Correction" {
+                        Correction(binary)
                     }
                     case "Budget" {
                         Budget(binary)
