@@ -253,7 +253,7 @@ internal class RepairChecks {
             if measure {
                 SynchronizationChecks.StartTreeTraffic(test.Flow)
             }
-            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            VerifyReceipt(test)
             if measure {
                 SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, false)
             }
@@ -466,6 +466,77 @@ internal class RepairChecks {
             }
         }
 
+        private func VerifyReceipt(test RepairCase, code int32 = 0, branchReads int32 = 1) Result {
+            let flow = test.Flow
+            flow.ResetTraffic()
+            let result = flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, code, owner: true)
+            flow.Reload()
+            var repositories int32
+            var branches int32
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                if Check.Text(call["method"]) != "GET" {
+                    continue
+                }
+                let path = Check.Text(call["path"])
+                if path == "repos/donor/project" {
+                    repositories++
+                } else if path == "repos/donor/project/git/ref/heads/" + test.Branch {
+                    branches++
+                }
+            }
+            Check.That(repositories == 1, "Repair receipt must read fork metadata once per independent pass")
+            Check.That(branches == branchReads, "Repair receipt lost its exact branch-head read")
+            return result
+        }
+
+        private func ForkReceipt(test RepairCase) {
+            test.Call()
+            let flow = test.Flow
+            flow.Reload()
+            flow.State["fork_push"] = JsonValue.Create(false)
+            flow.Save()
+            VerifyReceipt(test)
+            for fault in[]string{"fork_id", "fork_owner_id", "fork_parent", "fork_parent_id", "branch"} {
+                if fault == "branch" {
+                    flow.Git(
+                        "-C",
+                        Path.Combine(flow.Bin, "fork"),
+                        "update-ref",
+                        "refs/heads/" + test.Branch,
+                        test.Previous
+                    )
+                } else {
+                    flow.Reload()
+                    flow.State[fault] = fault == "fork_parent" ? JsonValue.Create("owner/other") as JsonNode:
+                    JsonValue.Create(999) as JsonNode
+                    flow.Save()
+                }
+                let result = VerifyReceipt(test, 1, fault == "fork_id" || fault == "branch" ? 1: 0)
+                Check.Contains(
+                    result.Error,
+                    fault == "fork_id" ? "Repair receipt head repository identity changed": (
+                        fault == "fork_owner_id" ? "numerically owned": (
+                            fault == "branch" ? "exact declared commit": "not a fork"
+                        )
+                    )
+                )
+                if fault == "branch" {
+                    flow.Git(
+                        "-C",
+                        Path.Combine(flow.Bin, "fork"),
+                        "update-ref",
+                        "refs/heads/" + test.Branch,
+                        test.Candidate
+                    )
+                } else {
+                    flow.State.AsObject().Remove(fault)
+                    flow.Save()
+                }
+                VerifyReceipt(test)
+                Console.WriteLine("PASS repair receipt fork " + fault)
+            }
+        }
+
         private func ExactReceipt(test RepairCase, fault string) {
             test.Call()
             test.Flow.Reload()
@@ -491,7 +562,11 @@ internal class RepairChecks {
                 )
             }
             test.Flow.Save()
-            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+            if fault == "head_repository_id" {
+                Check.Contains(VerifyReceipt(test, 1).Error, "Repair receipt head repository identity changed")
+            } else {
+                test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+            }
         }
 
         private func Race(test RepairCase) {
@@ -559,6 +634,7 @@ internal class RepairChecks {
                 "receipt-report",
                 "receipt-donor_id",
                 "receipt-head_repository_id",
+                "receipt-fork",
                 "receipt-sync"
             } {
                 if selected != "" && selected != name {
@@ -588,6 +664,8 @@ internal class RepairChecks {
                     Failed(test)
                 } else if name.StartsWith("saved-") {
                     ChangedAfterVerification(test, name.Substring(6))
+                } else if name == "receipt-fork" {
+                    ForkReceipt(test)
                 } else if name.StartsWith("receipt-") {
                     ExactReceipt(test, name.Substring(8))
                 } else if name == "lost_push_response" ||
