@@ -31,7 +31,7 @@ internal class CorrectionPublication {
                 run.Text("repo"),
                 run.Number("issue"),
                 run.Text("approval"),
-                run.Text("state_sha"),
+                (run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")),
                 run.Text("id"),
                 run.Text("donor"),
                 correction.Text("commit")
@@ -264,6 +264,7 @@ internal class CorrectionPublication {
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(actor)
+            LeaseLifecycle.Fence(state, run.Text("attempt"))
             let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), actor)
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
@@ -279,7 +280,9 @@ internal class CorrectionPublication {
                 throw CliFailure("stale_approval", "Original reservation or approval changed")
             }
             Correction.Fork(run)
-            if state.Sha == run.Text("state_sha") {
+            if state.Sha == (
+                run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+            ) {
                 Correction.Authority(directory, run)
                 return state
             }
@@ -291,7 +294,9 @@ internal class CorrectionPublication {
             let parents = J.Items(J.Get(commit, "parents"))
             let outcome = RequestData.Recorded(value, actor, request)
             let failure = "Stale coordination revision; only the exact saved publication transition can resume"
-            let expected = run.Text("state_sha")
+            let expected = (
+                run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+            )
             if parents.Count != 1 || J.Text(parents[0], "sha") != expected {
                 throw CliFailure("stale_approval", failure)
             }
@@ -336,6 +341,10 @@ internal class CorrectionPublication {
                 var intent = J.Get(correction.Element(), "publication")
                 if intent.ValueKind == JsonValueKind.Undefined {
                     Correction.Authority(directory, run)
+                    let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
+                    ContributionClaim.RecheckV2(run)
+                    run.Fields["publication_expected"] = live.Sha
+                    run.Save(directory)
                     correction.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")
                     let request = Submission.PublicationRequest(run, correction)
                     RequestData.Parse(J.Write(request))
@@ -354,7 +363,9 @@ internal class CorrectionPublication {
                 let stage = J.Text(intent, "stage")
                 var remote = Remote(run, correction, stage == "prepared")
                 let existing = Publication.Find(run, J.Parse(J.Write(Receipt(run, correction))))
-                if state.Sha != run.Text("state_sha") {
+                if state.Sha != (
+                    run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+                ) {
                     if existing.ValueKind == JsonValueKind.Undefined || remote != correction.Text("commit") || J.Number(
                         J.Get(J.Get(state.Value(), "contribution"), "outcome"),
                         "pr"

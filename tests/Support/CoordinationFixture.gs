@@ -112,7 +112,7 @@ internal open class CoordinationFixture : IDisposable {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(selected ? 10: 9, 3, 1, 0, result)
+        Flow.Traffic(selected ? 18: 16, 3, selected ? 9: 8, 0, result)
         return request
     }
 
@@ -177,7 +177,9 @@ internal open class CoordinationFixture : IDisposable {
                 "tools",
                 Check.Json(File.ReadAllText(Tools)),
                 "verification",
-                "donor-reported-pass"
+                "donor-reported-pass",
+                "attempt",
+                Check.Text(state["state"]?["reservation"]?["attempt"])
             )
         )
     }

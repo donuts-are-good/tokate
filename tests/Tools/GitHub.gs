@@ -928,7 +928,8 @@ internal partial class Fixture {
             "Rendezvous requires exactly one parent matching the shared expected state"
         )
         let proposed = Check.Json(Git("upstream", []string{"show", sha + ":state.json"}))
-        let participant = Check.Text(proposed["reservation"]?["reservation"])
+        let outcomes = proposed["outcomes"]?.AsArray() ?? throw Exception("Missing mutation outcomes")
+        let participant = Check.Text(outcomes[outcomes.Count - 1]?["uuid"])
         let first = Check.Text(rendezvous["first"])
         let second = Check.Text(rendezvous["second"])
         Check.That(participant == first || participant == second, "Unexpected claim rendezvous participant")

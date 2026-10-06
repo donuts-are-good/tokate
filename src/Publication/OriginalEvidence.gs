@@ -142,6 +142,7 @@ internal class OriginalEvidence {
                 "head_repo",
                 "approval",
                 "state_sha",
+                "attempt",
                 "base",
                 "base_branch",
                 "policy_hash",

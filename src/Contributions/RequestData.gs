@@ -231,10 +231,10 @@ internal class RequestData {
             }
             RepositoryIdentity.CommitSha(J.Text(value, "expected"))
             let metadata = J.Get(value, "metadata")
-            if J.Text(value, "action") == "claim" {
+            if J.Text(value, "action") == "claim" || LeaseLifecycle.Transition(J.Text(value, "action")) {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
-                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary")
+                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary,attempt")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
@@ -251,7 +251,7 @@ internal class RequestData {
                     Correction(correction, J.Text(metadata, "head"), JsonElement{})
                 }
             } else if J.Text(value, "action") == "amend" {
-                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync,summary")
+                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync,summary,attempt")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "previous"))

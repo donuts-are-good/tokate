@@ -151,6 +151,9 @@ internal class Amendment {
             let actor = J.Get(viewer, "id").ToString()
             let originalActor = J.Get(original, "actor").ToString()
             let reservationId = J.Text(reservation, "reservation")
+            if LeaseLifecycle.Supported(value) && run.Text("attempt") != J.Text(reservation, "attempt") {
+                throw CliFailure("stale_approval", "Saved amendment attempt fence changed")
+            }
             let target = J.Text(approval, "base_branch")
             let policyHash = J.Text(approval, "policy_hash")
             let failure = "Published contribution authority changed"
@@ -204,7 +207,12 @@ internal class Amendment {
                 if currentHistory != savedHistory {
                     throw Exception(syncFailure)
                 }
-                let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
+                let publicationRevision = J.Text(value, "publication_revision")
+                let commit = GitHub.Api(
+                    "repos/" + run.Text("repo") +
+                        "/git/commits/" +
+                        (publicationRevision == "" ? state.Sha: publicationRevision)
+                )
                 let parents = J.Items(J.Get(commit, "parents"))
                 if parents.Count != 1 || J.Text(parents[0], "sha") != amendment.Text("expected") {
                     throw Exception("Amendment state is not the exact saved coordination transition")
@@ -653,6 +661,20 @@ internal class Amendment {
                             J.Get(amendment.Element(), "public_summary")
                         )
                     )
+                }
+                if run.Number("version") == 2 && run.Text("attempt") != "" {
+                    let request = J.Get(amendment.Element(), "request")
+                    let metadata = J.Map()
+                    for field in J.Get(request, "metadata").EnumerateObject() {
+                        metadata[field.Name] = field.Value.Clone()
+                    }
+                    metadata["attempt"] = run.Text("attempt")
+                    let updated = J.Map()
+                    for field in request.EnumerateObject() {
+                        updated[field.Name] = field.Value.Clone()
+                    }
+                    updated["metadata"] = metadata
+                    amendment.Fields["request"] = updated
                 }
                 if run.Number("version") == 2 && amendment.Text("sync") != "" {
                     let request = J.Get(amendment.Element(), "request")

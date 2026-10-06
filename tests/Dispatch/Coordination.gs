@@ -12,6 +12,15 @@ internal partial class CoordinationFlow : CoordinationFixture {
         internal func All(binary string, selected string = "") {
             var matched bool
             for name in[]string{
+                "LeaseStalePublication",
+                "LeasePublicationRace",
+                "LeaseFencing",
+                "LeaseReceipts",
+                "LeaseExecution",
+                "LeasePauseExecution",
+                "LeaseReleaseExecution",
+                "LeaseReplayAndLegacy",
+                "LeaseTakeover",
                 "EligibilityTraffic",
                 "EligibilityRaces",
                 "EligibilityLatePublication",
@@ -61,6 +70,33 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 using let test = CoordinationFlow(binary)
                 test.Initialize()
                 switch name {
+                    case "LeaseStalePublication" {
+                        test.LeaseStalePublication()
+                    }
+                    case "LeasePublicationRace" {
+                        test.LeasePublicationRace()
+                    }
+                    case "LeaseFencing" {
+                        test.LeaseFencing()
+                    }
+                    case "LeaseReceipts" {
+                        test.LeaseReceipts()
+                    }
+                    case "LeasePauseExecution" {
+                        test.LeaseExecution("pause")
+                    }
+                    case "LeaseReleaseExecution" {
+                        test.LeaseExecution("release")
+                    }
+                    case "LeaseExecution" {
+                        test.LeaseExecution()
+                    }
+                    case "LeaseReplayAndLegacy" {
+                        test.LeaseReplayAndLegacy()
+                    }
+                    case "LeaseTakeover" {
+                        test.LeaseTakeover()
+                    }
                     case "SimultaneousClaims" {
                         test.SimultaneousClaims()
                     }

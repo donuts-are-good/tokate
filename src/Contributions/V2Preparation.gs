@@ -68,6 +68,11 @@ internal class V2Preparation {
                     )
                 }
             }
+            if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
+                throw Exception(
+                    "Published work is preserved; saved-checkout continuation remains unsupported until #14"
+                )
+            }
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["id"] = J.Text(J.Get(state.Value(), "reservation"), "reservation")
@@ -78,6 +83,9 @@ internal class V2Preparation {
             run.Fields["head_repo"] = RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
             run.Fields["approval"] = J.Text(state.Value(), "approval_id")
             run.Fields["state_sha"] = state.Sha
+            if LeaseLifecycle.Supported(state.Value()) {
+                run.Fields["attempt"] = J.Text(J.Get(state.Value(), "reservation"), "attempt")
+            }
             run.Fields["base"] = J.Text(approval, "base")
             run.Fields["base_branch"] = J.Text(approval, "base_branch")
             run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
@@ -102,7 +110,10 @@ internal class V2Preparation {
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
             }
-            let directory = Preparation.RunDirectory(args, run.Text("id"))
+            let directory = Preparation.RunDirectory(
+                args,
+                run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt")
+            )
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")

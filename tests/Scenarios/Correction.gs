@@ -1167,7 +1167,9 @@ internal class CorrectionChecks {
                         "tools",
                         Check.Json("[]"),
                         "verification",
-                        "donor-reported-pass"
+                        "donor-reported-pass",
+                        "attempt",
+                        Check.Text(metadata["attempt"])
                     )
                 )
                 Check.Contains(managed.Coordinate(managed.Event(request), 1).Error, "protected owner path")

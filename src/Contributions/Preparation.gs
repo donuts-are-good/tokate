@@ -64,6 +64,9 @@ internal class Preparation {
 
         private func BoundIdentity(run Data, normalized bool = true) string {
             let identity = Identity(run, normalized)
+            if run.Text("attempt") != "" {
+                return Data.Hash(identity + ":" + run.Text("attempt"))
+            }
             return V1Continuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
@@ -376,6 +379,9 @@ internal class Preparation {
                 )
             }
             if J.Text(J.Get(reference, "object"), "sha") != run.Text("base") {
+                if run.Text("attempt") != "" {
+                    throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
+                }
                 Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
             }
         }
@@ -384,7 +390,25 @@ internal class Preparation {
             let reference = Reference(run)
             if !run.Flag("branch_creation_attempted") {
                 if reference.ValueKind != JsonValueKind.Undefined {
-                    Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                    if run.Text("attempt") == "" {
+                        Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                    }
+                    ContributionClaim.RecheckV2(run)
+                    CheckBranch(run)
+                    let pulls = J.Items(
+                        GitHub.Api(
+                            "repos/" + run.Text("repo") + "/pulls?state=all&head=" + Uri.EscapeDataString(
+                                run.Text("donor") + ":" + run.Text("branch")
+                            )
+                        )
+                    )
+                    if pulls.Count != 0 {
+                        throw Exception("Partial publication is preserved; continuation remains unsupported until #14")
+                    }
+                    run.Fields["branch_creation_attempted"] = true
+                    run.Fields["branch_prepared"] = true
+                    run.Save(directory)
+                    return
                 }
                 run.Fields["branch_creation_attempted"] = true
                 run.Save(directory)

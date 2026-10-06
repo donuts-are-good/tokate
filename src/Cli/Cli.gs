@@ -239,7 +239,7 @@ internal class Cli {
                 "request",
                 "repo,issue,file",
                 "repo,issue,file",
-                "Post a v2 claim or publication request to GitHub; no inference.",
+                "Post a v2 claim, lease transition or publication request; no inference.",
                 "[--repo OWNER/REPO] --issue N|URL --file FILE",
                 "request --repo owner/project --issue 42 --file request.json"
                 ,

@@ -389,7 +389,10 @@ internal class Terminal {
 
         internal func Json(value JsonElement, title string) {
             if PublicOutput.Enabled {
-                PublicOutput.ResultData = PublicOutput.Select(value, "reservation,donor,actor,expires,pr,url,head")
+                PublicOutput.ResultData = PublicOutput.Select(
+                    value,
+                    "reservation,lease,donor,actor,expires,status,attempt,pr,url,head"
+                )
                 return
             }
             if Console.IsOutputRedirected && !Plain && !Ascii {

@@ -171,6 +171,14 @@ internal partial class Fixture {
             }
         }
         Save()
+        if mode == "lifecycle_wait" {
+            File.WriteAllText(Path.Combine(Root, "executing"), "ready")
+            let deadline = DateTime.UtcNow.AddSeconds(60)
+            while !File.Exists(Path.Combine(Root, "continue-execution")) {
+                Check.That(DateTime.UtcNow < deadline, "Lifecycle execution rendezvous timed out")
+                System.Threading.Thread.Sleep(20)
+            }
+        }
         if mode == "capture_write_failure" {
             using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start capture child")
             File.WriteAllText(Path.Combine(Root, "child.pid"), child.Id.ToString())
