@@ -9,12 +9,7 @@ import System.Text.Json
 internal class Submission {
     shared {
         internal func Commit(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
+            using let lease = Preparation.Lease(directory)
             let run = Data.Load(directory)
             let record = ContributionClaim.RecheckV2(run)
             if run.Text("source") != "tokate" || run.Text("state") != "generated" {
@@ -280,17 +275,12 @@ internal class Submission {
 
         internal func Submit(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
+            using let lease = Preparation.Lease(directory)
+            let run = Data.Load(directory)
             if File.Exists(Path.Combine(directory, "correction.json")) {
-                CorrectionPublication.Submit(directory)
+                CorrectionPublication.SubmitLocked(directory, run)
                 return
             }
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
             let path = Path.Combine(directory, "request.json")
             if run.Text("publication_uuid") != "" && File.Exists(path) {
                 let saved = RequestData.FileData(path, 8192)

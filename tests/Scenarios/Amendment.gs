@@ -126,6 +126,30 @@ internal class AmendmentFlow {
             }
         }
 
+        private func ForkIdentity(binary string) {
+            for v2 in[]bool{false, true} {
+                using let prepared = PublishedContribution.Create(binary, v2: v2)
+                let flow = prepared.Coordination.Flow
+                let run = prepared.Run
+                let commit = Edit(flow, run)
+                RepositoryFaults.Reject(
+                    flow,
+                    run,
+                    []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+                )
+                Check.That(
+                    !Directory.Exists(Path.Combine(run, "amendments", commit)),
+                    "Fork refusal created an amendment"
+                )
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == (v2 ? "": "1"), "Fork refusal launched inference")
+                Check.That(
+                    Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"]) == Check.Text(Saved(run)["commit"]),
+                    "Fork refusal changed published head"
+                )
+            }
+        }
+
         private func ArchiveRefusals(binary string) {
             using let prepared = PublishedContribution.Create(binary)
             let flow = prepared.Coordination.Flow
@@ -879,6 +903,7 @@ internal class AmendmentFlow {
                 "ArchiveIdentity",
                 "LegacyArchives",
                 "ReceiptAuthority",
+                "ForkIdentity",
                 "V1",
                 "V1Owner",
                 "V1Push",
@@ -915,6 +940,9 @@ internal class AmendmentFlow {
                     }
                     case "LegacyArchives" {
                         LegacyArchives(binary)
+                    }
+                    case "ForkIdentity" {
+                        ForkIdentity(binary)
                     }
                     case "ReceiptAuthority" {
                         ReceiptAuthority(binary)
