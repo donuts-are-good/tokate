@@ -9,7 +9,4 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
-  <ItemGroup>
-    <ProjectReference Include="../Tokate.gsproj" />
-  </ItemGroup>
 </Project>

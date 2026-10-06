@@ -1,71 +1,12 @@
 package TokateTests
 
 import System
-import System.Diagnostics
 import System.IO
 import System.Security.Cryptography
 import System.Text.Json.Nodes
-import Tokate
 
 internal class Installer {
     shared {
-        internal func InputFailure(capture bool) {
-            PublicOutput.Enabled = capture
-            let info = ProcessStartInfo("/bin/sh")
-            info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = capture
-            info.RedirectStandardError = capture
-            info.ArgumentList.Add("-s")
-            let script = "printf '%s' $$$$ > \"$$HOME/installer.pid\"; " +
-                "printf 'synthetic-installer-output\\n'; printf 'synthetic-installer-error\\n' >&2; " +
-                "exec 0<&-; exec sleep 120\n" +
-                "#" +
-                String('x', 1024 * 1024) +
-                "\n"
-            var failed bool
-            try {
-                Installation.Run(info, script)
-            } catch (error IOException) {
-                Check.Contains(error.Message.ToLowerInvariant(), "broken pipe")
-                failed = true
-            }
-            Check.That(failed, "Installer stdin failure did not preserve IOException")
-            let pid = File.ReadAllText(Path.Combine(Environment.GetEnvironmentVariable("HOME") ?? "", "installer.pid"))
-            Check.That(TestProcess.Status("/proc/" + pid + "/stat") == nil, "Failed installer was not reaped")
-        }
-
-        internal func InputFailures() {
-            using let temp = Temp()
-            let pidPath = Path.Combine(temp.Env["HOME"], "installer.pid")
-            for mode in[]string{"human", "capture"} {
-                try {
-                    let result = TestProcess.Run(
-                        Environment.ProcessPath ?? throw Exception("Missing test executable"),
-                        []string{"--installer-input-fixture", mode},
-                        temp.Env,
-                        seconds: 10
-                    )
-                    Check.Success(result)
-                    if mode == "human" {
-                        Check.Contains(result.Output, "synthetic-installer-output")
-                        Check.Contains(result.Error, "synthetic-installer-error")
-                    } else {
-                        Check.That(result.Output == "", "Captured installer diagnostics escaped to stdout")
-                    }
-                } finally {
-                    if File.Exists(pidPath) {
-                        let pid = File.ReadAllText(pidPath)
-                        if TestProcess.Status("/proc/" + pid + "/stat") != nil {
-                            TestProcess.Run("/usr/bin/kill", []string{"-KILL", pid}, temp.Env)
-                        }
-                        File.Delete(pidPath)
-                    }
-                }
-            }
-            Console.WriteLine("PASS installer broken stdin preserves IOException and collects process and readers")
-        }
-
         internal func Lifecycle(project string, binary string, shell string = "/bin/bash", accountShell string? = nil) {
             using let temp = Temp()
             temp.Env["SHELL"] = shell

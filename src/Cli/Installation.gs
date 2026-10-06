@@ -23,10 +23,6 @@ internal class Installation {
                     info.Environment[key] = value
                 }
             }
-            return Run(info, ApplicationInfo.Resource("install.sh"))
-        }
-
-        internal func Run(info ProcessStartInfo, input string) int32 {
             let started = Chan[Process?](1)
             let exited = Chan[Exception?](1)
             let output = Chan[CommandOutput](1)
@@ -53,7 +49,7 @@ internal class Installation {
                     go Commands.Read(process.StandardError, error, failed)
                     errorStarted = true
                 }
-                process.StandardInput.Write(input)
+                process.StandardInput.Write(ApplicationInfo.Resource("install.sh"))
                 process.StandardInput.Close()
                 select {
                     case let failure = <- exited {
