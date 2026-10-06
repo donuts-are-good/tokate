@@ -37,7 +37,7 @@ internal class Coordinator {
             let actor = J.Get(canonicalUser, "id")
             RepositoryIdentity.PositiveId(actor)
             let donor = RepositoryIdentity.Login(J.Text(canonicalUser, "login"))
-            let info = RepositoryAccess.RequireOwner(repo)
+            let info = GitHub.Api("repos/" + repo)
             let eventActor = J.Get(J.Get(eventComment, "user"), "id")
             let identityFailure = "Comment author, content, repository or issue identity changed"
             let eventRepositoryId = J.Get(eventRepository, "id").ToString()

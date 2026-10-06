@@ -306,6 +306,7 @@ internal partial class Fixture {
                         false
                     ),
                     "permissions",
+                    folder != "fork" && State["repo_permissions"] != nil ? State["repo_permissions"] as JsonNode:
                     Check.Map(
                         "push",
                         State["fork_push"] ?? JsonValue.Create(

@@ -43,6 +43,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "CanonicalSubmit",
                 "ExpiryAndRevocation",
                 "InvalidEvents",
+                "CoordinatorPermissions",
                 "InterruptedWrite",
                 "PublicationRevocation",
                 "ExpiryDuringPublication",
@@ -153,6 +154,9 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     }
                     case "InvalidEvents" {
                         test.InvalidEvents()
+                    }
+                    case "CoordinatorPermissions" {
+                        test.CoordinatorPermissions()
                     }
                     case "InterruptedWrite" {
                         test.InterruptedWrite()
