@@ -1,5 +1,5 @@
-import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { findPackageJSON } from 'node:module';
@@ -22,27 +22,42 @@ for (const [name, member] of [['ModelRuntime', 'create'], ['SessionManager', 'in
 }
 if (process.version !== 'v26.10.0') throw new Error('Untested Node runtime');
 
-const allowedPath = async path => {
+const withParent = async (path, operation, recursive = false) => {
     const absolute = resolve(path);
-    let parent = absolute;
-    while (true) {
-        try {
-            const canonical = await realpath(parent);
-            const permitted = [cwd, '/tmp/tokate-tools'].some(root => canonical === root || canonical.startsWith(`${root}/`));
-            if (!permitted || canonical === `${cwd}/.git` || canonical.startsWith(`${cwd}/.git/`)) throw new Error('Tool path denied');
-            return absolute;
-        } catch (error) {
-            if (error.code !== 'ENOENT') throw error;
-            if (dirname(parent) === parent) throw new Error('Tool path denied');
-            parent = dirname(parent);
+    const root = [cwd, '/tmp/tokate-tools'].find(root => absolute === root || absolute.startsWith(`${root}/`));
+    if (!root) throw new Error('Tool path denied');
+    const parts = absolute.slice(root.length).split('/').filter(Boolean);
+    if (root === cwd && parts[0] === '.git') throw new Error('Tool path denied');
+    const leaf = parts.pop() ?? '.';
+    let directory = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+        for (const part of parts) {
+            const next = `/proc/self/fd/${directory.fd}/${part}`;
+            if (recursive) {
+                try { await mkdir(next); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+            }
+            const opened = await open(next, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+            await directory.close();
+            directory = opened;
         }
+        return await operation(`/proc/self/fd/${directory.fd}/${leaf}`);
+    } finally {
+        await directory.close();
     }
 };
+const withFile = (path, flags, operation) => withParent(path, async target => {
+    const file = await open(target, flags | constants.O_NOFOLLOW);
+    try { return await operation(file); } finally { await file.close(); }
+});
 const files = {
-    readFile: async path => readFile(await allowedPath(path)),
-    writeFile: async (path, content) => writeFile(await allowedPath(path), content, 'utf8'),
-    access: async path => access(await allowedPath(path), constants.R_OK),
-    mkdir: async path => { await mkdir(await allowedPath(path), { recursive: true }); },
+    readFile: path => withFile(path, constants.O_RDONLY, file => file.readFile()),
+    writeFile: (path, content) => withFile(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, file => file.writeFile(content, 'utf8')),
+    access: path => withFile(path, constants.O_RDONLY, async () => {}),
+    mkdir: path => withParent(path, async target => {
+        try { await mkdir(target); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+        const directory = await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        await directory.close();
+    }, true),
     detectImageMimeType: async () => undefined,
 };
 

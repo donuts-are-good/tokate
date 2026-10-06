@@ -32,7 +32,8 @@ Donor credentials, user settings and repository customization are never loaded.
 The SDK runs in bubblewrap with private PID/user namespaces, read-only system
 files and the selected module tree, a writable checkout and private temporary
 storage. Git metadata is masked. Only read, edit, write and constrained bash
-are enabled. File tools accept checkout/tool-temp paths only. Bash hides SDK
+are enabled. File tools accept checkout/tool-temp paths only and reject symlinks.
+Bash hides SDK
 control files and has network access only when owner and donor permit it.
 Extensions, skills, prompts, context discovery, retries, compaction, cache warming
 and persistent sessions are disabled. Failed capability probes stop before inference.

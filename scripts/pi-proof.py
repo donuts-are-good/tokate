@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import signal
 import shlex
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -27,6 +28,33 @@ if metadata.get('name') != '@earendil-works/pi-coding-agent' or metadata.get('ve
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
+    def race_paths(self, checkout):
+        leaf, temporary = checkout / 'race-leaf', checkout / 'race-next'
+        directory, saved = checkout / 'race-dir', checkout / 'race-saved'
+        saved.mkdir()
+        (saved / 'models.json').write_text('synthetic-safe-file')
+        try:
+            while not self.stop_race.is_set():
+                temporary.symlink_to('/tokate-control/models.json')
+                temporary.replace(leaf)
+                temporary.write_text('synthetic-safe-file')
+                temporary.replace(leaf)
+                saved.rename(directory)
+                time.sleep(0.001)
+                directory.rename(saved)
+                directory.symlink_to('/tokate-control', target_is_directory=True)
+                time.sleep(0.001)
+                directory.unlink()
+                self.race_cycles += 1
+        except Exception as error:
+            self.race_error = str(error)
+        finally:
+            for path in [leaf, temporary, directory, saved]:
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    shutil.rmtree(path)
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *unused):
         pass
@@ -46,6 +74,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         assert 'PRIVATE_CREDENTIAL_SENTINEL' not in text
         assert 'HOSTILE_CONTEXT_SENTINEL' not in text
         assert 'HOSTILE_EXTENSION_LOADED' not in text
+        for message in body['messages']:
+            if message['role'] == 'tool':
+                assert 'tokate-no-auth' not in str(message.get('content', '')), 'File tool exposed private model settings'
         if self.server.case == 'failed':
             self.send_response(503)
             self.end_headers()
@@ -62,6 +93,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         turn = sum(m['role'] == 'assistant' for m in body['messages'])
         fixture = json.loads((self.server.root / 'fixture.json').read_text())
+        if self.server.case == 'off' and self.server.calls == 1:
+            self.server.racer = threading.Thread(target=self.server.race_paths, args=(Path(fixture['checkout']),))
+            self.server.racer.start()
         private, outside = fixture['private'], fixture['outside']
         code = f"from pathlib import Path; import socket; assert not Path({private!r}).exists(); assert not Path('.git/config').exists(); assert not Path('/tokate-control/models.json').exists(); denied=False\ntry: Path({outside!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{self.server.server_address[1]})); connected=True\nexcept OSError: pass\nassert connected == {self.server.case == 'on'}\nPath('result.txt').write_text('final')"
         planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}),
@@ -72,6 +106,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                    ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
         if self.server.case == 'cancel':
             planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
+        elif self.server.case == 'off':
+            planned += [('read', {'path': path}) for path in ['race-leaf', 'race-dir/models.json'] * 4]
+            planned += [('write', {'path': 'race-leaf', 'content': 'synthetic-safe-update'})]
         if self.server.case == 'incomplete':
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Incomplete'}, 'finish_reason': 'length'}]}
         elif self.server.case == 'empty':
@@ -80,6 +117,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             name, parameters = planned[turn]
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'tool_calls': [{'index': 0, 'id': f'call_{turn}', 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(parameters)}}]}, 'finish_reason': 'tool_calls'}]}
         else:
+            self.server.stop_race.set()
+            if self.server.racer:
+                self.server.racer.join(timeout=5)
+                assert not self.server.racer.is_alive(), 'Synthetic path racer did not stop'
+                assert self.server.race_cycles > 0 and self.server.race_error is None, 'Synthetic path race failed'
             for message in body['messages']:
                 if message['role'] == 'tool' and 'BOUNDARY_FAILURE' in str(message.get('content', '')):
                     raise AssertionError('Execution boundary failed')
@@ -97,6 +139,10 @@ with Server(('127.0.0.1', 0), Handler) as server:
             server.root = root
             server.calls = 0
             server.case = case
+            server.stop_race = threading.Event()
+            server.racer = None
+            server.race_cycles = 0
+            server.race_error = None
             fixture_root = root / 'fixtures'
             fixture_root.mkdir()
             env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TOKATE_TEST_ROOT': str(fixture_root),
@@ -127,7 +173,12 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted'
                 assert 'turn_completed' not in saved
             else:
-                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)
+                try:
+                    result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)
+                finally:
+                    server.stop_race.set()
+                    if server.racer:
+                        server.racer.join(timeout=5)
                 assert result.returncode == 0, f'{case}: {result.stdout}\n{result.stderr}'
                 if case not in ['off', 'on']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
