@@ -60,9 +60,15 @@ member before proposing files. It rejects unreleased, draft or prerelease versio
 Review and install the entry as `.github/workflows/tokate-coordinator.yml` yourself;
 setup does not commit it. Ordinary public Actions runners suffice. The shared
 workflow passes the event file to the released binary, without checkout or donor
-code execution. Its permissions are contents write, issues read and pull-requests
-write. Keep fork verification in read-only CI without secrets. PR admission and
-close-message execution remain pending integration into this same entry.
+code execution. Coordination uses contents write, issues read and pull-requests
+write; admission reduces contents to read. The same entry handles PR admission
+through `pull_request_target`, without executing contributor code. Setup checks
+Actions event policies; allow the entry's events and external actors before use.
+Keep fork verification in read-only CI without secrets. Rejection occurs after PR
+creation and cannot stop CI already triggered or provide an unspoofable merge gate.
+GitHub-token-created PRs do not trigger `pull_request_target`; coordinator creation
+checks remain necessary, and later human events recheck admission. Completed
+receipts, CI readiness and final acceptance remain separate owner checks.
 
 Extend the existing policy explicitly, for example:
 

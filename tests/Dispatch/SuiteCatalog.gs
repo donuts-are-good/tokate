@@ -26,8 +26,11 @@ internal class SuiteCatalog {
                     NativeFlow.All(binary, parallel: true)
                 }
                 case "Coordination" {
-                    CoordinationFlow.All(binary, leases: false)
+                    CoordinationFlow.All(binary, leases: false, admission: false)
                     CommandTrafficChecks.All(binary)
+                }
+                case "Admission" {
+                    CoordinationFlow.All(binary, admission: true)
                 }
                 case "LeaseLifecycle" {
                     CoordinationFlow.All(binary, leases: true)
@@ -118,6 +121,7 @@ internal class SuiteCatalog {
                     Job("SynchronizationV2Second"),
                     Job("Native"),
                     Job("Coordination"),
+                    Job("Admission"),
                     Job("LeaseLifecycle"),
                     Job("Correction"),
                     Job("Amendment"),

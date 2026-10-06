@@ -9,7 +9,7 @@ import System.Text.Json.Nodes
 
 internal partial class CoordinationFlow : CoordinationFixture {
     shared {
-        internal func All(binary string, selected string = "", leases bool? = nil) {
+        internal func All(binary string, selected string = "", leases bool? = nil, admission bool? = nil) {
             var matched bool
             for name in[]string{
                 "LeaseStalePublication",
@@ -21,6 +21,9 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "LeaseReleaseExecution",
                 "LeaseReplayAndLegacy",
                 "LeaseTakeover",
+                "AdmissionAuthority",
+                "AdmissionCoordinator",
+                "AdmissionSafety",
                 "EligibilityTraffic",
                 "EligibilityRaces",
                 "EligibilityLatePublication",
@@ -65,8 +68,17 @@ internal partial class CoordinationFlow : CoordinationFixture {
                         continue
                     }
                 }
+                if let admit = admission {
+                    if name.StartsWith("Admission") != admit {
+                        continue
+                    }
+                }
                 matched = true
                 if !CiShard.Include("Coordination/" + name) {
+                    continue
+                }
+                if name.StartsWith("Admission", StringComparison.Ordinal) {
+                    AdmissionChecks.All(binary, name)
                     continue
                 }
                 if name.StartsWith("Eligibility", StringComparison.Ordinal) {

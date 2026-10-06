@@ -178,7 +178,7 @@ internal class Cli {
             CliOption("tools", "FILE", "Nonsecret JSON tool declarations"),
             CliOption("summary", "FILE", "Bounded public JSON summary for the exact candidate commit"),
             CliOption("file", "FILE", "Strict claim or publication request JSON"),
-            CliOption("event", "FILE", "Trusted issue_comment event JSON"),
+            CliOption("event", "FILE", "Trusted GitHub event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
             CliOption("sync", "SHA", "Exact live owner synchronization grant"),
             CliOption(
@@ -365,6 +365,15 @@ internal class Cli {
                 "submit --run /path/to/run"
                 ,
                 effects: "local_read local_write github_read github_write"
+            ),
+            CliCommand(
+                "admit",
+                "repo,event",
+                "repo,event",
+                "Trusted owner workflow: close PRs without current owner authorization; no inference.",
+                "--repo OWNER/REPO --event FILE",
+                "admit --repo owner/project --event event.json",
+                effects: "local_read github_read github_write"
             ),
             CliCommand(
                 "coordinate",
