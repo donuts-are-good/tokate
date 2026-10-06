@@ -14,22 +14,27 @@ internal class ToolCheck {
 
 internal class Startup {
     shared {
+        private func Executable(path string) bool {
+            try {
+                return File.Exists(path) &&
+                    (
+                    File.GetUnixFileMode(path) & (
+                        UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
+                    )
+                ) != 0
+            } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+            return false
+        }
+
         internal func Find(name string) string {
             for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
                 if !Path.IsPathFullyQualified(entry) {
                     continue
                 }
                 let path = Path.Combine(entry, name)
-                try {
-                    if File.Exists(path) &&
-                        (
-                        File.GetUnixFileMode(path) & (
-                            UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
-                        )
-                    ) != 0 {
-                        return path
-                    }
-                } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+                if Executable(path) {
+                    return path
+                }
             }
             return ""
         }
@@ -82,19 +87,9 @@ internal class Startup {
                 } else {
                     tool.Detail = tool.Hint
                 }
-                if tool.Path != "" && name.StartsWith("/") {
-                    var executable bool
-                    try {
-                        executable = (
-                            File.GetUnixFileMode(tool.Path) & (
-                                UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
-                            )
-                        ) != 0
-                    } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
-                    if !executable {
-                        tool.Status = "failed"
-                        tool.Detail = "Required helper is not executable. " + tool.Hint
-                    }
+                if tool.Path != "" && name.StartsWith("/") && !Executable(tool.Path) {
+                    tool.Status = "failed"
+                    tool.Detail = "Required helper is not executable. " + tool.Hint
                 }
                 tools.Add(tool)
             }
