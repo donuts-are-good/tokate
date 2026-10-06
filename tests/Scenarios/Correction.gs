@@ -788,7 +788,7 @@ internal class CorrectionChecks {
         }
 
         private func ManagedRefusals(binary string) {
-            for change in[]string{"expiry", "revocation", "identity", "revision"} {
+            for change in[]string{"expiry", "revocation", "identity", "attempt"} {
                 using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let run = ManagedRun(flow, "staged_whitespace")
@@ -808,8 +808,11 @@ internal class CorrectionChecks {
                         flow.Flow.State["viewer_id"] = JsonValue.Create(999)
                         flow.Flow.Save()
                     }
-                    case "revision" {
+                    case "attempt" {
                         let state = flow.State()["state"] ?? throw Exception("Missing state")
+                        (state["reservation"] ?? throw Exception("Missing lease"))["attempt"] = JsonValue.Create(
+                            Guid.NewGuid().ToString("D")
+                        )
                         flow.RewriteState(state)
                     }
                 }
@@ -829,7 +832,7 @@ internal class CorrectionChecks {
             for originalMode in modelPolicy == "" ? []string{"staged_whitespace", "verification_fail"}: []string{
                 "staged_whitespace"
             } {
-                using let flow = CoordinationFixture(binary)
+                using let flow = CoordinationFlow(binary)
                 flow.Initialize()
                 if modelPolicy != "" {
                     let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
@@ -887,6 +890,7 @@ internal class CorrectionChecks {
                 flow.Flow.Mode("")
                 flow.Coordinate(path)
                 flow.Coordinate(path)
+                flow.Lifecycle("renew")
                 flow.Flow.Call([]string{"submit", "--run", run})
                 flow.Flow.Call([]string{"submit", "--run", run})
                 Once(flow.Flow, 1)

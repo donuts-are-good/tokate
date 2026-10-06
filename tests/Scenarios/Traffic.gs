@@ -327,7 +327,7 @@ internal class CommandTrafficChecks {
             flow.Flow.Mode("lost_request_response")
             flow.Flow.ResetTraffic()
             let first = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
-            Budgets(flow.Flow, first, 23, 1, 1, 11)
+            Budgets(flow.Flow, first, 25, 1, 1, 13)
             flow.Flow.Mode("")
             flow.Flow.ResetTraffic()
             let duplicate = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)

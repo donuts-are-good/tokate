@@ -290,7 +290,12 @@ internal class CorrectionPublication {
             let request = J.Get(intent, "request")
             let contribution = J.Get(value, "contribution")
             let contributionOutcome = J.Get(contribution, "outcome")
-            let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
+            let publicationRevision = J.Text(value, "publication_revision")
+            let commit = GitHub.Api(
+                "repos/" + run.Text("repo") +
+                    "/git/commits/" +
+                    (publicationRevision == "" ? state.Sha: publicationRevision)
+            )
             let parents = J.Items(J.Get(commit, "parents"))
             let outcome = RequestData.Recorded(value, actor, request)
             let failure = "Stale coordination revision; only the exact saved publication transition can resume"
