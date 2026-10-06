@@ -63,7 +63,7 @@ internal open class NativeFixture : IDisposable {
 
     public func Dispose() -> Temp.Dispose()
 
-    internal func Save() -> File.WriteAllText(Path.Combine(Bin, "state.json"), State.ToJsonString())
+    internal func Save() -> Check.SaveJson(Path.Combine(Bin, "state.json"), State)
 
     internal func Reload() {
         State = Check.Json(File.ReadAllText(Path.Combine(Bin, "state.json")))
