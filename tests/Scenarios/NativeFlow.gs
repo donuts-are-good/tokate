@@ -935,7 +935,7 @@ internal partial class NativeFlow : NativeFixture {
             if mode != "push_fail" {
                 Check.Contains(failure.Error, "No automatic retry")
                 Check.Contains(failure.Error, "outcome may be uncertain")
-                flow.Traffic(44, 1, 32, 0)
+                flow.Traffic(48, 1, 36, 0)
             }
             let failed = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(failed["state"]) == "generated", "Publication failure discarded generated work")
@@ -947,9 +947,9 @@ internal partial class NativeFlow : NativeFixture {
             flow.ResetTraffic()
             flow.Call([]string{"publish", "--run", run}, traffic: true)
             if mode == "pr_fail_after_create" {
-                flow.Traffic(11, 0, 0, 0)
+                flow.Traffic(12, 0, 1, 0)
             } else {
-                flow.Traffic(20, 1, 9, 0)
+                flow.Traffic(22, 1, 11, 0)
             }
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Publication retry ran inference")
@@ -1355,9 +1355,9 @@ internal partial class NativeFlow : NativeFixture {
                     let edited = mode == "after_304_edit"
                     Check.Contains(failed.Error, edited ? "The owner must approve again": "Issue needs Tokate approval")
                     flow.Traffic(
-                        (publication ? 13: 14) + (edited ? 2: 0),
+                        (publication ? 14: 15) + (edited ? 2: 0),
                         0,
-                        (publication ? 1: 3) + (edited ? 2: 0),
+                        (publication ? 2: 4) + (edited ? 2: 0),
                         0,
                         failed
                     )

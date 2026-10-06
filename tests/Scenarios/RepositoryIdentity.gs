@@ -68,6 +68,7 @@ internal class RepositoryIdentityChecks {
             let claim = Check.Envelope(flow.Call(WorkArgs(flow, "owner/project", "claim")), "claim", "ok")
             let run = Check.Text(claim["data"]?["run"])
             let path = Path.Combine(run, "run.json")
+            RepositoryFaults.Reject(flow, run, []string{"work", "--run", run})
             var saved = Check.Json(File.ReadAllText(path))
             let original = saved.ToJsonString()
             for field in[]string{"approval", "base", "policy_hash", "base_branch", "branch"} {

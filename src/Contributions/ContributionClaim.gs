@@ -160,15 +160,9 @@ internal class ContributionClaim {
                 .Substring(0, 12) {
                 throw Exception("Invalid saved claim branch")
             }
-            let head = RepositoryIdentity.Repo(run.Text("head_repo"))
-            if run.Number("preparation_version") == 0 ||
-                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
-                RepositoryAccess.ValidateRepository(
-                    run.Text("repo"),
-                    head,
-                    J.Get(run.Element(), "donor_id"),
-                    GitHub.Api("repos/" + head)
-                )
+            RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
+                RepositoryAccess.ValidateRun(run)
             }
             Policy(J.Write(J.Get(record, "policy"))).Validate(
                 run.Text("model"),
@@ -217,10 +211,9 @@ internal class ContributionClaim {
                 (run.Text("model") != J.Text(tools[0], "model") || run.Text("effort") != J.Text(tools[0], "effort")) {
                 throw Exception("Saved execution differs from the declared tool; no model substitution is allowed")
             }
-            let fork = RepositoryIdentity.Repo(run.Text("head_repo"))
-            if run.Number("preparation_version") == 0 ||
-                (run.Text("state") != "preparing" && run.Text("preparation_head") != "") {
-                RepositoryAccess.ValidateRepository(repo, fork, J.Get(saved, "donor_id"), GitHub.Api("repos/" + fork))
+            RepositoryIdentity.Repo(run.Text("head_repo"))
+            if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
+                RepositoryAccess.ValidateRun(run)
             }
             policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
             return record

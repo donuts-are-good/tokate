@@ -243,7 +243,7 @@ internal class Commands {
             completed <- failure
         }
 
-        private func Wait(info ProcessStartInfo, started Chan[Process?], completed Chan[Exception?]) {
+        internal func Wait(info ProcessStartInfo, started Chan[Process?], completed Chan[Exception?]) {
             var process Process? = nil
             var failure Exception? = nil
             try {
