@@ -9,6 +9,115 @@ import System.Text.RegularExpressions
 
 internal class CoordinatorSetup {
     shared {
+        internal func EventPolicy(repo string, workflow string = ".github/workflows/tokate-coordinator.yml") {
+            let policies = GitHub.Api("repos/" + repo + "/actions/policies?has_parents=true&per_page=100")
+            let rows = J.Get(policies, "policies")
+            if rows.ValueKind != JsonValueKind.Array || J.Number(policies, "total_count") != rows.GetArrayLength() ||
+                rows.GetArrayLength() > 100 {
+                throw Exception(
+                    "Cannot inspect all applicable Actions policies; owner setup requires a complete policy read"
+                )
+            }
+            var configured bool
+            for row in J.Items(rows) {
+                let id = RepositoryIdentity.PositiveId(J.Get(row, "id"))
+                var path = "repos/" + repo + "/actions/policies/" + id.ToString()
+                let self = J.Text(J.Get(J.Get(row, "_links"), "self"), "href")
+                if self != "" {
+                    let prefix = "https://api.github.com/"
+                    if !self.StartsWith(prefix, StringComparison.Ordinal) {
+                        throw Exception("Invalid applicable Actions policy location")
+                    }
+                    let source = self.Substring(prefix.Length)
+                    if source != path && !Regex.IsMatch(
+                        source,
+                        "^(?:orgs|enterprises)/[A-Za-z0-9][A-Za-z0-9_.-]*/actions/policies/" + id.ToString() + "$"
+                    ) {
+                        throw Exception("Invalid inherited Actions policy location")
+                    }
+                    path = source
+                }
+                let policy = GitHub.Api(path)
+                let enforcement = J.Text(policy, "enforcement")
+                if enforcement == "disabled" {
+                    continue
+                }
+                if enforcement != "active" && enforcement != "evaluate" || J.Get(policy, "rules")
+                    .ValueKind != JsonValueKind.Array {
+                    throw Exception("Malformed Actions policy; inspect Settings > Actions > Policies before setup")
+                }
+                let condition = J.Get(J.Get(policy, "conditions"), "workflow_path")
+                if condition.ValueKind != JsonValueKind.Undefined && !Applies(condition, workflow) {
+                    continue
+                }
+                for rule in J.Items(J.Get(policy, "rules")) {
+                    if J.Text(rule, "type") != "restrict_actions_events" {
+                        continue
+                    }
+                    let events = J.Get(J.Get(rule, "parameters"), "allowed_events")
+                    if events.ValueKind != JsonValueKind.Array {
+                        throw Exception("Malformed Actions event policy")
+                    }
+                    let allowed = HashSet[string]()
+                    for event in J.Items(events) {
+                        if event.ValueKind != JsonValueKind.String {
+                            throw Exception("Malformed Actions event name")
+                        }
+                        allowed.Add(event.GetString() ?? "")
+                    }
+                    if !allowed.Contains("issue_comment") || !allowed.Contains("pull_request_target") ||
+                        !allowed
+                        .Contains("workflow_call") {
+                        throw Exception(
+                            "Actions event policy blocks Tokate. The owner must allow issue_comment, pull_request_target and workflow_call in Settings > Actions > Policies; the default public-repository block is enforced November 2, 2026"
+                        )
+                    }
+                    configured = true
+                }
+            }
+            if !configured {
+                throw Exception(
+                    "Explicit Actions event policy required before admission setup. Allow issue_comment, pull_request_target and workflow_call in Settings > Actions > Policies; the default public-repository block is enforced November 2, 2026"
+                )
+            }
+            Terminal.Message(
+                "Actions event policy permits Tokate events. Review actor rules so external PR events can run admission."
+            )
+        }
+
+        private func Applies(condition JsonElement, workflow string) bool {
+            let included = J.Get(condition, "include")
+            let excluded = J.Get(condition, "exclude")
+            if included.ValueKind != JsonValueKind.Array || excluded.ValueKind != JsonValueKind.Array {
+                throw Exception("Malformed Actions workflow path condition")
+            }
+            var applies = included.GetArrayLength() == 0
+            for pattern in J.Items(included) {
+                applies = Matches(pattern, workflow) || applies
+            }
+            for pattern in J.Items(excluded) {
+                if Matches(pattern, workflow) {
+                    return false
+                }
+            }
+            return applies
+        }
+
+        private func Matches(pattern JsonElement, workflow string) bool {
+            if pattern.ValueKind != JsonValueKind.String || pattern.GetString() == "" {
+                throw Exception("Malformed Actions workflow path pattern")
+            }
+            let value = pattern.GetString() ?? ""
+            if value == "~ALL" {
+                return true
+            }
+            if value.Contains('[') || value.Contains('{') || value.Contains('\\') || value.StartsWith('!') {
+                throw Exception("Unsupported Actions workflow path pattern; inspect event policy before setup")
+            }
+            let expression = Regex.Escape(value).Replace("\\*\\*", ".*").Replace("\\*", "[^/]*").Replace("\\?", "[^/]")
+            return Regex.IsMatch(workflow, "^" + expression + "$")
+        }
+
         internal func Run(args Args) {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let requested = Path.GetFullPath(args.Need("output"))
@@ -26,6 +135,7 @@ internal class CoordinatorSetup {
                 )
             }
             RepositoryAccess.RequireOwner(repo)
+            EventPolicy(repo)
             let yaml = Resolve()
             OwnerSetup.Preview(output, File.Exists(output) ? File.ReadAllText(output): "", yaml)
             if OwnerSetup.Confirm(args) {
@@ -119,7 +229,7 @@ internal class CoordinatorSetup {
                         "Bootstrap required: the owner must install the reviewed central reusable workflow in the matching release before setup can write adopter files"
                     )
                 }
-                return "name: Tokate\non:\n  issue_comment:\n    types: [created]\npermissions: {}\njobs:\n  coordinate:\n" +
+                return "name: Tokate\non:\n  issue_comment:\n    types: [created]\n  pull_request_target:\n    types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft, labeled, unlabeled, assigned, unassigned]\npermissions: {}\njobs:\n  coordinate:\n" +
                     "    permissions:\n      contents: write\n      issues: read\n      pull-requests: write\n" +
                     "    uses: obselate/tokate/.github/workflows/tokate-shared.yml@" +
                     commit +

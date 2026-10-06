@@ -21,6 +21,9 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "LeaseReleaseExecution",
                 "LeaseReplayAndLegacy",
                 "LeaseTakeover",
+                "AdmissionAuthority",
+                "AdmissionCoordinator",
+                "AdmissionSafety",
                 "EligibilityTraffic",
                 "EligibilityRaces",
                 "EligibilityLatePublication",
@@ -67,6 +70,10 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 }
                 matched = true
                 if !CiShard.Include("Coordination/" + name) {
+                    continue
+                }
+                if name.StartsWith("Admission", StringComparison.Ordinal) {
+                    AdmissionChecks.All(binary, name)
                     continue
                 }
                 if name.StartsWith("Eligibility", StringComparison.Ordinal) {

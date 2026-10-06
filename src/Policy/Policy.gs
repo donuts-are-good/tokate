@@ -309,7 +309,7 @@ internal class Policy {
     shared {
         internal func CloseMessage(value JsonElement) string -> J.Get(value, "close_message")
             .ValueKind == JsonValueKind.Undefined ?
-        "This pull request does not meet the repository's Tokate admission policy. Request owner review before submitting again.": J.Text(
+        "This pull request lacks current owner authorization. Please request owner approval.": J.Text(
             value,
             "close_message"
         )

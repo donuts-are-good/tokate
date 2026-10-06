@@ -27,6 +27,7 @@ The binary requires **Linux x86_64 with glibc 2.34+** and public GitHub reposito
 
 1. Check owner tools with `tokate doctor --owner --auth`, sign in with `gh auth login` if needed, and run `tokate init --repo OWNER/REPO` in your repository.
 2. Select unrestricted models or a whitelist, choose existing project checks, and review the complete policy, pinned workflow and permissions before confirming. Commit the two files; repeated setup preserves customization. A matching release must already include the central reusable workflow.
+   In Settings > Actions > Policies, permit `issue_comment`, `pull_request_target` and `workflow_call` for this entry, including external PR actors. Setup checks event policy; the default public-repository event block is enforced November 2, 2026.
 3. Initialize access once and approve task scope:
 
 ```sh

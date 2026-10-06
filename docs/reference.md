@@ -91,8 +91,29 @@ legacy policy while keeping its model restrictions.
 
 Tokate ships the default PR format. Optional policy `pr_text` and `close_message`
 are literal text, also configurable with `--pr-text` and `--close-message`; existing
-`.github/tokate-pr.md` customization remains supported. Admission and close-message
-execution await the shared workflow integration. PRs always need owner review.
+`.github/tokate-pr.md` customization remains supported. The shared workflow closes
+PRs lacking current owner authority and keeps authorized incomplete drafts open.
+Omit `close_message` for the short default or set it to an empty string to close
+without a comment. Markdown is passed literally, without shell or template evaluation.
+PRs always need owner review.
+
+Admission uses current canonical authors and the existing denial-first access
+evaluator: Open allows non-denied authors, Trusted allows persistent trust, and
+Manual needs a matching grant for a currently approved upstream issue. Current
+maintainers are allowed; legacy approved assignments keep their v1 approval checks.
+PR text can nominate an issue with `Fixes #42`, an upstream issue URL, or a receipt,
+but adds no authority. Bot-created PRs need exact live contribution bindings or a
+matching active reservation to establish the donor. API failures and malformed
+trusted state fail the check and leave the PR open. Reopening and PR updates run a
+fresh decision; the explanation is posted at most once by the Actions bot.
+
+Setup reads applicable Actions event policies. Allow `issue_comment`,
+`pull_request_target` and `workflow_call` in Settings > Actions > Policies, including
+external PR actors. The default public-repository event block takes effect on
+November 2, 2026. Setup requires policy inspection access and does not change these
+settings. Review the installed entry's immutable central workflow and binary pins
+and event types before enabling closure. Existing customized entries are preserved;
+update their event wiring through owner review without adding another workflow.
 
 ```sh
 tokate access --repo OWNER/REPO --operation request --issue 42 --scope trust

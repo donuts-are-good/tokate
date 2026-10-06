@@ -15,6 +15,7 @@ permissions: {}
 jobs:
   coordinate:
     if: >-
+      github.event_name == 'issue_comment' &&
       github.event.issue.pull_request == null &&
       startsWith(github.event.comment.body, '/tokate ')
     runs-on: ubuntu-24.04
@@ -27,7 +28,8 @@ jobs:
       issues: read
       pull-requests: write
     steps:
-      - name: Fetch pinned coordinator
+      - &bootstrap
+        name: Fetch pinned coordinator
         env:
           TOKATE_ARCHIVE_URL: ${{ inputs.archive_url }}
           TOKATE_ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
@@ -48,3 +50,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TOKATE_REPOSITORY: ${{ github.repository }}
         run: '"$RUNNER_TEMP/tokate" coordinate --repo "$TOKATE_REPOSITORY" --event "$GITHUB_EVENT_PATH" --traffic'
+  admit:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    concurrency:
+      group: tokate-admission-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - *bootstrap
+      - name: Admit canonical pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOKATE_REPOSITORY: ${{ github.repository }}
+        run: '"$RUNNER_TEMP/tokate" admit --repo "$TOKATE_REPOSITORY" --event "$GITHUB_EVENT_PATH" --traffic'

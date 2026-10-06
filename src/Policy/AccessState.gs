@@ -8,6 +8,22 @@ internal class AccessState {
     internal var Sha string = ""
     internal var RepoId int64
     internal let Members List[JsonElement] = List[JsonElement]()
+    internal func Allows(actor int64, mode string, issue int32 = 0, assigned bool = false) bool {
+        var trusted bool
+        var denied bool
+        var granted bool
+        for member in Members {
+            if RepositoryIdentity.PositiveId(J.Get(member, "actor")) == actor {
+                trusted = J.Bool(member, "trusted")
+                denied = J.Bool(member, "denied")
+                for number in J.Items(J.Get(member, "issues")) {
+                    granted = granted || RepositoryIdentity.PositiveId(number) == issue
+                }
+            }
+        }
+        return !denied && (mode == "open" || granted || assigned || (mode == "trusted" && trusted))
+    }
+
     internal func Value() JsonElement -> J.Parse(J.Write(J.Map("version", 1, "repo_id", RepoId, "members", Members)))
 
     internal func Write(repo string, expected string) {
@@ -143,20 +159,8 @@ internal class AccessState {
                     throw Exception("Task repository numeric identity changed")
                 }
                 let access = Load(repo, repoId)
-                var trusted bool
-                var denied bool
-                var granted bool
-                for member in access.Members {
-                    if RepositoryIdentity.PositiveId(J.Get(member, "actor")) == id {
-                        trusted = J.Bool(member, "trusted")
-                        denied = J.Bool(member, "denied")
-                        for number in J.Items(J.Get(member, "issues")) {
-                            granted = granted || RepositoryIdentity.PositiveId(number) == issue
-                        }
-                    }
-                }
                 let mode = J.Text(approval, "eligibility")
-                let allowed = !denied && (mode == "open" || granted || (mode == "trusted" && trusted))
+                let allowed = access.Allows(id, mode, issue)
                 PublicOutput.ResultData = J.Map(
                     "repo",
                     repo,

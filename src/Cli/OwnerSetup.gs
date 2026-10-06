@@ -261,6 +261,7 @@ internal class OwnerSetup {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             RepositoryAccess.RequireOwner(repo)
             let oldWorkflow = File.Exists(workflow) ? File.ReadAllText(workflow): ""
+            CoordinatorSetup.EventPolicy(repo, Path.GetRelativePath(root, workflow))
             let yaml = oldWorkflow == "" ? CoordinatorSetup.Resolve(): oldWorkflow
             Preview(path, before, text)
             Preview(workflow, oldWorkflow, yaml)

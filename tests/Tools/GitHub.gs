@@ -240,6 +240,34 @@ internal partial class Fixture {
         let folder = State["repository_folders"]?[repo] is JsonNode selected ? Check.Text(selected):
         repo == "owner/project" ? "upstream": "fork"
         let tail = String.Join("/", parts, 3, parts.Length - 3)
+        if tail.StartsWith("actions/policies?") {
+            return Answer(
+                State["actions_policies"] ?? Check.Map("total_count", 1, "policies", Check.Json("[{\"id\":1}]"))
+            )
+        }
+        if tail.StartsWith("actions/policies/") {
+            return Answer(
+                State["actions_policy"] ?? Check.Map(
+                    "enforcement",
+                    "active",
+                    "rules",
+                    Check.Json(
+                        "[{\"type\":\"restrict_actions_events\",\"parameters\":{\"allowed_events\":[\"issue_comment\",\"pull_request_target\",\"workflow_call\"]}}]"
+                    )
+                )
+            )
+        }
+        if tail.StartsWith("collaborators/") && tail.EndsWith("/permission") {
+            let login = tail.Split('/')[1]
+            return Answer(
+                Check.Map(
+                    "permission",
+                    login == "owner" ? "admin": "read",
+                    "user",
+                    Check.Map("login", login, "id", login == "owner" ? 1: login == "donor" ? 123: 124)
+                )
+            )
+        }
         if tail == "" {
             if folder == "fork" && State["fork_pending_reads"] != nil && Int32.Parse(
                 Check.Text(State["fork_pending_reads"])
@@ -562,6 +590,9 @@ internal partial class Fixture {
                     "issue_url",
                     "https://api.github.com/repos/owner/project/issues/1"
                 )
+                if Check.Text(body["body"]).Contains("<!-- tokate-admission:v1 -->") {
+                    comment["user"] = Check.Map("login", "github-actions[bot]", "id", 41898282, "type", "Bot")
+                }
                 let comments = State["comments"] ?? JsonObject()
                 comments[(100 + count).ToString()] = comment.DeepClone()
                 State["comments"] = comments
@@ -651,6 +682,18 @@ internal partial class Fixture {
         }
         if tail.StartsWith("labels") {
             return Answer(Check.Map("name", "tokate:approved"))
+        }
+        if tail == "git/matching-refs/heads/tokate/contributions/" {
+            let refs = JsonArray()
+            for row in Git(
+                folder,
+                []string{"for-each-ref", "--format=%(refname) %(objectname)", "refs/heads/tokate/contributions/"}
+            )
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries) {
+                let fields = row.Split(' ')
+                refs.Add(Check.Map("ref", fields[0], "object", Check.Map("type", "commit", "sha", fields[1])))
+            }
+            return Answer(refs)
         }
         if tail.StartsWith("git/ref/heads/") {
             if tail == "git/ref/heads/tokate/access" && State["access_revoke_at"] != nil {
@@ -893,7 +936,9 @@ internal partial class Fixture {
                 if Check.Text(State["mode"]) == "body_fail" {
                     return Response(500)
                 }
-                pull["body"] = body["body"]?.DeepClone()
+                for field in body.AsObject() {
+                    pull[field.Key] = field.Value?.DeepClone()
+                }
                 if Check.Text(State["mode"]) == "lost_body_response" {
                     State["mode"] = JsonValue.Create("")
                     Save()
@@ -923,9 +968,16 @@ internal partial class Fixture {
                 "ref",
                 branch,
                 "repo",
-                Check.Map("full_name", headLogin + "/project", "owner", Check.Map("login", headLogin, "id", 123))
+                Check.Map(
+                    "id",
+                    2,
+                    "full_name",
+                    headLogin + "/project",
+                    "owner",
+                    Check.Map("login", headLogin, "id", 123)
+                )
             )
-            body["base"] = Check.Map("ref", Check.Text(body["base"]), "repo", Check.Map("full_name", repo))
+            body["base"] = Check.Map("ref", Check.Text(body["base"]), "repo", Check.Map("id", 1, "full_name", repo))
             let pulls = State["pulls"]?.AsArray() ?? JsonArray()
             pulls.Add(body)
             State["pulls"] = pulls

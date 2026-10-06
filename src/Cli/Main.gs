@@ -143,6 +143,8 @@ func Dispatch(options Args) int32 {
         AccessState.Run(options)
     } else if options.Command == "coordinate" {
         Coordinator.Run(options)
+    } else if options.Command == "admit" {
+        Admission.Run(options)
     } else if options.Command == "coordination" {
         let state = CoordinationState.Load(RepositoryIdentity.Repo(options.Need("repo")), options.Number("issue"))
         if PublicOutput.Enabled {
