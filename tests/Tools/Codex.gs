@@ -275,7 +275,10 @@ internal partial class Fixture {
                     FileInfo("/proc/self/ns/" + name).LinkTarget ?? throw Exception("Missing namespace")
                 )
             }
-            File.WriteAllText(Path.Combine(Root, "namespace-ready"), Environment.ProcessId.ToString())
+            File.WriteAllText(
+                Path.Combine(Root, "namespace-ready"),
+                FileInfo("/proc/self").LinkTarget ?? throw Exception("Missing owned task PID")
+            )
             let release = Path.Combine(Root, "namespace-release")
             let clock = System.Diagnostics.Stopwatch.StartNew()
             while !File.Exists(release) && clock.Elapsed.TotalSeconds < 5 {
