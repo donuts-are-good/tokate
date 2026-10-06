@@ -68,8 +68,7 @@ internal class Submission {
                 if response.ValueKind != JsonValueKind.Array {
                     throw Exception("Cannot inspect complete request comment evidence")
                 }
-                let rows = J.Items(response)
-                for row in rows {
+                for row in response.EnumerateArray() {
                     if J.Get(J.Get(row, "user"), "id").ToString() != actor.ToString() {
                         continue
                     }
@@ -107,7 +106,7 @@ internal class Submission {
                     }
                     count++
                 }
-                if rows.Count < 100 {
+                if response.GetArrayLength() < 100 {
                     if count > 1 {
                         throw Exception("Ambiguous duplicate request comments")
                     }

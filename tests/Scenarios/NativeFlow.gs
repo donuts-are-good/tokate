@@ -199,6 +199,44 @@ internal partial class NativeFlow : NativeFixture {
             }
             flow.NoPr()
         }
+        EventDelimiters()
+    }
+
+    private func EventDelimiters() {
+        let started = "{\"type\":\"turn.started\"}"
+        let completed = "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}"
+        let streams = []string{
+            String('\n', 1024 * 1024) + started + "\n \t\r\n" + completed + "\n\n",
+            "\r\n" + started + "\r\n\r\n" + completed + "\r\n",
+            started + "\n" + completed.Replace(",\"usage\"", "\r,\"usage\"") + "\n",
+            started + "\r" + completed
+        }
+        for i in 0 ... streams.Length {
+            using let flow = NativeFlow(Binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim(seconds: "30")
+            flow.Reload()
+            flow.State["event_stream"] = JsonValue.Create(streams[i])
+            flow.Save()
+            let valid = i < streams.Length - 1
+            let result = flow.Call([]string{"work", "--run", run, "--json"}, valid ? 0: 1)
+            Check.Envelope(result, "work", valid ? "ok": "error", valid ? "": "inference_failed")
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            if valid {
+                Check.That(
+                    Check.Text(saved["usage"]?["input_tokens"]) == "7" && Check.Text(
+                        saved["usage"]?["output_tokens"]
+                    ) == "3",
+                    "Event delimiter changed completed usage"
+                )
+            } else {
+                Check.That(saved["usage"] == nil && saved["turn_completed"] == nil, "Lone CR split two events")
+                flow.NoPr()
+            }
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Event delimiter fixture retried inference")
+        }
     }
 
     internal func CrossAccountFlow() {

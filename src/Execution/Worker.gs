@@ -380,11 +380,13 @@ internal class Worker {
             var completed bool
             var completions int32
             let usage = Dictionary[string, Object?]()
-            for line in output.Split('\n') {
-                if String.IsNullOrWhiteSpace(line) {
+            let events = output.AsSpan()
+            for bounds in events.Split('\n') {
+                let line = events[bounds]
+                if line.IsWhiteSpace() {
                     continue
                 }
-                let item = J.Parse(line)
+                let item = J.Parse(line.ToString())
                 if J.Text(item, "type") == "turn.started" {
                     completed = false
                 }
