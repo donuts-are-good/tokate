@@ -127,6 +127,7 @@ internal class SuiteCatalog {
                 let installer = report.Serial()
                 try {
                     if CiShard.Include("Installer") {
+                        Installer.InputFailures()
                         Installer.Lifecycle(project, binary)
                         Console.WriteLine(
                             "PASS installer lifecycle, failed updates, credential boundary, and offline removal"

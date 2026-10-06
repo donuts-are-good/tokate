@@ -10,9 +10,10 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-    <Version>0.2.46</Version>
+    <Version>0.2.47</Version>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="tokate-tests" />
     <Compile Remove="tests/**/*.gs" />
     <EmbeddedResource Include="templates/*" />
     <EmbeddedResource Include="site/install.sh" LogicalName="Tokate.templates.install.sh" />

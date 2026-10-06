@@ -20,6 +20,14 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
+        if args.Length == 2 && args[0] == "--installer-input-fixture" {
+            Installer.InputFailure(args[1] == "capture")
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--installer-input" {
+            Installer.InputFailures()
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
