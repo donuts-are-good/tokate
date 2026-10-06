@@ -1,7 +1,16 @@
 name: Tokate coordination
 on:
-  issue_comment:
-    types: [created]
+  workflow_call:
+    inputs:
+      archive_url:
+        required: true
+        type: string
+      archive_sha256:
+        required: true
+        type: string
+      member:
+        required: true
+        type: string
 permissions: {}
 jobs:
   coordinate:
@@ -18,14 +27,18 @@ jobs:
       issues: read
       pull-requests: write
     steps:
-      # Trusted released binary only: no checkout, build, or donor expressions.
       - name: Fetch pinned coordinator
         env:
-          TOKATE_ARCHIVE_URL: '@ARCHIVE_URL@'
-          TOKATE_ARCHIVE_SHA256: '@ARCHIVE_SHA256@'
-          TOKATE_MEMBER: '@MEMBER@'
+          TOKATE_ARCHIVE_URL: ${{ inputs.archive_url }}
+          TOKATE_ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+          TOKATE_MEMBER: ${{ inputs.member }}
         run: |
           set -eu
+          test "$TOKATE_ARCHIVE_URL" = "https://api.github.com/repos/obselate/tokate/releases/assets/${TOKATE_ARCHIVE_URL##*/}"
+          case "${TOKATE_ARCHIVE_URL##*/}" in ''|*[!0-9]*) exit 1;; esac
+          test "${#TOKATE_ARCHIVE_SHA256}" -eq 64
+          case "$TOKATE_ARCHIVE_SHA256" in *[!0-9a-f]*) exit 1;; esac
+          printf '%s\n' "$TOKATE_MEMBER" | grep -Eq '^tokate-[0-9]+\.[0-9]+\.[0-9]+-linux-x64/tokate$'
           curl -qfsSL --proto '=https' --proto-redir '=https' --max-time 60 --max-filesize 134217728 -H 'Accept: application/octet-stream' "$TOKATE_ARCHIVE_URL" -o "$RUNNER_TEMP/tokate.tar.gz"
           printf '%s  %s\n' "$TOKATE_ARCHIVE_SHA256" "$RUNNER_TEMP/tokate.tar.gz" | sha256sum -c -
           tar -xOzf "$RUNNER_TEMP/tokate.tar.gz" "$TOKATE_MEMBER" > "$RUNNER_TEMP/tokate"

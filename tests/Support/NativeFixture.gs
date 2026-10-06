@@ -9,6 +9,7 @@ import System.Globalization
 import System.IO
 import System.Net
 import System.Net.Sockets
+import System.Reflection
 import System.Text.Json.Nodes
 
 internal open class NativeFixture : IDisposable {
@@ -47,10 +48,25 @@ internal open class NativeFixture : IDisposable {
         Save()
     }
 
+    shared {
+        internal func Template(name string) string {
+            using let stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(
+                "TokateTests.templates." + name
+            )
+            if stream == nil {
+                throw Exception("Missing fixture template")
+            }
+            using let reader = StreamReader(stream)
+            return reader.ReadToEnd()
+        }
+    }
+
     internal func Initialize() {
         Git("init", "-b", "main", Upstream)
         Git("-C", Upstream, "config", "maintenance.autoDetach", "false")
-        Call([]string{"init", "--path", Upstream})
+        Directory.CreateDirectory(Path.Combine(Upstream, ".github"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate.json"), Template("tokate.json"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate-pr.md"), Template("tokate-pr.md"))
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
         Check.That(Check.Text(policy["max_seconds"]) == "3600", "New policy budget must be 3600 seconds")
@@ -59,6 +75,37 @@ internal open class NativeFixture : IDisposable {
         Commit("Initial")
         Git("clone", "--bare", Upstream, Path.Combine(Bin, "fork"))
         Git("-C", Path.Combine(Bin, "fork"), "config", "maintenance.autoDetach", "false")
+    }
+
+    internal func ReleaseReady(hosted bool = true) {
+        let version = Call([]string{"--version"}).Output.Trim().Substring(7)
+        let bundle = "tokate-" + version + "-linux-x64"
+        let storage = Path.Combine(Temp.Root, bundle)
+        Directory.CreateDirectory(storage)
+        File.Copy(Binary, Path.Combine(storage, "tokate"))
+        let archive = Path.Combine(Bin, "release.tar.gz")
+        Check.Success(TestProcess.Run("/usr/bin/tar", []string{"-czf", archive, "-C", Temp.Root, bundle}, Temp.Env))
+        Temp.Tool("curl")
+        Reload()
+        State["coordinator_download"] = JsonValue.Create(true)
+        State["hosted_workflow"] = JsonValue.Create(hosted)
+        State["release_version"] = JsonValue.Create(version)
+        let assets = JsonArray()
+        assets.Add(
+            Check.Map(
+                "id",
+                41,
+                "name",
+                bundle + ".tar.gz",
+                "state",
+                "uploaded",
+                "size",
+                Convert.ToInt32(FileInfo(archive).Length)
+            )
+        )
+        assets.Add(Check.Map("id", 42, "name", bundle + ".tar.gz.sha256", "state", "uploaded", "size", 128))
+        State["release"] = Check.Map("tag_name", "v" + version, "draft", false, "prerelease", false, "assets", assets)
+        Save()
     }
 
     public func Dispose() -> Temp.Dispose()

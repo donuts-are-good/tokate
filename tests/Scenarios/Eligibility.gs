@@ -505,8 +505,177 @@ internal class EligibilityChecks {
             test.Flow.NoPr()
         }
 
+        private func Presentation(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            Setup(test, "trusted")
+            let args = []string{
+                "access",
+                "--repo",
+                "owner/project",
+                "--operation",
+                "request",
+                "--issue",
+                "1",
+                "--scope",
+                "trust",
+                "--json"
+            }
+            let requested = Check.Envelope(test.Flow.Call(args), "access", "ok")
+            Check.That(Check.Text(requested["data"]?["posted"]) == "true", "Donor request was not posted")
+            test.Flow.Reload()
+            let commentId = Check.Text(requested["data"]?["comment"])
+            let comment = test.Flow.State["comments"]?[commentId] ?? throw Exception("Missing request")
+            comment["issue_url"] = JsonValue.Create("https://api.github.com/repos/Owner/Project/issues/1")
+            test.Flow.Save()
+            let repeated = Check.Envelope(test.Flow.Call(args), "access", "ok")
+            Check.That(
+                Check.Text(repeated["data"]?["posted"]) == "false",
+                "Case-variant request posted duplicate comments"
+            )
+            let listArgs = []string{"access", "--repo", "owner/project", "--operation", "list", "--json"}
+            let pending = Check.Envelope(test.Flow.Call(listArgs, owner: true), "access", "ok")
+            Check.That(pending["data"]?["pending"]?.AsArray().Count == 1, "Pending request was hidden")
+            Claim(test, 1)
+            Access(test, "trust")
+            let trusted = Check.Envelope(test.Flow.Call(listArgs, owner: true), "access", "ok")
+            Check.That(
+                trusted["data"]?["pending"]?.AsArray().Count == 0 && Check.Text(
+                    trusted["data"]?["trusted"]?[0]?["donor"]
+                ) == "donor",
+                "Trusted donor presentation did not resolve the request"
+            )
+            Access(test, "untrust")
+            Access(test, "check", issue: "1", code: 1, owner: false)
+            let restored = Check.Envelope(test.Flow.Call(listArgs), "access", "ok")
+            Check.That(
+                restored["data"]?["pending"]?.AsArray().Count == 1 && restored["data"]?["trusted"]?.AsArray()
+                    .Count == 0,
+                "Revocation presentation retained trust"
+            )
+            test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "request", "--issue", "1"})
+            Access(test, "grant", issue: "1")
+            File.Delete(Path.Combine(test.Flow.Upstream, ".github/tokate-pr.md"))
+            let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(path))
+            policy["target_branch"] = JsonValue.Create("release")
+            policy["pr_text"] = JsonValue.Create("Literal {{issue}} owner text")
+            policy["close_message"] = JsonValue.Create("Owner review required.")
+            File.WriteAllText(path, policy.ToJsonString())
+            test.Flow.Commit("Built-in PR format with literal owner text")
+            test.Flow.Git("-C", test.Flow.Upstream, "branch", "release")
+            test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
+            Check.That(
+                Check.Text(test.State()["state"]?["approval"]?["base_branch"]) == "release",
+                "Configured target was not used for approval"
+            )
+            let claim = Claim(test)
+            let run = test.Prepare()
+            let commit = test.Candidate(claim)
+            test.Flow.Call([]string{"external", "--run", run, "--commit", commit})
+            test.Flow.Call([]string{"submit", "--run", run})
+            let publication = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
+            test.Coordinate(test.Event(publication))
+            test.Flow.Reload()
+            Check.That(
+                Check.Text(test.Flow.State["pulls"]?[0]?["user"]?["login"]) == "owner",
+                "Coordinator did not create the PR"
+            )
+            let body = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
+            Check.Contains(body, "Fixes #1")
+            Check.Contains(body, "Literal {{issue}} owner text")
+            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            test.Flow.ResetTraffic()
+            let history = Check.Envelope(
+                test.Flow.Call(
+                    []string{
+                        "access",
+                        "--repo",
+                        "owner/project",
+                        "--operation",
+                        "history",
+                        "--donor",
+                        "donor",
+                        "--json"
+                    }
+                ),
+                "access",
+                "ok"
+            )
+            Check.That(
+                history["data"]?["history"]?.AsArray().Count == 1 && Check.Text(
+                    history["data"]?["history"]?[0]?["pr"]
+                ) == "10" &&
+                    Check.Text(history["data"]?["history"]?[0]?["donor"]) == "donor",
+                "Contribution history omitted the PR"
+            )
+            Check.Contains(Check.Text(history["data"]?["history"]?[0]?["evidence"]), "unverified")
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing history PR")
+            let head = pull["head"]?["repo"] ?? throw Exception("Missing history head repository")
+            let owner = head["owner"]?.DeepClone() ?? throw Exception("Missing history head owner")
+            head["owner"] = Check.Map("login", "other", "id", 124)
+            test.Flow.Save()
+            let forged = Check.Envelope(
+                test.Flow.Call(
+                    []string{
+                        "access",
+                        "--repo",
+                        "owner/project",
+                        "--operation",
+                        "history",
+                        "--donor",
+                        "donor",
+                        "--json"
+                    }
+                ),
+                "access",
+                "ok"
+            )
+            Check.That(
+                forged["data"]?["history"]?.AsArray().Count == 0,
+                "Forged receipt attributed a PR to another donor"
+            )
+            let mismatch = Check.Envelope(
+                test.Flow.Call(
+                    []string{
+                        "access",
+                        "--repo",
+                        "owner/project",
+                        "--operation",
+                        "history",
+                        "--donor",
+                        "other",
+                        "--json"
+                    }
+                ),
+                "access",
+                "ok"
+            )
+            Check.That(
+                mismatch["data"]?["history"]?.AsArray().Count == 0,
+                "Mismatched head owner and receipt entered history"
+            )
+            test.Flow.Reload()
+            let restoredPull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing history PR")
+            let restoredRepo = restoredPull["head"]?["repo"] ?? throw Exception("Missing history head repository")
+            restoredRepo["owner"] = owner
+            test.Flow.Save()
+            for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "History mutated authority")
+            }
+            policy["close_message"] = JsonValue.Create("Changed admission message")
+            File.WriteAllText(path, policy.ToJsonString())
+            test.Flow.Commit("Change optional text")
+            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true)
+            test.Flow.NoInference()
+        }
+
         internal func All(binary string, selected string) {
             switch selected {
+                case "EligibilityPresentation" {
+                    Presentation(binary)
+                }
                 case "EligibilityTraffic" {
                     Traffic(binary)
                 }

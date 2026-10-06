@@ -25,16 +25,16 @@ internal class CoordinatorSetup {
                     "Generate to a new file outside protected .github paths; installation is an owner action after release"
                 )
             }
-            let info = RepositoryAccess.RequireOwner(repo)
-            let existing = GitHub.Api(
-                "repos/" + repo + "/contents/.github/workflows/tokate-coordinator.yml?ref=" + Uri.EscapeDataString(
-                    J.Text(info, "default_branch")
-                ),
-                missing: true
-            )
-            if existing.ValueKind != JsonValueKind.Undefined {
-                throw Exception("Coordinator workflow already exists; refusing replacement")
+            RepositoryAccess.RequireOwner(repo)
+            let yaml = Resolve()
+            OwnerSetup.Preview(output, File.Exists(output) ? File.ReadAllText(output): "", yaml)
+            if OwnerSetup.Confirm(args) {
+                File.WriteAllText(output, yaml)
+                Terminal.Message("Generated a pinned shared workflow entry. Owner: review and install it separately.")
             }
+        }
+
+        internal func Resolve() string {
             let version = ApplicationInfo.Version()
             let release = GitHub.Api("repos/obselate/tokate/releases/tags/v" + version, missing: true)
             if release.ValueKind == JsonValueKind.Undefined || J.Bool(release, "draft") || J.Bool(
@@ -91,17 +91,46 @@ internal class CoordinatorSetup {
                 if FileInfo(binary).LinkTarget != nil || HashFile(binary) != HashFile(Environment.ProcessPath ?? "") {
                     throw Exception("Running binary does not match the released archive member")
                 }
-                let template = ApplicationInfo.Resource("coordinator.yml")
-                let yaml = template
-                    .Replace("@ARCHIVE_URL@", archiveUrl)
-                    .Replace("@ARCHIVE_SHA256@", hash)
-                    .Replace("@MEMBER@", member)
-                File.WriteAllText(output, yaml)
-                Terminal.Message(
-                    "Generated " +
-                        output +
-                        ". Owner: review, then install as .github/workflows/tokate-coordinator.yml; opt in with policy version 2 and fresh approvals."
+                let tag = GitHub.Api("repos/obselate/tokate/git/ref/tags/v" + version)
+                var identity = J.Get(tag, "object")
+                var depth int32
+                while J.Text(identity, "type") == "tag" && depth < 8 {
+                    let annotated = GitHub.Api(
+                        "repos/obselate/tokate/git/tags/" + RepositoryIdentity.CommitSha(J.Text(identity, "sha"))
+                    )
+                    identity = J.Get(annotated, "object")
+                    depth++
+                }
+                if J.Text(identity, "type") != "commit" {
+                    throw Exception("Stable release tag does not resolve to a commit")
+                }
+                let commit = RepositoryIdentity.CommitSha(J.Text(identity, "sha"))
+                let hosted = GitHub.FileAt(
+                    "obselate/tokate",
+                    ".github/workflows/tokate-shared.yml",
+                    commit,
+                    missing: true
                 )
+                if hosted.Replace("\r", "").TrimEnd() != ApplicationInfo
+                    .Resource("coordinator.yml")
+                    .Replace("\r", "")
+                    .TrimEnd() {
+                    throw Exception(
+                        "Bootstrap required: the owner must install the reviewed central reusable workflow in the matching release before setup can write adopter files"
+                    )
+                }
+                return "name: Tokate\non:\n  issue_comment:\n    types: [created]\npermissions: {}\njobs:\n  coordinate:\n" +
+                    "    permissions:\n      contents: write\n      issues: read\n      pull-requests: write\n" +
+                    "    uses: obselate/tokate/.github/workflows/tokate-shared.yml@" +
+                    commit +
+                    "\n" +
+                    "    with:\n      archive_url: '" +
+                    archiveUrl +
+                    "'\n      archive_sha256: '" +
+                    hash +
+                    "'\n      member: '" +
+                    member +
+                    "'\n"
             } finally {
                 Directory.Delete(directory, true)
             }

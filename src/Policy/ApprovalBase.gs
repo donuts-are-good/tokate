@@ -31,7 +31,7 @@ internal class ApprovalBase {
                 "sha"
             )
             let policy = Policy.Load(repo, current)
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", current)
+            let template = PrBody.Template(repo, current, policy)
             if (version == 2 && J.Number(policy.Value, "version") != 2) || policy.Digest != J.Text(
                 approval,
                 "policy_hash"

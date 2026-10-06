@@ -135,16 +135,7 @@ func Dispatch(options Args) int32 {
             Terminal.Json(selection, "Donor selection")
         }
     } else if options.Command == "init" {
-        OwnerApproval.Init(options)
-        let root = Path.GetFullPath(options.Get("path", "."))
-        PublicOutput.ResultData = J.Map(
-            "path",
-            root,
-            "policy",
-            Path.Combine(root, ".github/tokate.json"),
-            "template",
-            Path.Combine(root, ".github/tokate-pr.md")
-        )
+        OwnerSetup.Run(options)
     } else if options.Command == "coordinator-setup" {
         CoordinatorSetup.Run(options)
         PublicOutput.ResultData = J.Map("repo", options.Get("repo"), "output", Path.GetFullPath(options.Need("output")))

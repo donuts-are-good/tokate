@@ -1,4 +1,4 @@
-# Opt-in contribution coordination
+# Contribution coordination
 
 Version 2 coordinates contributions on GitHub independently of the coding tool.
 The repository owner installs a small workflow; there is no hosted service or
@@ -8,12 +8,13 @@ Tokate-launched inference currently uses Codex. Other coding tools can contribut
 through the external exact-commit path; their managed launch integrations are
 not provided by this path.
 
-## Compatibility comes first
+## Setup
 
-`tokate init` creates version-1 policy and templates. To adopt version 2, commit
-an explicit policy change, install the coordinator workflow and approve again.
-The default PR template works with either version. Existing runs and receipts
-keep their original version; there is no automatic conversion.
+New `tokate init` setup uses version 2 and Trusted task eligibility. Existing policy
+and custom templates are preserved; `init --upgrade` explicitly upgrades legacy
+policy without removing model restrictions. Commit the reviewed policy and workflow
+and approve again. Existing runs and receipts retain their original authority;
+there is no automatic conversion.
 
 Changes to task, policy or template require fresh approval. Assignment changes
 also invalidate assignment-bound approvals. Old work and state history remain
@@ -42,27 +43,26 @@ retains original source/tools and uses the original unexpired reservation throug
 
 ## Owner installation after a release
 
-Run the released binary with repository write access:
+Use a stable Tokate release with its hosted shared workflow. Setup verifies the
+release before writing adopter files.
+
+For ordinary adoption, use `tokate init --repo OWNER/REPO`. To prepare only the
+short workflow entry outside protected paths:
 
 ```sh
-tokate coordinator-setup --repo OWNER/REPO --output tokate-coordinator.yml
+tokate coordinator-setup --repo OWNER/REPO --output tokate-coordinator.yml --yes
 ```
 
-This generates a file outside `.github`; it does not install or commit it. It
-refuses an unreleased/draft/prerelease version, an existing output or coordinator
-workflow, a bad archive checksum, or a binary that differs from the release
-archive member. It resolves the release matching the running version, downloads
-the archive and separate checksum sidecar, and pins the immutable numeric GitHub
-release asset URL, archive SHA256 and exact binary member. The archive does not
-contain its own checksum. Replaced assets have different numeric IDs; the pin
-fails rather than silently following a replaced tag/asset.
-
-Review the output, then install it as `.github/workflows/tokate-coordinator.yml`
-and commit it yourself. Enable GitHub Actions PR creation in repository settings
-if necessary. The workflow never checks out/builds the repository or runs donor
-code with its write token. Job permissions are `contents: write` for the state ref, `issues: read`
-for canonical comments/eligibility, and `pull-requests: write` for draft PRs.
-Keep fork verification in ordinary read-only `pull_request` CI without secrets.
+The entry pins the central workflow to the release tag's resolved commit, the
+immutable numeric archive asset URL, archive SHA256 and exact binary member.
+Setup checks the checksum sidecar and verifies the running binary against that
+member before proposing files. It rejects unreleased, draft or prerelease versions.
+Review and install the entry as `.github/workflows/tokate-coordinator.yml` yourself;
+setup does not commit it. Ordinary public Actions runners suffice. The shared
+workflow passes the event file to the released binary, without checkout or donor
+code execution. Its permissions are contents write, issues read and pull-requests
+write. Keep fork verification in read-only CI without secrets. PR admission and
+close-message execution remain pending integration into this same entry.
 
 Extend the existing policy explicitly, for example:
 
@@ -101,7 +101,7 @@ fresh approval and explicitly select any tools or inputs beyond the entrypoint.
 
 Upgrade the donor CLI and pinned coordinator to 0.2.22 before adopting this mode.
 Existing v1/v2 policies without these fields keep exactly their assignment-bound
-approval behavior. No approval, run or receipt is migrated. To opt in, add both
+approval behavior. No approval, run or receipt is migrated. For an existing policy, add both
 fields to a version-2 policy and commit it to the authority branch:
 
 ```json

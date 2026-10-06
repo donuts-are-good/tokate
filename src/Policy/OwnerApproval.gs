@@ -2,27 +2,10 @@ package Tokate
 
 import System
 import System.Collections.Generic
-import System.IO
 import System.Text.Json
 
 internal class OwnerApproval {
     shared {
-        internal func Init(args Args) {
-            let root = Path.GetFullPath(args.Get("path", "."))
-            let directory = Path.Combine(root, ".github")
-            Directory.CreateDirectory(directory)
-            let policy = Path.Combine(directory, "tokate.json")
-            let template = Path.Combine(directory, "tokate-pr.md")
-            if File.Exists(policy) || File.Exists(template) {
-                throw CliFailure("invalid_state", "Tokate files already exist. Edit them directly.")
-            }
-            File.WriteAllText(policy, ApplicationInfo.Resource("tokate.json"))
-            File.WriteAllText(template, ApplicationInfo.Resource("tokate-pr.md"))
-            Terminal.Message(
-                "Created .github/tokate.json and .github/tokate-pr.md. Set allowed model/effort pairs and required checks, then commit to the default branch."
-            )
-        }
-
         internal func ApprovalRef(number int32) string -> "tokate/approvals/" + number.ToString()
 
         internal func Approve(args Args) {
@@ -49,15 +32,16 @@ internal class OwnerApproval {
             }
             let continuing = predecessor.ValueKind != JsonValueKind.Undefined
             let authority = J.Text(info, "default_branch")
+            let authorityBase = GitHub.Branch(repo, authority)
+            let policy = Policy.Load(repo, authorityBase)
+            let configuredTarget = J.Text(policy.Value, "target_branch")
             let branch = continuing ? J.Text(J.Get(predecessor, "approval"), "base_branch"): ApprovalBase.Select(
                 args,
-                authority
+                configuredTarget == "" ? authority: configuredTarget
             )
-            let authorityBase = GitHub.Branch(repo, authority)
             let revision = continuing ? J.Text(J.Get(predecessor, "approval"), "base"): (
                 branch == authority ? authorityBase: GitHub.Branch(repo, branch)
             )
-            let policy = Policy.Load(repo, authorityBase)
             if continuing && J.Number(policy.Value, "version") != 1 {
                 throw Exception("Continuation is limited to unpublished same-donor version-1 managed work")
             }
@@ -70,7 +54,7 @@ internal class OwnerApproval {
                 let donorArg = args.Need("donor")
                 donor = RepositoryIdentity.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
             }
-            let template = GitHub.FileAt(repo, ".github/tokate-pr.md", authorityBase)
+            let template = PrBody.Template(repo, authorityBase, policy)
             ValidateTemplate(template)
             let commit = GitHub.Api("repos/" + repo + "/git/commits/" + RepositoryIdentity.CommitSha(revision))
             let decree = Decree.CaptureTree(repo, RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))

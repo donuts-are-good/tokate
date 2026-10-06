@@ -132,8 +132,9 @@ internal class PublicOutput {
         internal func Policy(value JsonElement) Object {
             let result = Select(
                 value,
-                "version,max_seconds,allow_network,reservation_seconds,approval_scope,eligibility"
+                "version,max_seconds,allow_network,reservation_seconds,approval_scope,eligibility,target_branch,pr_text,close_message"
             )
+            result["close_message"] = Policy.CloseMessage(value)
             let mode = J.Text(value, "model_policy")
             result["model_policy"] = mode == "" ? "whitelist": mode
             let models = J.Map()

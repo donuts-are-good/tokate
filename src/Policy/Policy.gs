@@ -1,6 +1,7 @@
 package Tokate
 
 import System
+import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
 
@@ -15,6 +16,35 @@ internal class Policy {
         let version = J.Number(Value, "version")
         if version != 1 && version != 2 {
             throw Exception("Policy version must be 1 or 2")
+        }
+        for key in[]string{"pr_text", "close_message", "target_branch"} {
+            var occurrences int32
+            for field in Value.EnumerateObject() {
+                if field.Name == key {
+                    occurrences++
+                }
+            }
+            if occurrences > 1 {
+                throw Exception("Duplicate policy field " + key)
+            }
+            let item = J.Get(Value, key)
+            if item.ValueKind != JsonValueKind.Undefined {
+                if item.ValueKind != JsonValueKind.String || Encoding.UTF8.GetByteCount(item.GetString() ?? "") > 4096 {
+                    throw Exception(key + " must be bounded plain text")
+                }
+                let text = item.GetString() ?? ""
+                for c in text {
+                    if c == '\0' || (Char.IsControl(c) && c != '\n' && c != '\r' && c != '\t') {
+                        throw Exception(key + " contains control characters")
+                    }
+                }
+                if text.Contains("<!-- tokate") {
+                    throw Exception(key + " cannot contain Tokate ownership markers")
+                }
+                if key == "target_branch" {
+                    RepositoryIdentity.Branch(text)
+                }
+            }
         }
         ProtectedPaths.Validate(J.Get(Value, "protected_paths"))
         var eligibilityFields int32
@@ -277,6 +307,13 @@ internal class Policy {
     }
 
     shared {
+        internal func CloseMessage(value JsonElement) string -> J.Get(value, "close_message")
+            .ValueKind == JsonValueKind.Undefined ?
+        "This pull request does not meet the repository's Tokate admission policy. Request owner review before submitting again.": J.Text(
+            value,
+            "close_message"
+        )
+
         internal func Load(repo string, revision string) Policy -> Policy(
             GitHub.FileAt(repo, ".github/tokate.json", revision)
         )

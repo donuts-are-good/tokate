@@ -174,13 +174,7 @@ internal class Diagnostics {
                 Call(binary, temp, words, "error", "invalid_arguments")
             }
             Check.That(!File.Exists(calls), "Conflicting scopes started probes")
-            let project = Path.Combine(temp.Root, "project")
-            for words in[]([]string){
-                []string{"help"},
-                []string{"--version"},
-                []string{"completion", "bash"},
-                []string{"init", "--path", project}
-            } {
+            for words in[]([]string){[]string{"help"}, []string{"--version"}, []string{"completion", "bash"}} {
                 Call(binary, temp, words)
             }
             let saved = Path.Combine(temp.Root, "saved")

@@ -91,6 +91,10 @@ func Main(args[]string) int32 {
             ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if args.Length == 1 && args[0] == "--cli-setup" {
+            CliDiscovery.Setup(binary)
+            return 0
+        }
         if args.Length == 1 && args[0] == "--cli" {
             CliDiscovery.All(binary)
             return 0
