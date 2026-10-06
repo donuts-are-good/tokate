@@ -53,13 +53,7 @@ internal class Repair {
             }
             let approval = J.Get(record, "approval")
             let head = J.Get(pull, "head")
-            let headInfo = GitHub.Api("repos/" + RepositoryIdentity.Repo(J.Text(J.Get(head, "repo"), "full_name")))
-            if RepositoryIdentity.PositiveId(J.Get(headInfo, "id")) != RepositoryIdentity.PositiveId(
-                J.Get(value, "head_repository_id")
-            ) {
-                throw Exception("Repair receipt head repository identity changed")
-            }
-            RepositoryAccess.ValidateFork(
+            let headInfo = RepositoryAccess.ValidateFork(
                 repo,
                 J.Parse(
                     J.Write(
@@ -75,6 +69,11 @@ internal class Repair {
                 ),
                 J.Get(value, "donor_id")
             )
+            if RepositoryIdentity.PositiveId(J.Get(headInfo, "id")) != RepositoryIdentity.PositiveId(
+                J.Get(value, "head_repository_id")
+            ) {
+                throw Exception("Repair receipt head repository identity changed")
+            }
             if J.Number(grant, "approval_version") != 1 || J.Number(grant, "pr") != J.Number(pull, "number") || J.Text(
                 grant,
                 "candidate"

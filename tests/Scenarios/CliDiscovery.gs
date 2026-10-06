@@ -2,6 +2,7 @@ package TokateTests
 
 import Gsharp.Concurrency
 import System
+import System.Collections.Generic
 import System.Diagnostics
 import System.IO
 import System.Net.Sockets
@@ -86,6 +87,229 @@ internal class CliDiscovery {
             Check.That(result.Code == code, result.Output + result.Error)
             Check.That(!result.Error.Contains("Missing tools"), "Prerequisites checked before validation")
             return result
+        }
+
+        internal func Setup(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            flow.ReleaseReady(hosted: false)
+            let root = Path.Combine(flow.Temp.Root, "adopter")
+            let args = []string{
+                "init",
+                "--repo",
+                "owner/project",
+                "--path",
+                root,
+                "--model-policy",
+                "unrestricted",
+                "--verification",
+                "[[\"bash\",\"scripts/verify.sh\"]]",
+                "--required-checks",
+                "[\"verify\"]",
+                "--non-interactive",
+                "--yes"
+            }
+            Check.Contains(
+                flow.Call([]string{"init", "--repo", "owner/project", "--path", root}, 1, true).Error,
+                "Choose --model-policy"
+            )
+            Check.Contains(flow.Call(args, 1, true).Error, "Bootstrap required")
+            Check.That(!Directory.Exists(root), "Failed setup created adopter files")
+            flow.Reload()
+            flow.State["hosted_workflow"] = JsonValue.Create(true)
+            flow.Save()
+            let preview = List[string](args)
+            preview.Remove("--yes")
+            Check.Contains(flow.Call(preview.ToArray(), owner: true).Error, "Preview only")
+            Check.That(!Directory.Exists(root), "Preview wrote adopter files")
+            let created = flow.Call(args, owner: true)
+            Check.Contains(created.Error, "Proposed complete file")
+            Check.Contains(created.Error, "contents write")
+            Check.Contains(created.Error, "tokate/contributions/N")
+            let policyPath = Path.Combine(root, ".github/tokate.json")
+            let workflowPath = Path.Combine(root, ".github/workflows/tokate-coordinator.yml")
+            let original = File.ReadAllText(policyPath)
+            var policy = Check.Json(original)
+            Check.That(
+                Check.Text(policy["eligibility"]) == "trusted" && Check.Text(policy["approval_scope"]) == "task",
+                "New setup did not default to task-scoped trusted access"
+            )
+            Check.That(
+                policy["models"] == nil && Check.Text(policy["model_policy"]) == "unrestricted",
+                "Unrestricted setup silently restricted models"
+            )
+            Check.That(
+                Directory.GetFiles(root, "*", SearchOption.AllDirectories).Length == 2,
+                "New adopter footprint is not two files"
+            )
+            let yaml = File.ReadAllText(workflowPath)
+            Check.That(
+                !yaml.Contains("run:") && !yaml.Contains("checkout") && yaml.Split('\n').Length < 25,
+                "Setup copied runtime code"
+            )
+            flow.Call(
+                []string{"init", "--repo", "owner/project", "--path", root, "--non-interactive", "--yes"},
+                owner: true
+            )
+            Check.That(
+                File.ReadAllText(policyPath) == original && File.ReadAllText(workflowPath) == yaml,
+                "Repeated setup changed owner files"
+            )
+            let renamed = Path.Combine(root, ".github/workflows/owner.yaml")
+            File.Move(workflowPath, renamed)
+            flow.Call(
+                []string{"init", "--repo", "owner/project", "--path", root, "--non-interactive", "--yes"},
+                owner: true
+            )
+            Check.That(
+                !File.Exists(workflowPath) && File.ReadAllText(renamed) == yaml && Directory.GetFiles(
+                    root,
+                    "*",
+                    SearchOption.AllDirectories
+                )
+                    .Length == 2,
+                "Repeat duplicated renamed owner workflow"
+            )
+            File.Move(renamed, workflowPath)
+            let escaped = "custom owner workflow\n# synthetic-preview-\x1b[31m\n"
+            File.WriteAllText(workflowPath, escaped)
+            let safePreview = flow.Call(
+                []string{"init", "--repo", "owner/project", "--path", root, "--non-interactive", "--plain"},
+                owner: true
+            )
+            Check.That(!safePreview.Error.Contains('\x1b'), "Owner preview emitted terminal control bytes")
+            Check.Contains(safePreview.Error, "synthetic-preview-")
+            Check.Contains(safePreview.Error, "not verified")
+            Check.That(File.ReadAllText(workflowPath) == escaped, "Preview changed the custom workflow")
+            let custom = Path.Combine(root, ".github/tokate-pr.md")
+            File.WriteAllText(custom, NativeFixture.Template("tokate-pr.md") + "Owner customization\n")
+            File.WriteAllText(workflowPath, "custom owner workflow\n")
+            flow.Call(
+                []string{
+                    "init",
+                    "--repo",
+                    "owner/project",
+                    "--path",
+                    root,
+                    "--model-policy",
+                    "whitelist",
+                    "--models",
+                    "{\"model-a\":[\"low\",\"high\"],\"model-b\":[\"absent\"]}",
+                    "--eligibility",
+                    "manual",
+                    "--base-branch",
+                    "release",
+                    "--network",
+                    "allow",
+                    "--seconds",
+                    "5400",
+                    "--reservation-seconds",
+                    "300",
+                    "--pr-text",
+                    "Literal {{issue}} owner text",
+                    "--close-message",
+                    "Ask the owner for access.",
+                    "--non-interactive",
+                    "--yes"
+                },
+                owner: true
+            )
+            let restricted = File.ReadAllText(policyPath)
+            policy = Check.Json(restricted)
+            Check.That(
+                Check.Text(policy["target_branch"]) == "release" && Check.Text(policy["max_seconds"]) == "5400" &&
+                    Check.Text(policy["allow_network"]) == "true",
+                "Noninteractive settings were not applied"
+            )
+            flow.Call(
+                []string{"init", "--repo", "owner/project", "--path", root, "--non-interactive", "--yes"},
+                owner: true
+            )
+            Check.That(
+                File.ReadAllText(policyPath) == restricted && File.ReadAllText(
+                    workflowPath
+                ) == "custom owner workflow\n" &&
+                    File
+                    .ReadAllText(custom).EndsWith("Owner customization\n"),
+                "Repeat overwrote customization or restrictions"
+            )
+            let invalid = []string{
+                "init",
+                "--repo",
+                "owner/project",
+                "--path",
+                root,
+                "--verification",
+                "[]",
+                "--non-interactive",
+                "--yes"
+            }
+            flow.Call(invalid, 1, true)
+            Check.That(File.ReadAllText(policyPath) == restricted, "Invalid policy replaced owner work")
+            let legacy = Path.Combine(flow.Temp.Root, "legacy")
+            Directory.CreateDirectory(Path.Combine(legacy, ".github/workflows"))
+            File.WriteAllText(Path.Combine(legacy, ".github/tokate.json"), NativeFixture.Template("tokate.json"))
+            File.WriteAllText(Path.Combine(legacy, ".github/workflows/tokate-coordinator.yml"), "legacy owner wiring\n")
+            let legacyText = File.ReadAllText(Path.Combine(legacy, ".github/tokate.json"))
+            flow.Call(
+                []string{"init", "--repo", "owner/project", "--path", legacy, "--non-interactive", "--yes"},
+                owner: true
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(legacy, ".github/tokate.json")) == legacyText,
+                "Repeat changed legacy approval binding"
+            )
+            flow.Call(
+                []string{
+                    "init",
+                    "--repo",
+                    "owner/project",
+                    "--path",
+                    legacy,
+                    "--upgrade",
+                    "--non-interactive",
+                    "--yes"
+                },
+                owner: true
+            )
+            let upgraded = Check.Json(File.ReadAllText(Path.Combine(legacy, ".github/tokate.json")))
+            Check.That(
+                Check.Text(upgraded["model_policy"]) == "whitelist" && upgraded["models"]?.ToJsonString() == Check
+                    .Json(NativeFixture.Template("tokate.json"))["models"]
+                    ?.ToJsonString(),
+                "Upgrade removed model restrictions"
+            )
+            let interactiveRoot = Path.Combine(flow.Temp.Root, "interactive")
+            let command = "'" + binary + "' init --repo owner/project --path '" + interactiveRoot + "' --plain"
+            let env = System.Collections.Generic.Dictionary[string, string](flow.Temp.Env)
+            env["GH_TOKEN"] = "fixture-owner"
+            let terminal = TestProcess.Run(
+                "/usr/bin/script",
+                []string{"-q", "-e", "-c", command, "/dev/null"},
+                env,
+                "whitelist\nmodel-a\nhigh xhigh\n\n\nmain\n\n\n\n/usr/bin/true\n\nverify, build\n\ny\n"
+            )
+            Check.Success(terminal)
+            Check.That(
+                terminal.Output.Split("Models: unrestricted or whitelist").Length == 2,
+                "Setup asked for model mode more than once"
+            )
+            Check.That(
+                File.Exists(Path.Combine(interactiveRoot, ".github/tokate.json")),
+                "Interactive confirmation did not apply setup"
+            )
+            let selected = Check.Json(File.ReadAllText(Path.Combine(interactiveRoot, ".github/tokate.json")))
+            Check.That(
+                selected["models"]?["model-a"]?.ToJsonString() == "[\"high\",\"xhigh\"]" &&
+                    selected["verification"]?.ToJsonString() == "[[\"/bin/sh\",\"-c\",\"/usr/bin/true\"]]" &&
+                    selected["required_checks"]?.ToJsonString() == "[\"verify\",\"build\"]",
+                "Interactive setup lost selected models, commands or check names"
+            )
+            flow.NoInference()
+            flow.NoPr()
+            Console.WriteLine(
+                "PASS CLI owner setup: bootstrap, preview, confirmation, two files, repeat, restrictions, upgrade and explicit options"
+            )
         }
 
         internal func Structured(binary string) {
@@ -293,8 +517,17 @@ internal class CliDiscovery {
             )
             Check.That(Check.Text(blocked["next_actions"]?[0]?[1]) == "doctor", "Missing-tools action absent")
             let init = Path.Combine(temp.Root, "project")
-            Check.Envelope(TestProcess.Run(binary, []string{"init", "--path", init, "--json"}, temp.Env), "init", "ok")
-            Check.That(File.Exists(Path.Combine(init, ".github/tokate.json")), "JSON changed init effects")
+            Check.Envelope(
+                TestProcess.Run(
+                    binary,
+                    []string{"init", "--repo", "owner/project", "--path", init, "--json"},
+                    temp.Env
+                ),
+                "init",
+                "error",
+                "missing_tools"
+            )
+            Check.That(!File.Exists(Path.Combine(init, ".github/tokate.json")), "Failed setup wrote configuration")
             let saved = Path.Combine(temp.Root, "saved")
             Directory.CreateDirectory(saved)
             let rows = JsonArray()

@@ -2,13 +2,32 @@ package Tokate
 
 import System
 import System.Collections.Generic
+import System.Text
 import System.Text.Json
 import System.Text.RegularExpressions
 
 internal class PrBody {
     shared {
-        internal func Render(template string, values Dictionary[string, string]) string ->
-        Regex.Replace(template, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
+        internal func Template(repo string, revision string, policy Policy) string {
+            let custom = GitHub.Api(
+                "repos/" + repo + "/contents/.github/tokate-pr.md?ref=" + Uri.EscapeDataString(revision),
+                missing: true
+            )
+            var text = ApplicationInfo.Resource("tokate-pr.md")
+            if custom.ValueKind != JsonValueKind.Undefined {
+                if J.Text(custom, "encoding") != "base64" {
+                    throw Exception("Expected a small repository PR template")
+                }
+                text = Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(custom, "content")))
+                OwnerApproval.ValidateTemplate(text)
+            }
+            return text + (J.Text(policy.Value, "pr_text") == "" ? "": "\n\n{{pr_text}}\n")
+        }
+
+        internal func Render(template string, values Dictionary[string, string], policy JsonElement) string {
+            values["pr_text"] = J.Text(policy, "pr_text")
+            return Regex.Replace(template, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
+        }
 
         internal func OriginalReport(metadata JsonElement) string {
             var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +

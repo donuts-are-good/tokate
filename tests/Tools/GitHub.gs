@@ -203,11 +203,36 @@ internal partial class Fixture {
             }
             return Answer(Check.Map("login", login, "id", login == "donor" || login == "renamed" ? 123: 124))
         }
+        if path.StartsWith("user/") {
+            let id = Int32.Parse(path.Substring(5))
+            return Answer(Check.Map("id", id, "login", id == 123 ? "donor": "other"))
+        }
         if path.StartsWith("repos/obselate/tokate/releases/tags/") {
             if let release = State["release"] {
                 return Answer(release)
             }
             return Response(404)
+        }
+        if path.StartsWith("repos/obselate/tokate/git/ref/tags/") {
+            return Answer(
+                State["release_tag"] ?? Check.Map("object", Check.Map("type", "commit", "sha", String('a', 40)))
+            )
+        }
+        if path.StartsWith("repos/obselate/tokate/git/tags/") {
+            return Answer(Check.Map("object", Check.Map("type", "commit", "sha", String('a', 40))))
+        }
+        if path.StartsWith("repos/obselate/tokate/contents/.github/workflows/tokate-shared.yml?ref=") {
+            if Check.Text(State["hosted_workflow"]) != "true" {
+                return Response(404)
+            }
+            return Answer(
+                Check.Map(
+                    "encoding",
+                    "base64",
+                    "content",
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes(NativeFixture.Template("coordinator.yml")))
+                )
+            )
         }
         let parts = path.Split('/')
         Check.That(parts[0] == "repos", "Expected repository API")
@@ -489,6 +514,13 @@ internal partial class Fixture {
             return Answer(
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )
+        }
+        if tail.StartsWith("issues/comments?") {
+            let comments = JsonArray()
+            for comment in State["comments"]?.AsObject() ?? JsonObject() {
+                comments.Add(comment.Value?.DeepClone())
+            }
+            return Answer(comments)
         }
         if tail.StartsWith("issues/") {
             let issueNumber = tail.Split('/')[1]
@@ -833,10 +865,9 @@ internal partial class Fixture {
                 return Answer(Check.Map("message", "Unexpected PR response"))
             }
             let pageField = Array.Find(query, field -> field.StartsWith("page=", StringComparison.Ordinal)) ?? "page=1"
-            let sizeField = Array.Find(query, field -> field.StartsWith("per_page=", StringComparison.Ordinal)) ??
-                "per_page=30"
+            let sizeField = Array.Find(query, field -> field.StartsWith("per_page=", StringComparison.Ordinal))
             let page = Int32.Parse(pageField.Substring(5))
-            let size = Int32.Parse(sizeField.Substring(9))
+            let size = Int32.Parse((sizeField ?? "per_page=30").Substring(9))
             let rows = JsonArray()
             if Check.Text(State["pull_history_unbounded"]) == "true" {
                 for i in 0 ... size {

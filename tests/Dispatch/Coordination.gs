@@ -26,6 +26,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "EligibilityLatePublication",
                 "EligibilityDeclarations",
                 "EligibilityModes",
+                "EligibilityPresentation",
                 "EligibilityRevocation",
                 "EligibilityAuthority",
                 "EligibilityTransport",

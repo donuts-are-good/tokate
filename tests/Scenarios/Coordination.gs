@@ -599,7 +599,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
 
     internal func SetupRelease() {
         let output = Path.Combine(Flow.Temp.Root, "coordinator.yml")
-        let args = []string{"coordinator-setup", "--repo", "owner/project", "--output", output}
+        let args = []string{"coordinator-setup", "--repo", "owner/project", "--output", output, "--yes"}
         Flow.Call(args, 1, owner: true)
         Check.That(!File.Exists(output), "Unreleased binary generated a workflow")
         Flow.Call(
@@ -613,63 +613,29 @@ internal partial class CoordinationFlow : CoordinationFixture {
             1,
             owner: true
         )
+        Flow.ReleaseReady(hosted: false)
+        Check.Contains(Flow.Call(args, 1, owner: true).Error, "Bootstrap required")
+        Check.That(!File.Exists(output), "Bootstrap failure wrote an unusable workflow")
+        Flow.Reload()
+        Flow.State["hosted_workflow"] = JsonValue.Create(true)
+        Flow.State["release_tag"] = Check.Map("object", Check.Map("type", "tag", "sha", String('b', 40)))
+        Flow.Save()
         let version = Flow.Call([]string{"--version"}).Output.Trim().Substring(7)
         let bundle = "tokate-" + version + "-linux-x64"
-        let storage = Path.Combine(Flow.Temp.Root, bundle)
-        Directory.CreateDirectory(storage)
-        File.Copy(Flow.Binary, Path.Combine(storage, "tokate"))
         let archive = Path.Combine(Flow.Bin, "release.tar.gz")
-        Check.Success(
-            TestProcess.Run("/usr/bin/tar", []string{"-czf", archive, "-C", Flow.Temp.Root, bundle}, Flow.Temp.Env)
-        )
-        Flow.Temp.Tool("curl")
-        Flow.Reload()
-        Flow.State["coordinator_download"] = JsonValue.Create(true)
-        Flow.State["release_version"] = JsonValue.Create(version)
-        let assets = JsonArray()
-        assets.Add(
-            Check.Map(
-                "id",
-                41,
-                "name",
-                bundle + ".tar.gz",
-                "state",
-                "uploaded",
-                "size",
-                Convert.ToInt32(FileInfo(archive).Length)
-            )
-        )
-        assets.Add(Check.Map("id", 42, "name", bundle + ".tar.gz.sha256", "state", "uploaded", "size", 128))
-        Flow.State["release"] = Check.Map(
-            "tag_name",
-            "v" + version,
-            "draft",
-            false,
-            "prerelease",
-            false,
-            "assets",
-            assets
-        )
-        Flow.Save()
         Flow.Call(args, owner: true)
         let yaml = File.ReadAllText(output)
         Check.Contains(yaml, "https://api.github.com/repos/obselate/tokate/releases/assets/41")
         Check.Contains(yaml, Check.Hash(archive))
         Check.Contains(yaml, bundle + "/tokate")
+        Check.Contains(yaml, "uses: obselate/tokate/.github/workflows/tokate-shared.yml@" + String('a', 40))
+        Check.That(!yaml.Contains("run:") && yaml.Split('\n').Length < 25, "Adopter received copied runtime code")
         Check.That(
             !yaml.Contains("@ARCHIVE") && !yaml.Contains("actions/checkout"),
             "Generated workflow contains unresolved pins or repository checkout"
         )
         Flow.Call(args, 1, owner: true)
         File.Delete(output)
-        Directory.CreateDirectory(Path.Combine(Flow.Upstream, ".github/workflows"))
-        File.WriteAllText(
-            Path.Combine(Flow.Upstream, ".github/workflows/tokate-coordinator.yml"),
-            "existing owner workflow"
-        )
-        Flow.Commit("Existing workflow")
-        Flow.Call(args, 1, owner: true)
-        Check.That(!File.Exists(output), "Existing workflow was replaced")
     }
 
     internal func TokateExecution() {

@@ -31,8 +31,14 @@ internal class GitHub {
             expires int64 = 0
         ) JsonElement -> ApiTransport.Request(path, body, method, missing, expires)
 
-        internal func FileAt(repo string, path string, revision string) string {
-            let result = Api("repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision))
+        internal func FileAt(repo string, path string, revision string, missing bool = false) string {
+            let result = Api(
+                "repos/" + repo + "/contents/" + path + "?ref=" + Uri.EscapeDataString(revision),
+                missing: missing
+            )
+            if result.ValueKind == JsonValueKind.Undefined {
+                return ""
+            }
             if J.Text(result, "encoding") != "base64" {
                 throw Exception("Expected a small repository configuration file")
             }

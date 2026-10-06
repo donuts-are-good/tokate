@@ -190,9 +190,261 @@ internal class AccessState {
             }
         }
 
+        private func Pages(path string) List[JsonElement] {
+            let result = List[JsonElement]()
+            for page in 1 ... 11 {
+                let value = GitHub.Api(path + "per_page=100&page=" + page.ToString())
+                if value.ValueKind != JsonValueKind.Array {
+                    throw Exception("Expected a paginated GitHub list")
+                }
+                let rows = J.Items(value)
+                result.AddRange(rows)
+                if rows.Count < 100 {
+                    return result
+                }
+            }
+            throw Exception(
+                "Access presentation exceeded 1000 records; inspect GitHub directly or restrict requests to one issue"
+            )
+        }
+
+        private func AccessRequest(repo string, comment JsonElement) JsonElement {
+            let body = J.Text(comment, "body")
+            if !body.StartsWith("/tokate-access ") || body.Length > 2048 {
+                return JsonElement{}
+            }
+            try {
+                let request = RequestData.Parse(body.Substring(15), 2048)
+                RequestData.Keys(request, "version,scope,issue")
+                let issue = J.Number(request, "issue")
+                let requestScope = J.Text(request, "scope")
+                if J.Number(request, "version") != 1 ||
+                    issue < 1 ||
+                    (requestScope != "issue" && requestScope != "trust") ||
+                    !RepositoryIdentity.IsIssueUrl(J.Text(comment, "issue_url"), repo, issue) {
+                    return JsonElement{}
+                }
+                let user = J.Get(comment, "user")
+                return J.Parse(
+                    J.Write(
+                        J.Map(
+                            "comment",
+                            RepositoryIdentity.PositiveId(J.Get(comment, "id")),
+                            "actor",
+                            RepositoryIdentity.PositiveId(J.Get(user, "id")),
+                            "donor",
+                            RepositoryIdentity.Login(J.Text(user, "login")),
+                            "issue",
+                            issue,
+                            "scope",
+                            requestScope
+                        )
+                    )
+                )
+            } catch (error Exception) {
+                return JsonElement{}
+            }
+        }
+
+        private func RequestAccess(repo string, args Args) {
+            if args.Get("donor") != "" {
+                throw Exception("Access requests use the authenticated donor")
+            }
+            let issue = args.Number("issue")
+            GitHub.Issue(repo, issue)
+            let viewer = GitHub.Api("user")
+            let actor = RepositoryIdentity.PositiveId(J.Get(viewer, "id"))
+            let requestScope = args.Get("scope", "issue")
+            let comments = Pages("repos/" + repo + "/issues/" + issue.ToString() + "/comments?")
+            for comment in comments {
+                let request = AccessRequest(repo, comment)
+                if request.ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(
+                    J.Get(request, "actor")
+                ) == actor &&
+                    J.Text(request, "scope") == requestScope {
+                    PublicOutput.ResultData = J.Map(
+                        "repo",
+                        repo,
+                        "issue",
+                        issue,
+                        "scope",
+                        requestScope,
+                        "posted",
+                        false,
+                        "comment",
+                        J.Get(request, "comment")
+                    )
+                    Terminal.Message("An access request already exists; owner review is still required.")
+                    return
+                }
+            }
+            let comment = GitHub.Api(
+                "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
+                J.Map("body", "/tokate-access " + J.Write(J.Map("version", 1, "scope", requestScope, "issue", issue)))
+            )
+            PublicOutput.ResultData = J.Map(
+                "repo",
+                repo,
+                "issue",
+                issue,
+                "scope",
+                requestScope,
+                "posted",
+                true,
+                "comment",
+                J.Get(comment, "id")
+            )
+            Terminal.Message(
+                "Access requested. The owner can grant this issue or persistent trust; the request grants no eligibility."
+            )
+        }
+
+        private func Present(repo string, args Args) {
+            let info = GitHub.Api("repos/" + repo)
+            let access = Load(repo, RepositoryIdentity.PositiveId(J.Get(info, "id")))
+            let donor = args.Get("donor")
+            var actor int64
+            if donor != "" {
+                actor = RepositoryIdentity.PositiveId(
+                    J.Get(GitHub.Api("users/" + RepositoryIdentity.Login(donor)), "id")
+                )
+            }
+            let members = List[JsonElement]()
+            let trusted = List[JsonElement]()
+            for member in access.Members {
+                if actor == 0 || RepositoryIdentity.PositiveId(J.Get(member, "actor")) == actor {
+                    let displayed = J.Map(
+                        "actor",
+                        J.Get(member, "actor"),
+                        "trusted",
+                        J.Get(member, "trusted"),
+                        "denied",
+                        J.Get(member, "denied"),
+                        "issues",
+                        J.Get(member, "issues")
+                    )
+                    let identity = GitHub.Api(
+                        "user/" + RepositoryIdentity.PositiveId(J.Get(member, "actor")).ToString()
+                    )
+                    if RepositoryIdentity.PositiveId(J.Get(identity, "id")) != RepositoryIdentity.PositiveId(
+                        J.Get(member, "actor")
+                    ) {
+                        throw Exception("Donor display identity changed")
+                    }
+                    displayed["donor"] = RepositoryIdentity.Login(J.Text(identity, "login"))
+                    let row = J.Parse(J.Write(displayed))
+                    members.Add(row)
+                    if J.Bool(member, "trusted") && !J.Bool(member, "denied") {
+                        trusted.Add(row)
+                    }
+                }
+            }
+            let history = List[Object]()
+            if args.Get("operation") == "history" {
+                for pull in Pages("repos/" + repo + "/pulls?state=all&") {
+                    try {
+                        let receipt = PrBody.Receipt(J.Text(pull, "body"))
+                        let headOwner = J.Get(J.Get(J.Get(pull, "head"), "repo"), "owner")
+                        let donorId = RepositoryIdentity.PositiveId(J.Get(headOwner, "id"))
+                        let donorLogin = RepositoryIdentity.Login(J.Text(headOwner, "login"))
+                        if !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) || !String.Equals(
+                            J.Text(receipt, "donor"),
+                            donorLogin,
+                            StringComparison.OrdinalIgnoreCase
+                        ) ||
+                            (actor != 0 && donorId != actor) ||
+                            (args.Get("issue") != "" && J.Number(receipt, "issue") != args.Number("issue")) {
+                            continue
+                        }
+                        history.Add(
+                            J.Map(
+                                "pr",
+                                J.Number(pull, "number"),
+                                "issue",
+                                J.Number(receipt, "issue"),
+                                "donor",
+                                donorLogin,
+                                "state",
+                                J.Text(pull, "state"),
+                                "merged",
+                                J.Get(pull, "merged_at").ValueKind == JsonValueKind.String,
+                                "evidence",
+                                "unverified PR receipt; inspect verify-pr and owner review"
+                            )
+                        )
+                    } catch (error Exception) { }
+                }
+            }
+            let pending = List[JsonElement]()
+            if args.Get("operation") == "list" {
+                let commentsPath = args.Get("issue") == "" ? "/issues/comments?": "/issues/" + args.Number("issue")
+                    .ToString() + "/comments?"
+                let seen = HashSet[string]()
+                for comment in Pages("repos/" + repo + commentsPath) {
+                    let request = AccessRequest(repo, comment)
+                    if request.ValueKind == JsonValueKind.Undefined {
+                        continue
+                    }
+                    let id = RepositoryIdentity.PositiveId(J.Get(request, "actor"))
+                    if actor != 0 && id != actor {
+                        continue
+                    }
+                    var resolved bool
+                    for member in access.Members {
+                        if RepositoryIdentity.PositiveId(J.Get(member, "actor")) != id {
+                            continue
+                        }
+                        resolved = J.Bool(member, "denied") ||
+                            (J.Text(request, "scope") == "trust" && J.Bool(member, "trusted"))
+                        if J.Text(request, "scope") == "issue" {
+                            for number in J.Items(J.Get(member, "issues")) {
+                                resolved = resolved || RepositoryIdentity.PositiveId(number) == J.Number(
+                                    request,
+                                    "issue"
+                                )
+                            }
+                        }
+                    }
+                    let key = id.ToString() + ":" + J.Text(request, "scope") + ":" + J.Number(request, "issue")
+                        .ToString()
+                    if !resolved && seen.Add(key) {
+                        pending.Add(request)
+                    }
+                }
+            }
+            PublicOutput.ResultData = J.Map(
+                "repo",
+                repo,
+                "access_sha",
+                access.Sha,
+                "members",
+                members,
+                "trusted",
+                trusted,
+                "pending",
+                pending,
+                "history",
+                history
+            )
+            if !PublicOutput.Enabled {
+                Terminal.Json(J.Parse(J.Write(PublicOutput.ResultData)), "Donor access and owner review")
+            }
+        }
+
         internal func Run(args Args) {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let operation = args.Need("operation")
+            if operation != "request" && args.Get("scope") != "" {
+                throw Exception("Only access request takes --scope")
+            }
+            if operation == "request" {
+                RequestAccess(repo, args)
+                return
+            }
+            if operation == "list" || operation == "history" {
+                Present(repo, args)
+                return
+            }
             if operation == "check" {
                 if args.Get("donor") != "" {
                     throw Exception("Access check uses the authenticated donor")
@@ -297,6 +549,11 @@ internal class AccessState {
                 }
             }
             access.Write(repo, expected)
+            Terminal.Message(
+                "Eligibility changes do not alter task scope approval. Revoked access blocks new work and publication; every PR requires owner review.",
+                "cyan",
+                true
+            )
             PublicOutput.ResultData = J.Map(
                 "repo",
                 repo,

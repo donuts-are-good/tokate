@@ -103,7 +103,7 @@ internal class Startup {
 
         private func Requirements(options Args)[]string {
             let command = options.Command
-            if command == "init" || command == "status" || command == "defaults" {
+            if command == "status" || command == "defaults" {
                 return []string{}
             }
             let names = List[string]{"setsid", "/usr/bin/env", "/usr/bin/unshare", "gh"}
@@ -147,7 +147,7 @@ internal class Startup {
             if independent {
                 names.Add("/usr/bin/bwrap")
             }
-            if command == "coordinator-setup" {
+            if command == "coordinator-setup" || command == "init" {
                 names.Add("curl")
                 names.Add("tar")
             }

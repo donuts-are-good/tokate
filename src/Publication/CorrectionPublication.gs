@@ -127,7 +127,7 @@ internal class CorrectionPublication {
             values["usage"] = Publication.Usage(run)
             values["receipt"] = "<!-- tokate-run:" + run.Text("id") + " -->\n<!-- tokate-receipt:" + J.Write(receipt) +
                 " -->"
-            return PrBody.Render(J.Text(record, "template"), values)
+            return PrBody.Render(J.Text(record, "template"), values, J.Get(record, "policy"))
         }
 
         internal func PublishLocked(directory string, run Data, correction Data, record JsonElement) {

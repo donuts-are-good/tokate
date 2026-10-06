@@ -80,6 +80,7 @@ internal class SuiteCatalog {
                     }
                     if CiShard.Include("CliDiscovery") {
                         CliDiscovery.All(binary)
+                        CliDiscovery.Setup(binary)
                     }
                     if CiShard.Include("Diagnostics") {
                         Diagnostics.All(binary)

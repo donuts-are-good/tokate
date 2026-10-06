@@ -88,7 +88,45 @@ internal class Cli {
             CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
-            CliOption("operation", "ACTION", "Access operation", "init trust untrust grant remove deny restore check"),
+            CliOption(
+                "operation",
+                "ACTION",
+                "Access operation",
+                "init trust untrust grant remove deny restore check request list history"
+            ),
+            CliOption(
+                "model-policy",
+                "MODE",
+                "Explicit model access choice; existing restrictions are preserved",
+                "unrestricted whitelist"
+            ),
+            CliOption(
+                "models",
+                "JSON",
+                "Whitelist map of exact models to effort arrays; absent declares no effort control"
+            ),
+            CliOption(
+                "eligibility",
+                "MODE",
+                "Task eligibility; new repositories default to trusted",
+                "open trusted manual"
+            ),
+            CliOption("verification", "JSON", "Existing project verification commands as JSON argv arrays"),
+            CliOption("required-checks", "JSON", "Required GitHub check names as a JSON array"),
+            CliOption("network", "MODE", "Owner command network permission; default deny", "allow deny"),
+            CliOption("reservation-seconds", "N", "Reservation lifetime from 300 to 604800 seconds"),
+            CliOption("pr-text", "TEXT", "Optional literal owner text appended to PRs; no template expressions"),
+            CliOption(
+                "close-message",
+                "TEXT",
+                "Optional literal admission message reserved for later admission integration"
+            ),
+            CliOption(
+                "upgrade",
+                "",
+                "Explicitly upgrade legacy policy to task-scoped version 2 while preserving restrictions"
+            ),
+            CliOption("scope", "SCOPE", "Requested donor access; default issue", "issue trust"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption(
                 "base-branch",
@@ -206,19 +244,19 @@ internal class Cli {
             ),
             CliCommand(
                 "init",
-                "path",
-                "",
-                "Create local policy and PR template; no inference or publication.",
-                "[--path DIR]",
-                "init --path ."
+                "repo,path,model-policy,models,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
+                "repo",
+                "Preview and confirm owner policy and a pinned shared workflow; preserve existing customization.",
+                "[--repo OWNER/REPO] [--path DIR] [options]",
+                "init --repo owner/project"
                 ,
-                effects: "local_read local_write"
+                effects: "local_read local_write github_read"
             ),
             CliCommand(
                 "coordinator-setup",
+                "repo,output,non-interactive,yes",
                 "repo,output",
-                "repo,output",
-                "Download verified release assets and write a v2 workflow; no inference.",
+                "Preview a shared workflow entry using verified matching release assets; no inference.",
                 "[--repo OWNER/REPO] --output FILE",
                 "coordinator-setup --repo owner/project --output coordinator.yml"
                 ,
@@ -226,9 +264,9 @@ internal class Cli {
             ),
             CliCommand(
                 "access",
-                "repo,donor,issue,operation",
+                "repo,donor,issue,operation,scope",
                 "repo,operation",
-                "Owner: mutate numeric donor membership, or check current task eligibility; no inference.",
+                "Request access, inspect pending requests and history, or manage existing numeric donor membership; no scoring.",
                 "--repo OWNER/REPO --operation ACTION [--donor LOGIN] [--issue N]",
                 "access --repo owner/project --operation trust --donor donor",
                 effects: "local_read github_read github_write"
@@ -783,7 +821,7 @@ internal class Cli {
                     throw Exception("Invalid identifier: --" + key)
                 }
             }
-            for key in[]string{"effort", "source", "availability"} {
+            for key in[]string{"effort", "source", "availability", "model-policy", "eligibility", "network", "scope"} {
                 if args.Get(key) != "" && Array.IndexOf(
                     OptionFor(args.Command, key).Choices.Split(' '),
                     args.Get(key)

@@ -56,37 +56,71 @@ with `tokate completion fish | source`. Regenerate after updates.
 
 ```sh
 tokate doctor --owner --auth
-tokate init
-tokate policy --repo OWNER/REPO
-tokate approve --repo OWNER/REPO --issue 42 --donor DONOR
+tokate init --repo OWNER/REPO
+git add .github/tokate.json .github/workflows/tokate-coordinator.yml
+git commit -m "Configure Tokate"
+git push
+tokate access --repo OWNER/REPO --operation init
+tokate approve --repo OWNER/REPO --issue 42
 ```
 
-Owners need GitHub CLI and `setsid`; approval requires repository write access.
-`init` creates version-1 `.github/tokate.json` and `.github/tokate-pr.md`;
-edit existing files. Commit policy, template and checks to the default branch
-before approval; preserve template placeholders.
+New setup defaults to version 2 and Trusted task eligibility. Choose unrestricted
+models or an exact model/effort whitelist explicitly. Setup previews complete files
+and permissions before confirmation: one policy and one short shared workflow entry,
+with no copied runtime code. The matching stable release must contain the reviewed
+central workflow; bootstrap refusal writes no adopter files. Commit both files before
+approval and use existing project checks. Ordinary public Actions runners suffice.
 
-| Policy field | Owner choice |
-| --- | --- |
-| `models` | Nonempty map of exact model names to allowed effort arrays. |
-| `model_policy` | Omitted/`whitelist` enforces that map; `unrestricted` requires omitted or empty `models`. |
-| `max_seconds` | Total execution and verification limit, 1–86400 seconds. |
-| `verification` | Nonempty argument arrays running the project's real checks. |
-| `required_checks` | Exact GitHub check names required on the PR commit. |
-| `allow_network` | False by default; permit only when needed. |
-| `protected_paths` | Optional literal repository paths; final `/` protects a directory and descendants. No globs. |
+For explicit configuration without prompts, for example:
 
-Protected paths allow 64 entries of 512 characters each. `.github/workflows/`
-and the `.github/tokate` prefix remain protected. Protect check dependencies too.
+```sh
+tokate init --repo OWNER/REPO --non-interactive --yes \
+  --model-policy unrestricted --eligibility trusted \
+  --verification '[["bash","scripts/verify.sh"]]' --required-checks '["verify"]' \
+  --network deny --seconds 3600
+```
 
-`--base-branch BRANCH` selects an approval target; omission prompts on a terminal
-and otherwise uses the upstream default. Approval pins its exact base; policy and
-template come from the default authority branch. Changed issue text, policy,
-template or assignment needs fresh approval. `assign` replaces approval/donor;
-`revoke` blocks publication, but cannot stop computation on another machine.
+With `--non-interactive`, omit `--yes` to preview without writing. Interactive setup
+asks for confirmation. `tokate init --help` lists options for checks, target branch,
+network, runtime, reservation lifetime and model restrictions. Whitelists use
+`--model-policy whitelist --models '{"MODEL":["high"]}'`; `absent` declares no effort
+control for a compatible tool, never an effort applied by Tokate. Managed Codex still
+requires supported effort controls. Repeated setup preserves existing restrictions,
+custom fields, PR templates and workflow wiring. `--upgrade` explicitly upgrades
+legacy policy while keeping its model restrictions.
 
-Version 2 is explicit opt-in. See [coordination setup and commands](coordination-v2.md)
-for workflow installation, external tools, reservations and independent eligibility.
+Tokate ships the default PR format. Optional policy `pr_text` and `close_message`
+are literal text, also configurable with `--pr-text` and `--close-message`; existing
+`.github/tokate-pr.md` customization remains supported. Admission and close-message
+execution await the shared workflow integration. PRs always need owner review.
+
+```sh
+tokate access --repo OWNER/REPO --operation request --issue 42 --scope trust
+tokate access --repo OWNER/REPO --operation list
+tokate access --repo OWNER/REPO --operation history --donor DONOR
+tokate access --repo OWNER/REPO --operation grant --donor DONOR --issue 42
+tokate access --repo OWNER/REPO --operation trust --donor DONOR
+tokate access --repo OWNER/REPO --operation untrust --donor DONOR
+```
+
+Requests are ordinary issue comments and grant no access. `list` shows unresolved
+membership requests and trusted donors; `history` shows unverified PR declarations
+for owner inspection, without scores. Open permits authenticated donors, Trusted
+requires trust or an issue grant, and Manual requires an issue grant. Denial overrides
+all modes. See `tokate access --help` for removal, denial, restoration and eligibility.
+
+`--base-branch` sets a policy default during setup or overrides the target for an
+approval. Approval pins the exact base and binds policy and effective PR format from
+the default authority branch. Policy or PR text changes stale approvals and claims;
+issue changes also require fresh approval. Access revocation independently blocks
+new work and publication. Legacy assignment-bound approvals remain supported.
+
+State also occupies one `tokate/access` ref and one `tokate/contributions/N` ref per
+version-2 issue, retaining coordination history; legacy approval and explicit sync
+grant refs remain when present. Setup creates no refs. Optional `protected_paths`
+allows 64 literal paths of at most 512 characters; final `/` protects descendants.
+The workflow directory and `.github/tokate` prefix stay protected. Protect check
+dependencies too. See [coordination](coordination-v2.md) and [transparency](transparency.md).
 
 ## Owner codebase instructions
 

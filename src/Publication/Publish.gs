@@ -201,7 +201,7 @@ internal class Publication {
             values["usage"] = Usage(run)
             values["receipt"] = marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
             var body = J.Text(record, "template")
-            body = PrBody.Render(body, values)
+            body = PrBody.Render(body, values, J.Get(record, "policy"))
             File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
             let publication = J.Map(
                 "title",

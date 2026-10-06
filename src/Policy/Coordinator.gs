@@ -614,7 +614,7 @@ internal class Coordinator {
             values["policy"] = J.Text(J.Get(record, "approval"), "policy_hash")
             values["usage"] = "per-tool donor declaration; not independently attested"
             values["receipt"] = marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
-            return PrBody.Render(J.Text(record, "template"), values)
+            return PrBody.Render(J.Text(record, "template"), values, J.Get(record, "policy"))
         }
     }
 }

@@ -815,8 +815,14 @@ internal class SynchronizationChecks {
                             case <- after(TimeSpan.FromMilliseconds(10.0)) { }
                         }
                     }
-                    Check.That(File.Exists(entered) && !process.HasExited, "Reconciliation exited before Git merge interruption")
-                    Check.That(Check.Text(Saved(run)["reconciliation"]?["phase"]) == "merging", "Missing saved merge intent")
+                    Check.That(
+                        File.Exists(entered) && !process.HasExited,
+                        "Reconciliation exited before Git merge interruption"
+                    )
+                    Check.That(
+                        Check.Text(Saved(run)["reconciliation"]?["phase"]) == "merging",
+                        "Missing saved merge intent"
+                    )
                 } finally {
                     if !process.HasExited {
                         try {
@@ -827,7 +833,10 @@ internal class SynchronizationChecks {
                 }
                 let physicalIndex = Convert.ToHexString(File.ReadAllBytes(Path.Combine(checkout, ".git/index")))
                 let physicalHead = flow.Git("-C", checkout, "rev-parse", "HEAD")
-                Check.That(physicalHead == start && !File.Exists(Path.Combine(checkout, ".git/MERGE_HEAD")), "Git merge ran before interruption")
+                Check.That(
+                    physicalHead == start && !File.Exists(Path.Combine(checkout, ".git/MERGE_HEAD")),
+                    "Git merge ran before interruption"
+                )
                 flow.Call([]string{"reconcile", "--run", run, "--resume"}, 1)
                 Check.That(
                     physicalHead == flow.Git("-C", checkout, "rev-parse", "HEAD") &&
