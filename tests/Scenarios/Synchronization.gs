@@ -7,6 +7,151 @@ import System.Text.Json.Nodes
 
 internal class SynchronizationChecks {
     shared {
+        internal func StartTreeTraffic(flow NativeFixture) {
+            flow.ResetTraffic()
+            File.WriteAllText(Path.Combine(flow.Bin, "local-tree-heads.txt"), "")
+        }
+
+        internal func TreeTraffic(flow NativeFixture, base string, history JsonNode, head string, local bool) {
+            flow.Reload()
+            let grants = history.AsArray()
+            let first = Check.Json(
+                flow.Git("-C", flow.Upstream, "show", Check.Text(grants[0]?["grant"]) + ":synchronization.json")
+            )
+            let previous = Check.Text(first["previous"])
+            let last = Check.Text(grants[grants.Count - 1]?["candidate"])
+            let later = head == last ? 0: 1
+            let trace = File.ReadAllLines(Path.Combine(flow.Bin, "local-tree-heads.txt"))
+            let localHeads = List[string]()
+            for line in trace {
+                if !line.StartsWith("api:", StringComparison.Ordinal) {
+                    localHeads.Add(line)
+                }
+            }
+            var localPasses int32
+            for sha in localHeads {
+                if sha == previous {
+                    localPasses++
+                }
+            }
+            let previousTree = flow.Git("-C", Path.Combine(flow.Bin, "fork"), "rev-parse", previous + "^{tree}")
+            var remotePasses int32
+            let counts = Dictionary[string, int32]()
+            var upstreamTrees int32
+            var forkTrees int32
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                let path = Check.Text(call["path"])
+                if !path.Contains("/git/trees/") || !path.EndsWith("?recursive=1", StringComparison.Ordinal) {
+                    continue
+                }
+                counts[path] = counts.ContainsKey(path) ? counts[path] + 1: 1
+                if path.StartsWith("repos/owner/project/", StringComparison.Ordinal) {
+                    upstreamTrees++
+                } else {
+                    forkTrees++
+                }
+                if path == "repos/donor/project/git/trees/" + previousTree + "?recursive=1" {
+                    remotePasses++
+                }
+            }
+            Check.That(
+                local ? localPasses > 0: localPasses == 0 && remotePasses == 1,
+                "Missing isolated synchronization pass"
+            )
+            Check.That(
+                localHeads.Count == localPasses * (2 * grants.Count + later),
+                "Repeated local tree materialization"
+            )
+            if !local {
+                Check.That(forkTrees == 2 * grants.Count + later, "Repeated remote candidate tree materialization")
+                Check.That(upstreamTrees == grants.Count + 1, "Repeated repository baseline tree materialization")
+            }
+            let upstream = List[string]{base}
+            for grant in grants {
+                upstream.Add(Check.Text(grant["upstream"]))
+            }
+            for sha in upstream {
+                let tree = flow.Git("-C", flow.Upstream, "rev-parse", sha + "^{tree}")
+                let path = "repos/owner/project/git/trees/" + tree + "?recursive=1"
+                if !local {
+                    Check.That(
+                        counts.ContainsKey(path) && counts[path] == 1,
+                        "Upstream tree not loaded exactly once per pass"
+                    )
+                }
+            }
+            if local {
+                // Match each local pass independently of remote checks of an earlier published head.
+                let expected = List[string]()
+                expected.Add(
+                    "api:repos/owner/project/git/trees/" + flow.Git(
+                        "-C",
+                        flow.Upstream,
+                        "rev-parse",
+                        base + "^{tree}"
+                    ) +
+                        "?recursive=1"
+                )
+                for grant in grants {
+                    let value = Check.Json(
+                        flow.Git("-C", flow.Upstream, "show", Check.Text(grant["grant"]) + ":synchronization.json")
+                    )
+                    expected.Add(Check.Text(value["previous"]))
+                    expected.Add(
+                        "api:repos/owner/project/git/trees/" + flow.Git(
+                            "-C",
+                            flow.Upstream,
+                            "rev-parse",
+                            Check.Text(value["upstream"]) + "^{tree}"
+                        ) +
+                            "?recursive=1"
+                    )
+                    expected.Add(Check.Text(value["candidate"]))
+                }
+                if later == 1 {
+                    expected.Add(head)
+                }
+                var matches int32
+                for i in 0 ... trace.Length {
+                    if i + expected.Count > trace.Length {
+                        break
+                    }
+                    var match = true
+                    for j in 0 ... expected.Count {
+                        if trace[i + j] != expected[j] {
+                            match = false
+                        }
+                    }
+                    if match {
+                        matches++
+                    }
+                }
+                Check.That(matches == localPasses, "Local pass repeated or omitted an upstream tree")
+            }
+            Console.WriteLine(
+                "Tree traffic: grants=" + grants.Count.ToString() + " later=" + later.ToString() +
+                    " local_passes=" +
+                    localPasses.ToString() + " remote_passes=" + remotePasses.ToString() +
+                    " upstream_trees=" +
+                    upstreamTrees.ToString() + " fork_trees=" + forkTrees.ToString() +
+                    " local_tree_processes=" +
+                    localHeads
+                    .Count
+                    .ToString()
+            )
+        }
+
+        private func MeasureTrees(flow NativeFixture, run string, head string, local bool) {
+            let amendment = Saved(Path.Combine(run, "amendments", head))
+            TreeTraffic(
+                flow,
+                Check.Text(Saved(run)["base"]),
+                amendment["synchronizations"] ?? throw Exception("Missing history"),
+                head,
+                local
+            )
+        }
+
         private func Saved(run string) JsonNode -> Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
 
         private func Commit(flow NativeFixture, checkout string, message string) string {
@@ -342,7 +487,15 @@ internal class SynchronizationChecks {
             } else if mode == "substitution" {
                 PublishedContribution.Write(Path.Combine(run, "checkout"), "another.txt", "different candidate\n")
                 candidate = Commit(flow, Path.Combine(run, "checkout"), "Candidate substitution")
-            } else if mode.StartsWith("tree-") {
+            } else if mode.StartsWith("local-tree-") || mode == "local-final-ancestry" {
+                flow.Reload()
+                if mode == "local-final-ancestry" {
+                    flow.State["local_final_ancestry_fault"] = JsonValue.Create("true")
+                } else {
+                    flow.State["local_tree_fault"] = JsonValue.Create(mode.Substring("local-tree-".Length))
+                }
+                flow.Save()
+            } else if mode.StartsWith("tree-") && mode != "tree-reuse" {
                 flow.Reload()
                 flow.State["tree_fault"] = JsonValue.Create(mode.Substring(5))
                 flow.Save()
@@ -350,6 +503,7 @@ internal class SynchronizationChecks {
                 flow.Mode("revoke_sync_after_push")
             }
             let success = mode == "timeout" ||
+                mode == "tree-reuse" ||
                 mode == "ordinary" ||
                 mode == "conflict" ||
                 mode == "sibling-creation" ||
@@ -368,8 +522,23 @@ internal class SynchronizationChecks {
                 jobs = Int32.Parse(Check.Text(flow.State["workflow_jobs"] ?? JsonValue.Create(0)))
                 flow.Mode("lost_request_response")
             }
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+            }
             let result = Amend(flow, run, candidate, grant, success ? 0: 1)
+            if mode == "tree-reuse" {
+                MeasureTrees(flow, run, candidate, true)
+            }
             if !success {
+                if mode.StartsWith("local-tree-") {
+                    Check.Contains(
+                        result.Output + result.Error,
+                        mode.EndsWith("truncated") ?
+                        "Truncated protected tree evidence": "Invalid protected tree evidence"
+                    )
+                } else if mode == "local-final-ancestry" {
+                    Check.Contains(result.Output + result.Error, "Missing local synchronization ancestry evidence")
+                }
                 Check.That(
                     Check.Text(Saved(run)["commit"]) == h,
                     "Rejected synchronization rewrote original saved head"
@@ -449,7 +618,24 @@ internal class SynchronizationChecks {
                 coordination.Coordinate(coordination.Event(request))
                 Amend(flow, run, candidate, grant)
             }
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+            }
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+            if mode == "tree-reuse" {
+                MeasureTrees(flow, run, candidate, false)
+                flow.Reload()
+                flow.State["diff_fault"] = JsonValue.Create("wrong-identical-base")
+                flow.Save()
+                let refused = flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+                Check.Contains(
+                    refused.Output + refused.Error,
+                    "Missing or mismatched synchronization ancestry evidence"
+                )
+                flow.Reload()
+                flow.State["diff_fault"] = nil
+                flow.Save()
+            }
             Check.That(
                 File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
                 "Original receipt/evidence overwritten"
@@ -487,12 +673,23 @@ internal class SynchronizationChecks {
             }
             PublishedContribution.Write(Path.Combine(run, "checkout"), "followup.txt", "ordinary review correction\n")
             let next = Commit(flow, Path.Combine(run, "checkout"), "Ordinary amendment after synchronization")
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+            }
             Amend(flow, run, next)
+            if mode == "tree-reuse" {
+                MeasureTrees(flow, run, next, true)
+            }
             if v2 {
                 flow.Reload()
                 let request = Check.PostedRequest(flow.State)
                 coordination.Coordinate(coordination.Event(request))
                 Amend(flow, run, next)
+            }
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                MeasureTrees(flow, run, next, false)
             }
             let history = Saved(run)["synchronizations"]?[0] ?? throw Exception("Lost historical synchronization")
             Check.That(
@@ -511,7 +708,13 @@ internal class SynchronizationChecks {
             let newUpstream = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             let newCandidate = Candidate(flow, run, newUpstream)
             let newGrant = Grant(flow, newCandidate, newUpstream)
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+            }
             Amend(flow, run, newCandidate, newGrant)
+            if mode == "tree-reuse" {
+                MeasureTrees(flow, run, newCandidate, true)
+            }
             if v2 {
                 flow.Reload()
                 let request = Check.PostedRequest(flow.State)
@@ -519,6 +722,45 @@ internal class SynchronizationChecks {
                 Amend(flow, run, newCandidate, newGrant)
             }
             Check.That(Saved(run)["synchronizations"]?.AsArray().Count == 2, "New grant discarded history")
+            if mode == "tree-reuse" {
+                StartTreeTraffic(flow)
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                MeasureTrees(flow, run, newCandidate, false)
+                PublishedContribution.Write(Path.Combine(run, "checkout"), "two-grant-followup.txt", "later head\n")
+                let later = Commit(flow, Path.Combine(run, "checkout"), "Later head after two grants")
+                StartTreeTraffic(flow)
+                Amend(flow, run, later)
+                MeasureTrees(flow, run, later, true)
+                if v2 {
+                    flow.Reload()
+                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
+                    Amend(flow, run, later)
+                }
+                StartTreeTraffic(flow)
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                MeasureTrees(flow, run, later, false)
+                // A fresh operation must reload even a previously validated later head.
+                let tree = flow.Git("-C", Path.Combine(flow.Bin, "fork"), "rev-parse", later + "^{tree}")
+                for fault in[]string{"truncated", "missing", "identity", "ancestor", "protected"} {
+                    flow.Reload()
+                    flow.State["tree_fault"] = JsonValue.Create(fault)
+                    flow.State["tree_fault_sha"] = JsonValue.Create(tree)
+                    flow.Save()
+                    flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
+                }
+                flow.Reload()
+                flow.State["tree_fault"] = nil
+                flow.State["tree_fault_sha"] = nil
+                flow.Save()
+                PublishedContribution.Write(
+                    Path.Combine(run, "checkout"),
+                    "protected/content",
+                    "unapproved later edit\n"
+                )
+                let protectedHead = Commit(flow, Path.Combine(run, "checkout"), "Protected later head")
+                let rejected = Amend(flow, run, protectedHead, code: 1)
+                Check.Contains(rejected.Output + rejected.Error, "Synchronization changes protected owner content")
+            }
             Revoke(flow, grant)
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true)
             if v2 {
@@ -537,6 +779,7 @@ internal class SynchronizationChecks {
                     for mode in[]string{
                         "timeout",
                         "ordinary",
+                        "tree-reuse",
                         "conflict",
                         "stale-creation",
                         "donor-grant",
@@ -572,6 +815,9 @@ internal class SynchronizationChecks {
                         "tree-missing",
                         "tree-identity",
                         "tree-ancestor",
+                        "local-tree-truncated",
+                        "local-tree-malformed",
+                        "local-final-ancestry",
                         "unresolved",
                         "after-push",
                         "after-coordinate",

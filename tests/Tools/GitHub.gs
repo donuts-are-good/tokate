@@ -381,6 +381,8 @@ internal partial class Fixture {
                 value["files"] = Check.Json("[{\"filename\":\"result.txt\"}]")
             } else if fault == "missing-commits" {
                 value.AsObject().Remove("commits")
+            } else if fault == "wrong-identical-base" && comparison[0] == sha {
+                value["base_commit"] = Check.Map("sha", String('a', 40))
             }
             return Answer(value)
         }
@@ -647,6 +649,10 @@ internal partial class Fixture {
         if tail.StartsWith("git/trees/") {
             let sha = tail.Substring(10).Split('?')[0]
             let recursive = tail.EndsWith("?recursive=1", StringComparison.Ordinal)
+            let treeTrace = Path.Combine(Root, "local-tree-heads.txt")
+            if recursive && File.Exists(treeTrace) {
+                File.AppendAllText(treeTrace, "api:" + ApiPath + "\n")
+            }
             let entries = JsonArray()
             let args = recursive ? []string{"ls-tree", "-r", "-t", "-z", sha}: []string{"ls-tree", "-z", sha}
             for line in GitRaw(folder, args).Split('\0') {
@@ -670,7 +676,9 @@ internal partial class Fixture {
                 }
                 entries.Add(entry)
             }
-            let fault = Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
+            let fault = recursive && Check.Text(State["tree_fault_sha"]) != "" && Check.Text(
+                State["tree_fault_sha"]
+            ) != sha ? "": Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
             let result = Check.Map("sha", sha, "truncated", fault == "truncated", "tree", entries)
             if recursive && fault == "missing" {
                 result.AsObject().Remove("tree")
@@ -681,6 +689,13 @@ internal partial class Fixture {
                     if Check.Text(entries[i]?["path"]) == ".github" {
                         entries.RemoveAt(i)
                         break
+                    }
+                }
+                result["tree"] = entries.DeepClone()
+            } else if recursive && fault == "protected" {
+                for entry in entries {
+                    if Check.Text(entry["path"]) == "protected/content" {
+                        entry["sha"] = JsonValue.Create(String('a', 40))
                     }
                 }
                 result["tree"] = entries.DeepClone()
