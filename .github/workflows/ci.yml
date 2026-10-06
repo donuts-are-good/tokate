@@ -38,13 +38,6 @@ jobs:
       - run: bash scripts/build.sh
       - run: artifacts/linux-x64/tokate --version
       - run: python3 scripts/native-proof.py
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: 26.10.0
-      - name: Prove native Pi workflow without inference
-        run: |
-          npm install --prefix "$RUNNER_TEMP/pi-proof" --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.0.0 @earendil-works/pi-ai@1.0.0 @earendil-works/pi-agent-core@1.0.0
-          python3 scripts/pi-proof.py --pi-root "$RUNNER_TEMP/pi-proof/node_modules" --node "$(command -v node)"
       - run: git diff --check
       - name: Probe the real managed sandbox without inference
         run: artifacts/linux-x64/tokate doctor

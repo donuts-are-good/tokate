@@ -49,8 +49,8 @@ Failed, malformed, truncated, empty or incomplete turns cannot publish. Complete
 work passes candidate capture, protected-path checks and independent verification
 before the coordinator opens a draft PR.
 
-CI exercises the native CLI with the pinned SDK and a deterministic local server,
-without model inference. To run the same gate with an existing installation:
+The native proof uses the pinned SDK and a deterministic local server without
+model inference. Run it separately with an existing installation:
 
 ```sh
 python3 scripts/pi-proof.py --pi-root /absolute/installed/node_modules \
