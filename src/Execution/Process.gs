@@ -276,9 +276,30 @@ internal class Commands {
             strictOutput bool = false,
             outputPath string = "",
             errorPath string = "",
-            budget RuntimeBudget? = nil
+            budget RuntimeBudget? = nil,
+            pidNamespace bool = false
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
+            if !pidNamespace {
+                if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/unshare") || !File.Exists("/usr/bin/env") {
+                    throw CliFailure(
+                        "missing_tools",
+                        "Command cleanup requires Linux, /usr/bin/unshare, and /usr/bin/env",
+                        summary: "PID namespace prerequisite is unavailable"
+                    )
+                }
+                info.ArgumentList.Add("/usr/bin/unshare")
+                info.ArgumentList.Add("--map-current-user")
+                info.ArgumentList.Add("--pid")
+                info.ArgumentList.Add("--fork")
+                info.ArgumentList.Add("--kill-child")
+                info.ArgumentList.Add("--mount-proc")
+                info.ArgumentList.Add("--")
+                info.ArgumentList.Add("/usr/bin/env")
+                info.ArgumentList.Add("-u")
+                info.ArgumentList.Add("LC_ALL")
+                info.ArgumentList.Add("--")
+            }
             info.ArgumentList.Add(exe)
             info.UseShellExecute = false
             info.RedirectStandardOutput = true
@@ -325,6 +346,9 @@ internal class Commands {
             info.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
             info.Environment["GIT_NO_REPLACE_OBJECTS"] = "1"
             info.Environment["GIT_GRAFT_FILE"] = "/dev/null"
+            if !pidNamespace {
+                info.Environment["LC_ALL"] = "C"
+            }
             if let signal = cancellation {
                 select {
                     case <- signal {
@@ -490,6 +514,25 @@ internal class Commands {
                     throw CommandInputInterrupted(io, result)
                 }
                 throw CommandInterrupted(error, result)
+            }
+            if !pidNamespace && result.Code != 0 {
+                for prefix in[]string{
+                    "unshare: unshare failed:",
+                    "unshare: mount /proc failed:",
+                    "unshare: mount proc on /proc failed:",
+                    "unshare: write failed /proc/self/",
+                    "unshare: failed to write /proc/self/",
+                    "unshare: failed to open /proc/self/",
+                    "unshare: setgroups failed:"
+                } {
+                    if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
+                        throw CliFailure(
+                            "missing_tools",
+                            "Cannot start a PID namespace with /usr/bin/unshare",
+                            summary: "PID namespace prerequisite is unavailable"
+                        )
+                    }
+                }
             }
             return result
         }

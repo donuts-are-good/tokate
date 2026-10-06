@@ -328,7 +328,7 @@ internal class VerificationChecks {
                 }
                 if missing {
                     args.AddRange([]string{"--tmpfs", "/usr/bin"})
-                    for tool in[]string{"bash", "env", "git", "setsid"} {
+                    for tool in[]string{"bash", "env", "git", "setsid", "unshare"} {
                         args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
                     }
                     args.AddRange([]string{"--symlink", "bash", "/usr/bin/sh"})
@@ -440,7 +440,7 @@ internal class VerificationChecks {
             if File.Exists("/etc/ld.so.cache") {
                 args.AddRange([]string{"--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache"})
             }
-            for tool in[]string{"bash", "git", "env", "bwrap", "setsid", "cp"} {
+            for tool in[]string{"bash", "git", "env", "bwrap", "setsid", "unshare", "cp"} {
                 args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
             }
             args.AddRange(
