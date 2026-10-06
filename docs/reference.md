@@ -419,7 +419,7 @@ tokate revoke-sync --repo OWNER/REPO --grant G
 Tokate checks ancestry and protected trees against authenticated U and reruns all
 checks on C. Grants neither inspect private candidates nor grant final acceptance.
 Revocation or target movement invalidates readiness. No automatic rebase, conflict
-resolver, force push or inference is supplied. See [coordination](coordination-v2.md#compatibility-comes-first)
+resolver, force push or inference is supplied. See [coordination](coordination-v2.md#setup)
 for v2 state and coordinator requirements.
 
 ## Check contribution overlap
