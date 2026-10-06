@@ -453,6 +453,10 @@ The verification script runs the formatter, build and full suite. Check managed
 isolation separately with `artifacts/linux-x64/tokate doctor` and compatible native
 Codex on PATH; simulated checks do not prove that boundary.
 
+Managed pi local execution requires explicit version-2 policy, an existing pinned
+SDK/runtime and a donor-selected no-auth loopback endpoint. See [setup, isolation
+and release validation](pi.md).
+
 ### Public PR summaries
 
 Managed tasks request a dedicated `tokate-public-summary.json` in the checkout.

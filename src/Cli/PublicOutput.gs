@@ -182,7 +182,7 @@ internal class PublicOutput {
             let value = run.Element()
             let result = Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
             )
             if run.Number("version") == 1 || run.Text("source") == "tokate" {
                 result["coding_seconds"] = run.Number("seconds") - run.Number("verification_reserve")
@@ -309,6 +309,7 @@ internal class PublicOutput {
 
         internal func Coordination(value JsonElement, sha string) Object {
             let result = Select(value, "version,repo,issue,approval_id,revoked")
+            result["identity"] = J.Get(value, "identity")
             result["sha"] = sha
             let approval = J.Get(value, "approval")
             let summary = Select(
@@ -319,7 +320,10 @@ internal class PublicOutput {
                 summary["decree"] = Select(J.Get(approval, "decree"), "present,sha256")
             }
             result["approval"] = summary
-            result["reservation"] = Select(J.Get(value, "reservation"), "reservation,donor,actor,created,expires")
+            result["reservation"] = Select(
+                J.Get(value, "reservation"),
+                "reservation,lease,donor,actor,created,expires,status,attempt"
+            )
             result["contribution"] = Select(
                 J.Get(CoordinationState.Current(value), "outcome"),
                 "pr,url,head,reservation"

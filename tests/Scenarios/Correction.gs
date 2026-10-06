@@ -737,6 +737,44 @@ internal class CorrectionChecks {
             Once(compatibility)
         }
 
+        private func ForkIdentity(binary string) {
+            for v2 in[]bool{false, true} {
+                using let test = CoordinationFixture(binary)
+                let flow = test.Flow
+                var run string
+                if v2 {
+                    test.Initialize()
+                    run = ManagedRun(test, "staged_whitespace")
+                } else {
+                    flow.Initialize()
+                    flow.Approve()
+                    run = flow.Claim()
+                    flow.Mode("staged_whitespace")
+                    flow.Call([]string{"work", "--run", run}, 1)
+                }
+                let original = Prepared(flow, run)
+                let commit = Correct(flow, run)
+                RepositoryFaults.Reject(
+                    flow,
+                    run,
+                    []string{"recover", "--run", run, "--commit", commit, "--seconds", "30"}
+                )
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == original,
+                    "Fork refusal changed original evidence"
+                )
+                Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Fork refusal created a correction")
+                Recover(flow, run, commit)
+                flow.Call([]string{v2 ? "submit": "publish", "--run", run})
+                if v2 {
+                    flow.Reload()
+                    test.Coordinate(test.Event(Check.PostedRequest(flow.State)))
+                }
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                Once(flow, 1)
+            }
+        }
+
         private func AuthorityChanges(binary string) {
             for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
                 using let flow = NativeFixture(binary)
@@ -804,7 +842,7 @@ internal class CorrectionChecks {
         }
 
         private func ManagedRefusals(binary string) {
-            for change in[]string{"expiry", "revocation", "identity", "revision"} {
+            for change in[]string{"expiry", "revocation", "identity", "attempt"} {
                 using let flow = CoordinationFixture(binary)
                 flow.Initialize()
                 let run = ManagedRun(flow, "staged_whitespace")
@@ -824,8 +862,11 @@ internal class CorrectionChecks {
                         flow.Flow.State["viewer_id"] = JsonValue.Create(999)
                         flow.Flow.Save()
                     }
-                    case "revision" {
+                    case "attempt" {
                         let state = flow.State()["state"] ?? throw Exception("Missing state")
+                        (state["reservation"] ?? throw Exception("Missing lease"))["attempt"] = JsonValue.Create(
+                            Guid.NewGuid().ToString("D")
+                        )
                         flow.RewriteState(state)
                     }
                 }
@@ -845,7 +886,7 @@ internal class CorrectionChecks {
             for originalMode in modelPolicy == "" ? []string{"staged_whitespace", "verification_fail"}: []string{
                 "staged_whitespace"
             } {
-                using let flow = CoordinationFixture(binary)
+                using let flow = CoordinationFlow(binary)
                 flow.Initialize()
                 if modelPolicy != "" {
                     let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
@@ -903,6 +944,7 @@ internal class CorrectionChecks {
                 flow.Flow.Mode("")
                 flow.Coordinate(path)
                 flow.Coordinate(path)
+                flow.Lifecycle("renew")
                 flow.Flow.Call([]string{"submit", "--run", run})
                 flow.Flow.Call([]string{"submit", "--run", run})
                 Once(flow.Flow, 1)
@@ -1183,7 +1225,9 @@ internal class CorrectionChecks {
                         "tools",
                         Check.Json("[]"),
                         "verification",
-                        "donor-reported-pass"
+                        "donor-reported-pass",
+                        "attempt",
+                        Check.Text(metadata["attempt"])
                     )
                 )
                 Check.Contains(managed.Coordinate(managed.Event(request), 1).Error, "protected owner path")
@@ -1391,6 +1435,7 @@ internal class CorrectionChecks {
                 "ChangedCandidate",
                 "LegacyAndArchive",
                 "AuthorityChanges",
+                "ForkIdentity",
                 "ManagedRefusals",
                 "InterruptedVerification"
             } {
@@ -1466,6 +1511,9 @@ internal class CorrectionChecks {
                     }
                     case "LegacyAndArchive" {
                         LegacyAndArchive(binary)
+                    }
+                    case "ForkIdentity" {
+                        ForkIdentity(binary)
                     }
                     case "AuthorityChanges" {
                         AuthorityChanges(binary)

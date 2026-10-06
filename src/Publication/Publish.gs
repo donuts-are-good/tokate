@@ -85,20 +85,20 @@ internal class Publication {
         }
 
         internal func Publish(directory string) {
-            if File.Exists(Path.Combine(directory, "correction.json")) {
-                CorrectionPublication.Publish(directory)
-                return
-            }
-            if Data.Load(directory).Number("version") == 2 {
+            using let lease = Preparation.Lease(directory)
+            let run = Data.Load(directory)
+            if run.Number("version") == 2 {
                 throw Exception("Version-2 runs use submit and the owner-installed coordinator")
             }
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
+            if File.Exists(Path.Combine(directory, "correction.json")) {
+                CorrectionPublication.PublishLocked(
+                    directory,
+                    run,
+                    Data.Read(Path.Combine(directory, "correction.json")),
+                    Correction.Authority(directory, run)
+                )
+                return
+            }
             let record = ContributionClaim.Recheck(run)
             if run.Text("state") != "generated" && run.Text("state") != "published" {
                 throw Exception("Only a successful saved run can be published")

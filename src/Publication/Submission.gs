@@ -9,12 +9,7 @@ import System.Text.Json
 internal class Submission {
     shared {
         internal func Commit(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
+            using let lease = Preparation.Lease(directory)
             let run = Data.Load(directory)
             let record = ContributionClaim.RecheckV2(run)
             if run.Text("source") != "tokate" || run.Text("state") != "generated" {
@@ -156,7 +151,7 @@ internal class Submission {
                 }
             }
             let state = CoordinationState.Load(repo, issue)
-            if AccessState.Task(J.Get(state.Value(), "approval")) {
+            if J.Text(value, "action") != "release" && AccessState.Task(J.Get(state.Value(), "approval")) {
                 state.Check(repo, issue, RepositoryIdentity.Login(J.Text(viewer, "login")), actor)
             }
             let outcome = RequestData.Recorded(state.Value(), actor, value)
@@ -179,10 +174,20 @@ internal class Submission {
             ) {
                 throw Exception("Stale state or approval; no request posted")
             }
-            state.Check(repo, issue, RepositoryIdentity.Login(J.Text(viewer, "login")), J.Get(viewer, "id"))
+            if J.Text(value, "action") != "release" {
+                state.Check(repo, issue, RepositoryIdentity.Login(J.Text(viewer, "login")), actor)
+            }
             var expires int64
             if J.Text(value, "action") != "claim" {
-                state.Reservation(actor)
+                if LeaseLifecycle.Transition(J.Text(value, "action")) {
+                    LeaseLifecycle.Owner(state, actor)
+                    if !LeaseLifecycle.Supported(state.Value()) {
+                        throw Exception("Legacy lease transitions are unsupported")
+                    }
+                } else {
+                    state.Reservation(actor)
+                    LeaseLifecycle.Fence(state, J.Text(J.Get(value, "metadata"), "attempt"))
+                }
                 expires = CoordinationState.Unix(J.Get(state.Value(), "reservation"), "expires")
             }
             {
@@ -253,6 +258,9 @@ internal class Submission {
                 "verification",
                 "donor-reported-pass"
             )
+            if run.Text("attempt") != "" {
+                metadata["attempt"] = run.Text("attempt")
+            }
             if correction != nil {
                 metadata["correction"] = Correction.Provenance(correction)
             }
@@ -266,7 +274,9 @@ internal class Submission {
                         "uuid",
                         correction?.Text("publication_uuid") ?? run.Text("publication_uuid"),
                         "expected",
-                        run.Text("state_sha"),
+                        run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text(
+                            "publication_expected"
+                        ),
                         "approval",
                         run.Text("approval"),
                         "action",
@@ -280,17 +290,12 @@ internal class Submission {
 
         internal func Submit(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
+            using let lease = Preparation.Lease(directory)
+            let run = Data.Load(directory)
             if File.Exists(Path.Combine(directory, "correction.json")) {
-                CorrectionPublication.Submit(directory)
+                CorrectionPublication.SubmitLocked(directory, run)
                 return
             }
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
             let path = Path.Combine(directory, "request.json")
             if run.Text("publication_uuid") != "" && File.Exists(path) {
                 let saved = RequestData.FileData(path, 8192)
@@ -365,6 +370,10 @@ internal class Submission {
                 ContributionClaim.RecheckV2(run)
             }
             if run.Text("publication_uuid") == "" {
+                let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
+                live.Reservation(J.Get(run.Element(), "donor_id"))
+                LeaseLifecycle.Fence(live, run.Text("attempt"))
+                run.Fields["publication_expected"] = live.Sha
                 run.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")
                 run.Save(directory)
             }

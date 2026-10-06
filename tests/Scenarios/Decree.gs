@@ -603,32 +603,7 @@ internal class DecreeFlow : IDisposable {
                             "Protected external diff reached verification"
                         )
                     }
-                    let state = coordination.State()
-                    let publication = Check.Map(
-                        "uuid",
-                        Guid.NewGuid().ToString("D"),
-                        "expected",
-                        Check.Text(state["sha"]),
-                        "approval",
-                        Check.Text(state["state"]?["approval_id"]),
-                        "action",
-                        "publish",
-                        "metadata",
-                        Check.Map(
-                            "fork",
-                            "donor/project",
-                            "branch",
-                            "tokate/v2-" + Check.Text(claim["uuid"]),
-                            "head",
-                            commit,
-                            "source",
-                            "external",
-                            "tools",
-                            Check.Json(File.ReadAllText(coordination.Tools)),
-                            "verification",
-                            "donor-reported-pass"
-                        )
-                    )
+                    let publication = coordination.PublishRequest(claim, commit)
                     let result = coordination.Coordinate(coordination.Event(publication), legacy ? 0: 1)
                     if !legacy {
                         Check.Contains(result.Error, "changes approved root DECREE.md")

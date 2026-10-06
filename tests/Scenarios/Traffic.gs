@@ -327,11 +327,11 @@ internal class CommandTrafficChecks {
             flow.Flow.Mode("lost_request_response")
             flow.Flow.ResetTraffic()
             let first = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
-            Budgets(flow.Flow, first, 23, 1, 1, 11)
+            Budgets(flow.Flow, first, 26, 1, 1, 14)
             flow.Flow.Mode("")
             flow.Flow.ResetTraffic()
             let duplicate = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
-            Budgets(flow.Flow, duplicate, 18, 0, 0, 7)
+            Budgets(flow.Flow, duplicate, 19, 0, 0, 8)
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
@@ -362,7 +362,15 @@ internal class CommandTrafficChecks {
             return run
         }
 
-        private func Watch(flow NativeFixture, run string, timeout string, code int32 = 8) Result -> flow.Call(
+        private func Watch(
+            flow NativeFixture,
+            run string,
+            timeout string,
+            code int32 = 8,
+            direct bool = false
+        ) Result -> flow
+            .Call(
+            direct ? []string{"checks", "--repo", "owner/project", "--pr", "10", "--watch", "--timeout", timeout}:
             []string{"checks", "--run", run, "--watch", "--timeout", timeout},
             code,
             traffic: true
@@ -495,6 +503,9 @@ internal class CommandTrafficChecks {
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
             Budgets(flow, pending, 21, 0, 0, 10)
+            flow.ResetTraffic()
+            let direct = flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, traffic: true)
+            Budgets(flow, direct, 21, 0, 0, 10)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -514,23 +525,93 @@ internal class CommandTrafficChecks {
                 ),
                 "Unchanged pending polls rewrote local state"
             )
+            flow.State["check_polls"] = JsonValue.Create(0)
+            flow.Save()
+            flow.ResetTraffic()
+            Budgets(flow, Watch(flow, run, "10", 0, true), 63, 0, 0, 51)
         }
 
         private func WatchChanges(binary string) {
             using let flow = NativeFixture(binary)
             let run = Published(flow)
             using let baseline = FixtureSnapshot(flow.Temp.Root)
-            for kind in[]string{"head", "approval"} {
-                baseline.Restore()
-                flow.Reload()
-                flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
-                flow.State["check_read_effect"] = JsonValue.Create(kind)
-                flow.Save()
-                flow.ResetTraffic()
-                let result = Watch(flow, run, "5", 1)
-                Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
+            for direct in[]bool{false, true} {
+                for kind in[]string{"head", "approval"} {
+                    baseline.Restore()
+                    flow.Reload()
+                    flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+                    flow.State["check_read_effect"] = JsonValue.Create(kind)
+                    flow.Save()
+                    flow.ResetTraffic()
+                    let result = Watch(flow, run, "5", 1, direct)
+                    Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
+                    Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
+                }
             }
+        }
+
+        private func CacheRetention(binary string) {
+            using let flow = NativeFixture(binary)
+            let run = Published(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for size in[]int32{1024 * 1024, 3 * 1024 * 1024} {
+                for revoked in[]bool{false, true} {
+                    baseline.Restore()
+                    flow.Reload()
+                    flow.State["response_padding"] = Check.Map(
+                        "repos/owner/project",
+                        size,
+                        "repos/owner/project/issues/1",
+                        size
+                    )
+                    flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+                    if revoked {
+                        flow.State["check_read_effect"] = JsonValue.Create("approval")
+                    }
+                    flow.Save()
+                    flow.ResetTraffic()
+                    let result = flow.Call([]string{"checks", "--run", run}, revoked ? 1: 0, traffic: true)
+                    if revoked {
+                        Check.Contains(result.Error, "Issue needs Tokate approval")
+                    }
+                    flow.Reload()
+                    for path in[]string{"repos/owner/project", "repos/owner/project/issues/1"} {
+                        var full int32
+                        for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                            if Check.Text(call["path"]) == path {
+                                Check.That(
+                                    Check.Text(call["conditional"]) == "false",
+                                    "Evicted or oversized response supplied a validator"
+                                )
+                                Check.That(Check.Text(call["status"]) == "200", "Evicted read was not fully fetched")
+                                full++
+                            }
+                        }
+                        let expected = revoked && path == "repos/owner/project" ? 1: 2
+                        Check.That(full >= expected, "Missing full fetch after cache eviction or non-admission")
+                    }
+                }
+            }
+            baseline.Restore()
+            flow.Reload()
+            flow.State["response_padding"] = Check.Map(
+                "repos/owner/project",
+                1024 * 1024,
+                "repos/owner/project/issues/1",
+                1024 * 1024
+            )
+            flow.State["etag_force_304"] = JsonValue.Create(true)
+            flow.Save()
+            flow.ResetTraffic()
+            let unmatched = flow.Call([]string{"checks", "--run", run}, 1, traffic: true)
+            Check.Contains(unmatched.Error, "HTTP 304 without a matching in-memory body")
+            flow.Reload()
+            let calls = flow.State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
+            let last = calls[calls.Count - 1] ?? throw Exception("Missing last request")
+            Check.That(
+                Check.Text(last["status"]) == "304" && Check.Text(last["conditional"]) == "false",
+                "Evicted body supplied a validator or authority for an unmatched 304"
+            )
         }
 
         internal func All(binary string, selected string = "") {
@@ -545,7 +626,8 @@ internal class CommandTrafficChecks {
                 "MovedDecreeDeadline",
                 "WatchStructured",
                 "WatchTraffic",
-                "WatchChanges"
+                "WatchChanges",
+                "CacheRetention"
             } {
                 if selected != "" && selected != name {
                     continue
@@ -586,6 +668,9 @@ internal class CommandTrafficChecks {
                     }
                     case "WatchChanges" {
                         WatchChanges(binary)
+                    }
+                    case "CacheRetention" {
+                        CacheRetention(binary)
                     }
                 }
                 Console.WriteLine("PASS command traffic " + name)

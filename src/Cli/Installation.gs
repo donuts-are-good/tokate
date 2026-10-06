@@ -3,6 +3,7 @@ package Tokate
 import Gsharp.Concurrency
 import System
 import System.Diagnostics
+import System.Runtime.ExceptionServices
 
 internal class Installation {
     shared {
@@ -22,20 +23,76 @@ internal class Installation {
                     info.Environment[key] = value
                 }
             }
-            using let process = Process.Start(info) ?? throw Exception("Cannot start the installer")
+            let started = Chan[Process?](1)
+            let exited = Chan[Exception?](1)
             let output = Chan[CommandOutput](1)
             let error = Chan[CommandOutput](1)
             let failed = Chan[Exception](4)
-            if PublicOutput.Enabled {
-                go Commands.Read(process.StandardOutput, output, failed)
-                go Commands.Read(process.StandardError, error, failed)
+            go Commands.Wait(info, started, exited)
+            let launched = <-started
+            if launched == nil {
+                throw <-exited ?? Exception("Cannot start the installer")
             }
-            process.StandardInput.Write(ApplicationInfo.Resource("install.sh"))
-            process.StandardInput.Close()
-            process.WaitForExit()
-            if PublicOutput.Enabled {
-                let stdout = <-output
-                let stderr = <-error
+            using let process = launched
+            var outputStarted bool
+            var errorStarted bool
+            var exitDone bool
+            var terminal Exception? = nil
+            var stdout = CommandOutput()
+            var stderr = CommandOutput()
+            try {
+                if info.RedirectStandardOutput {
+                    go Commands.Read(process.StandardOutput, output, failed)
+                    outputStarted = true
+                }
+                if info.RedirectStandardError {
+                    go Commands.Read(process.StandardError, error, failed)
+                    errorStarted = true
+                }
+                process.StandardInput.Write(ApplicationInfo.Resource("install.sh"))
+                process.StandardInput.Close()
+                select {
+                    case let failure = <- exited {
+                        terminal = failure
+                        exitDone = true
+                    }
+                    case let failure = <- failed {
+                        throw failure
+                    }
+                }
+            } catch (failure Exception) {
+                terminal = failure
+            } finally {
+                try {
+                    if !process.HasExited {
+                        try {
+                            process.Kill(true)
+                        } catch (failure InvalidOperationException) { }
+                    }
+                    process.WaitForExit()
+                } catch (failure Exception) {
+                    terminal = terminal ?? failure
+                }
+                if !exitDone {
+                    let failure = <-exited
+                    terminal = terminal ?? failure
+                }
+                try {
+                    process.StandardInput.Close()
+                } catch (failure Exception) {
+                    terminal = terminal ?? failure
+                }
+                if outputStarted {
+                    stdout = <-output
+                }
+                if errorStarted {
+                    stderr = <-error
+                }
+            }
+            if let failure = terminal {
+                ExceptionDispatchInfo.Capture(failure).Throw()
+            }
+            if outputStarted || errorStarted {
                 if stdout.Failure != nil || stderr.Failure != nil {
                     throw CliFailure("command_failed", "Cannot read installer diagnostics")
                 }

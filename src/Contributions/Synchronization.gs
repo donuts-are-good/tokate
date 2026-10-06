@@ -249,7 +249,7 @@ internal class Synchronization {
             history JsonElement,
             head string
         ) {
-            var baseline = base
+            var baselineTree Dictionary[string, string]? = nil
             var predecessor = base
             for item in J.Items(history) {
                 let value = Load(repo, J.Text(item, "grant"))
@@ -261,26 +261,23 @@ internal class Synchronization {
                 Commands.Git(checkout, "merge-base", "--is-ancestor", predecessor, previous)
                 Commands.Git(checkout, "merge-base", "--is-ancestor", previous, candidate)
                 Commands.Git(checkout, "merge-base", "--is-ancestor", upstream, candidate)
-                ProtectedPaths.EqualTrees(
-                    policy,
-                    approval,
-                    GitHubPathEvidence.Tree(repo, baseline),
-                    ProtectedPaths.LocalTree(checkout, previous)
-                )
-                ProtectedPaths.EqualTrees(
-                    policy,
-                    approval,
-                    GitHubPathEvidence.Tree(repo, upstream),
-                    ProtectedPaths.LocalTree(checkout, candidate)
-                )
-                baseline = upstream
+                if baselineTree == nil {
+                    baselineTree = GitHubPathEvidence.Tree(repo, base)
+                }
+                ProtectedPaths.EqualTrees(policy, approval, baselineTree, ProtectedPaths.LocalTree(checkout, previous))
+                let upstreamTree = GitHubPathEvidence.Tree(repo, upstream)
+                ProtectedPaths.EqualTrees(policy, approval, upstreamTree, ProtectedPaths.LocalTree(checkout, candidate))
+                baselineTree = upstreamTree
                 predecessor = candidate
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", predecessor, head)
+            if baselineTree != nil && head == predecessor {
+                return
+            }
             ProtectedPaths.EqualTrees(
                 policy,
                 approval,
-                GitHubPathEvidence.Tree(repo, baseline),
+                baselineTree ?? GitHubPathEvidence.Tree(repo, base),
                 ProtectedPaths.LocalTree(checkout, head)
             )
         }
@@ -294,7 +291,7 @@ internal class Synchronization {
             fork string,
             head string
         ) {
-            var baseline = base
+            var baselineTree Dictionary[string, string]? = nil
             var predecessor = base
             for item in J.Items(history) {
                 let value = Load(repo, J.Text(item, "grant"))
@@ -306,26 +303,23 @@ internal class Synchronization {
                 Ancestor(repo, predecessor, fork, previous)
                 Ancestor(repo, previous, fork, candidate)
                 Ancestor(repo, upstream, fork, candidate)
-                ProtectedPaths.EqualTrees(
-                    policy,
-                    approval,
-                    GitHubPathEvidence.Tree(repo, baseline),
-                    GitHubPathEvidence.Tree(fork, previous)
-                )
-                ProtectedPaths.EqualTrees(
-                    policy,
-                    approval,
-                    GitHubPathEvidence.Tree(repo, upstream),
-                    GitHubPathEvidence.Tree(fork, candidate)
-                )
-                baseline = upstream
+                if baselineTree == nil {
+                    baselineTree = GitHubPathEvidence.Tree(repo, base)
+                }
+                ProtectedPaths.EqualTrees(policy, approval, baselineTree, GitHubPathEvidence.Tree(fork, previous))
+                let upstreamTree = GitHubPathEvidence.Tree(repo, upstream)
+                ProtectedPaths.EqualTrees(policy, approval, upstreamTree, GitHubPathEvidence.Tree(fork, candidate))
+                baselineTree = upstreamTree
                 predecessor = candidate
             }
             Ancestor(repo, predecessor, fork, head)
+            if baselineTree != nil && head == predecessor {
+                return
+            }
             ProtectedPaths.EqualTrees(
                 policy,
                 approval,
-                GitHubPathEvidence.Tree(repo, baseline),
+                baselineTree ?? GitHubPathEvidence.Tree(repo, base),
                 GitHubPathEvidence.Tree(fork, head)
             )
         }
