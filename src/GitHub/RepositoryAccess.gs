@@ -27,8 +27,8 @@ internal class RepositoryAccess {
             let head = RepositoryIdentity.Repo(run.Text("head_repo"))
             let upstream = GitHub.Api("repos/" + repo)
             let info = RepositoryIdentity.SameRepo(repo, head) ? upstream: GitHub.Api("repos/" + head)
-            ValidateRepository(repo, head, J.Get(run.Element(), "donor_id"), info, upstream: upstream)
             let saved = run.Element()
+            ValidateRepository(repo, head, J.Get(saved, "donor_id"), info, upstream: upstream)
             for binding in[]string{"preparation_repo_id", "preparation_head_id"} {
                 let expected = J.Get(saved, binding)
                 if expected.ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(expected) !=
