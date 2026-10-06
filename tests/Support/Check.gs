@@ -1,6 +1,7 @@
 package TokateTests
 
 import System
+import System.Collections.Generic
 import System.IO
 import System.Security.Cryptography
 import System.Text
@@ -10,6 +11,33 @@ internal class Check {
     shared {
         internal func Hash(path string) string -> Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))
             .ToLowerInvariant()
+
+        internal func TextHash(text string) string -> Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))
+            .ToLowerInvariant()
+
+        internal func FixtureDigest(value JsonNode) string -> TextHash(Ordered(value)?.ToJsonString() ?? "null")
+
+        private func Ordered(value JsonNode?) JsonNode? {
+            if value is JsonObject fields {
+                let sorted = SortedDictionary[string, JsonNode?](StringComparer.Ordinal)
+                for field in fields {
+                    sorted.Add(field.Key, Ordered(field.Value))
+                }
+                let result = JsonObject()
+                for field in sorted {
+                    result.Add(field.Key, field.Value)
+                }
+                return result
+            }
+            if value is JsonArray items {
+                let result = JsonArray()
+                for item in items {
+                    result.Add(Ordered(item))
+                }
+                return result
+            }
+            return value?.DeepClone()
+        }
 
         internal func Envelope(result Result, command string, status string, error string = "") JsonNode {
             let value = Check.Json(result.Output)

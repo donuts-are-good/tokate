@@ -3,7 +3,6 @@ package TokateTests
 import System
 import System.IO
 import System.Text.Json.Nodes
-import Tokate
 
 internal class RepositoryIdentityChecks {
     shared {
@@ -75,8 +74,12 @@ internal class RepositoryIdentityChecks {
                 let text = Check.Text(saved[field])
                 saved[field] = JsonValue.Create(field == "base_branch" ? "Main": text.ToUpperInvariant())
                 File.WriteAllText(path, saved.ToJsonString())
-                flow.Call([]string{"work", "--run", run}, 1)
-                flow.NoInference()
+                flow.Reject(
+                    []string{"work", "--run", run},
+                    field == "approval" ? "Approval was replaced": (
+                        field == "branch" ? "Invalid saved claim branch": "Saved run differs from owner approval"
+                    )
+                )
                 saved = Check.Json(original)
             }
             saved["repo"] = JsonValue.Create("OWNER/PROJECT")
@@ -112,40 +115,28 @@ internal class RepositoryIdentityChecks {
             let claim = Check.Envelope(flow.Call(WorkArgs(flow, "OwNeR/PrOjEcT", "claim")), "claim", "ok")
             let directory = Check.Text(claim["data"]?["run"])
             let path = Path.Combine(directory, "run.json")
-            let run = Data.Load(directory)
-            let identity = Data.Hash(
-                J.Write(
-                    J.Map(
-                        "version",
-                        run.Number("version"),
-                        "id",
-                        run.Text("id"),
-                        "repo",
-                        run.Text("repo"),
-                        "issue",
-                        run.Number("issue"),
-                        "donor_id",
-                        J.Get(run.Element(), "donor_id"),
-                        "approval",
-                        run.Text("approval"),
-                        "state_sha",
-                        run.Text("state_sha"),
-                        "base",
-                        run.Text("base"),
-                        "base_branch",
-                        run.Text("base_branch"),
-                        "branch",
-                        run.Text("branch"),
-                        "source",
-                        run.Text("source"),
-                        "fork",
-                        run.Text("requested_fork"),
-                        "head_repo",
-                        run.Text("head_repo")
-                    )
-                )
-            )
-            Check.That(identity != run.Text("preparation_identity"), "Legacy fixture did not retain exact case")
+            let run = Check.Json(File.ReadAllText(path))
+            let legacy = Check.Map()
+            for field in[]string{
+                "version",
+                "id",
+                "repo",
+                "issue",
+                "donor_id",
+                "approval",
+                "state_sha",
+                "base",
+                "base_branch",
+                "branch",
+                "source"
+            } {
+                legacy[field] = field == "version" || field == "issue" || field == "donor_id" ?
+                run[field]?.DeepClone(): JsonValue.Create(Check.Text(run[field]))
+            }
+            legacy["fork"] = JsonValue.Create(Check.Text(run["requested_fork"]))
+            legacy["head_repo"] = JsonValue.Create(Check.Text(run["head_repo"]))
+            let identity = Check.TextHash(legacy.ToJsonString())
+            Check.That(identity != Check.Text(run["preparation_identity"]), "Legacy fixture did not retain exact case")
             let saved = Check.Json(File.ReadAllText(path))
             saved["preparation_identity"] = JsonValue.Create(identity)
             File.WriteAllText(path, saved.ToJsonString())
@@ -279,27 +270,6 @@ internal class RepositoryIdentityChecks {
         }
 
         internal func All(binary string) {
-            Check.That(
-                RepositoryIdentity.IsIssueUrl(
-                    "https://api.github.com/repos/OWNER/PROJECT/issues/1",
-                    "owner/project",
-                    1
-                ),
-                "Issue URL rejected repository case variant"
-            )
-            for url in[]string{
-                "https://api.github.com/repos/owner/other/issues/1",
-                "https://api.github.com/repos/owner/project/Issues/1",
-                "https://api.github.com/repos/owner/project/issues/01",
-                "https://api.github.com/repos/owner/project/issues/2",
-                "https://api.github.com/repos/owner/project/issues/1?extra",
-                "https://API.github.com/repos/owner/project/issues/1"
-            } {
-                Check.That(
-                    !RepositoryIdentity.IsIssueUrl(url, "owner/project", 1),
-                    "Issue URL comparison loosened: " + url
-                )
-            }
             MixedWork(binary, false, "OwNeR/PrOjEcT", "owner/project")
             MixedWork(binary, false, "owner/project", "OwNeR/PrOjEcT")
             MixedWork(binary, true, "OwNeR/PrOjEcT", "OWNER/PROJECT")

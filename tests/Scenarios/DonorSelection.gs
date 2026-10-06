@@ -262,7 +262,7 @@ internal class DonorSelectionChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             ExpandPolicy(flow)
-            let command = "'" + binary + "' select --repo owner/project"
+            let command = "'" + binary + "' select --repo owner/project --plain"
             let result = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
@@ -270,9 +270,9 @@ internal class DonorSelectionChecks {
                 "2\n"
             )
             Check.Success(result)
-            Check.Contains(result.Output, "Choice number")
-            Check.Contains(result.Output, "interactive donor choice")
-            Check.Contains(result.Output, "xhigh")
+            Check.Contains(result.Output, "Model: gpt-6.1-sol\r\n")
+            Check.Contains(result.Output, "Effort: xhigh\r\n")
+            Check.Contains(result.Output, "Source: interactive donor choice\r\n")
             Check.That(!File.Exists(Settings(flow)), "Interactive choice saved preferences implicitly")
             let refused = TestProcess.Run(
                 "/usr/bin/script",
@@ -288,10 +288,10 @@ internal class DonorSelectionChecks {
                 flow.Temp.Env,
                 "1\n"
             )
-            Check.That(
-                noninteractive.Code == 1 && !noninteractive.Output.Contains("Choice number"),
-                "Noninteractive selection hid a prompt"
-            )
+            Check.That(noninteractive.Code == 1, "Noninteractive selection accepted terminal input")
+            Check.Contains(noninteractive.Output, "Explicit donor choice required")
+            flow.NoInference()
+            flow.NoPr()
             flow.Approve()
             let work = "'" + binary + "' work --repo owner/project --issue 1 --runs '" + Path.Combine(
                 flow.Temp.Root,
@@ -305,7 +305,7 @@ internal class DonorSelectionChecks {
                 "1\nn\n"
             )
             Check.That(declined.Code == 1, "Declined confirmation launched work")
-            Check.Contains(declined.Output, "[y/N]")
+            Check.Contains(declined.Output, "Inference was not confirmed")
             flow.NoInference()
             flow.NoPr()
             flow.Mode("model_failure")
@@ -321,6 +321,12 @@ internal class DonorSelectionChecks {
             Check.That(
                 Check.Text(flow.State["exec_count"]) == "1",
                 "Confirmed terminal work retried or did not execute"
+            )
+            Check.That(
+                Check.Text(flow.State["requested_model"]) == "gpt-6.1-sol" && Check.Text(
+                    flow.State["requested_effort"]
+                ) == "model_reasoning_effort=\"high\"",
+                "Confirmation forwarded the wrong tuple"
             )
         }
 
@@ -423,7 +429,7 @@ internal class DonorSelectionChecks {
                     Check.Contains(Check.Text(rejected["error"]), "known model")
                 }
                 flow.Call([]string{"defaults", "remove"})
-                let command = "'" + binary + "' select --repo owner/project"
+                let command = "'" + binary + "' select --repo owner/project --plain"
                 let chosen = TestProcess.Run(
                     "/usr/bin/script",
                     []string{"-q", "-e", "-c", command, "/dev/null"},
@@ -431,8 +437,9 @@ internal class DonorSelectionChecks {
                     "1\n"
                 )
                 Check.Success(chosen)
-                Check.Contains(chosen.Output, "gpt-6-sol / high")
-                Check.Contains(chosen.Output, "interactive donor choice")
+                Check.Contains(chosen.Output, "Model: gpt-6-sol\r\n")
+                Check.Contains(chosen.Output, "Effort: high\r\n")
+                Check.Contains(chosen.Output, "Source: interactive donor choice\r\n")
                 let cancelled = TestProcess.Run(
                     "/usr/bin/script",
                     []string{"-q", "-e", "-c", command, "/dev/null"},

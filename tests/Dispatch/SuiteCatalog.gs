@@ -5,7 +5,6 @@ import System
 import System.Diagnostics
 import System.Globalization
 import System.IO
-import Tokate
 
 internal class SuiteCatalog {
     shared {
@@ -71,10 +70,10 @@ internal class SuiteCatalog {
                 let serial = report.Serial()
                 try {
                     if CiShard.Include("Process") {
-                        ProcessChecks.All()
+                        ProcessChecks.All(binary)
                     }
                     if CiShard.Include("ProtectedPaths") {
-                        ProtectedPathChecks.All()
+                        ProtectedPathChecks.All(binary)
                     }
                     if CiShard.Include("CliDiscovery") {
                         CliDiscovery.All(binary)
@@ -86,10 +85,10 @@ internal class SuiteCatalog {
                         DonorSelectionChecks.All(binary)
                     }
                     if CiShard.Include("Verification") {
-                        VerificationChecks.All()
+                        VerificationChecks.All(binary)
                     }
-                    if CiShard.Include("SuiteDriver") {
-                        SuiteChecks.All()
+                    if CiShard.Include("PublicDescriptions") {
+                        PublicDescriptions.All(binary)
                     }
                     for name in NativeFlow.SerialGroups {
                         if CiShard.Include("Native/" + name) {

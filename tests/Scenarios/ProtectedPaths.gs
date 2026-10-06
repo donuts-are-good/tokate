@@ -1,51 +1,76 @@
 package TokateTests
 
 import System
-import System.Collections.Generic
 import System.IO
-import System.Text.Json
-import Tokate
+import System.Text.Json.Nodes
 
 internal class ProtectedPathChecks {
     shared {
-        private func Git(temp Temp, checkout string, args ...string) string {
-            let all = List[string]{"-C", checkout, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test"}
-            all.AddRange(args)
-            return Check.Success(TestProcess.Run("/usr/bin/git", all.ToArray(), temp.Env))
-        }
-
-        private func Refused(checkout string, policy JsonElement, base string, head string = "") {
-            var refused bool
-            try {
-                ProtectedPaths.Local(checkout, policy, JsonElement(), base, head)
-            } catch (error Exception) {
-                Check.Contains(error.Message, "protected owner")
-                refused = true
+        internal func All(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            let paths = []string{" protected", "\uFEFFprotected", "scripts/quoted\" ", "scripts/checks/line\n\".sh"}
+            let entries = JsonArray()
+            for path in paths {
+                PublishedContribution.Write(flow.Upstream, path, "original\n")
+                entries.Add(JsonValue.Create(path.Contains('\n') ? "scripts/checks/": path) as JsonNode)
             }
-            Check.That(refused, "Protected raw Git path was accepted")
-        }
-
-        internal func All() {
-            for path in[]string{" protected", "\uFEFFprotected", "scripts/quoted\" ", "scripts/checks/line\n\".sh"} {
-                using let temp = Temp()
-                let checkout = Path.Combine(temp.Root, "checkout")
-                let file = Path.Combine(checkout, path)
-                Directory.CreateDirectory(Path.GetDirectoryName(file) ?? checkout)
-                File.WriteAllText(file, "original\n")
-                Git(temp, checkout, "init", "--quiet", "--template=")
-                Git(temp, checkout, "add", "-A")
-                Git(temp, checkout, "commit", "--quiet", "-m", "Base")
-                let base = Git(temp, checkout, "rev-parse", "HEAD")
-                let policy = J.Parse(
-                    J.Write(J.Map("protected_paths", []string{path.Contains('\n') ? "scripts/checks/": path}))
-                )
-                File.AppendAllText(file, "changed\n")
-                Git(temp, checkout, "add", "-A")
-                Refused(checkout, policy, base)
-                Git(temp, checkout, "commit", "--quiet", "-m", "Changed")
-                Refused(checkout, policy, base, Git(temp, checkout, "rev-parse", "HEAD"))
+            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["protected_paths"] = entries
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Commit("Raw protected Git names")
+            flow.Approve()
+            let run = flow.Claim()
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for path in paths {
+                for committed in[]bool{false, true} {
+                    baseline.Restore()
+                    let checkout = Path.Combine(run, "checkout")
+                    File.AppendAllText(Path.Combine(checkout, path), "changed\n")
+                    flow.Git("-C", checkout, "add", "-A")
+                    let savedPath = Path.Combine(run, "run.json")
+                    let saved = Check.Json(File.ReadAllText(savedPath))
+                    saved["state"] = JsonValue.Create("generated")
+                    let checks = JsonArray()
+                    checks.Add(Check.Map("command", policy["verification"]?[0], "exit_code", 0))
+                    saved["verification"] = checks
+                    File.WriteAllText(
+                        Path.Combine(run, "changes.patch"),
+                        flow.Git("-C", checkout, "diff", "--cached", "--binary", Check.Text(saved["base"])) + "\n"
+                    )
+                    if committed {
+                        flow.Git(
+                            "-C",
+                            checkout,
+                            "-c",
+                            "user.name=Fixture",
+                            "-c",
+                            "user.email=fixture@example.test",
+                            "commit",
+                            "-m",
+                            "Forged success"
+                        )
+                        saved["commit"] = JsonValue.Create(flow.Git("-C", checkout, "rev-parse", "HEAD"))
+                    }
+                    File.WriteAllText(savedPath, saved.ToJsonString())
+                    Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "protected owner path")
+                    Check.That(
+                        flow.Git(
+                            "-C",
+                            Path.Combine(flow.Bin, "fork"),
+                            "rev-parse",
+                            Check.Text(saved["branch"])
+                        ) == Check.Text(saved["base"]),
+                        "Protected path was pushed"
+                    )
+                    flow.NoInference()
+                    flow.NoPr()
+                }
             }
-            Console.WriteLine("PASS staged and committed protected whitespace, BOM, quoted and newline Git names")
+            Console.WriteLine(
+                "PASS CLI publication rejects staged and committed whitespace, BOM, quoted and newline protected Git names"
+            )
         }
     }
 }

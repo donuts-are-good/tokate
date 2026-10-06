@@ -117,7 +117,7 @@ internal class RequestData {
             for tool in items {
                 Keys(tool, "harness,provider,model,effort,usage,coding_seconds")
                 for name in[]string{"harness", "provider", "model", "effort"} {
-                    Token(J.Text(tool, name))
+                    PublicSummary.Identifier(Token(J.Text(tool, name)))
                 }
                 let number = J.Get(tool, "coding_seconds")
                 var seconds int64
@@ -234,7 +234,7 @@ internal class RequestData {
             if J.Text(value, "action") == "claim" {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
-                Keys(metadata, "fork,branch,head,source,tools,verification,correction")
+                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
@@ -251,7 +251,7 @@ internal class RequestData {
                     Correction(correction, J.Text(metadata, "head"), JsonElement{})
                 }
             } else if J.Text(value, "action") == "amend" {
-                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync")
+                Keys(metadata, "fork,branch,previous,head,pr,seconds,tools,verification,sync,summary")
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "previous"))
@@ -274,6 +274,10 @@ internal class RequestData {
                 }
             } else {
                 throw Exception("Only claim, publish and amend are donor request operations")
+            }
+            let summary = J.Get(metadata, "summary")
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, J.Text(metadata, "head"))
             }
         }
     }

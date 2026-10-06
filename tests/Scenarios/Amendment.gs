@@ -4,6 +4,7 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
+import Tokate
 
 internal class AmendmentFlow {
     shared {
@@ -53,7 +54,14 @@ internal class AmendmentFlow {
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
             var body = Check.Text(pull["body"])
             if legacy {
-                body = body.Replace("<!-- tokate-report:start -->\n", "").Replace("\n<!-- tokate-report:end -->", "")
+                let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+                let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+                if body.Contains("<!-- tokate-run:") {
+                    body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(
+                        start,
+                        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue\'s acceptance criteria and limitations."
+                    )
+                }
             }
             pull["body"] = JsonValue.Create("Owner review before\n" + body + "\nOwner review after")
             flow.Save()
@@ -612,7 +620,13 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
+        private func V2(
+            binary string,
+            mode string = "",
+            native bool = false,
+            modelPolicy string = "",
+            legacy bool = false
+        ) {
             using let flow = CoordinationFixture(binary)
             let run = PublishedContribution.V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
@@ -644,6 +658,7 @@ internal class AmendmentFlow {
                 "Amendment repeated an applied request comment"
             )
             let path = flow.Event(request)
+            var legacyBody = ""
             if mode == "lost_body_response" || mode == "lost_state_response" || mode == "interrupted_state_write" {
                 flow.Flow.Mode(mode)
                 flow.Coordinate(path, 1)
@@ -652,6 +667,32 @@ internal class AmendmentFlow {
                     mode == "lost_state_response" ? 0: 1
                 )
                 flow.Flow.Mode("")
+                if legacy {
+                    flow.Flow.Reload()
+                    let pull = flow.Flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
+                    let body = Check.Text(pull["body"])
+                    let metadata = request["metadata"] ?? throw Exception("Missing amendment metadata")
+                    let declared = metadata["tools"]?.AsArray() ?? JsonArray()
+                    let legacyReport = "Review amendment: " + Check.Text(metadata["previous"]) + " → " + Check.Text(
+                        metadata["head"]
+                    ) +
+                        ". Donor reports all original owner commands passed locally with a separate " +
+                        Check.Text(metadata["seconds"]) +
+                        " second verification budget; no inference was launched by amend.\n\n" +
+                        "Original execution/model/effort/runtime/usage observations cover original work only. Amendment editing: " +
+                        (
+                        declared.Count == 0 ? "manual; coding time and usage unknown":
+                        "donor-reported tools " + declared.ToJsonString() +
+                            "; identity, coding time and usage not independently attested"
+                    ) +
+                        ". Owner CI and review must validate this exact amended commit."
+                    let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal) +
+                        "<!-- tokate-report:start -->".Length
+                    let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+                    legacyBody = body.Remove(start, end - start).Insert(start, "\n" + legacyReport + "\n")
+                    pull["body"] = JsonValue.Create(legacyBody)
+                    flow.Flow.Save()
+                }
             }
             flow.Flow.ResetTraffic()
             flow.Coordinate(path)
@@ -669,6 +710,18 @@ internal class AmendmentFlow {
             flow.Flow.Reload()
             for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                 Check.That(Check.Text(call["method"]) == "GET", "Applied amendment request repeated writes")
+            }
+            if legacy {
+                Check.That(
+                    Check.Text(flow.Flow.State["pulls"]?[0]?["body"]) == legacyBody,
+                    "Legacy replay changed the exact applied body"
+                )
+                Check.Contains(legacyBody, "Owner review before")
+                Check.Contains(legacyBody, "Owner review after")
+                flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                AssertOriginal(run, original)
+                Check.That(flow.State()["state"]?["amendments"]?.AsArray().Count == 1, "Legacy history missing")
+                return
             }
             Amend(flow.Flow, run, commit, tools: tools)
             AssertOriginal(run, original)
@@ -758,7 +811,7 @@ internal class AmendmentFlow {
                         pull["body"] = JsonValue.Create(
                             failure == "report-edited" ?
                             Check.Text(pull["body"]).Replace(
-                                "The coordinator did not observe coding execution.",
+                                "coordinator did not observe execution.",
                                 "Incorrect attribution."
                             ):
                             Check.Text(pull["body"]).Replace("tokate-receipt:", "edited-receipt:")
@@ -840,6 +893,7 @@ internal class AmendmentFlow {
                 "V2Body",
                 "V2State",
                 "V2StateBefore",
+                "V2LegacyStateBefore",
                 "V2Stale"
             } {
                 if only != "" && only != name {
@@ -911,6 +965,9 @@ internal class AmendmentFlow {
                     }
                     case "V2StateBefore" {
                         V2(binary, "interrupted_state_write")
+                    }
+                    case "V2LegacyStateBefore" {
+                        V2(binary, "interrupted_state_write", legacy: true)
                     }
                     case "V2Stale" {
                         V2Stale(binary)

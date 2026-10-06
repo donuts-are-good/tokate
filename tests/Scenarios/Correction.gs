@@ -386,7 +386,7 @@ internal class CorrectionChecks {
                     "Correction usage replaced original usage"
                 )
                 let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
-                Check.Contains(body, declared ? "donor-reported correction tools": "manual/unknown")
+                Check.Contains(body, declared ? "Donor-reported correction tools": "manual/unknown")
             }
         }
 
@@ -902,7 +902,8 @@ internal class CorrectionChecks {
                     "v2 publication replay reran checks"
                 )
                 flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Correction editing is separate")
+                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Original donor-reported tools")
+                Check.Contains(Check.Text(flow.Flow.State["pulls"]?[0]?["body"]), "Donor-reported correction tools")
                 Recover(flow.Flow, run, commit, 1, flow.Tools)
                 flow.Expire()
                 flow.Flow.Call([]string{"submit", "--run", run}, 1)

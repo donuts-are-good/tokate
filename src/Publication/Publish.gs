@@ -9,18 +9,7 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
-        internal func Usage(run Data) string {
-            let usage = J.Get(run.Element(), "usage")
-            let counts = Dictionary[string, Object?]()
-            for key in[]string{"input_tokens", "cached_input_tokens", "output_tokens"} {
-                let item = J.Get(usage, key)
-                var count int64
-                if item.ValueKind == JsonValueKind.Number && item.TryGetInt64(out count) && count >= 0 {
-                    counts[key] = count
-                }
-            }
-            return J.Write(counts)
-        }
+        internal func Usage(run Data) string -> PublicSummary.Usage(J.Get(run.Element(), "usage"))
 
         internal func Pulls(run Data) List[JsonElement] {
             let pulls = List[JsonElement]()
@@ -129,7 +118,7 @@ internal class Publication {
                 }
                 fields["original_head"] = original.Text("commit")
                 let publicAmendment = J.Parse(J.Write(Amendment.PublicRecord(amendment)))
-                Amendment.ValidateReceipt(publicAmendment, Policy(J.Write(J.Get(record, "policy"))))
+                Amendment.ValidateReceipt(publicAmendment, Policy(J.Write(J.Get(record, "policy"))), run.Text("commit"))
                 fields["amendment"] = publicAmendment
                 Synchronization.Keep(fields, Synchronization.History(amendment.Element()))
             }
@@ -194,13 +183,15 @@ internal class Publication {
                 run.Text("base"),
                 run.Text("commit")
             )
+            PublicSummary.Bind(run, committedPatch)
+            run.Save(directory)
             let receipt = ContributionReceipt.Native(run, run.Text("commit"))
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            values["report"] = PrBody.Report(PrBody.VerificationReport(run, record))
+            values["report"] = PrBody.Report(PrBody.ManagedReport(run, record))
             values["donor"] = run.Text("donor")
-            values["model"] = run.Text("model")
-            values["effort"] = run.Text("effort")
+            values["model"] = PublicSummary.Identifier(run.Text("model"))
+            values["effort"] = PublicSummary.Identifier(run.Text("effort"))
             values["seconds"] = run.Flag("recovered") ? "unknown (verification-only recovery: " + run.Number(
                 "elapsed_seconds"
             )

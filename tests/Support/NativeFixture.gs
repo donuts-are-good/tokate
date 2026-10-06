@@ -10,7 +10,6 @@ import System.IO
 import System.Net
 import System.Net.Sockets
 import System.Text.Json.Nodes
-import Tokate
 
 internal open class NativeFixture : IDisposable {
     internal let Temp Temp = Temp()
@@ -50,6 +49,7 @@ internal open class NativeFixture : IDisposable {
 
     internal func Initialize() {
         Git("init", "-b", "main", Upstream)
+        Git("-C", Upstream, "config", "maintenance.autoDetach", "false")
         Call([]string{"init", "--path", Upstream})
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
@@ -58,6 +58,7 @@ internal open class NativeFixture : IDisposable {
         File.WriteAllText(path, policy.ToJsonString())
         Commit("Initial")
         Git("clone", "--bare", Upstream, Path.Combine(Bin, "fork"))
+        Git("-C", Path.Combine(Bin, "fork"), "config", "maintenance.autoDetach", "false")
     }
 
     public func Dispose() -> Temp.Dispose()
@@ -206,6 +207,12 @@ internal open class NativeFixture : IDisposable {
     internal func NoPr() {
         Reload()
         Check.That(State["pulls"] == nil, "Unexpected PR")
+    }
+
+    internal func Reject(args[]string, reason string, owner bool = false) {
+        Check.Contains(Call(args, 1, owner).Error, reason)
+        NoInference()
+        NoPr()
     }
 
     internal func SetModelPolicy(mode string, models string = "") {
