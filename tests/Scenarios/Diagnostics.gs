@@ -368,6 +368,13 @@ internal class Diagnostics {
                         ) == "skipped",
                         "Owner diagnostics misattributed a failed cleanup helper"
                     )
+                    let discovery = Check.Envelope(
+                        FixedCall(binary, flow, helper, []string{"policy"}),
+                        "policy",
+                        "error",
+                        "missing_tools"
+                    )
+                    Check.Contains(Check.Text(discovery["error"]?["message"]), "PID namespace")
                 }
                 if helper != "/usr/bin/bwrap" {
                     let selection = Check.Envelope(

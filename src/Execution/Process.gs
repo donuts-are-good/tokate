@@ -517,6 +517,8 @@ internal class Commands {
             }
             if !pidNamespace && result.Code != 0 {
                 for prefix in[]string{
+                    "setsid: failed to execute /usr/bin/unshare:",
+                    "unshare: failed to execute /usr/bin/env:",
                     "unshare: unshare failed:",
                     "unshare: mount /proc failed:",
                     "unshare: mount proc on /proc failed:",
