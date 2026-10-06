@@ -106,8 +106,7 @@ internal class PiBoundary {
             return args
         }
 
-        internal func Control(root string, model string, endpoint string) string {
-            let control = Path.Combine(root, "pi-control-" + Guid.NewGuid().ToString("N"))
+        internal func Control(control string, model string, endpoint string) {
             Directory.CreateDirectory(
                 control,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -162,7 +161,6 @@ internal class PiBoundary {
                     )
                 )
             )
-            return control
         }
 
         internal func Probe(root string, node string, budget RuntimeBudget? = nil) {
@@ -175,7 +173,8 @@ internal class PiBoundary {
                 Directory.CreateDirectory(Path.Combine(checkout, ".git"))
                 File.WriteAllText(Path.Combine(checkout, ".git/config"), "synthetic-private")
                 File.WriteAllText(Path.Combine(storage.FullName, "credential-sentinel"), "synthetic-private")
-                let control = Control(storage.FullName, "tokate-probe", "http://127.0.0.1:1/v1")
+                let control = Path.Combine(storage.FullName, "control")
+                Control(control, "tokate-probe", "http://127.0.0.1:1/v1")
                 let args = Boundary(checkout, root, node, control, false)
                 args.AddRange(
                     []string{

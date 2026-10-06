@@ -118,11 +118,11 @@ const { session, modelFallbackMessage } = await sdk.createAgentSession({ cwd, ag
         compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
         blockImages: true, cacheWarming: "off", defaultTools: ['read', 'edit', 'write', 'bash'],
     }) });
-if (typeof session.getToolDefinition !== 'function' || typeof session.getActiveToolNames !== 'function' ||
-    session.getActiveToolNames().sort().join(',') !== 'bash,edit,read,write' ||
-    customTools.some(tool => session.getToolDefinition(tool.name) !== tool)) throw new Error('Unconstrained execution surface');
-if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local') throw new Error('Pi substituted selection');
 try {
+    if (typeof session.getToolDefinition !== 'function' || typeof session.getActiveToolNames !== 'function' ||
+        session.getActiveToolNames().sort().join(',') !== 'bash,edit,read,write' ||
+        customTools.some(tool => session.getToolDefinition(tool.name) !== tool)) throw new Error('Unconstrained execution surface');
+    if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local') throw new Error('Pi substituted selection');
     if (mode === 'probe') {
         let denied = 0;
         for (const path of [sentinel, `${cwd}/.git/config`, '/tokate-control/auth.json', '/tokate-control/models.json']) {

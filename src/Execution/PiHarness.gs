@@ -121,105 +121,110 @@ internal class PiHarness {
             Preparation.Ready(directory, run)
             PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
             let checkout = Path.Combine(directory, "checkout")
-            let control = PiBoundary.Control(directory, run.Text("model"), PiBoundary.Endpoint(run.Text("pi_endpoint")))
-            let args = PiBoundary.Boundary(checkout, run.Text("pi_root"), run.Text("pi_node"), control, true)
-            args.AddRange(
-                []string{
-                    "/tokate-node",
-                    "/tokate-control/bridge.mjs",
-                    "run",
-                    checkout,
-                    run.Text("model"),
-                    run.Flag("network") ? "true": "false"
-                }
-            )
-            ContributionClaim.Recheck(run)
-            Preparation.Ready(directory, run)
-            run.Fields["state"] = "running"
-            run.Fields["failure_stage"] = "inference"
-            run.Fields["failure_reason"] = "inference_failed"
-            run.Fields["pi_version"] = "1.0.0"
-            run.Fields["observed_invocation"] = J.Map(
-                "harness",
-                "pi",
-                "sdk_version",
-                "1.0.0",
-                "node_version",
-                "26.10.0",
-                "provider",
-                "local-chat-completions",
-                "model",
-                run.Text("model"),
-                "effort",
-                "absent"
-            )
-            run.Save(directory)
+            let control = Path.Combine(directory, "pi-control-" + Guid.NewGuid().ToString("N"))
             try {
-                PublicOutput.FailureCode = "inference_failed"
-                var result CommandResult
-                {
-                    using let progress = TerminalProgress(
-                        "Pi inference",
-                        coding,
-                        RuntimeBudget(timer, run.Number("seconds"))
-                    )
-                    result = Commands.Run(
-                        "/usr/bin/bwrap",
-                        args.ToArray(),
+                PiBoundary.Control(control, run.Text("model"), PiBoundary.Endpoint(run.Text("pi_endpoint")))
+                let args = PiBoundary.Boundary(checkout, run.Text("pi_root"), run.Text("pi_node"), control, true)
+                args.AddRange(
+                    []string{
+                        "/tokate-node",
+                        "/tokate-control/bridge.mjs",
+                        "run",
                         checkout,
-                        prompt,
-                        run.Number("seconds"),
-                        isolated: true,
-                        cancellation: Chan[bool](1),
-                        strictOutput: true,
-                        outputPath: Path.Combine(directory, "events.jsonl"),
-                        errorPath: Path.Combine(directory, "stderr.log"),
-                        budget: coding
-                    )
-                }
-                run.Fields["output_truncated"] = result.OutputTruncated
-                run.Fields["error_truncated"] = result.ErrorTruncated
-                run.Fields["inference_exit_code"] = result.Code
-                if result.Code != 0 || result.Truncated || result.ReadFailed {
-                    throw Exception("Pi did not complete; inspect private captured evidence. No retry or fallback")
-                }
-                let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"))
-                run.Fields["turn_completed"] = true
-                run.Fields["usage"] = usage
-                run.Fields[
-                    "usage_provenance"
-                ] = "harness-reported; server identity, resources and billing are not independently proven"
-                run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
-                run.Save(directory)
-                PublicOutput.FailureCode = "invalid_state"
-                Contribution.Finish(
-                    directory,
-                    run,
-                    record,
-                    usage,
-                    timer,
-                    run.Number("seconds"),
-                    run.Number("verification_reserve")
+                        run.Text("model"),
+                        run.Flag("network") ? "true": "false"
+                    }
                 )
-            } catch (error Exception) {
-                if run.Text("failure_stage") == "inference" {
-                    if error is CommandInterrupted interrupted {
-                        run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
-                    }
-                    if error is CommandInputInterrupted interruptedInput {
-                        run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
-                    }
-                }
-                run.Fields["state"] = "failed"
-                run.Fields["error"] = error.Message
+                ContributionClaim.Recheck(run)
+                Preparation.Ready(directory, run)
+                run.Fields["state"] = "running"
+                run.Fields["failure_stage"] = "inference"
+                run.Fields["failure_reason"] = "inference_failed"
+                run.Fields["pi_version"] = "1.0.0"
+                run.Fields["observed_invocation"] = J.Map(
+                    "harness",
+                    "pi",
+                    "sdk_version",
+                    "1.0.0",
+                    "node_version",
+                    "26.10.0",
+                    "provider",
+                    "local-chat-completions",
+                    "model",
+                    run.Text("model"),
+                    "effort",
+                    "absent"
+                )
                 run.Save(directory)
-                throw error
+                try {
+                    PublicOutput.FailureCode = "inference_failed"
+                    var result CommandResult
+                    {
+                        using let progress = TerminalProgress(
+                            "Pi inference",
+                            coding,
+                            RuntimeBudget(timer, run.Number("seconds"))
+                        )
+                        result = Commands.Run(
+                            "/usr/bin/bwrap",
+                            args.ToArray(),
+                            checkout,
+                            prompt,
+                            run.Number("seconds"),
+                            isolated: true,
+                            cancellation: Chan[bool](1),
+                            strictOutput: true,
+                            outputPath: Path.Combine(directory, "events.jsonl"),
+                            errorPath: Path.Combine(directory, "stderr.log"),
+                            budget: coding
+                        )
+                    }
+                    run.Fields["output_truncated"] = result.OutputTruncated
+                    run.Fields["error_truncated"] = result.ErrorTruncated
+                    run.Fields["inference_exit_code"] = result.Code
+                    if result.Code != 0 || result.Truncated || result.ReadFailed {
+                        throw Exception("Pi did not complete; inspect private captured evidence. No retry or fallback")
+                    }
+                    let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"))
+                    run.Fields["turn_completed"] = true
+                    run.Fields["usage"] = usage
+                    run.Fields[
+                        "usage_provenance"
+                    ] = "harness-reported; server identity, resources and billing are not independently proven"
+                    run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
+                    run.Save(directory)
+                    PublicOutput.FailureCode = "invalid_state"
+                    Contribution.Finish(
+                        directory,
+                        run,
+                        record,
+                        usage,
+                        timer,
+                        run.Number("seconds"),
+                        run.Number("verification_reserve")
+                    )
+                } catch (error Exception) {
+                    if run.Text("failure_stage") == "inference" {
+                        if error is CommandInterrupted interrupted {
+                            run.Fields["failure_reason"] = "inference_interrupted"
+                            run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
+                            run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
+                        }
+                        if error is CommandInputInterrupted interruptedInput {
+                            run.Fields["failure_reason"] = "inference_interrupted"
+                            run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
+                            run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
+                        }
+                    }
+                    run.Fields["state"] = "failed"
+                    run.Fields["error"] = error.Message
+                    run.Save(directory)
+                    throw error
+                }
             } finally {
-                Directory.Delete(control, true)
+                if Directory.Exists(control) {
+                    Directory.Delete(control, true)
+                }
             }
         }
     }
