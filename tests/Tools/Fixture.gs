@@ -32,5 +32,5 @@ internal partial class Fixture {
         }
     }
 
-    internal func Save() -> File.WriteAllText(StatePath, State.ToJsonString())
+    internal func Save() -> Check.SaveJson(StatePath, State)
 }
