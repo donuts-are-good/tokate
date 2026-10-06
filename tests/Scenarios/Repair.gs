@@ -140,6 +140,181 @@ internal class RepairCase {
 
 internal class RepairChecks {
     shared {
+        private let LegacyText string =
+        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+
+        private func ReceiptRegion(body string) string {
+            let start = body.IndexOf("<!-- tokate-receipt:", StringComparison.Ordinal)
+            let end = body.IndexOf(" -->", start, StringComparison.Ordinal)
+            return body.Substring(start, end + 4 - start)
+        }
+
+        private func Legacy(test RepairCase, crlf bool = false) string {
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing legacy PR")
+            var body = Check.Text(pull["body"])
+            let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+            let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+            body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(start, LegacyText)
+            body = body.Replace("## Task and independent verification", "## Changes and verification")
+            body = body.Insert(
+                body.IndexOf("<!-- tokate-run:", StringComparison.Ordinal),
+                "Maintainer near receipt\n\n"
+            )
+            if crlf {
+                body = body.Replace("\n", "\r\n")
+            }
+            pull["body"] = JsonValue.Create(body)
+            test.Flow.Save()
+            return body
+        }
+
+        private func LegacyValid(test RepairCase, crlf bool = false) {
+            let original = Legacy(test, crlf)
+            Valid(test)
+            test.Flow.Reload()
+            let body = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
+            let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+            let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+            let report = body.Substring(start, end + "<!-- tokate-report:end -->".Length - start)
+            let oldReport = crlf ? LegacyText.Replace("\n", "\r\n"): LegacyText
+            Check.That(
+                body == original.Replace(oldReport, report).Replace(ReceiptRegion(original), ReceiptRegion(body)),
+                "Legacy repair changed text outside original report and receipt"
+            )
+            Check.That(Check.Text(test.Saved()["previous_body"]) == original, "Legacy preflight rewrote original body")
+            let receipt = Check.Json(ReceiptRegion(body).Substring("<!-- tokate-receipt:".Length).Replace(" -->", ""))
+            Check.That(
+                Check.Text(receipt["head"]) == test.Candidate && Check.Text(receipt["original_head"]) == test.Previous,
+                "Legacy receipt lost exact repaired or original head"
+            )
+        }
+
+        private func LegacyFailed(test RepairCase) {
+            let original = Legacy(test)
+            Failed(test)
+            Check.That(
+                Check.Text(test.Saved()["previous_body"]) == original,
+                "Legacy failure lost exact original evidence"
+            )
+            test.Flow.Reload()
+            Check.That(
+                Check.Text(test.Flow.State["pulls"]?[0]?["body"]) == original && !File.Exists(
+                    Path.Combine(test.Evidence, "publication.json")
+                ),
+                "Legacy preflight changed the report or receipt before verification passed"
+            )
+        }
+
+        private func LegacyAmbiguous(test RepairCase) {
+            let original = Legacy(test)
+            let receipt = ReceiptRegion(original)
+            let start = original.IndexOf("<!-- tokate-run:", StringComparison.Ordinal)
+            let marker = original.Substring(
+                start,
+                original.IndexOf(" -->", start, StringComparison.Ordinal) + 4 - start
+            )
+            for fault in[]string{
+                "duplicate-report",
+                "duplicate-usage",
+                "missing-report",
+                "missing-usage",
+                "empty-report",
+                "duplicate-text",
+                "nested-heading",
+                "reversed",
+                "partial-start",
+                "partial-end",
+                "malformed-report-marker",
+                "missing-run",
+                "duplicate-run",
+                "malformed-run",
+                "embedded-run",
+                "missing-receipt",
+                "duplicate-receipt",
+                "malformed-receipt",
+                "embedded-receipt"
+            } {
+                var body = original
+                switch fault {
+                    case "duplicate-report" {
+                        body += "\n## Changes and verification\n\nOther report"
+                    }
+                    case "duplicate-usage" {
+                        body += "\n## Donated AI usage\n\nOther usage"
+                    }
+                    case "missing-report" {
+                        body = body.Replace("## Changes and verification", "## Maintainer notes")
+                    }
+                    case "missing-usage" {
+                        body = body.Replace("## Donated AI usage", "## Maintainer notes")
+                    }
+                    case "empty-report" {
+                        body = body.Replace(LegacyText, "")
+                    }
+                    case "duplicate-text" {
+                        body += "\n" + LegacyText
+                    }
+                    case "nested-heading" {
+                        body = body.Replace(LegacyText, LegacyText + "\n\n## Maintainer notes\n\nKeep this")
+                    }
+                    case "reversed" {
+                        body = body
+                            .Replace("## Changes and verification", "## Temporary heading")
+                            .Replace("## Donated AI usage", "## Changes and verification")
+                            .Replace("## Temporary heading", "## Donated AI usage")
+                    }
+                    case "partial-start" {
+                        body += "\n<!-- tokate-report:start -->"
+                    }
+                    case "partial-end" {
+                        body += "\n<!-- tokate-report:end -->"
+                    }
+                    case "malformed-report-marker" {
+                        body += "\n<!-- tokate-report:start ->"
+                    }
+                    case "missing-run" {
+                        body = body.Replace(marker, "")
+                    }
+                    case "duplicate-run" {
+                        body += "\n" + marker
+                    }
+                    case "malformed-run" {
+                        body = body.Replace(marker, "<!-- tokate-run:invalid -->")
+                    }
+                    case "embedded-run" {
+                        body = body.Replace(marker, "").Replace(LegacyText, LegacyText + "\n\n" + marker)
+                    }
+                    case "missing-receipt" {
+                        body = body.Replace(receipt, "")
+                    }
+                    case "duplicate-receipt" {
+                        body += "\n" + receipt
+                    }
+                    case "malformed-receipt" {
+                        body = body.Replace(receipt, receipt.Replace(" -->", " ->"))
+                    }
+                    case "embedded-receipt" {
+                        body = body.Replace(receipt, "").Replace(LegacyText, LegacyText + "\n\n" + receipt)
+                    }
+                }
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing ambiguous PR")
+                pull["body"] = JsonValue.Create(body)
+                test.Flow.Save()
+                test.Call(1)
+                Check.That(
+                    !File.Exists(Path.Combine(test.Evidence, "repair.json")) && !File.Exists(
+                        Path.Combine(test.Evidence, "verification.json")
+                    ),
+                    "Ambiguous legacy body reached saved intent or verification: " + fault
+                )
+                test.Unpublished()
+                Check.That(Check.Text(test.Flow.State["pulls"]?[0]?["body"]) == body, "Refused legacy body was changed")
+                Console.WriteLine("PASS repair legacy boundary " + fault)
+            }
+        }
+
         private func Valid(test RepairCase) {
             let result = test.Call()
             Check.That(
@@ -344,6 +519,13 @@ internal class RepairChecks {
                 test.Commit()
             } else if fault == "approval" {
                 test.Flow.Approve()
+            } else if fault == "report" {
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing changed legacy report")
+                pull["body"] = JsonValue.Create(
+                    Check.Text(pull["body"]).Replace(LegacyText, "Changed owned report") + "\n" + LegacyText
+                )
+                test.Flow.Save()
             } else if fault == "intent" {
                 test.Call(1, "29")
                 Check.That(Check.Text(test.Saved()["id"]) == id, "Changed inputs replaced intent")
@@ -364,6 +546,9 @@ internal class RepairChecks {
                 Check.Text(test.Saved()["verification"]) == checks && Check.Text(test.Saved()["id"]) == id,
                 "Refusal rewrote passed evidence"
             )
+            if fault == "report" {
+                test.Unpublished()
+            }
         }
 
         private func ExactReceipt(test RepairCase, fault string) {
@@ -418,6 +603,13 @@ internal class RepairChecks {
             var matched bool
             for name in[]string{
                 "valid",
+                "legacy-valid",
+                "legacy-crlf",
+                "legacy-ambiguous",
+                "legacy-verification",
+                "legacy-lost_push_response",
+                "legacy-lost_body_response",
+                "legacy-saved-report",
                 "target-sync",
                 "protected",
                 "rename",
@@ -465,8 +657,21 @@ internal class RepairChecks {
                     continue
                 }
                 prepared.Restore()
-                let test = RepairCase.Create(flow, prepared.Run, name, name == "target-sync")
-                if name == "valid" || name == "target-sync" {
+                let fault = name == "legacy-verification" ? "verification": name
+                let test = RepairCase.Create(flow, prepared.Run, fault, name == "target-sync")
+                if name == "legacy-valid" || name == "legacy-crlf" {
+                    LegacyValid(test, name == "legacy-crlf")
+                } else if name == "legacy-ambiguous" {
+                    LegacyAmbiguous(test)
+                } else if name == "legacy-verification" {
+                    LegacyFailed(test)
+                } else if name == "legacy-lost_push_response" || name == "legacy-lost_body_response" {
+                    Legacy(test)
+                    InterruptedPublication(test, name.Substring("legacy-".Length))
+                } else if name == "legacy-saved-report" {
+                    Legacy(test)
+                    ChangedAfterVerification(test, "report")
+                } else if name == "valid" || name == "target-sync" {
                     Valid(test)
                 } else if name == "race" {
                     Race(test)
