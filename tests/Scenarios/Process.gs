@@ -289,7 +289,11 @@ internal class ProcessChecks {
                 }
                 let child = Path.Combine(flow.Bin, "child.pid")
                 if File.Exists(child) {
-                    TestProcess.Run("/usr/bin/kill", []string{"-KILL", File.ReadAllText(child).Trim()}, flow.Temp.Env)
+                    let identity = File.ReadAllText(child)
+                    let pid = TestProcess.ResolveHostPid(identity)
+                    if pid != "" && TestProcess.ResolveHostPid(identity) == pid {
+                        TestProcess.Run("/usr/bin/kill", []string{"-KILL", pid}, flow.Temp.Env)
+                    }
                 }
             }
             Console.WriteLine("PASS abruptly terminated CLI retains flushed prefixes without claiming completion")

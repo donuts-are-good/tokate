@@ -9,27 +9,48 @@ import System.Text
 
 internal class TestProcess {
     shared {
-        internal func HostPid(child Process) string {
-            for task in Directory.EnumerateDirectories("/proc/self/task") {
-                for pid in File.ReadAllText(Path.Combine(task, "children")).Split(
-                    ' ',
-                    StringSplitOptions.RemoveEmptyEntries
-                ) {
-                    let status = Status("/proc/" + pid.Trim() + "/status")
-                    if status == nil {
+        internal func ChildIdentity(child Process) string {
+            let name = FileInfo("/proc/self/ns/pid").LinkTarget ?? throw Exception("Missing child PID namespace")
+            return name + " " + child.Id.ToString()
+        }
+
+        internal func ResolveHostPid(identity string) string {
+            let parts = identity.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            Check.That(
+                parts.Length == 2 && parts[0].StartsWith("pid:[") && parts[0].EndsWith("]"),
+                "Invalid child PID identity"
+            )
+            Check.That(
+                Int64.Parse(parts[0].Substring(5, parts[0].Length - 6)) > 0 && Int32.Parse(parts[1]) > 0,
+                "Invalid child PID identity"
+            )
+            for task in Directory.EnumerateDirectories("/proc") {
+                var status string?
+                try {
+                    status = Status(Path.Combine(task, "status"))
+                } catch (error UnauthorizedAccessException) {
+                    continue
+                } catch (error IOException) {
+                    continue
+                }
+                if status == nil {
+                    continue
+                }
+                for line in status.Split('\n') {
+                    if !line.StartsWith("NSpid:") {
                         continue
                     }
-                    for line in status.Split('\n') {
-                        if line.StartsWith("NSpid:") &&
-                            line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)[^1] == child
-                            .Id
-                            .ToString() {
-                            return pid.Trim()
-                        }
+                    let fields = line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)
+                    if fields.Length > 2 && fields[^1] == parts[1] {
+                        try {
+                            if FileInfo(Path.Combine(task, "ns/pid")).LinkTarget == parts[0] {
+                                return Path.GetFileName(task)
+                            }
+                        } catch (error UnauthorizedAccessException) { } catch (error IOException) { }
                     }
                 }
             }
-            throw Exception("Cannot identify owned child in host proc mount")
+            return ""
         }
 
         internal func Fields(stat string)[]string -> stat.Substring(stat.LastIndexOf(')') + 2).Split(
@@ -50,8 +71,9 @@ internal class TestProcess {
             return nil
         }
 
-        internal func Collected(pid string, message string) {
-            let stat = Status("/proc/" + pid.Trim() + "/stat")
+        internal func Collected(identity string, message string) {
+            let pid = ResolveHostPid(identity)
+            let stat = pid == "" ? nil: Status("/proc/" + pid + "/stat")
             Check.That(stat == nil || Fields(stat)[0] == "Z", message)
         }
 
