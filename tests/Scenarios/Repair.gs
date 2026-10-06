@@ -140,6 +140,84 @@ internal class RepairCase {
 
 internal class RepairChecks {
     shared {
+        private let LegacyText string =
+        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+
+        private func ReceiptRegion(body string) string {
+            let start = body.IndexOf("<!-- tokate-receipt:", StringComparison.Ordinal)
+            let end = body.IndexOf(" -->", start, StringComparison.Ordinal)
+            return body.Substring(start, end + 4 - start)
+        }
+
+        private func Legacy(test RepairCase) string {
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing legacy PR")
+            var body = Check.Text(pull["body"])
+            let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+            let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+            body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(start, LegacyText)
+            body = body.Replace("## Task and independent verification", "## Changes and verification")
+            body = body.Insert(
+                body.IndexOf("<!-- tokate-run:", StringComparison.Ordinal),
+                "Maintainer near receipt\n\n"
+            )
+            pull["body"] = JsonValue.Create(body)
+            test.Flow.Save()
+            return body
+        }
+
+        private func LegacyValid(test RepairCase) {
+            let original = Legacy(test)
+            Valid(test)
+            test.Flow.Reload()
+            let body = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
+            let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+            let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+            let report = body.Substring(start, end + "<!-- tokate-report:end -->".Length - start)
+            Check.That(
+                body == original.Replace(LegacyText, report).Replace(ReceiptRegion(original), ReceiptRegion(body)),
+                "Legacy repair changed text outside original report and receipt"
+            )
+            Check.That(Check.Text(test.Saved()["previous_body"]) == original, "Legacy preflight rewrote original body")
+            let receipt = Check.Json(ReceiptRegion(body).Substring("<!-- tokate-receipt:".Length).Replace(" -->", ""))
+            Check.That(
+                Check.Text(receipt["head"]) == test.Candidate && Check.Text(receipt["original_head"]) == test.Previous,
+                "Legacy receipt lost exact repaired or original head"
+            )
+        }
+
+        private func LegacyAmbiguous(test RepairCase) {
+            let original = Legacy(test)
+            for fault in[]string{"duplicate-report", "missing-usage", "partial-marker"} {
+                var body = original
+                switch fault {
+                    case "duplicate-report" {
+                        body += "\n## Changes and verification\n\nOther report"
+                    }
+                    case "missing-usage" {
+                        body = body.Replace("## Donated AI usage", "## Maintainer notes")
+                    }
+                    case "partial-marker" {
+                        body += "\n<!-- tokate-report:start -->"
+                    }
+                }
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing ambiguous PR")
+                pull["body"] = JsonValue.Create(body)
+                test.Flow.Save()
+                test.Call(1)
+                Check.That(
+                    !File.Exists(Path.Combine(test.Evidence, "repair.json")) && !File.Exists(
+                        Path.Combine(test.Evidence, "verification.json")
+                    ),
+                    "Ambiguous legacy body reached saved intent or verification: " + fault
+                )
+                test.Unpublished()
+                Check.That(Check.Text(test.Flow.State["pulls"]?[0]?["body"]) == body, "Refused legacy body was changed")
+                Console.WriteLine("PASS repair legacy boundary " + fault)
+            }
+        }
+
         private func Valid(test RepairCase) {
             let result = test.Call()
             Check.That(
@@ -344,6 +422,13 @@ internal class RepairChecks {
                 test.Commit()
             } else if fault == "approval" {
                 test.Flow.Approve()
+            } else if fault == "report" {
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing changed legacy report")
+                pull["body"] = JsonValue.Create(
+                    Check.Text(pull["body"]).Replace(LegacyText, "Changed owned report") + "\n" + LegacyText
+                )
+                test.Flow.Save()
             } else if fault == "intent" {
                 test.Call(1, "29")
                 Check.That(Check.Text(test.Saved()["id"]) == id, "Changed inputs replaced intent")
@@ -364,6 +449,9 @@ internal class RepairChecks {
                 Check.Text(test.Saved()["verification"]) == checks && Check.Text(test.Saved()["id"]) == id,
                 "Refusal rewrote passed evidence"
             )
+            if fault == "report" {
+                test.Unpublished()
+            }
         }
 
         private func ExactReceipt(test RepairCase, fault string) {
@@ -418,6 +506,10 @@ internal class RepairChecks {
             var matched bool
             for name in[]string{
                 "valid",
+                "legacy-valid",
+                "legacy-ambiguous",
+                "legacy-lost_body_response",
+                "legacy-saved-report",
                 "target-sync",
                 "protected",
                 "rename",
@@ -466,7 +558,17 @@ internal class RepairChecks {
                 }
                 prepared.Restore()
                 let test = RepairCase.Create(flow, prepared.Run, name, name == "target-sync")
-                if name == "valid" || name == "target-sync" {
+                if name == "legacy-valid" {
+                    LegacyValid(test)
+                } else if name == "legacy-ambiguous" {
+                    LegacyAmbiguous(test)
+                } else if name == "legacy-lost_body_response" {
+                    Legacy(test)
+                    InterruptedPublication(test, name.Substring("legacy-".Length))
+                } else if name == "legacy-saved-report" {
+                    Legacy(test)
+                    ChangedAfterVerification(test, "report")
+                } else if name == "valid" || name == "target-sync" {
                     Valid(test)
                 } else if name == "race" {
                     Race(test)

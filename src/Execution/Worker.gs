@@ -14,18 +14,7 @@ internal class Worker {
             args.Add(key + "=" + value)
         }
 
-        internal func CodexPath() string {
-            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
-                if !Path.IsPathFullyQualified(entry) {
-                    continue
-                }
-                let path = Path.Combine(entry, "codex")
-                if File.Exists(path) {
-                    return LocalPaths.CanonicalPath(path)
-                }
-            }
-            throw Exception("Install the Codex CLI first")
-        }
+        internal func CodexPath() string -> CodexRuntime.Resolve()
 
         internal func Run(
             directory string,
@@ -107,9 +96,10 @@ internal class Worker {
                     "TMPDIR=/tmp/tokate-home",
                     "/bin/sh",
                     "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\"",
+                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
                     "probe",
-                    sentinel
+                    sentinel,
+                    CodexPath()
                 }
             )
             let result = Run(directory, args.ToArray())
@@ -121,8 +111,8 @@ internal class Worker {
                 )
             }
             if File.Exists(Path.Combine(checkout, "global.json")) {
-                args[args.Count - 3] = "dotnet msbuild -nologo -version"
-                args[args.Count - 2] = "toolchain"
+                args[args.Count - 4] = "dotnet msbuild -nologo -version"
+                args[args.Count - 3] = "toolchain"
                 try {
                     let toolchain = Run(directory, args.ToArray())
                     if toolchain.Code != 0 || toolchain.Truncated || toolchain.ReadFailed {
@@ -187,7 +177,11 @@ internal class Worker {
             Terminal.Step("Checking owner approval and donor login...")
             let selected = J.Get(run.Element(), "selection")
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                DonorSelection.Confirm(options, selected)
+                if V1Continuation.Has(run) {
+                    V1Continuation.Confirm(options, selected)
+                } else {
+                    DonorSelection.Confirm(options, selected)
+                }
             }
             let record = ContributionClaim.Recheck(run)
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
@@ -197,7 +191,7 @@ internal class Worker {
             }
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
-            let login = Commands.Run("codex", []string{"login", "status"}, harness: true)
+            let login = Commands.Run(CodexPath(), []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw CliFailure(
                     "authentication_required",
@@ -205,7 +199,7 @@ internal class Worker {
                     []string{"codex", "login"}
                 )
             }
-            let version = Commands.Checked("codex", []string{"--version"}, harness: true)
+            let version = Commands.Checked(CodexPath(), []string{"--version"}, harness: true)
             if !version.StartsWith("codex-cli 0.") {
                 throw Exception("A supported Codex CLI is required")
             }
