@@ -120,9 +120,21 @@ pinned `global.json` SDK too. Missing, failed or skipped required probes block w
 Diagnostics do not establish dependencies, build success, account permissions,
 model availability or remaining allowance. Repair prerequisites before donating.
 
-Tools and dependencies must work from standard system paths: sandboxed commands
-cannot use home tools or caches. Managed runs, harness homes and tool installations
-must be outside `/tmp`. Tokate does not change system security settings.
+Managed Codex supports Linux x64 native executables (including symlinks) and the
+official npm `bin/codex.js` launcher with a matching nested
+`node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex`
+or sibling platform package. These layouts are verified with Codex 0.160.0.
+Tokate reads only bounded package metadata and executable headers to resolve the
+native executable; it does not run launchers to discover files. Only that canonical
+executable is exposed read-only; Node, package directories, home settings, credentials
+and caches are not exposed. Offline selection uses the same native executable.
+Other launcher/runtime layouts are unsupported. Codex prerequisites apply only to
+the managed Codex route; owners and external donations do not require Codex.
+
+Other tools and dependencies must work from standard system paths: repository
+commands cannot use unrelated home tools or caches. Managed runs, harness homes
+and tool installations must be outside `/tmp`. Run `tokate doctor --managed`
+before donating; no global installation or sudo is required for Codex.
 
 ```sh
 tokate defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high

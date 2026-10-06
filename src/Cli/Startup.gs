@@ -46,7 +46,7 @@ internal class Startup {
                         tool.Hint = "Install GitHub CLI and add gh to PATH."
                     }
                     case "codex" {
-                        tool.Hint = "Install the native Codex CLI and add codex to PATH."
+                        tool.Hint = "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported."
                     }
                     case "setsid" {
                         tool.Hint = "Install util-linux and add setsid to PATH."
@@ -153,8 +153,12 @@ internal class Startup {
                     continue
                 }
                 try {
+                    let executable = tool.Name == "codex" && Path.GetFileName(
+                        LocalPaths.CanonicalPath(tool.Path)
+                    ) == "codex.js" ?
+                    CodexRuntime.Resolve(): tool.Path
                     let result = Commands.Run(
-                        tool.Path,
+                        executable,
                         []string{"--version"},
                         seconds: 10,
                         harness: tool.Name == "codex"
@@ -171,6 +175,9 @@ internal class Startup {
                         tool.Status = "ready"
                         tool.Detail = "Successfully executed --version."
                     }
+                } catch (error CliFailure) {
+                    tool.Status = "failed"
+                    tool.Detail = error.Summary
                 } catch (error Exception) {
                     tool.Status = "failed"
                     tool.Detail = "Tool could not start or complete --version. Repair or reinstall it. " + tool.Hint
