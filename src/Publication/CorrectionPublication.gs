@@ -31,7 +31,7 @@ internal class CorrectionPublication {
                 run.Text("repo"),
                 run.Number("issue"),
                 run.Text("approval"),
-                run.Text("state_sha"),
+                (run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")),
                 run.Text("id"),
                 run.Text("donor"),
                 correction.Text("commit")
@@ -126,21 +126,6 @@ internal class CorrectionPublication {
             values["receipt"] = "<!-- tokate-run:" + run.Text("id") + " -->\n<!-- tokate-receipt:" + J.Write(receipt) +
                 " -->"
             return PrBody.Render(J.Text(record, "template"), values)
-        }
-
-        internal func Publish(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
-            if run.Number("version") != 1 {
-                throw Exception("Version-2 runs use submit and the owner-installed coordinator")
-            }
-            let correction = Data.Read(Path.Combine(directory, "correction.json"))
-            PublishLocked(directory, run, correction, Correction.Authority(directory, run))
         }
 
         internal func PublishLocked(directory string, run Data, correction Data, record JsonElement) {
@@ -264,6 +249,7 @@ internal class CorrectionPublication {
             }
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(actor)
+            LeaseLifecycle.Fence(state, run.Text("attempt"))
             let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), actor)
             let pinned = J.Parse(File.ReadAllText(Path.Combine(directory, "original-evidence", "approval.json")))
             for key in[]string{"approval", "policy", "template"} {
@@ -278,20 +264,29 @@ internal class CorrectionPublication {
             ) != run.Text("id") {
                 throw CliFailure("stale_approval", "Original reservation or approval changed")
             }
-            Correction.Fork(run)
-            if state.Sha == run.Text("state_sha") {
+            if state.Sha == (
+                run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+            ) {
                 Correction.Authority(directory, run)
                 return state
             }
+            RepositoryAccess.ValidateRun(run)
             let intent = J.Get(correction.Element(), "publication")
             let request = J.Get(intent, "request")
             let contribution = J.Get(value, "contribution")
             let contributionOutcome = J.Get(contribution, "outcome")
-            let commit = GitHub.Api("repos/" + run.Text("repo") + "/git/commits/" + state.Sha)
+            let publicationRevision = J.Text(value, "publication_revision")
+            let commit = GitHub.Api(
+                "repos/" + run.Text("repo") +
+                    "/git/commits/" +
+                    (publicationRevision == "" ? state.Sha: publicationRevision)
+            )
             let parents = J.Items(J.Get(commit, "parents"))
             let outcome = RequestData.Recorded(value, actor, request)
             let failure = "Stale coordination revision; only the exact saved publication transition can resume"
-            let expected = run.Text("state_sha")
+            let expected = (
+                run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+            )
             if parents.Count != 1 || J.Text(parents[0], "sha") != expected {
                 throw CliFailure("stale_approval", failure)
             }
@@ -319,14 +314,7 @@ internal class CorrectionPublication {
             request
         )
 
-        internal func Submit(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
+        internal func SubmitLocked(directory string, run Data) {
             let correction = Data.Read(Path.Combine(directory, "correction.json"))
             if run.Number("version") != 2 || run.Text("source") != "tokate" {
                 throw Exception("Correction submit requires a managed version-2 contribution")
@@ -336,6 +324,10 @@ internal class CorrectionPublication {
                 var intent = J.Get(correction.Element(), "publication")
                 if intent.ValueKind == JsonValueKind.Undefined {
                     Correction.Authority(directory, run)
+                    let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
+                    ContributionClaim.RecheckV2(run)
+                    run.Fields["publication_expected"] = live.Sha
+                    run.Save(directory)
                     correction.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")
                     let request = Submission.PublicationRequest(run, correction)
                     RequestData.Parse(J.Write(request))
@@ -354,7 +346,9 @@ internal class CorrectionPublication {
                 let stage = J.Text(intent, "stage")
                 var remote = Remote(run, correction, stage == "prepared")
                 let existing = Publication.Find(run, J.Parse(J.Write(Receipt(run, correction))))
-                if state.Sha != run.Text("state_sha") {
+                if state.Sha != (
+                    run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
+                ) {
                     if existing.ValueKind == JsonValueKind.Undefined || remote != correction.Text("commit") || J.Number(
                         J.Get(J.Get(state.Value(), "contribution"), "outcome"),
                         "pr"

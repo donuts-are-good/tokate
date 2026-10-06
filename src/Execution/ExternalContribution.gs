@@ -10,12 +10,7 @@ internal class ExternalContribution {
     shared {
         internal func External(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
+            using let lease = Preparation.Lease(directory)
             let run = Data.Load(directory)
             if run.Number("version") != 2 || run.Text("source") != "external" || run.Text("state") != "claimed" {
                 throw Exception("Expected an unexecuted external version-2 contribution")

@@ -230,9 +230,13 @@ internal partial class Fixture {
                     "default_branch",
                     State["default_branch"] == nil ? "main": Check.Text(State["default_branch"]),
                     "id",
-                    folder == "fork" ? 2: (State["repo_id"] ?? JsonValue.Create(1) as JsonNode),
+                    folder == "fork" ? (State["fork_id"] ?? JsonValue.Create(2) as JsonNode): (
+                        State["repo_id"] ?? JsonValue.Create(1) as JsonNode
+                    ),
                     "full_name",
-                    repo,
+                    folder == "fork" ? (State["fork_full_name"] ?? JsonValue.Create(repo) as JsonNode): (
+                        State["repo_full_name"] ?? JsonValue.Create(repo) as JsonNode
+                    ),
                     "owner",
                     Check.Map(
                         "login",
@@ -245,7 +249,9 @@ internal partial class Fixture {
                         )
                     ),
                     "fork",
-                    folder == "fork",
+                    folder == "fork" ? (State["fork_flag"] ?? JsonValue.Create(true) as JsonNode): JsonValue.Create(
+                        false
+                    ),
                     "permissions",
                     Check.Map(
                         "push",
@@ -258,7 +264,7 @@ internal partial class Fixture {
                         "full_name",
                         State["fork_parent"] ?? JsonValue.Create("owner/project") as JsonNode,
                         "id",
-                        State["repo_id"] ?? JsonValue.Create(1) as JsonNode
+                        State["fork_parent_id"] ?? State["repo_id"] ?? JsonValue.Create(1) as JsonNode
                     )
                 )
             )
@@ -385,6 +391,8 @@ internal partial class Fixture {
                 value["files"] = Check.Json("[{\"filename\":\"result.txt\"}]")
             } else if fault == "missing-commits" {
                 value.AsObject().Remove("commits")
+            } else if fault == "wrong-identical-base" && comparison[0] == sha {
+                value["base_commit"] = Check.Map("sha", String('a', 40))
             }
             return Answer(value)
         }
@@ -674,7 +682,9 @@ internal partial class Fixture {
                 }
                 entries.Add(entry)
             }
-            let fault = Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
+            let fault = recursive && Check.Text(State["tree_fault_sha"]) != "" && Check.Text(
+                State["tree_fault_sha"]
+            ) != sha ? "": Check.Text(State[recursive ? "tree_fault": "decree_tree_fault"])
             let result = Check.Map("sha", sha, "truncated", fault == "truncated", "tree", entries)
             if recursive && fault == "missing" {
                 result.AsObject().Remove("tree")
@@ -932,7 +942,8 @@ internal partial class Fixture {
             "Rendezvous requires exactly one parent matching the shared expected state"
         )
         let proposed = Check.Json(Git("upstream", []string{"show", sha + ":state.json"}))
-        let participant = Check.Text(proposed["reservation"]?["reservation"])
+        let outcomes = proposed["outcomes"]?.AsArray() ?? throw Exception("Missing mutation outcomes")
+        let participant = Check.Text(outcomes[outcomes.Count - 1]?["uuid"])
         let first = Check.Text(rendezvous["first"])
         let second = Check.Text(rendezvous["second"])
         Check.That(participant == first || participant == second, "Unexpected claim rendezvous participant")

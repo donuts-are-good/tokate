@@ -46,11 +46,12 @@ internal class PublicSummary {
             "(?i)(https?:|www\\.|\\b[A-Z]:|gh[pousr]_|github_pat_|sk-|bearer|password|api[ _-]?key|credential|secret|tokate-receipt|tokate-report|localhost:|[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+|[a-z]+://|generated a patch|implemented acceptance criteria)"
         )
 
-        internal func Identifier(text string) string {
-            if text == "" {
+        internal func Identifier(text string, model bool = false) string {
+            if text == "" && !model {
                 return "unknown"
             }
-            if !Regex.IsMatch(text, "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$") || Regex.IsMatch(
+            let pattern = model ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+            if !Regex.IsMatch(text, pattern) || text.Contains("://") || Regex.IsMatch(
                 text,
                 "(?i)(gh[pousr]_|github_pat_|sk-|secret|password)"
             ) {
@@ -183,7 +184,7 @@ internal class PublicSummary {
                 let cells = List[string]()
                 for key in[]string{"harness", "provider", "model", "effort"} {
                     let token = J.Text(tool, key)
-                    cells.Add(Identifier(token))
+                    cells.Add(Identifier(token, model: key == "model"))
                 }
                 result += "\n| " +
                     cells[0] +

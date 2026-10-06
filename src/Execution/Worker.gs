@@ -45,6 +45,7 @@ internal class Worker {
             }
             let wrapper = List[string]{
                 "--die-with-parent",
+                "--unshare-pid",
                 "--bind",
                 "/",
                 "/",
@@ -68,7 +69,8 @@ internal class Worker {
                 cancellation: cancellation,
                 outputPath: capture ? Path.Combine(directory, "events.jsonl"): "",
                 errorPath: capture ? Path.Combine(directory, "stderr.log"): "",
-                budget: budget
+                budget: budget,
+                pidNamespace: true
             )
         }
 
@@ -191,6 +193,10 @@ internal class Worker {
             }
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
+            if run.Text("harness") == "pi" {
+                PiHarness.Execute(directory, run, record, prompt)
+                return
+            }
             let login = Commands.Run(CodexPath(), []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw CliFailure(

@@ -396,6 +396,102 @@ internal class PreparationChecks {
             external.Flow.NoPr()
         }
 
+        private func LinkedControls(binary string) {
+            for v2 in[]bool{false, true} {
+                using let test = CoordinationFixture(binary)
+                let flow = test.Flow
+                var run string
+                if v2 {
+                    test.Initialize()
+                    test.Claim()
+                    run = test.Prepare()
+                } else {
+                    flow.Initialize()
+                    flow.Approve()
+                    run = flow.Claim()
+                }
+                let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                for control in[]string{".lock", "run.json", "run.json.tmp"} {
+                    let path = Path.Combine(run, control)
+                    let backup = Path.Combine(flow.Temp.Root, "control-backup")
+                    let existed = File.Exists(path)
+                    if existed {
+                        File.Move(path, backup)
+                    }
+                    for link in[]string{"symbolic", "dangling", "hard"} {
+                        let dangling = link == "dangling"
+                        let target = Path.Combine(flow.Temp.Root, "control-target")
+                        if !dangling {
+                            File.WriteAllText(target, original)
+                        }
+                        if link == "hard" {
+                            Check.Success(TestProcess.Run("/usr/bin/ln", []string{target, path}, flow.Temp.Env))
+                        } else {
+                            File.CreateSymbolicLink(path, target)
+                        }
+                        for command in[]string{
+                            "prepare",
+                            "work",
+                            "external",
+                            "submit",
+                            "publish",
+                            "recover",
+                            "correction",
+                            "amend",
+                            "submit-correction",
+                            "publish-correction"
+                        } {
+                            let corrected = command.EndsWith("-correction")
+                            if corrected {
+                                File.WriteAllText(Path.Combine(run, "correction.json"), "{}")
+                            }
+                            let name = corrected ? command.Replace("-correction", ""): (
+                                command == "correction" ? "recover": command
+                            )
+                            let args = List[string]{name, "--run", run}
+                            if command == "correction" {
+                                args.Add("--prepare")
+                            }
+                            if command == "external" || command == "amend" {
+                                args.AddRange([]string{"--commit", String('0', 40)})
+                            }
+                            if command == "amend" {
+                                args.AddRange([]string{"--seconds", "30"})
+                            }
+                            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Preserved")
+                            if corrected {
+                                File.Delete(Path.Combine(run, "correction.json"))
+                            }
+                            Check.That(
+                                link == "hard" ? File.ReadAllText(path) == original: FileInfo(
+                                    path
+                                ).LinkTarget == target,
+                                "Refusal replaced linked control"
+                            )
+                            Check.That(
+                                dangling ? !File.Exists(target): File.ReadAllText(target) == original,
+                                "Refusal followed linked control"
+                            )
+                        }
+                        File.Delete(path)
+                        if !dangling {
+                            File.Delete(target)
+                        }
+                    }
+                    if existed {
+                        File.Move(backup, path)
+                    }
+                    Check.That(
+                        File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                        "Refusal changed run record"
+                    )
+                }
+                Resume(flow, run)
+                flow.NoInference()
+                flow.NoPr()
+            }
+        }
+
         internal func All(binary string, selected string = "") {
             for name in[]string{
                 "Creation",
@@ -404,7 +500,8 @@ internal class PreparationChecks {
                 "Preservation",
                 "External",
                 "Ownership",
-                "Authority"
+                "Authority",
+                "LinkedControls"
             } {
                 if selected != "" && selected != name {
                     continue
@@ -427,6 +524,9 @@ internal class PreparationChecks {
                     }
                     case "Ownership" {
                         Ownership(binary)
+                    }
+                    case "LinkedControls" {
+                        LinkedControls(binary)
                     }
                     case "Authority" {
                         Authority(binary)
