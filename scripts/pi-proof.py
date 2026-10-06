@@ -161,7 +161,16 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 assert fixture and (Path(fixture['checkout']) / 'running').exists(), 'Pi never launched constrained bash'
                 checkout = Path(fixture['checkout'])
                 git = (checkout / '.git/config').read_text()
-                os.killpg(process.pid, signal.SIGINT)
+                children = set()
+                for task in Path(f'/proc/{process.pid}/task').iterdir():
+                    children.update((task / 'children').read_text().split())
+                targets = [int(pid) for pid in children if Path(f'/proc/{pid}/exe').resolve() == Path(args.binary).resolve()]
+                assert len(targets) == 1, 'Expected one owned Tokate work process'
+                descriptor = os.pidfd_open(targets[0])
+                try:
+                    signal.pidfd_send_signal(descriptor, signal.SIGINT)
+                finally:
+                    os.close(descriptor)
                 process.communicate(timeout=15)
                 time.sleep(3)
                 assert checkout.is_dir(), 'Cancellation evidence disappeared'
@@ -170,7 +179,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 assert Path(fixture['private']).read_text() == 'PRIVATE_CREDENTIAL_SENTINEL'
                 assert (checkout / '.git/config').read_text() == git
                 saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
-                assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted'
+                assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', {key: saved.get(key) for key in ['state', 'failure_stage', 'failure_reason', 'error']}
                 assert 'turn_completed' not in saved
             else:
                 try:
