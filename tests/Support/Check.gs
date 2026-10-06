@@ -71,6 +71,18 @@ internal class Check {
 
         internal func Json(text string) JsonNode -> JsonNode.Parse(text) ?? throw Exception("Missing JSON")
 
+        internal func SaveJson(path string, value JsonNode) {
+            let temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp"
+            try {
+                File.WriteAllText(temporary, value.ToJsonString())
+                File.Move(temporary, path, true)
+            } finally {
+                if File.Exists(temporary) {
+                    File.Delete(temporary)
+                }
+            }
+        }
+
         internal func Text(value JsonNode?) string -> value?.ToString() ?? ""
 
         internal func Map(values ...Object?) JsonNode {

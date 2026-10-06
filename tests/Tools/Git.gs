@@ -249,7 +249,7 @@ internal partial class Fixture {
             latest["push_count"] = JsonValue.Create(
                 Int32.Parse(Check.Text(latest["push_count"] ?? JsonValue.Create(0))) + 1
             )
-            File.WriteAllText(StatePath, latest.ToJsonString())
+            Check.SaveJson(StatePath, latest)
             Console.Error.WriteLine("Synthetic lost push response")
             return 1
         }
@@ -278,7 +278,7 @@ internal partial class Fixture {
             let latest = Check.Json(File.ReadAllText(StatePath))
             let issue = latest["issue"] ?? throw Exception("Missing issue")
             issue["labels"] = JsonArray()
-            File.WriteAllText(StatePath, latest.ToJsonString())
+            Check.SaveJson(StatePath, latest)
         }
         if result.Code == 0 && command.Contains("fetch") && Directory.GetCurrentDirectory().EndsWith(".staging") &&
             Check.Text(State["preparation_revoke_after_fetch"]) == "true" {
