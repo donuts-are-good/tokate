@@ -128,21 +128,6 @@ internal class CorrectionPublication {
             return PrBody.Render(J.Text(record, "template"), values)
         }
 
-        internal func Publish(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
-            if run.Number("version") != 1 {
-                throw Exception("Version-2 runs use submit and the owner-installed coordinator")
-            }
-            let correction = Data.Read(Path.Combine(directory, "correction.json"))
-            PublishLocked(directory, run, correction, Correction.Authority(directory, run))
-        }
-
         internal func PublishLocked(directory string, run Data, correction Data, record JsonElement) {
             try {
                 CheckSaved(directory, run, correction)
@@ -279,13 +264,13 @@ internal class CorrectionPublication {
             ) != run.Text("id") {
                 throw CliFailure("stale_approval", "Original reservation or approval changed")
             }
-            Correction.Fork(run)
             if state.Sha == (
                 run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text("publication_expected")
             ) {
                 Correction.Authority(directory, run)
                 return state
             }
+            RepositoryAccess.ValidateRun(run)
             let intent = J.Get(correction.Element(), "publication")
             let request = J.Get(intent, "request")
             let contribution = J.Get(value, "contribution")
@@ -329,14 +314,7 @@ internal class CorrectionPublication {
             request
         )
 
-        internal func Submit(directory string) {
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-            let run = Data.Load(directory)
+        internal func SubmitLocked(directory string, run Data) {
             let correction = Data.Read(Path.Combine(directory, "correction.json"))
             if run.Number("version") != 2 || run.Text("source") != "tokate" {
                 throw Exception("Correction submit requires a managed version-2 contribution")

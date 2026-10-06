@@ -721,6 +721,44 @@ internal class CorrectionChecks {
             Once(compatibility)
         }
 
+        private func ForkIdentity(binary string) {
+            for v2 in[]bool{false, true} {
+                using let test = CoordinationFixture(binary)
+                let flow = test.Flow
+                var run string
+                if v2 {
+                    test.Initialize()
+                    run = ManagedRun(test, "staged_whitespace")
+                } else {
+                    flow.Initialize()
+                    flow.Approve()
+                    run = flow.Claim()
+                    flow.Mode("staged_whitespace")
+                    flow.Call([]string{"work", "--run", run}, 1)
+                }
+                let original = Prepared(flow, run)
+                let commit = Correct(flow, run)
+                RepositoryFaults.Reject(
+                    flow,
+                    run,
+                    []string{"recover", "--run", run, "--commit", commit, "--seconds", "30"}
+                )
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == original,
+                    "Fork refusal changed original evidence"
+                )
+                Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Fork refusal created a correction")
+                Recover(flow, run, commit)
+                flow.Call([]string{v2 ? "submit": "publish", "--run", run})
+                if v2 {
+                    flow.Reload()
+                    test.Coordinate(test.Event(Check.PostedRequest(flow.State)))
+                }
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                Once(flow, 1)
+            }
+        }
+
         private func AuthorityChanges(binary string) {
             for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
                 using let flow = NativeFixture(binary)
@@ -1381,6 +1419,7 @@ internal class CorrectionChecks {
                 "ChangedCandidate",
                 "LegacyAndArchive",
                 "AuthorityChanges",
+                "ForkIdentity",
                 "ManagedRefusals",
                 "InterruptedVerification"
             } {
@@ -1456,6 +1495,9 @@ internal class CorrectionChecks {
                     }
                     case "LegacyAndArchive" {
                         LegacyAndArchive(binary)
+                    }
+                    case "ForkIdentity" {
+                        ForkIdentity(binary)
                     }
                     case "AuthorityChanges" {
                         AuthorityChanges(binary)

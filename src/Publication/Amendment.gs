@@ -124,22 +124,13 @@ internal class Amendment {
             }
             if run.Number("version") == 1 {
                 let record = ContributionClaim.Recheck(run)
-                let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("head_repo")))
-                let writable = J.Bool(J.Get(info, "permissions"), "push")
-                let parent = J.Text(J.Get(info, "parent"), "full_name")
-                let owner = J.Text(J.Get(info, "owner"), "login")
-                let sameParent = String.Equals(parent, run.Text("repo"), StringComparison.OrdinalIgnoreCase)
-                let sameOwner = String.Equals(owner, run.Text("donor"), StringComparison.OrdinalIgnoreCase)
-                let sameRepository = RepositoryIdentity.SameRepo(run.Text("head_repo"), run.Text("repo"))
-                if !writable || (!sameRepository && !sameParent) || !sameOwner {
-                    throw Exception("Donor fork ownership or upstream changed")
-                }
                 SyncAuthority(run, amendment, record)
                 return record
             }
             if run.Number("version") != 2 {
                 throw Exception("Amend requires a native version-1 or version-2 run")
             }
+            RepositoryAccess.ValidateRun(run)
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             state.Reservation(J.Get(viewer, "id"))
             let record = state.Check(run.Text("repo"), run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
@@ -336,12 +327,7 @@ internal class Amendment {
 
         internal func Run(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
+            using let lease = Preparation.Lease(directory)
             let run = Data.Load(directory)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")
