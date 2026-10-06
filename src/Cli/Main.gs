@@ -23,7 +23,7 @@ func Main(args[]string) int32 {
         Cli.Validate(options)
         validated = true
         PublicOutput.Command = options.Command
-        if options.Get("run") != "" {
+        if options.Get("run") != "" && options.Command != "repair" {
             PublicOutput.RunDirectory = Path.GetFullPath(options.Need("run"))
             PublicOutput.FailureCode = "invalid_state"
         }
@@ -174,6 +174,8 @@ func Dispatch(options Args) int32 {
         Synchronization.Revoke(options)
     } else if options.Command == "amend" {
         Amendment.Run(options)
+    } else if options.Command == "repair" {
+        Repair.Run(options)
     } else if options.Command == "submit" {
         Submission.Submit(options)
     } else if options.Command == "approve" || options.Command == "assign" {
@@ -222,14 +224,10 @@ func Dispatch(options Args) int32 {
         let run = ReceiptVerification.Verify(RepositoryIdentity.Repo(options.Need("repo")), options.Number("pr"))
         PublicOutput.ResultData = PublicOutput.Select(run.Element(), "repo,pr,pr_url,commit")
         Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
-    } else if options.Command == "status" {
+    } else if options.Command == "status" && !PublicOutput.Enabled {
         let summary = PublicOutput.RunSummary(Path.GetFullPath(options.Need("run")))
-        if PublicOutput.Enabled {
-            PublicOutput.ResultData = summary
-        } else {
-            summary["truncated"] = PublicOutput.Truncated
-            Terminal.Json(J.Parse(J.Write(summary)), "Donor run")
-        }
+        summary["truncated"] = PublicOutput.Truncated
+        Terminal.Json(J.Parse(J.Write(summary)), "Donor run")
     }
     if PublicOutput.Enabled && PublicOutput.RunDirectory != "" {
         PublicOutput.ResultData = PublicOutput.RunSummary(PublicOutput.RunDirectory)

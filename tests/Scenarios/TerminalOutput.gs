@@ -4,7 +4,6 @@ import System
 import System.IO
 import System.Text.Json.Nodes
 import System.Text.RegularExpressions
-import Tokate
 
 internal class TerminalOutput {
     shared {
@@ -204,8 +203,6 @@ internal class TerminalOutput {
             Check.That(invalid.Code == 1, "Invalid option did not fail")
             Plain(invalid.Output)
             Check.Contains(invalid.Output, "[red]literal[/]control")
-            let flags = Args([]string{"checks", "--run", "saved", "--plain", "--ascii", "--watch"})
-            Cli.Validate(flags)
             Checks(binary)
             ProgressChecks.All(binary)
             Console.WriteLine(

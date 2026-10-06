@@ -9,26 +9,4 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
   </PropertyGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="../templates/pi-bridge.mjs" LogicalName="Tokate.templates.pi-bridge.mjs" />
-    <Compile Include="../src/Execution/PiBoundary.gs" />
-    <Compile Include="../src/Execution/PiEvidence.gs" />
-    <Compile Include="../src/Execution/Verification.gs" />
-    <Compile Include="../src/Execution/LocalPaths.gs" />
-    <Compile Include="../src/Execution/Process.gs" />
-    <Compile Include="../src/Cli/Args.gs" />
-    <Compile Include="../src/Cli/ApplicationInfo.gs" />
-    <Compile Include="../src/Cli/RepositoryInput.gs" />
-    <Compile Include="../src/GitHub/RepositoryIdentity.gs" />
-    <Compile Include="../src/Cli/CliFailure.gs" />
-    <Compile Include="../src/Contributions/Data.gs" />
-    <Compile Include="../src/GitHub/GitHub.gs" />
-    <Compile Include="../src/Policy/Policy.gs" />
-    <Compile Include="../src/Policy/ProtectedPaths.gs" />
-    <Compile Include="../src/Policy/Decree.gs" />
-    <Compile Include="../src/Cli/Cli.gs" />
-    <Compile Include="../src/Json.gs" />
-    <Compile Include="../src/GitHub/ApiTransport.gs" />
-    <Compile Include="../src/Contributions/RequestData.gs" />
-  </ItemGroup>
 </Project>

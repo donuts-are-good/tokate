@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
-import socket
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description='Release gate: real installed pi 1.
 parser.add_argument('--pi-root', required=True, type=Path)
 parser.add_argument('--node', default='/usr/bin/node')
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
+parser.add_argument('--binary', default='artifacts/linux-x64/tokate')
 args = parser.parse_args()
 package = args.pi_root / '@earendil-works/pi-coding-agent/package.json'
 if not package.is_file():
@@ -22,7 +23,6 @@ if not package.is_file():
 metadata = json.loads(package.read_text())
 if metadata.get('name') != '@earendil-works/pi-coding-agent' or metadata.get('version') != '1.0.0':
     parser.error('The real pi 1.0.0 package is required')
-subprocess.run([args.tests, '--pi-real', str(args.pi_root.resolve()), args.node], check=True, timeout=45)
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
@@ -61,7 +61,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/event-stream')
         self.end_headers()
         turn = sum(m['role'] == 'assistant' for m in body['messages'])
-        planned = self.server.planned
+        fixture = json.loads((self.server.root / 'fixture.json').read_text())
+        private, outside = fixture['private'], fixture['outside']
+        code = f"from pathlib import Path; import socket; assert not Path({private!r}).exists(); assert not Path('.git/config').exists(); assert not Path('/tokate-control/models.json').exists(); denied=False\ntry: Path({outside!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{self.server.server_address[1]})); connected=True\nexcept OSError: pass\nassert connected == {self.server.case == 'on'}\nPath('result.txt').write_text('final')"
+        planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}),
+                   ('edit', {'path': 'result.txt', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
+                   ('read', {'path': private}), ('write', {'path': outside, 'content': 'escaped'}),
+                   ('read', {'path': '.git/config'}), ('read', {'path': '/tokate-control/models.json'}),
+                   ('bash', {'command': 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE', 'timeout': 4}),
+                   ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
+        if self.server.case == 'cancel':
+            planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
         if self.server.case == 'incomplete':
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Incomplete'}, 'finish_reason': 'length'}]}
         elif self.server.case == 'empty':
@@ -84,43 +94,42 @@ with Server(('127.0.0.1', 0), Handler) as server:
     for case in ['off', 'on', 'failed', 'malformed', 'incomplete', 'empty', 'cancel']:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
+            server.root = root
             server.calls = 0
             server.case = case
-            server.pending = threading.Event()
-            private = root / 'private-credential'
-            outside = root / 'denied-write'
-            code = f"from pathlib import Path; import socket; p=Path({str(private)!r}); assert not p.exists(); assert not Path('.git/config').exists(); assert not Path('/tokate-control/models.json').exists(); denied=False\ntry: Path({str(outside)!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{port})); connected=True\nexcept OSError: pass\nassert connected == {case == 'on'}\nPath('result.txt').write_text('final')"
-            import shlex
-            shell = 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE'
-            server.planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}), ('edit', {'path': 'result.txt', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
-                              ('read', {'path': str(private)}), ('write', {'path': str(outside), 'content': 'escaped'}), ('read', {'path': '.git/config'}),
-                              ('read', {'path': '/tokate-control/models.json'}), ('bash', {'command': shell, 'timeout': 4}),
-                              ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
+            fixture_root = root / 'fixtures'
+            fixture_root.mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TOKATE_TEST_ROOT': str(fixture_root),
+                   'TOKATE_BINARY': str(Path(args.binary).resolve())}
+            command = [args.tests, '--pi-proof', str(args.pi_root.resolve()), args.node, directory, f'http://127.0.0.1:{port}/v1', case]
             if case == 'cancel':
-                server.planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
-            command = [args.tests, '--pi-bridge', str(args.pi_root.resolve()), args.node, directory, f'http://127.0.0.1:{port}/v1', str(case == 'on').lower()]
-            if case == 'cancel':
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-                deadline = time.monotonic() + 5
-                while not (root / 'checkout/running').exists() and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                assert (root / 'checkout/running').exists(), 'Pi never launched constrained bash'
+                process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                deadline = time.monotonic() + 45
+                fixture = None
+                while time.monotonic() < deadline and process.poll() is None:
+                    if (root / 'fixture.json').exists():
+                        fixture = json.loads((root / 'fixture.json').read_text())
+                        if (Path(fixture['checkout']) / 'running').exists():
+                            break
+                    time.sleep(0.1)
+                assert fixture and (Path(fixture['checkout']) / 'running').exists(), 'Pi never launched constrained bash'
+                checkout = Path(fixture['checkout'])
+                git = (checkout / '.git/config').read_text()
                 os.killpg(process.pid, signal.SIGINT)
-                process.communicate(timeout=5)
-                assert process.returncode != 0
+                process.communicate(timeout=15)
+                time.sleep(3)
+                assert checkout.is_dir(), 'Cancellation evidence disappeared'
+                assert not (checkout / 'cancel-escaped').exists(), 'Cancelled descendant survived'
+                assert not Path(fixture['outside']).exists(), 'Outside write escaped'
+                assert Path(fixture['private']).read_text() == 'PRIVATE_CREDENTIAL_SENTINEL'
+                assert (checkout / '.git/config').read_text() == git
+                saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
+                assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted'
+                assert 'turn_completed' not in saved
             else:
-                result = subprocess.run(command, capture_output=True, text=True, timeout=15)
-                expected = case in ['off', 'on']
-                assert (result.returncode == 0) == expected, f'{case}: {result.stderr}'
-                if expected:
-                    assert (root / 'checkout/result.txt').read_text() == 'final'
-                else:
+                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)
+                assert result.returncode == 0, f'{case}: {result.stdout}\n{result.stderr}'
+                if case not in ['off', 'on']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
-            time.sleep(3)
-            assert not (root / 'checkout/timeout-escaped').exists(), 'Timeout descendant survived'
-            assert not (root / 'checkout/cancel-escaped').exists(), 'Cancelled descendant survived'
-            assert not outside.exists(), 'Outside write escaped'
-            assert private.read_text() == 'PRIVATE_CREDENTIAL_SENTINEL'
-            assert (root / 'checkout/.git/config').read_text() == 'synthetic-private'
-            print('PASS real pi synthetic ' + case)
+            print('PASS native Pi workflow ' + case, flush=True)
     server.shutdown()

@@ -1,15 +1,16 @@
 # Managed pi local execution
 
-This opt-in path requires version-2 coordination and the exact owner pair
-`{"harness":"pi","provider":"local-chat-completions"}` in `allowed_tools`.
-With `model_policy: "whitelist"`, list the exact endpoint model identifier in
-`models` with `["absent"]`. Explicit `model_policy` is required for absent effort.
-Version-1 defaults and saved Codex contributions keep their existing behavior.
-Paid providers, reasoning controls, remote endpoints, other pi versions and other
-harness/provider combinations are rejected. Provider selection is separate from
-harness identity; `org/model:tag` is an exact model identifier, never a search.
+Linux x64 only. Requires pi 1.0.0, pi-ai 1.0.0, pi-agent-core 1.0.0,
+Node 26.10.0, bubblewrap, and an already-running no-auth HTTP loopback
+Chat Completions endpoint. Tokate installs nothing and starts no model server.
 
-After the ordinary version-2 reservation, prepare a managed contribution:
+Version-2 owner policy must allow the exact pair
+`{"harness":"pi","provider":"local-chat-completions"}`. With
+`model_policy: "whitelist"`, list the exact model identifier with `["absent"]`.
+Explicit `model_policy` is required for absent effort. Other pi versions, paid
+providers, remote endpoints and reasoning controls are unsupported.
+
+After a version-2 reservation:
 
 ```sh
 tokate prepare --repo OWNER/REPO --issue N --state STATE_SHA --source tokate \
@@ -18,64 +19,43 @@ tokate prepare --repo OWNER/REPO --issue N --state STATE_SHA --source tokate \
   --pi-root /absolute/installed/node_modules --node /absolute/installed/node \
   --seconds 3600 --verification-reserve 1200
 tokate work --run RUN_DIRECTORY
+tokate submit --run RUN_DIRECTORY
 ```
 
-The donor must already have pi 1.0.0 (including pi-ai and pi-agent-core 1.0.0), Node 26.10.0, and a running no-auth HTTP
-loopback Chat Completions endpoint. Tokate installs nothing, starts no model server,
-and downloads no models. Without explicit runtime paths, it resolves a PATH pi
-symlink to the scoped npm package's `dist/cli.js` and resolves Node on PATH.
-The module tree and its dependencies must be self-contained; layouts needing
-symlinks outside that tree fail closed. Paths and endpoint details stay in private
-saved run state, outside task context and publication metadata. The generated
-model configuration uses the public placeholder `tokate-no-auth` because pi's
-Chat Completions interface requires an API-key value; no donor credential is read.
-The endpoint must accept this nonsecret placeholder without authentication.
+Runtime paths are optional when PATH resolves pi's scoped package
+`dist/bundle/cli.js` and the pinned Node executable. The module tree must be
+self-contained. Endpoint and runtime paths stay in private run state.
+The SDK receives only generated model settings and an empty authentication
+profile. Its required API-key placeholder is the public value `tokate-no-auth`.
+Donor credentials, user settings and repository customization are never loaded.
 
-A trusted bridge imports the official SDK and checks nested ModelRuntime,
-SettingsManager and SessionManager interfaces, the exact model, and the four
-active tool definitions before prompting. Settings and sessions are in memory;
-a custom ResourceLoader returns no extensions, skills, prompts, themes or context
-files. Authentication uses an empty generated profile. Agent and provider retries,
-compaction and cache warming are disabled. Host environment, user configuration,
-repository settings, npm lifecycle scripts and repository extensions are not loaded.
+The SDK runs in bubblewrap with private PID/user namespaces, read-only system
+files and the selected module tree, a writable checkout and private temporary
+storage. Git metadata is masked. Only read, edit, write and constrained bash
+are enabled. File tools accept checkout/tool-temp paths only. Bash hides SDK
+control files and has network access only when owner and donor permit it.
+Extensions, skills, prompts, context discovery, retries, compaction, cache warming
+and persistent sessions are disabled. Failed capability probes stop before inference.
 
-The entire harness runs inside bubblewrap with private PID/user namespaces,
-dropped capabilities, read-only system/runtime mounts, one writable checkout and
-private temporary storage. Git metadata is masked; run control and host home
-files are outside the mounted checkout. File tools accept checkout/tool-temp paths
-only. Bash uses another boundary, hides harness control settings, clears its
-environment, and disables network unless both owner and donor permit it. Commands
-and alternate helpers receive the same restrictions. No local execution fallback
-exists. Preflight isolation/SDK failures stop before inference.
+The SDK can reach the selected endpoint regardless of command network policy.
+The endpoint may itself use the network. Cancellation collects client descendants,
+including detached processes, but does not prove a server resource or billing cap.
+There is no CPU, RAM or disk quota. The kernel, runtime and selected module tree
+remain trusted. No automatic continuation, model substitution or fallback occurs.
 
-The SDK process can reach the selected loopback endpoint even with command network
-disabled. Endpoint connectivity does not prove offline operation: the server can
-itself use the network. Deadlines and cancellation stop client descendants, including
-processes creating new sessions; they do not prove a hard server resource or billing
-cap. There is no CPU, RAM or disk quota beyond the existing runtime allowance.
-Kernel/runtime trust and the donor's executable/module tree remain prerequisites.
+Tokate records the selected invocation separately from harness-reported usage.
+Failed, malformed, truncated, empty or incomplete turns cannot publish. Completed
+work passes candidate capture, protected-path checks and independent verification
+before the coordinator opens a draft PR.
 
-Tokate records the observed SDK invocation separately from harness-reported model
-and usage. A failed, malformed, truncated, empty or incomplete turn is not publishable.
-Completed work goes through existing candidate capture, protected-path validation,
-independent owner verification, saved evidence and explicit publication contracts.
-Preparation supports handoff before inference. Interrupted inference requires fresh
-owner approval; there is no automatic continuation, substitution or retry.
-
-Release validation is still required. Only Linux x64 containment has been exercised
-here; the real installed pi path has not been verified in this implementation
-sandbox. Do not advertise broader support or release this path until this gate passes
-using an existing installation (the server is deterministic and spends no inference):
+CI exercises the native CLI with the pinned SDK and a deterministic local server,
+without model inference. To run the same gate with an existing installation:
 
 ```sh
-artifacts/tests/tokate-tests --pi
 python3 scripts/pi-proof.py --pi-root /absolute/installed/node_modules \
   --node /absolute/installed/node
 ```
 
-The real gate checks SDK import, nested namespaces, exact selection, read/edit/write,
-constrained bash/helpers, private sentinels, Git/control denial, hostile configuration,
-network off/on, failed/malformed/incomplete/empty output, cancellation, and independent
-owner verification. The focused G# checks cover policy/effort rejection, completion
-mapping, real outer containment and deadline descendant cleanup. Full repository
-verification remains the independent runner's responsibility.
+The gate covers read/edit/write, constrained bash, private sentinels, Git/control
+denial, hostile configuration, network off/on, exact selection, rejected effort,
+failed responses, cancellation, descendant cleanup, verification and publication.

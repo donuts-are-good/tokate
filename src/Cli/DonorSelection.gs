@@ -8,13 +8,7 @@ import System.Text.Json
 internal class DonorSelection {
     shared {
         internal func Capabilities() Dictionary[string, HashSet[string]] {
-            let executable = Startup.Find("codex")
-            if executable == "" {
-                throw CliFailure(
-                    "missing_tools",
-                    "Install native Codex to verify model/effort capability; availability is unknown"
-                )
-            }
+            let executable = CodexRuntime.Resolve()
             let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             try {

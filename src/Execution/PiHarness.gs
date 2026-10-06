@@ -25,10 +25,11 @@ internal class PiHarness {
                     )
                 }
                 let cli = LocalPaths.CanonicalPath(executable)
-                let installedPackage = Path.GetDirectoryName(Path.GetDirectoryName(cli) ?? "") ?? ""
-                if Path.GetFileName(installedPackage) != "pi-coding-agent" || Path.GetFileName(
-                    Path.GetDirectoryName(installedPackage) ?? ""
-                ) != "@earendil-works" {
+                let installedPackage = Directory.GetParent(cli)?.Parent?.Parent?.FullName ?? ""
+                if cli != Path.Combine(installedPackage, "dist/bundle/cli.js") || Path.GetFileName(
+                    installedPackage
+                ) != "pi-coding-agent" ||
+                    Path.GetFileName(Path.GetDirectoryName(installedPackage) ?? "") != "@earendil-works" {
                     throw Exception(
                         "Unsupported pi executable layout; provide the installed node_modules directory explicitly"
                     )

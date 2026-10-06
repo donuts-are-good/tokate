@@ -120,9 +120,21 @@ pinned `global.json` SDK too. Missing, failed or skipped required probes block w
 Diagnostics do not establish dependencies, build success, account permissions,
 model availability or remaining allowance. Repair prerequisites before donating.
 
-Tools and dependencies must work from standard system paths: sandboxed commands
-cannot use home tools or caches. Managed runs, harness homes and tool installations
-must be outside `/tmp`. Tokate does not change system security settings.
+Managed Codex supports Linux x64 native executables (including symlinks) and the
+official npm `bin/codex.js` launcher with a matching nested
+`node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex`
+or sibling platform package. These layouts are verified with Codex 0.160.0.
+Tokate reads only bounded package metadata and executable headers to resolve the
+native executable; it does not run launchers to discover files. Only that canonical
+executable is exposed read-only; Node, package directories, home settings, credentials
+and caches are not exposed. Offline selection uses the same native executable.
+Other launcher/runtime layouts are unsupported. Codex prerequisites apply only to
+the managed Codex route; owners and external donations do not require Codex.
+
+Other tools and dependencies must work from standard system paths: repository
+commands cannot use unrelated home tools or caches. Managed runs, harness homes
+and tool installations must be outside `/tmp`. Run `tokate doctor --managed`
+before donating; no global installation or sudo is required for Codex.
 
 ```sh
 tokate defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high
@@ -197,6 +209,55 @@ Inspect `status` and private evidence first. No recovery command starts inferenc
 | Interrupted fresh preparation | `tokate prepare --run DIR` inspects recorded fork, branch and checkout state without inference, checks or publication. |
 | Dirty, divergent or unidentified preparation | Inspect preserved work and use its original run, or move local files aside explicitly; do not delete branches to restart. |
 
+To seed a **fresh v1 attempt** from unpublished interrupted managed work, the
+owner first names its still-current, valid, unrevoked approval:
+
+```sh
+tokate approve --repo OWNER/REPO --issue 42 --donor DONOR --continue-approval PRIOR_APPROVAL_SHA
+```
+
+This grant retains the predecessor's exact original base, target branch, issue
+scope, policy, template and root owner instructions, with a fresh nonce and an
+explicit predecessor binding. It refuses changed or revoked authority and cannot
+be combined with `--base-branch`. Advancing the target's code alone does not
+change the imported work's approved base.
+
+The same authenticated numeric donor explicitly selects a new total budget and
+positive verification reserve, then confirms inference normally:
+
+```sh
+tokate work --repo OWNER/REPO --issue 42 --continue-from PRIOR_RUN_DIR --model MODEL --effort EFFORT --seconds 3600 --verification-reserve 1200 --yes
+```
+
+`claim` accepts the same import options to prepare without inference. This first
+bridge supports only stopped, unpublished same-donor v1 managed runs with the
+recorded preparation protections and explicit owner-instruction snapshot. V2
+lease continuation, published-PR handoff and unsupported legacy layouts are
+excluded. The source's exclusive lease must be free. Its checkout, branch,
+metadata, logs, failure and attribution remain preserved; no missing completion,
+usage, report or verification is reconstructed.
+
+Capture is limited to 1000 changed regular files, 32 MiB of edit bytes and 100000
+inventory paths. Protected paths, unsafe names, symbolic/hard links, mount
+crossings, submodules, file/directory replacements and inconsistent staged edits
+are refused. Known
+generated directories, including `.verification-data/`, `.tokate-scratch/`,
+credential homes, package caches and build output, are excluded by name without
+reading their contents; logs and runtime artifacts stay with the source. Approved
+bases that track excluded paths are unsupported. Git metadata is freshly prepared
+from the approved base; donor hooks, configuration and credentials are not copied.
+
+Interrupted capture/preparation retains one identified local attempt. Repeating
+the import command identifies it and refuses a new reservation. Inspect `status
+--run DIR`, explicitly use `prepare --run DIR`, then `work --run DIR --yes`.
+Preparation accepts only the captured edits or a consistent partial import;
+unrelated dirty work and changed manifests require explicit inspection. The
+manifest is checked again immediately before inference. Imported edits are
+untrusted task input: a new completed turn, every independent owner check on the
+complete final diff from the original base, exact-head receipt validation and
+owner review are still required. Private state and public provenance retain the
+interrupted predecessor; the fresh attempt does not make it retroactively successful.
+
 For an explicit correction **before first publication**:
 
 ```sh
@@ -231,6 +292,51 @@ open PR with a nonforce push. Original evidence/usage stays separate from editin
 provenance. Failed checks need a corrected commit. After interrupted publication,
 explicitly repeat the identical command to inspect state and resume applied work;
 v2 awaits its coordinator. Writes are not atomic; inspect uncertain remote state.
+
+`original-evidence` preserves the original records and verification log directories
+under a checked manifest. Linked evidence paths and changed or incomplete archives
+block amendment and retry; the archive is never silently rebuilt.
+Older amendment archives remain unsealed with logs in the run directory. Tokate
+checks preserved records and log paths without reconstructing or sealing history.
+
+## Repair when the original local run is unavailable
+
+For an existing open, unmerged **v1 draft PR**, prepare a separate, self-contained
+Git checkout from its exact remote head. Apply the owner-reviewed correction and,
+when needed, merge the current target. Commit the result and leave the checkout
+clean. The owner must explicitly authorize exact correction C and current target U
+using the existing synchronization grant command:
+
+```sh
+tokate authorize-sync --repo OWNER/REPO --pr 10 --commit C --upstream U
+tokate repair --repo OWNER/REPO --pr 10 --run REPAIR_DIR --path CHECKOUT --commit C --sync G --seconds N
+```
+
+`REPAIR_DIR` is a new, empty evidence directory outside the candidate checkout;
+it is not a replacement original run. The authenticated numeric donor must match
+the PR author and own the original writable branch repository. The exact receipt,
+issue, approval, approved base, policy, template and live owner grant must agree.
+Ambiguous ownership markers, legacy unmarked reports, v2, closed, merged and
+ready-for-review PRs are refused. No handoff, inference, automatic merge or
+reconstruction of private logs, usage or verification is performed.
+
+Repair checks the complete candidate diff and protected trees, then runs every
+original owner command independently with a separate positive `--seconds` budget
+bounded by owner `max_seconds`. Network requires explicit `--allow-network` and
+owner permission. The new report and receipt disclose unavailable original
+private state and bind new verification to C. Original public observations remain
+claims about original work only. Publication preserves maintainer text and Tokate
+ownership markers; an exact head lease and ancestry checks prevent replacing a
+changed remote branch. Required CI and final owner review remain outstanding.
+
+`repair.json`, `candidate.patch`, verification logs and `publication.json` preserve
+the same intent across interruption. Explicitly repeat the identical command to
+inspect and resume publication without repeating passed checks. Failed or
+interrupted verification refuses a repeat; inspect the evidence and prepare a
+new corrected commit and owner grant in a new evidence directory. Writes are not
+atomic: a lost push or body response can leave a temporarily invalid receipt.
+Changed authority, candidate or owned regions block resume. Use `verify-pr` to
+validate the exact remote receipt and `checks` to inspect CI; pending is not success.
 
 ## Synchronize with upstream
 
@@ -311,6 +417,18 @@ prose to 2048 characters and summary lists to 64 entries with total counts.
 arguments stay complete; oversized safe output fails with exit 1, possibly after
 effects completed. Inspect state before reinvoking.
 
+Owner verification, including review amendments, runs in one private disposable
+copy of the exact candidate. Commands run in order and share that copy; Git
+metadata is read-only, and verification cannot write the saved checkout. The
+copy is removed on success, failure or handled interruption. Tracked candidate
+changes still fail verification. Logs and results remain in the run; ignored
+and untracked donor files are never cleaned.
+
+`status --run DIR` reports `storage.retained_bytes` and `storage.checkout_bytes`
+(regular-file bytes without following symlinks), plus `storage.next_safe_cleanup`.
+Keep runs for recovery and amendment. After acceptance and evidence backup, deletion
+of a completed run must be explicit: later amendment will no longer be available.
+
 Managed summaries include total `seconds`, `coding_seconds`, `verification_reserve`,
 safe check arguments/exit codes and private `data.artifacts` paths, excluding raw
 logs. Without `--json`, redirected `policy`/`status` retain unenveloped forms;
@@ -338,3 +456,43 @@ Codex on PATH; simulated checks do not prove that boundary.
 Managed pi local execution requires explicit version-2 policy, an existing pinned
 SDK/runtime and a donor-selected no-auth loopback endpoint. See [setup, isolation
 and release validation](pi.md).
+
+### Public PR summaries
+
+Managed tasks request a dedicated `tokate-public-summary.json` in the checkout.
+Tokate reads at most 4096 UTF-8 bytes, removes this untracked artifact before staging,
+and binds its validated contents to the candidate patch. Managed summaries allow
+4046 serialized bytes, reserving 50 bytes for the commit head within the final
+4096-byte bound. Tokate never generates public
+summaries from private harness reports, logs or prompts. A repository-owned file at
+that name or a symlink is refused.
+
+For `external`, explicit `recover --commit`, and `amend`, supply `--summary FILE`:
+
+```json
+{
+  "head": "0123456789abcdef0123456789abcdef01234567",
+  "changes": ["Fix empty results to display a useful message."],
+  "verification": ["Empty result behavior check passed."],
+  "limitations": ["Browser layout was not checked."]
+}
+```
+
+`head` must equal the exact candidate commit; managed artifacts omit it because
+Tokate binds the final patch before creating a commit. Use 1–8 concrete final
+behavior changes, 0–8 donor-reported verification results, and 0–4 material limits.
+Each item is 3–200 characters of plain ASCII prose; change bullets start with a
+supported action verb such as Add, Update, Remove, Fix, Preserve or Reject. Unknown
+fields, duplicate keys, markup, multiline output, URLs, paths, email addresses,
+endpoint patterns and known credential markers are rejected. This deliberately
+restricted format is not a universal credential detector or an attestation of
+semantic accuracy. Donors must review every public field before submission.
+
+Missing summaries produce an explicit request to review the candidate diff; invalid
+or stale commit summaries refuse the operation. A changed patch invalidates its old
+summary. Amendments require a new summary for the entire final diff, including any
+original changes retained. Saved publication intents keep their summary immutable.
+Observed local checks, donor declarations and GitHub CI are labeled separately;
+pending or missing CI is never described as success. Original execution and later
+editing tools and usage remain separate. Owner templates, receipts and acceptance
+policy remain authoritative and unchanged.

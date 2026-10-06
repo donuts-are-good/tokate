@@ -46,7 +46,7 @@ internal class Startup {
                         tool.Hint = "Install GitHub CLI and add gh to PATH."
                     }
                     case "codex" {
-                        tool.Hint = "Install the native Codex CLI and add codex to PATH."
+                        tool.Hint = "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported."
                     }
                     case "setsid" {
                         tool.Hint = "Install util-linux and add setsid to PATH."
@@ -104,7 +104,7 @@ internal class Startup {
                 names.Add("codex")
                 names.Add("/usr/bin/env")
             }
-            if options.Get("run") != "" {
+            if options.Get("run") != "" && command != "repair" {
                 let run = Data.Load(Path.GetFullPath(options.Need("run")))
                 if command == "work" && run.Number("version") == 2 && run.Text("source") != "tokate" {
                     throw CliFailure("invalid_state", "External work uses external --run; inference is never launched")
@@ -117,6 +117,7 @@ internal class Startup {
                 command == "publish" ||
                 command == "submit" ||
                 command == "amend" ||
+                command == "repair" ||
                 command == "recover" {
                 names.Add("git")
             }
@@ -126,6 +127,7 @@ internal class Startup {
             let independent = command == "work" ||
                 command == "external" ||
                 command == "amend" ||
+                command == "repair" ||
                 (command == "recover" && options.Get("prepare") != "true")
             if catalog || independent {
                 names.Add("/usr/bin/setsid")
@@ -155,8 +157,12 @@ internal class Startup {
                     continue
                 }
                 try {
+                    let executable = tool.Name == "codex" && Path.GetFileName(
+                        LocalPaths.CanonicalPath(tool.Path)
+                    ) == "codex.js" ?
+                    CodexRuntime.Resolve(): tool.Path
                     let result = Commands.Run(
-                        tool.Path,
+                        executable,
                         []string{"--version"},
                         seconds: 10,
                         harness: tool.Name == "codex"
@@ -173,6 +179,9 @@ internal class Startup {
                         tool.Status = "ready"
                         tool.Detail = "Successfully executed --version."
                     }
+                } catch (error CliFailure) {
+                    tool.Status = "failed"
+                    tool.Detail = error.Summary
                 } catch (error Exception) {
                     tool.Status = "failed"
                     tool.Detail = "Tool could not start or complete --version. Repair or reinstall it. " + tool.Hint

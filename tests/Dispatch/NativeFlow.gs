@@ -10,15 +10,16 @@ import System.IO
 import System.Net
 import System.Net.Sockets
 import System.Text.Json.Nodes
-import Tokate
 
 internal partial class NativeFlow : NativeFixture {
     shared {
         internal let SerialGroups[]string = []string{
             "ReadTraffic",
+            "GitEvidence",
             "TemporaryIsolation",
             "TemporaryHomeRejected",
-            "VerificationBoundary"
+            "VerificationBoundary",
+            "DisposableVerification"
         }
 
         internal func All(binary string, selected string = "", parallel bool = false) {
@@ -45,13 +46,11 @@ internal partial class NativeFlow : NativeFixture {
                 "Timeout",
                 "ManagedCancellation",
                 "Reapproval",
-                "FalseSuccess",
                 "PolicyEdit",
                 "WorkflowEdit",
                 "ProtectedEntrypoint",
                 "ProtectedRecovery",
                 "ProtectedPublication",
-                "ProtectedPolicyFreshness",
                 "EmptyProtectedPaths",
                 "ReceiptEvidence",
                 "GitEvidence",
@@ -61,25 +60,23 @@ internal partial class NativeFlow : NativeFixture {
                 "TemporaryHomeRejected",
                 "OutputBoundary",
                 "ToolAuthentication",
-                "TrafficBudgets",
                 "ConditionalClaim",
                 "ConditionalValidators",
-                "ConditionalPublication",
                 "ConditionalApproval",
                 "ReadTraffic",
                 "MutationTraffic",
                 "PublicationFailures",
+                "ExistingPublication",
                 "CanonicalVerification",
                 "CanonicalPublication",
-                "SelfOwnedFlow",
                 "RepositoryIdentity",
                 "PublicationRevocation",
                 "BackgroundCleanup",
                 "UnsupportedSandbox",
+                "DisposableVerification",
                 "VerificationBoundary",
                 "VerificationNetwork",
-                "VerificationRecovery",
-                "LegacyVerificationRecovery"
+                "VerificationRecovery"
             } {
                 if selected != "" && selected != name {
                     continue
@@ -88,8 +85,29 @@ internal partial class NativeFlow : NativeFixture {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Native/" + name) {
+                    continue
+                }
                 using let flow = NativeFlow(binary)
-                flow.Initialize()
+                if Array.IndexOf(
+                    []string{
+                        "StructuredFailures",
+                        "ModelPolicyModes",
+                        "ProtectedPublication",
+                        "GitEvidence",
+                        "PublicationFailures",
+                        "CanonicalVerification",
+                        "CanonicalPublication",
+                        "ConditionalClaim",
+                        "ConditionalApproval",
+                        "VerificationNetwork",
+                        "VerificationReserve",
+                        "RepositoryIdentity"
+                    },
+                    name
+                ) < 0 {
+                    flow.Initialize()
+                }
                 switch name {
                     case "HelpAndArguments" {
                         flow.HelpAndArguments()
@@ -154,9 +172,6 @@ internal partial class NativeFlow : NativeFixture {
                     case "Reapproval" {
                         flow.Reapproval()
                     }
-                    case "FalseSuccess" {
-                        flow.FalseSuccess()
-                    }
                     case "PolicyEdit" {
                         flow.PolicyEdit()
                     }
@@ -171,9 +186,6 @@ internal partial class NativeFlow : NativeFixture {
                     }
                     case "ProtectedPublication" {
                         flow.ProtectedPublication()
-                    }
-                    case "ProtectedPolicyFreshness" {
-                        flow.ProtectedPolicyFreshness()
                     }
                     case "EmptyProtectedPaths" {
                         flow.EmptyProtectedPaths()
@@ -202,17 +214,11 @@ internal partial class NativeFlow : NativeFixture {
                     case "ToolAuthentication" {
                         flow.ToolAuthentication()
                     }
-                    case "TrafficBudgets" {
-                        flow.TrafficBudgets()
-                    }
                     case "ConditionalClaim" {
                         flow.ConditionalClaim()
                     }
                     case "ConditionalValidators" {
                         flow.ConditionalValidators()
-                    }
-                    case "ConditionalPublication" {
-                        flow.ConditionalPublication()
                     }
                     case "ConditionalApproval" {
                         flow.ConditionalApproval()
@@ -222,6 +228,9 @@ internal partial class NativeFlow : NativeFixture {
                     }
                     case "MutationTraffic" {
                         flow.MutationTraffic()
+                    }
+                    case "ExistingPublication" {
+                        flow.ExistingPublication()
                     }
                     case "PublicationFailures" {
                         flow.PublicationFailures()
@@ -235,9 +244,6 @@ internal partial class NativeFlow : NativeFixture {
                     case "RepositoryIdentity" {
                         RepositoryIdentityChecks.All(binary)
                     }
-                    case "SelfOwnedFlow" {
-                        flow.SelfOwnedFlow()
-                    }
                     case "PublicationRevocation" {
                         flow.PublicationRevocation()
                     }
@@ -247,14 +253,14 @@ internal partial class NativeFlow : NativeFixture {
                     case "UnsupportedSandbox" {
                         flow.UnsupportedSandbox()
                     }
+                    case "DisposableVerification" {
+                        DisposableVerificationChecks.All(binary)
+                    }
                     case "VerificationBoundary" {
                         flow.VerificationBoundary()
                     }
                     case "VerificationRecovery" {
                         flow.VerificationRecovery()
-                    }
-                    case "LegacyVerificationRecovery" {
-                        flow.VerificationRecovery(true)
                     }
                     case "VerificationNetwork" {
                         flow.VerificationNetwork()

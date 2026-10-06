@@ -4,6 +4,7 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Text.Json.Nodes
+import Tokate
 
 internal class AmendmentFlow {
     shared {
@@ -53,7 +54,14 @@ internal class AmendmentFlow {
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
             var body = Check.Text(pull["body"])
             if legacy {
-                body = body.Replace("<!-- tokate-report:start -->\n", "").Replace("\n<!-- tokate-report:end -->", "")
+                let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+                let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+                if body.Contains("<!-- tokate-run:") {
+                    body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(
+                        start,
+                        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue\'s acceptance criteria and limitations."
+                    )
+                }
             }
             pull["body"] = JsonValue.Create("Owner review before\n" + body + "\nOwner review after")
             flow.Save()
@@ -63,6 +71,23 @@ internal class AmendmentFlow {
             Check.That(
                 File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
                 "Original run evidence changed"
+            )
+            for check in Saved(Path.Combine(run, "original-evidence"))["verification"]?.AsArray() ?? JsonArray() {
+                for field in[]string{"output_file", "error_file"} {
+                    let relative = Check.Text(check[field])
+                    Check.That(relative != "", "Original check lacks recorded evidence")
+                    Check.That(
+                        File
+                            .ReadAllBytes(Path.Combine(run, relative))
+                            .AsSpan()
+                            .SequenceEqual(File.ReadAllBytes(Path.Combine(run, "original-evidence", relative))),
+                        "Original verification artifact lost: " + relative
+                    )
+                }
+            }
+            Check.That(
+                File.Exists(Path.Combine(run, "original-evidence/manifest.json")),
+                "Original archive is unsealed"
             )
             let before = Check.Json(original)
             let after = Saved(run)
@@ -98,6 +123,257 @@ internal class AmendmentFlow {
                         "Original evidence overwritten: " + file
                     )
                 }
+            }
+        }
+
+        private func ArchiveRefusals(binary string) {
+            using let prepared = PublishedContribution.Create(binary)
+            let flow = prepared.Coordination.Flow
+            let run = prepared.Run
+            for fault in[]string{
+                "record",
+                "verification-directory",
+                "verification-file",
+                "broken-verification",
+                "missing-verification",
+                "archive-directory"
+            } {
+                prepared.Restore()
+                let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                let commit = Edit(flow, run)
+                let secret = Path.Combine(flow.Temp.Root, "outside-evidence")
+                File.WriteAllText(secret, "synthetic private evidence")
+                let evidence = Directory.GetDirectories(run, "verification-*")[0]
+                switch fault {
+                    case "record" {
+                        let record = Path.Combine(run, "report.md")
+                        File.Delete(record)
+                        File.CreateSymbolicLink(record, secret)
+                    }
+                    case "verification-directory" {
+                        Directory.Delete(evidence, true)
+                        Directory.CreateSymbolicLink(evidence, flow.Temp.Root)
+                    }
+                    case "verification-file", "broken-verification" {
+                        let output = Path.Combine(evidence, "stdout.log")
+                        File.Delete(output)
+                        File.CreateSymbolicLink(output, fault == "verification-file" ? secret: secret + "-missing")
+                    }
+                    case "missing-verification" {
+                        File.Delete(Path.Combine(evidence, "stdout.log"))
+                    }
+                    case "archive-directory" {
+                        Directory.CreateSymbolicLink(Path.Combine(run, "original-evidence"), flow.Temp.Root)
+                    }
+                }
+                Amend(flow, run, commit, 1)
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                    "Linked evidence rewrote saved run"
+                )
+                Check.That(
+                    !Directory.Exists(Path.Combine(run, "amendments", commit)),
+                    "Linked evidence reached verification"
+                )
+                Check.That(
+                    Directory.GetDirectories(run, "archive-*").Length == 0,
+                    "Rejected archive left partial staging"
+                )
+                Check.That(File.ReadAllText(secret) == "synthetic private evidence", "Archive changed linked target")
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Archive refusal repeated inference")
+            }
+        }
+
+        private func ArchiveIdentity(binary string) {
+            using let first = PublishedContribution.Create(binary)
+            using let second = PublishedContribution.Create(binary)
+            let flow = first.Coordination.Flow
+            let run = first.Run
+            let commit = Edit(flow, run)
+            Amend(flow, run, commit)
+            let otherFlow = second.Coordination.Flow
+            let otherRun = second.Run
+            Amend(otherFlow, otherRun, Edit(otherFlow, otherRun))
+            let archive = Path.Combine(run, "original-evidence")
+            Directory.Delete(archive, true)
+            Directory.Move(Path.Combine(otherRun, "original-evidence"), archive)
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            Amend(flow, run, commit, 1)
+            Amend(flow, run, Edit(flow, run, "Another amendment\n"), 1)
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == saved,
+                "Another run's sealed archive was accepted"
+            )
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Archive identity check repeated inference")
+        }
+
+        private func ArchiveIntegrity(binary string) {
+            using let prepared = PublishedContribution.Create(binary)
+            let flow = prepared.Coordination.Flow
+            let run = prepared.Run
+            for fault in[]string{"record-link", "verification-link", "tampered", "missing", "unsealed"} {
+                prepared.Restore()
+                let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                let commit = Edit(flow, run)
+                Amend(flow, run, commit)
+                AssertOriginal(run, original)
+                let archive = Path.Combine(run, "original-evidence")
+                let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+                let manifest = File.ReadAllText(Path.Combine(archive, "manifest.json"))
+                let secret = Path.Combine(flow.Temp.Root, "outside-evidence")
+                File.WriteAllText(secret, "synthetic private evidence")
+                switch fault {
+                    case "record-link" {
+                        let record = Path.Combine(archive, "report.md")
+                        File.Delete(record)
+                        File.CreateSymbolicLink(record, secret)
+                    }
+                    case "verification-link" {
+                        let evidence = Directory.GetDirectories(archive, "verification-*")[0]
+                        Directory.Delete(evidence, true)
+                        Directory.CreateSymbolicLink(evidence, flow.Temp.Root)
+                    }
+                    case "tampered" {
+                        let evidence = Directory.GetDirectories(archive, "verification-*")[0]
+                        File.AppendAllText(Path.Combine(evidence, "stdout.log"), "Changed original evidence")
+                    }
+                    case "missing" {
+                        Directory.Delete(Directory.GetDirectories(archive, "verification-*")[0], true)
+                    }
+                    case "unsealed" {
+                        File.Delete(Path.Combine(archive, "manifest.json"))
+                        File.Delete(Path.Combine(archive, "seal.json"))
+                        for evidence in Directory.EnumerateDirectories(archive) {
+                            Directory.Delete(evidence, true)
+                        }
+                    }
+                }
+                Amend(flow, run, commit, 1)
+                let second = Edit(flow, run, "Another amendment\n")
+                Amend(flow, run, second, 1)
+                flow.Call([]string{"publish", "--run", run}, 1)
+                Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == saved, "Changed archive was accepted")
+                Check.That(
+                    fault == "unsealed" ? !File.Exists(Path.Combine(archive, "manifest.json")):
+                    File.ReadAllText(Path.Combine(archive, "manifest.json")) == manifest,
+                    "Changed archive was resealed"
+                )
+                Check.That(File.ReadAllText(secret) == "synthetic private evidence", "Archive followed linked path")
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Archive validation repeated inference")
+            }
+        }
+
+        private func LegacyArchives(binary string) {
+            for mode in[]string{"v1-published", "v1-interrupted", "v2-published", "v2-requested"} {
+                let v2 = mode.StartsWith("v2")
+                using let prepared = PublishedContribution.Create(binary, v2: v2)
+                let coordination = prepared.Coordination
+                let flow = coordination.Flow
+                let run = prepared.Run
+                let commit = Edit(flow, run)
+                if mode == "v1-interrupted" {
+                    flow.Mode("lost_body_response")
+                }
+                Amend(flow, run, commit, mode == "v1-interrupted" ? 1: 0)
+                flow.Mode("")
+                if mode == "v2-published" {
+                    flow.Reload()
+                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
+                    Amend(flow, run, commit)
+                }
+                let archive = Path.Combine(run, "original-evidence")
+                File.Delete(Path.Combine(archive, "manifest.json"))
+                File.Delete(Path.Combine(archive, "seal.json"))
+                for evidence in Directory.EnumerateDirectories(archive) {
+                    Directory.Delete(evidence, true)
+                }
+                let location = Path.Combine(run, "amendments", commit)
+                let saved = Saved(location)
+                saved.AsObject().Remove("original_evidence_sha256")
+                File.WriteAllText(Path.Combine(location, "run.json"), saved.ToJsonString())
+                let original = File.ReadAllText(Path.Combine(archive, "run.json"))
+                let checks = File.ReadAllText(Path.Combine(location, "verification.json"))
+                flow.ResetTraffic()
+                let replay = Amend(flow, run, commit)
+                Check.Contains(replay.Output, "Legacy original evidence is unsealed")
+                Check.That(
+                    File.ReadAllText(Path.Combine(location, "verification.json")) == checks,
+                    "Legacy replay repeated verification"
+                )
+                if mode == "v2-requested" {
+                    flow.Reload()
+                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
+                    Amend(flow, run, commit)
+                }
+                let next = Edit(flow, run, "Legacy continuation\n")
+                Amend(flow, run, next)
+                if v2 {
+                    flow.Reload()
+                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
+                    Amend(flow, run, next)
+                    flow.NoInference()
+                } else {
+                    flow.Call([]string{"publish", "--run", run})
+                    flow.Reload()
+                    Check.That(Check.Text(flow.State["exec_count"]) == "1", "Legacy amendment repeated inference")
+                }
+                Check.That(
+                    File.ReadAllText(Path.Combine(archive, "run.json")) == original && !File.Exists(
+                        Path.Combine(archive, "manifest.json")
+                    ) &&
+                        !File.Exists(Path.Combine(archive, "seal.json")),
+                    "Legacy original evidence was rewritten or resealed"
+                )
+                Check.That(Directory.GetDirectories(archive).Length == 0, "Legacy evidence was reconstructed")
+                let originalRecord = Path.Combine(archive, "report.md")
+                File.WriteAllText(originalRecord, "Changed legacy evidence")
+                Amend(flow, run, next, 1)
+            }
+        }
+
+        private func ReceiptAuthority(binary string) {
+            using let prepared = PublishedContribution.Create(binary)
+            let flow = prepared.Coordination.Flow
+            let run = prepared.Run
+            let commit = Edit(flow, run)
+            Amend(flow, run, commit)
+            using let snapshot = FixtureSnapshot(flow.Temp.Root)
+            for field in[]string{"issue", "head", "approval", "model", "original_head", "amendment"} {
+                snapshot.Restore()
+                flow.Reload()
+                let location = Path.Combine(run, "amendments", commit)
+                let saved = Saved(location)
+                let body = Check.Text(saved["body"])
+                let start = body.IndexOf("<!-- tokate-receipt:") + "<!-- tokate-receipt:".Length
+                let encoded = body.Substring(start, body.IndexOf(" -->", start) - start)
+                let receipt = Check.Json(encoded)
+                if field == "issue" {
+                    receipt[field] = JsonValue.Create(999)
+                } else if field == "amendment" {
+                    (receipt[field] ?? throw Exception("Missing amendment"))["seconds"] = JsonValue.Create(31)
+                } else {
+                    receipt[field] = JsonValue.Create(
+                        field == "head" || field == "original_head" ? String('b', 40):
+                        "changed"
+                    )
+                }
+                let altered = body.Replace(encoded, receipt.ToJsonString())
+                saved["body"] = JsonValue.Create(altered)
+                File.WriteAllText(Path.Combine(location, "run.json"), saved.ToJsonString())
+                (flow.State["pulls"]?[0] ?? throw Exception("Missing PR"))["body"] = JsonValue.Create(altered)
+                flow.Save()
+                let original = File.ReadAllText(Path.Combine(run, "run.json"))
+                flow.ResetTraffic()
+                flow.Call([]string{"publish", "--run", run}, 1)
+                Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == original, "Altered receipt was accepted")
+                flow.Reload()
+                for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                    Check.That(Check.Text(call["method"]) == "GET", "Receipt refusal attempted publication")
+                }
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Receipt refusal repeated inference")
             }
         }
 
@@ -200,6 +476,12 @@ internal class AmendmentFlow {
             Check.That(Saved(run)["amendments"]?.AsArray().Count == 2, "Missing amendment history")
             flow.Reload()
             Check.Contains(Check.Text(flow.State["pulls"]?[0]?["body"]), "donor-reported tools")
+            flow.ResetTraffic()
+            flow.Call([]string{"publish", "--run", run}, owner: owner)
+            flow.Reload()
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "Published amendment replay repeated a write")
+            }
         }
 
         private func V1Interrupted(binary string, mode string) {
@@ -310,9 +592,16 @@ internal class AmendmentFlow {
                 } else if failure == "mutating-check" {
                     let amended = Edit(flow, run, "Trigger candidate mutation", "mutate")
                     Amend(flow, run, amended, 1)
-                    Check.Contains(
-                        Check.Text(Saved(Path.Combine(run, "amendments", amended))["error"]),
-                        "clean checkout"
+                    let saved = Saved(Path.Combine(run, "amendments", amended))
+                    Check.That(
+                        Check.Text(saved["failure_stage"]) == "changed_candidate" && Check.Text(
+                            saved["failure_reason"]
+                        ) == "candidate_changed",
+                        "Verifier mutation did not fail candidate validation"
+                    )
+                    Check.That(
+                        flow.Git("-C", Path.Combine(run, "checkout"), "status", "--porcelain") == "",
+                        "Verification changed the original candidate checkout"
                     )
                     continue
                 }
@@ -331,7 +620,13 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
+        private func V2(
+            binary string,
+            mode string = "",
+            native bool = false,
+            modelPolicy string = "",
+            legacy bool = false
+        ) {
             using let flow = CoordinationFixture(binary)
             let run = PublishedContribution.V2Original(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
@@ -363,6 +658,7 @@ internal class AmendmentFlow {
                 "Amendment repeated an applied request comment"
             )
             let path = flow.Event(request)
+            var legacyBody = ""
             if mode == "lost_body_response" || mode == "lost_state_response" || mode == "interrupted_state_write" {
                 flow.Flow.Mode(mode)
                 flow.Coordinate(path, 1)
@@ -371,6 +667,32 @@ internal class AmendmentFlow {
                     mode == "lost_state_response" ? 0: 1
                 )
                 flow.Flow.Mode("")
+                if legacy {
+                    flow.Flow.Reload()
+                    let pull = flow.Flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
+                    let body = Check.Text(pull["body"])
+                    let metadata = request["metadata"] ?? throw Exception("Missing amendment metadata")
+                    let declared = metadata["tools"]?.AsArray() ?? JsonArray()
+                    let legacyReport = "Review amendment: " + Check.Text(metadata["previous"]) + " → " + Check.Text(
+                        metadata["head"]
+                    ) +
+                        ". Donor reports all original owner commands passed locally with a separate " +
+                        Check.Text(metadata["seconds"]) +
+                        " second verification budget; no inference was launched by amend.\n\n" +
+                        "Original execution/model/effort/runtime/usage observations cover original work only. Amendment editing: " +
+                        (
+                        declared.Count == 0 ? "manual; coding time and usage unknown":
+                        "donor-reported tools " + declared.ToJsonString() +
+                            "; identity, coding time and usage not independently attested"
+                    ) +
+                        ". Owner CI and review must validate this exact amended commit."
+                    let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal) +
+                        "<!-- tokate-report:start -->".Length
+                    let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
+                    legacyBody = body.Remove(start, end - start).Insert(start, "\n" + legacyReport + "\n")
+                    pull["body"] = JsonValue.Create(legacyBody)
+                    flow.Flow.Save()
+                }
             }
             flow.Flow.ResetTraffic()
             flow.Coordinate(path)
@@ -388,6 +710,18 @@ internal class AmendmentFlow {
             flow.Flow.Reload()
             for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                 Check.That(Check.Text(call["method"]) == "GET", "Applied amendment request repeated writes")
+            }
+            if legacy {
+                Check.That(
+                    Check.Text(flow.Flow.State["pulls"]?[0]?["body"]) == legacyBody,
+                    "Legacy replay changed the exact applied body"
+                )
+                Check.Contains(legacyBody, "Owner review before")
+                Check.Contains(legacyBody, "Owner review after")
+                flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                AssertOriginal(run, original)
+                Check.That(flow.State()["state"]?["amendments"]?.AsArray().Count == 1, "Legacy history missing")
+                return
             }
             Amend(flow.Flow, run, commit, tools: tools)
             AssertOriginal(run, original)
@@ -477,7 +811,7 @@ internal class AmendmentFlow {
                         pull["body"] = JsonValue.Create(
                             failure == "report-edited" ?
                             Check.Text(pull["body"]).Replace(
-                                "The coordinator did not observe coding execution.",
+                                "coordinator did not observe execution.",
                                 "Incorrect attribution."
                             ):
                             Check.Text(pull["body"]).Replace("tokate-receipt:", "edited-receipt:")
@@ -540,6 +874,11 @@ internal class AmendmentFlow {
             var matched bool
             for name in[]string{
                 "Structured",
+                "ArchiveRefusals",
+                "ArchiveIntegrity",
+                "ArchiveIdentity",
+                "LegacyArchives",
+                "ReceiptAuthority",
                 "V1",
                 "V1Owner",
                 "V1Push",
@@ -554,13 +893,32 @@ internal class AmendmentFlow {
                 "V2Body",
                 "V2State",
                 "V2StateBefore",
+                "V2LegacyStateBefore",
                 "V2Stale"
             } {
                 if only != "" && only != name {
                     continue
                 }
                 matched = true
+                if !CiShard.Include("Amendment/" + name) {
+                    continue
+                }
                 switch name {
+                    case "ArchiveRefusals" {
+                        ArchiveRefusals(binary)
+                    }
+                    case "ArchiveIdentity" {
+                        ArchiveIdentity(binary)
+                    }
+                    case "ArchiveIntegrity" {
+                        ArchiveIntegrity(binary)
+                    }
+                    case "LegacyArchives" {
+                        LegacyArchives(binary)
+                    }
+                    case "ReceiptAuthority" {
+                        ReceiptAuthority(binary)
+                    }
                     case "Structured" {
                         Structured(binary)
                     }
@@ -607,6 +965,9 @@ internal class AmendmentFlow {
                     }
                     case "V2StateBefore" {
                         V2(binary, "interrupted_state_write")
+                    }
+                    case "V2LegacyStateBefore" {
+                        V2(binary, "interrupted_state_write", legacy: true)
                     }
                     case "V2Stale" {
                         V2Stale(binary)

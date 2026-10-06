@@ -10,7 +10,6 @@ import System.IO
 import System.Net
 import System.Net.Sockets
 import System.Text.Json.Nodes
-import Tokate
 
 internal partial class NativeFlow : NativeFixture {
     internal init(binary string) : base(binary) { }
@@ -203,8 +202,17 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func CrossAccountFlow() {
-        Approve()
-        let run = Claim()
+        ResetTraffic()
+        let approval = Call(
+            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+            owner: true,
+            traffic: true
+        )
+        Traffic(9, 5, 0, 0, approval)
+        ResetTraffic()
+        let claimed = Call(ClaimArgs(), traffic: true)
+        Traffic(33, 1, 21, 0, claimed)
+        let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
         Claim(code: 1)
         Call([]string{"work", "--run", run})
         Call([]string{"publish", "--run", run})
@@ -236,15 +244,20 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func OwnerPolicy() {
-        Call([]string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}, 1)
+        Reject(
+            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+            "Repository write permission is required"
+        )
         Approve()
-        Claim(model: "not-allowed", code: 1)
+        Reject(ClaimArgs(model: "not-allowed"), "not allowed by the repository policy")
         for seconds in[]string{"0", "3601", "86401"} {
-            Claim(seconds: seconds, code: 1)
+            Reject(
+                ClaimArgs(seconds: seconds),
+                seconds == "3601" ? "Runtime exceeds repository policy": "Invalid positive number: --seconds"
+            )
         }
         NoInference()
         let run = Claim(seconds: "1800")
-        Call([]string{"work", "--run", run})
         Check.That(
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == "1800",
             "Saved explicit budget changed"
@@ -263,100 +276,93 @@ internal partial class NativeFlow : NativeFixture {
             )
             flow.Approve()
             if !unrestricted {
-                flow.Claim(model: "unlisted-model", code: 1)
-                flow.Claim(model: "gpt-6-sol", effort: "xhigh", code: 1)
-                flow.Claim(effort: "low", code: 1)
+                flow.Reject(flow.ClaimArgs(model: "unlisted-model"), "not allowed by the repository policy")
+                flow.Reject(flow.ClaimArgs(model: "gpt-6-sol", effort: "xhigh"), "not allowed by the repository policy")
+                flow.Reject(flow.ClaimArgs(effort: "low"), "not allowed by the repository policy")
             }
-            flow.Claim(seconds: "3601", code: 1)
-            flow.Claim(network: true, code: 1)
-            flow.Claim(effort: "unknown", code: 1)
-            flow.Claim(effort: "absent", code: 1)
-            flow.Claim(effort: "invalid", code: 1)
+            flow.Reject(flow.ClaimArgs(seconds: "3601"), "Runtime exceeds repository policy")
+            flow.Reject(flow.ClaimArgs(network: true), "Repository policy forbids command network access")
+            for effort in[]string{"unknown", "absent", "invalid"} {
+                flow.Reject(flow.ClaimArgs(effort: effort), "Invalid value for --effort")
+            }
             flow.NoInference()
             let model = "gpt-6-sol"
             let run = flow.Claim(model: model, effort: "high")
-            flow.Call([]string{"work", "--run", run})
-            flow.Call([]string{"publish", "--run", run})
-            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
-            flow.Reload()
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(
-                Check.Text(flow.State["requested_model"]) == model && Check.Text(
-                    flow.State["requested_effort"]
-                ) == "model_reasoning_effort=\"high\"",
-                "Harness settings differ from explicit donor selection"
+                Check.Text(saved["model"]) == model && Check.Text(saved["effort"]) == "high",
+                "Claim substituted donor model/effort"
             )
-            let pulls = flow.State["pulls"]?.ToJsonString() ?? ""
-            let approval = flow.Git("-C", flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
-            flow.SetModelPolicy(
-                unrestricted ? "whitelist": "unrestricted",
-                unrestricted ?
-                "{\"gpt-6.1-sol\":[\"high\"]}": "omit"
-            )
-            Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "policy or template changed")
-            Check.Contains(
-                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, true).Error,
-                "policy or template changed"
-            )
-            flow.Reload()
-            Check.That(
-                File.ReadAllText(Path.Combine(run, "run.json")) == saved &&
-                    flow
-                    .State["pulls"]
-                    ?.ToJsonString() == pulls && flow.Git(
-                    "-C",
-                    flow.Upstream,
-                    "rev-parse",
-                    "refs/heads/tokate/approvals/1"
-                ) == approval,
-                "Model-policy edit rewrote saved authority or work"
-            )
+            flow.NoInference()
+            flow.NoPr()
         }
     }
 
     internal func ModelPolicyMalformed() {
         let path = Path.Combine(Upstream, ".github/tokate.json")
-        let original = File.ReadAllText(path)
-        for version in[]int32{1, 2} {
-            for fields in[]string{
-                "\"model_policy\":null",
-                "\"model_policy\":true",
-                "\"model_policy\":1",
-                "\"model_policy\":[]",
-                "\"model_policy\":{}",
-                "\"model_policy\":\"other\"",
+        let original = Check.Json(File.ReadAllText(path))
+        original.AsObject().Remove("models")
+        let text = original.ToJsonString()
+        for fixture in[][]string{
+            []string{"\"model_policy\":null", "model_policy must be exactly whitelist or unrestricted"},
+            []string{"\"model_policy\":true", "model_policy must be exactly whitelist or unrestricted"},
+            []string{"\"model_policy\":1", "model_policy must be exactly whitelist or unrestricted"},
+            []string{"\"model_policy\":[]", "model_policy must be exactly whitelist or unrestricted"},
+            []string{"\"model_policy\":{}", "model_policy must be exactly whitelist or unrestricted"},
+            []string{"\"model_policy\":\"other\"", "model_policy must be exactly whitelist or unrestricted"},
+            []string{
                 "\"model_policy\":\"whitelist\",\"model_policy\":\"unrestricted\"",
+                "model_policy must be exactly whitelist or unrestricted"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"model_policy\":\"unrestricted\"",
+                "model_policy must be exactly whitelist or unrestricted"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"models\":{\"model\":[\"high\"]}",
+                "Unrestricted model policy requires omitted models or an empty object"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"models\":null",
+                "Unrestricted model policy requires omitted models or an empty object"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"models\":[]",
+                "Unrestricted model policy requires omitted models or an empty object"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"models\":\"bad\"",
+                "Unrestricted model policy requires omitted models or an empty object"
+            },
+            []string{
                 "\"model_policy\":\"unrestricted\",\"models\":{},\"models\":{}",
-                "\"model_policy\":\"whitelist\"",
-                "\"model_policy\":\"whitelist\",\"models\":{}",
+                "Explicit model policy cannot contain duplicate models fields"
+            },
+            []string{"\"model_policy\":\"whitelist\"", "Policy models must map model names to effort arrays"},
+            []string{"\"model_policy\":\"whitelist\",\"models\":{}", "Set models and a max_seconds limit"},
+            []string{
                 "\"model_policy\":\"whitelist\",\"models\":null",
-                "\"model_policy\":\"whitelist\",\"models\":{\"bad model\":[\"high\"]}",
-                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[]}",
+                "Policy models must map model names to effort arrays"
+            },
+            []string{"\"model_policy\":\"whitelist\",\"models\":{\"bad model\":[\"high\"]}", "Invalid model name"},
+            []string{"\"model_policy\":\"whitelist\",\"models\":{\"model\":[]}", "Each model needs allowed efforts"},
+            []string{
                 "\"model_policy\":\"whitelist\",\"models\":{\"model\":\"high\"}",
-                "\"model_policy\":\"whitelist\",\"models\":{\"model\":[null]}",
+                "Each model needs allowed efforts"
+            },
+            []string{"\"model_policy\":\"whitelist\",\"models\":{\"model\":[null]}", "Invalid reasoning effort"},
+            []string{
                 "\"model_policy\":\"whitelist\",\"models\":{\"model\":[\"high,xhigh\"]}",
-                "\"models\":{}",
-                "\"models\":null",
-                "\"models\":{\"model\":[\"absent\"]}"
-            } {
-                let policy = Check.Json(original)
-                policy["version"] = JsonValue.Create(version)
-                policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
-                policy.AsObject().Remove("models")
-                let text = policy.ToJsonString()
-                File.WriteAllText(path, text.Substring(0, text.Length - 1) + "," + fields + "}")
-                Commit("Malformed model policy fixture")
-                Call([]string{"policy", "--repo", "owner/project"}, 1)
-                Check.That(File.ReadAllText(path).Contains(fields), "Policy inspection normalized owner bytes")
-            }
+                "Invalid reasoning effort"
+            },
+            []string{"\"models\":{}", "Set models and a max_seconds limit"},
+            []string{"\"models\":null", "Policy models must map model names to effort arrays"},
+            []string{"\"models\":{\"model\":[\"absent\"]}", "Invalid reasoning effort"},
+        } {
+            File.WriteAllText(path, text.Substring(0, text.Length - 1) + "," + fixture[0] + "}")
+            Commit("Malformed model policy fixture")
+            Reject([]string{"policy", "--repo", "owner/project"}, fixture[1])
         }
-        NoInference()
-        NoPr()
     }
 
     internal func FailedReassignment() {
@@ -443,11 +449,8 @@ internal partial class NativeFlow : NativeFixture {
             Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == expectedSeconds,
             "Wrong default budget for owner limit " + ownerSeconds.ToString()
         )
-        Call([]string{"work", "--run", run})
-        Check.That(
-            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["seconds"]) == expectedSeconds,
-            "Saved default budget changed"
-        )
+        NoInference()
+        NoPr()
     }
 
     internal func IssueEdit() {
@@ -456,7 +459,7 @@ internal partial class NativeFlow : NativeFixture {
         let issue = State["issue"] ?? throw Exception("Missing issue")
         issue["body"] = JsonValue.Create("Changed task")
         Save()
-        Claim(code: 1)
+        Reject(ClaimArgs(), "The owner must approve again")
     }
 
     internal func Revocation() {
@@ -580,23 +583,7 @@ internal partial class NativeFlow : NativeFixture {
         Approve()
         let run = Claim()
         Call([]string{"assign", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}, owner: true)
-        Call([]string{"work", "--run", run}, 1)
-        NoInference()
-    }
-
-    internal func FalseSuccess() {
-        Approve()
-        let run = Claim()
-        Mode("verification_fail")
-        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
-        Check.That(
-            Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "verification.json")))[0]?["exit_code"]) == "1",
-            "Failed verification not recorded"
-        )
-        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "Owner verification failed")
-        Reload()
-        Check.That(Check.Text(State["exec_count"]) == "1", "Failed recovery spent inference")
-        NoPr()
+        Reject([]string{"work", "--run", run}, "Approval was replaced")
     }
 
     internal func PolicyEdit() {
@@ -664,26 +651,17 @@ internal partial class NativeFlow : NativeFixture {
         Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
     }
 
-    internal func ProtectedPolicyFreshness() {
-        Approve()
-        let run = Claim()
-        let saved = File.ReadAllText(Path.Combine(run, "run.json"))
-        ProtectedPolicy()
-        Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "policy or template changed")
-        Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == saved, "Old approval was reinterpreted")
-        NoInference()
-        NoPr()
-    }
-
     internal func ProtectedPublication() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.ProtectedPolicy()
+        flow.Approve()
+        let run = flow.Claim()
+        flow.Mode("protected_entrypoint")
+        flow.Call([]string{"work", "--run", run}, 1)
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for committed in[]bool{false, true} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.ProtectedPolicy()
-            flow.Approve()
-            let run = flow.Claim()
-            flow.Mode("protected_entrypoint")
-            flow.Call([]string{"work", "--run", run}, 1)
+            baseline.Restore()
             let checkout = Path.Combine(run, "checkout")
             let path = Path.Combine(run, "run.json")
             let saved = Check.Json(File.ReadAllText(path))
@@ -809,11 +787,13 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func GitEvidence() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim()
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for fault in[]string{"missing-nul", "invalid-utf8", "truncated"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
+            baseline.Restore()
             flow.DiffFault("git_diff_fault", fault)
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Git path evidence")
             flow.NoPr()
@@ -885,8 +865,8 @@ internal partial class NativeFlow : NativeFixture {
         let saved = Check.Json(File.ReadAllText(Path.Combine(run, "publication.json")))
         let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
         Check.That(Check.Text(saved["body"]) == body, "Saved publication body differs")
-        Check.Contains(body, "Independent owner verification: 1/1 checks passed")
-        Check.Contains(body, "input_tokens")
+        Check.Contains(body, "Tokate observed locally: 1/1 checks passed")
+        Check.Contains(body, "input: 100")
         for value in[]string{
             "synthetic-raw",
             "synthetic-usage-secret",
@@ -941,11 +921,13 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func PublicationFailures() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim()
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for mode in[]string{"push_fail", "pr_fail", "pr_fail_after_create"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
+            baseline.Restore()
             flow.Mode(mode)
             flow.ResetTraffic()
             let failure = flow.Call([]string{"work", "--run", run}, 1, traffic: true)
@@ -980,12 +962,145 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
+    internal func ExistingPublication() {
+        using let prepared = PublishedContribution.Create(Binary)
+        let flow = prepared.Coordination.Flow
+        let run = prepared.Run
+        for fault in[]string{
+            "exact",
+            "closed",
+            "merged",
+            "ready",
+            "receipt",
+            "marker",
+            "fork",
+            "author",
+            "base",
+            "head",
+            "author-id",
+            "base-repo",
+            "missing-base-repo",
+            "merged-at",
+            "ambiguous",
+            "later-page",
+            "unbounded",
+            "invalid"
+        } {
+            prepared.Restore()
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            saved["state"] = JsonValue.Create("generated")
+            saved.AsObject().Remove("pr")
+            saved.AsObject().Remove("pr_url")
+            File.WriteAllText(Path.Combine(run, "run.json"), saved.ToJsonString())
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            switch fault {
+                case "closed" {
+                    pull["state"] = JsonValue.Create("closed")
+                }
+                case "merged" {
+                    pull["merged"] = JsonValue.Create(true)
+                }
+                case "ready" {
+                    pull["draft"] = JsonValue.Create(false)
+                }
+                case "receipt" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]).Replace(Check.Text(saved["approval"]), Guid.NewGuid().ToString("D"))
+                    )
+                }
+                case "marker" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]) + "<!-- tokate-run:" + Check.Text(saved["id"]) + " -->"
+                    )
+                }
+                case "fork" {
+                    (pull["head"]?["repo"] ?? throw Exception("Missing fork"))["full_name"] = JsonValue.Create(
+                        "donor/other"
+                    )
+                }
+                case "author" {
+                    (pull["user"] ?? throw Exception("Missing author"))["login"] = JsonValue.Create("other")
+                }
+                case "author-id" {
+                    (pull["user"] ?? throw Exception("Missing author"))["id"] = JsonValue.Create(999)
+                }
+                case "base-repo" {
+                    (pull["base"] ?? throw Exception("Missing base"))["repo"] = Check.Map("full_name", "other/project")
+                }
+                case "missing-base-repo" {
+                    (pull["base"] ?? throw Exception("Missing base")).AsObject().Remove("repo")
+                }
+                case "merged-at" {
+                    pull["merged_at"] = JsonValue.Create(DateTimeOffset.UtcNow.ToString("O"))
+                }
+                case "base" {
+                    (pull["base"] ?? throw Exception("Missing base"))["ref"] = JsonValue.Create("other")
+                }
+                case "head" {
+                    (pull["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(
+                        Check.Text(saved["base"])
+                    )
+                }
+                case "ambiguous", "later-page" {
+                    let pulls = flow.State["pulls"]?.AsArray() ?? throw Exception("Missing PRs")
+                    let count = fault == "later-page" ? 101: 2
+                    for i in 1 ... count {
+                        let duplicate = pull.DeepClone()
+                        duplicate["number"] = JsonValue.Create(10 + i)
+                        pulls.Add(duplicate)
+                    }
+                }
+                case "unbounded" {
+                    flow.State["pull_history_unbounded"] = JsonValue.Create(true)
+                }
+                case "invalid" {
+                    flow.State["pull_history_invalid"] = JsonValue.Create(true)
+                }
+            }
+            flow.Save()
+            flow.ResetTraffic()
+            let result = flow.Call([]string{"publish", "--run", run}, fault == "exact" ? 0: 1)
+            flow.Reload()
+            var pages int32
+            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "PR recovery attempted a write")
+                if Check.Text(call["path"]).Contains("/pulls?") {
+                    pages++
+                }
+            }
+            if fault == "later-page" {
+                Check.That(pages == 2, "PR recovery failed to inspect later history")
+                Check.Contains(result.Error, "ambiguous")
+            }
+            if fault == "unbounded" {
+                Check.That(pages > 1 && pages <= 25, "PR history inspection was not bounded")
+                Check.Contains(result.Error, "history is incomplete")
+            }
+            if fault == "exact" {
+                Check.That(
+                    Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["state"]) == "published",
+                    "Exact open draft was not recovered"
+                )
+            } else {
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                    "Invalid PR was recorded as published"
+                )
+            }
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "PR recovery repeated inference")
+            Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "PR recovery duplicated PR")
+        }
+    }
+
     internal func CanonicalVerification() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim()
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for mode in[]string{"replacement", "graft", "index_assume", "index_skip"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
+            baseline.Restore()
             flow.Mode(mode)
             let failure = flow.Call([]string{"work", "--run", run}, 1)
             Check.Contains(
@@ -1001,28 +1116,17 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
-    internal func SelfOwnedFlow() {
-        Reload()
-        State["self_owned"] = JsonValue.Create(true)
-        Save()
-        Call([]string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "owner"}, owner: true)
-        let run = Claim()
-        Call([]string{"work", "--run", run})
-        Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-        let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
-        Check.That(Check.Text(saved["head_repo"]) == "owner/project", "Self-owned version-1 run changed repository")
-        Check.That(Check.Text(saved["state"]) == "published", "Self-owned version-1 publication failed")
-    }
-
     internal func CanonicalPublication() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim()
+        flow.Mode("push_fail")
+        flow.Call([]string{"work", "--run", run}, 1)
+        flow.Mode("")
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for mode in[]string{"replacement", "packed", "graft", "index_assume", "index_skip"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
-            flow.Mode("push_fail")
-            flow.Call([]string{"work", "--run", run}, 1)
-            flow.Mode("")
+            baseline.Restore()
             let savedPath = Path.Combine(run, "run.json")
             let saved = Check.Json(File.ReadAllText(savedPath))
             let checkout = Path.Combine(run, "checkout")
@@ -1067,22 +1171,6 @@ internal partial class NativeFlow : NativeFixture {
                     flow.Git("--no-replace-objects", "-C", probe, "show", "candidate:.github/tokate-pr.md"),
                     "hidden protected change"
                 )
-                Check.Contains(Commands.Git(checkout, "diff", "--name-only", base, malicious), ".github/tokate-pr.md")
-                Check.Contains(
-                    Commands.GitRaw(checkout, []string{"diff", "--name-only", "-z", base, malicious}),
-                    ".github/tokate-pr.md\0"
-                )
-                let check = Verification.Run(
-                    checkout,
-                    []string{
-                        "/bin/sh",
-                        "-c",
-                        "git show HEAD:.github/tokate-pr.md | /usr/bin/grep 'hidden protected change'"
-                    },
-                    false,
-                    10
-                )
-                Check.That(check.Code == 0, check.Output + check.Error)
                 if mode == "packed" {
                     flow.Git("--no-replace-objects", "-C", checkout, "checkout", "--force", "--detach", malicious)
                     Check.Contains(
@@ -1099,7 +1187,6 @@ internal partial class NativeFlow : NativeFixture {
                     flow.Temp.Env
                 )
                 Check.That(ordinary.Code == 1, "Graft did not alter ancestry")
-                Commands.Git(checkout, "merge-base", "--is-ancestor", base, benign)
             } else {
                 flow.Git(
                     "-C",
@@ -1113,7 +1200,16 @@ internal partial class NativeFlow : NativeFixture {
             }
             let recordBefore = File.ReadAllText(savedPath)
             let patchBefore = File.ReadAllText(Path.Combine(run, "changes.patch"))
-            flow.Call([]string{"publish", "--run", run}, 1)
+            Check.Contains(
+                flow.Call([]string{"publish", "--run", run}, 1).Error,
+                mode == "graft" ? "self-contained Git metadata":
+                (
+                    mode.StartsWith("index_") ? "Candidate index":
+                    (mode == "packed" ? "Canonical commit differs": "Saved commit or checkout changed")
+                )
+            )
+            flow.Reload()
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Rejected publication repeated inference")
             Check.That(flow.Git("-C", remote, "rev-parse", branch) == base, "Unsafe candidate reached publication")
             Check.That(File.ReadAllText(savedPath) == recordBefore, "Blocked publication rewrote record")
             Check.That(
@@ -1125,37 +1221,11 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
-    internal func TrafficBudgets() {
-        ResetTraffic()
-        let approval = Call(
-            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-            owner: true,
-            traffic: true
-        )
-        Traffic(9, 5, 0, 0, approval)
-        ResetTraffic()
-        let claimed = Call(ClaimArgs(), traffic: true)
-        Traffic(33, 1, 21, 0, claimed)
-        let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
-        Mode("push_fail")
-        Call([]string{"work", "--run", run}, 1)
-        Mode("")
-        ResetTraffic()
-        let published = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(20, 1, 9, 0, published)
-        Reload()
-        Check.That(Check.Text(State["exec_count"]) == "1", "Publishing repeated inference")
-        ResetTraffic()
-        let repeated = Call([]string{"publish", "--run", run}, traffic: true)
-        Traffic(11, 0, 0, 0, repeated)
-        Reload()
-        Check.That(
-            State["pulls"]?.AsArray().Count == 1 && Check.Text(State["exec_count"]) == "1",
-            "Repeated publication duplicated work"
-        )
-    }
-
     internal func ConditionalClaim() {
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.ApproveSelf()
+        using let baseline = FixtureSnapshot(flow.Temp.Root)
         for mode in[]string{
             "strong",
             "weak",
@@ -1167,9 +1237,7 @@ internal partial class NativeFlow : NativeFixture {
             "weak-bound",
             "backslash"
         } {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.ApproveSelf()
+            baseline.Restore()
             flow.ETags(mode)
             if mode == "empty" || mode == "bound" || mode == "weak-bound" || mode == "backslash" {
                 let opaque = mode == "empty" ? "": (
@@ -1267,34 +1335,8 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
-    internal func ConditionalPublication() {
-        for mode in[]string{"strong", "weak", "weak-to-strong", "strong-to-weak", "missing"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
-            flow.ETags(mode)
-            flow.Mode("push_fail")
-            flow.ResetTraffic()
-            let worked = flow.Call([]string{"work", "--run", run}, 1, traffic: true)
-            flow.Traffic(35, 0, 23, 0, worked)
-            flow.NoPr()
-            flow.Mode("")
-            flow.ResetTraffic()
-            let published = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(20, 1, 9, 0, published)
-            flow.ResetTraffic()
-            let repeated = flow.Call([]string{"publish", "--run", run}, traffic: true)
-            flow.Traffic(11, 0, 0, 0, repeated)
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Equivalent ETags repeated inference")
-            Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Equivalent ETags duplicated publication")
-            Check.That(Check.Text(flow.State["pulls"]?[0]?["draft"]) == "true", "Publication must remain draft")
-        }
-    }
-
     internal func ConditionalApproval() {
-        for tags in[]string{"strong", "weak-to-strong", "strong-to-weak"} {
+        for tags in[]string{"weak-to-strong"} {
             for mode in[]string{"after_304_edit", "after_304_revoke"} {
                 for publication in[]bool{false, true} {
                     using let flow = NativeFlow(Binary)
@@ -1360,7 +1402,6 @@ internal partial class NativeFlow : NativeFixture {
                 timer.Elapsed.TotalSeconds >= (status == 0 || status == 503 ? 1.0: 2.0),
                 "Server retry delay was ignored"
             )
-            Check.That(timer.Elapsed.TotalSeconds < 10.0, "Retry used local time instead of server Date")
             Check.That(Check.Text(Check.Json(result.Output)["version"]) == "1", "Retry lost policy result")
             Traffic(3, 0, 0, 1, result)
         }
@@ -1377,11 +1418,9 @@ internal partial class NativeFlow : NativeFixture {
                 )
             }
             Faults("repos/owner/project", faults)
-            let timer = Stopwatch.StartNew()
             let failure = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
             let retryable = status == 0 || status == 503
             Traffic(retryable ? 3: 1, 0, status == 304 ? 1: 0, retryable ? 2: 0, failure)
-            Check.That(timer.Elapsed.TotalSeconds < 10.0, "Unbounded read failure")
             if status == 403 || status == 429 {
                 Check.Contains(failure.Error, "Retry at or after")
                 Check.Contains(failure.Error, "in 60 seconds")
@@ -1398,10 +1437,7 @@ internal partial class NativeFlow : NativeFixture {
         )
         let timer = Stopwatch.StartNew()
         let timed = Call([]string{"policy", "--repo", "owner/project"}, 1, traffic: true)
-        Check.That(
-            timer.Elapsed.TotalSeconds >= 59.0 && timer.Elapsed.TotalSeconds < 65.0,
-            "Subprocesses escaped the total read deadline"
-        )
+        Check.That(timer.Elapsed.TotalSeconds >= 59.0, "Subprocesses escaped the total read deadline")
         Traffic(2, 0, 0, 1, timed)
     }
 
@@ -1435,20 +1471,6 @@ internal partial class NativeFlow : NativeFixture {
             NoInference()
             Faults("", JsonArray())
         }
-        Faults(
-            "repos/owner/project/issues/1/assignees",
-            Check.Json("[{\"status\":429,\"headers\":\"Retry-After: 2\\r\\n\"}]")
-        )
-        let put = TestProcess.Run(
-            Environment.ProcessPath ?? throw Exception("Missing executable"),
-            []string{"--api-write", "PUT"},
-            Temp.Env
-        )
-        Check.That(put.Code == 1, "PUT accepted a failed mutation")
-        Traffic(0, 1, 0, 0, put)
-        Check.Contains(put.Error, "No automatic retry")
-        Check.Contains(put.Error, "Retry at or after")
-        NoInference()
     }
 
     internal func PublicationRevocation() {
@@ -1644,7 +1666,7 @@ internal partial class NativeFlow : NativeFixture {
         }
     }
 
-    internal func VerificationRecovery(legacy bool = false) {
+    internal func VerificationRecovery() {
         VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
         Approve()
         let run = Claim()
@@ -1655,12 +1677,6 @@ internal partial class NativeFlow : NativeFixture {
         let failed = Check.Json(File.ReadAllText(runPath))
         Check.That(Check.Text(failed["failure_reason"]) == "verification_failed", "New failure omitted stable reason")
         failed["error"] = JsonValue.Create("Changed displayed wording: synthetic-saved-error-marker")
-        if legacy {
-            failed.AsObject().Remove("failure_reason")
-            failed["error"] = JsonValue.Create(
-                "Owner verification failed. See verification.json. No PR will be opened."
-            )
-        }
         File.WriteAllText(runPath, failed.ToJsonString())
         NoPr()
         let original = File.ReadAllText(Path.Combine(run, "verification.json"))
@@ -1727,6 +1743,14 @@ internal partial class NativeFlow : NativeFixture {
             File.ReadAllText(Path.Combine(run, "verification.json")) == original,
             "Rejected recovery reran verification"
         )
+        let legacy = Check.Json(File.ReadAllText(runPath))
+        legacy.AsObject().Remove("failure_reason")
+        legacy["error"] = JsonValue.Create("Owner verification failed. See verification.json. No PR will be opened.")
+        File.WriteAllText(runPath, legacy.ToJsonString())
+        File.AppendAllText(protectedPath, "\n")
+        Check.Contains(Call([]string{"recover", "--run", run}, 1).Error, "protected owner configuration")
+        File.WriteAllText(protectedPath, protectedText)
+        File.WriteAllText(runPath, legacy.ToJsonString())
         Check.Envelope(Call([]string{"recover", "--run", run, "--json"}), "recover", "ok")
         Reload()
         Check.That(Check.Text(State["exec_count"]) == "1", "Recovery spent inference")

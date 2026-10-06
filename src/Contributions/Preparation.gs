@@ -59,7 +59,16 @@ internal class Preparation {
 
         private func Identified(run Data) bool {
             let identity = run.Text("preparation_identity")
-            return identity == Identity(run) || identity == Identity(run, false)
+            return identity == BoundIdentity(run) || identity == BoundIdentity(run, false)
+        }
+
+        private func BoundIdentity(run Data, normalized bool = true) string {
+            let identity = Identity(run, normalized)
+            return V1Continuation.Has(run) ? Data.Hash(
+                identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
+                    J.Get(run.Element(), "continuation")
+                )
+            ): identity
         }
 
         internal func Initialize(directory string, run Data, fork string) {
@@ -70,7 +79,7 @@ internal class Preparation {
             }
             run.Fields["requested_fork"] = fork
             run.Fields["preparation_version"] = 1
-            run.Fields["preparation_identity"] = Identity(run)
+            run.Fields["preparation_identity"] = BoundIdentity(run)
             run.Fields["state"] = "preparing"
             using let file = FileStream(
                 Path.Combine(directory, "run.json"),
@@ -131,7 +140,10 @@ internal class Preparation {
             if File.Exists(eventsPath) || File.Exists(reportPath) {
                 throw Exception(failure)
             }
-            ContributionClaim.Recheck(run)
+            let record = ContributionClaim.Recheck(run)
+            if V1Continuation.Has(run) && run.Text("continuation_phase") == "" {
+                V1Continuation.Capture(directory, run, record)
+            }
             let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")))
             if run.Fields.ContainsKey("preparation_repo_id") && J.Get(upstream, "id").ToString() != J.Get(
                 run.Element(),
@@ -148,7 +160,12 @@ internal class Preparation {
             ContributionClaim.Recheck(run)
             CheckFork(run, upstream)
             CheckBranch(run)
-            Clean(checkout, run)
+            if V1Continuation.Has(run) {
+                Source(checkout, run)
+                V1Continuation.Import(directory, run, record)
+            } else {
+                Clean(checkout, run)
+            }
             run.Fields["preparation_complete"] = true
             run.Fields["state"] = "claimed"
             run.Save(directory)
@@ -168,7 +185,16 @@ internal class Preparation {
             }
             CheckFork(run, upstream)
             CheckBranch(run)
-            Clean(Path.Combine(directory, run.Text("source") == "external" ? "coding": "checkout"), run)
+            let checkout = Path.Combine(directory, run.Text("source") == "external" ? "coding": "checkout")
+            if V1Continuation.Has(run) {
+                Source(checkout, run)
+                if run.Text("continuation_phase") != "imported" {
+                    throw Exception("Continuation import is incomplete; use prepare --run " + directory)
+                }
+                V1Continuation.Check(directory, run, ContributionClaim.Recheck(run))
+            } else {
+                Clean(checkout, run)
+            }
         }
 
         internal func Select(run Data, requested string) {
@@ -419,17 +445,14 @@ internal class Preparation {
             }
         }
 
-        private func Clean(checkout string, run Data) {
+        internal func Source(checkout string, run Data) {
+            if run.Number("preparation_version") != 1 || !Identified(run) {
+                throw Exception("Unsupported preparation identity; source is preserved")
+            }
             Owned(checkout, run)
             Verification.Candidate(checkout)
             Metadata(checkout)
-            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") || Commands.Git(
-                checkout,
-                "status",
-                "--porcelain",
-                "--untracked-files=all",
-                "--ignored"
-            ) != "" {
+            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
                 Reject(checkout)
             }
             let branch = Commands.GitResult(checkout, []string{"symbolic-ref", "--quiet", "--short", "HEAD"})
@@ -447,12 +470,30 @@ internal class Preparation {
             }
         }
 
+        private func Clean(checkout string, run Data) {
+            Source(checkout, run)
+            if Commands.Git(checkout, "status", "--porcelain", "--untracked-files=all", "--ignored") != "" {
+                Reject(checkout)
+            }
+        }
+
         private func Checkout(directory string, run Data) string {
             let name = run.Text("source") == "external" ? "coding": "checkout"
             let checkout = Path.Combine(directory, name)
             let staging = Path.Combine(directory, name + ".staging")
             if Directory.Exists(checkout) || File.Exists(checkout) || FileInfo(checkout).LinkTarget != nil {
-                Clean(checkout, run)
+                if V1Continuation.Has(run) &&
+                    (run.Text("continuation_phase") == "importing" || run.Text("continuation_phase") == "imported") {
+                    Source(checkout, run)
+                    V1Continuation.Check(
+                        directory,
+                        run,
+                        ContributionClaim.Recheck(run),
+                        run.Text("continuation_phase") == "importing"
+                    )
+                } else {
+                    Clean(checkout, run)
+                }
                 if Directory.Exists(staging) || File.Exists(staging) || FileInfo(staging).LinkTarget != nil {
                     Reject(staging)
                 }

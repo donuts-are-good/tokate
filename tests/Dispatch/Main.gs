@@ -2,7 +2,6 @@ package TokateTests
 
 import System
 import System.IO
-import Tokate
 
 func Main(args[]string) int32 {
     try {
@@ -21,93 +20,34 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
-        if args.Length == 2 && args[0] == "--capture-write-failure" {
-            ProcessChecks.LimitedCapture(args[1])
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--capture-prefix" {
-            ProcessChecks.Prefix(args[1])
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--api-write" {
-            try {
-                GitHub.Api("repos/owner/project/issues/1/assignees", method: args[1])
-                return 0
-            } finally {
-                ApiTransport.Report()
-            }
-        }
-        if args.Length == 3 && args[0] == "--verify-captured" {
-            Verification.Check(
-                args[2],
-                System.Collections.Generic.List[Object](),
-                J.Parse("[\"bash\",\"scripts/verify.sh\"]"),
-                args[1],
-                false,
-                1800
-            )
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--verification-cancellation" {
-            VerificationChecks.RuntimeCancellation()
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--verify-checkout" {
-            let result = Verification.Run(args[1], []string{"bash", "scripts/verify.sh"}, true, 1800)
-            Console.Write(result.Output)
-            Console.Error.Write(result.Error)
-            return result.Code ?? throw Exception("Missing completed verifier exit code")
-        }
-        if args.Length == 3 && args[0] == "--runtime-files-parent" {
-            VerificationChecks.RuntimeFilesParent(args[1], args[2])
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--runtime-files" {
-            VerificationChecks.RuntimeFiles()
-            VerificationChecks.RuntimeCancellation()
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--verification-capture" {
-            VerificationChecks.Cleanup()
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--verification" {
-            VerificationChecks.All()
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--pi" {
-            PiChecks.All()
-            return 0
-        }
-        if args.Length == 3 && args[0] == "--pi-real" {
-            PiBoundary.Probe(args[1], args[2])
-            Console.WriteLine("PASS installed pi SDK and isolation probe")
-            return 0
-        }
-        if args.Length == 6 && args[0] == "--pi-bridge" {
-            PiChecks.Bridge(args[1], args[2], args[3], args[4], args[5])
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--process" {
-            ProcessChecks.All()
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--protected-paths" {
-            ProtectedPathChecks.All()
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--suites" {
-            SuiteChecks.All()
-            return 0
-        }
-        if (args.Length == 2 || args.Length == 3) && args[0] == "--suite-fixture" {
-            SuiteChecks.Fixture(args[1], args.Length == 3 ? args[2]: "cancel")
-            return 0
-        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 6 && args[0] == "--pi-proof" {
+            PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
+            return 0
+        }
+        if args.Length == 4 && args[0] == "--local-codex" {
+            LocalCodex.All(binary, args[1], args[2], args[3])
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--process" {
+            ProcessChecks.All(binary)
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--verification" {
+            VerificationChecks.All(binary)
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--protected-paths" {
+            ProtectedPathChecks.All(binary)
+            return 0
+        }
+        if args.Length == 2 && args[0] == "--runtime-files-parent" {
+            VerificationChecks.RuntimeFilesParent(binary, args[1])
+            return 0
+        }
         if args.Length == 2 && args[0] == "--suite" {
             SuiteCatalog.Select(binary, args[1])
             return 0
@@ -142,6 +82,10 @@ func Main(args[]string) int32 {
         }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--preparation" {
             PreparationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--continuation" {
+            ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
         if args.Length == 1 && args[0] == "--cli" {
@@ -181,8 +125,16 @@ func Main(args[]string) int32 {
             SynchronizationChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--public-descriptions" {
+            PublicDescriptions.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--amendments" {
             AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--repairs" {
+            RepairChecks.All(binary, args.Length == 2 ? args[1]: "")
             return 0
         }
         if (args.Length == 1 || args.Length == 2) && args[0] == "--decree" {

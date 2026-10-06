@@ -3,7 +3,6 @@ package TokateTests
 import System
 import System.IO
 import System.Text.Json.Nodes
-import Tokate
 
 internal class TargetBranches {
     shared {
@@ -308,9 +307,7 @@ internal class TargetBranches {
                 let state = test.State()["state"] ?? throw Exception("Missing state")
                 let approval = state["approval"]?.AsObject() ?? throw Exception("Missing approval")
                 approval.Remove("authority_branch")
-                state["approval_id"] = JsonValue.Create(
-                    Data.Hash(RequestData.Canonical(RequestData.Parse(approval.ToJsonString())))
-                )
+                state["approval_id"] = JsonValue.Create(Check.FixtureDigest(approval))
                 test.RewriteState(state)
                 test.Coordinate(test.Event(test.ClaimRequest()))
                 File.WriteAllText(
@@ -488,7 +485,7 @@ internal class TargetBranches {
                     Check.That(
                         Check.Text(approval?["decree"]?["present"]) == "true" && Check.Text(
                             approval?["decree"]?["sha256"]
-                        ) == Data.Hash("synthetic-private-owner-instruction-marker\n"),
+                        ) == "e98121ab8e2b22651b3213509dd86d823df9a110c68bda77a95754b848e6b584",
                         "JSON lost instruction presence/hash"
                     )
                     Check.That(

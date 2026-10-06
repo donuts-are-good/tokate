@@ -1,249 +1,150 @@
 package TokateTests
 
-import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.IO
-import Tokate
+import System.Text.Json.Nodes
 
 internal class PiChecks {
     shared {
-        private func Reject(action Action) {
-            var rejected bool
-            try {
-                action()
-            } catch (error Exception) {
-                rejected = true
-            }
-            Check.That(rejected, "Unsafe pi input was accepted")
-        }
-
-        internal func Bridge(root string, node string, directory string, endpoint string, network string) {
-            let checkout = Path.Combine(directory, "checkout")
-            Directory.CreateDirectory(Path.Combine(checkout, ".git"))
-            File.WriteAllText(Path.Combine(checkout, ".git/config"), "synthetic-private")
-            Directory.CreateDirectory(Path.Combine(checkout, ".pi/extensions"))
+        internal func Run(binary string, root string, node string, directory string, endpoint string, mode string) {
+            let flow = CoordinationFixture(binary)
+            using let cleanup = mode == "cancel" ? nil: flow
+            flow.Initialize(approve: false)
+            let policyPath = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["model_policy"] = JsonValue.Create("whitelist")
+            policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\"]}")
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
+            policy["allow_network"] = JsonValue.Create(true)
+            policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test \\\"$$(cat result.txt)\\\" = final\"]]")
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            let custom = Path.Combine(flow.Flow.Upstream, ".pi")
+            Directory.CreateDirectory(Path.Combine(custom, "extensions"))
+            File.WriteAllText(Path.Combine(custom, "SYSTEM.md"), "HOSTILE_CONTEXT_SENTINEL")
             File.WriteAllText(
-                Path.Combine(checkout, ".pi/settings.json"),
+                Path.Combine(custom, "settings.json"),
                 "{\"extensions\":[\"./extensions/hostile.js\"],\"retry\":{\"enabled\":true}}"
             )
             File.WriteAllText(
-                Path.Combine(checkout, ".pi/extensions/hostile.js"),
+                Path.Combine(custom, "extensions/hostile.js"),
                 "throw new Error('HOSTILE_EXTENSION_LOADED');"
             )
-            File.WriteAllText(Path.Combine(checkout, "AGENTS.md"), "HOSTILE_CONTEXT_SENTINEL")
-            File.WriteAllText(Path.Combine(directory, "private-credential"), "PRIVATE_CREDENTIAL_SENTINEL")
-            let control = PiBoundary.Control(directory, "synthetic/model:exact", endpoint)
-            let args = PiBoundary.Boundary(checkout, root, node, control, true)
-            args.AddRange(
-                []string{
-                    "/tokate-node",
-                    "/tokate-control/bridge.mjs",
-                    "run",
+            flow.Flow.Commit("Pi policy and untrusted customization fixture")
+            flow.Flow.Approve()
+            flow.Claim()
+            File.CreateSymbolicLink(
+                Path.Combine(flow.Flow.Bin, "pi"),
+                Path.Combine(root, "@earendil-works/pi-coding-agent/dist/bundle/cli.js")
+            )
+            let args = List[string]{
+                "prepare",
+                "--repo",
+                "owner/project",
+                "--issue",
+                "1",
+                "--state",
+                Check.Text(flow.State()["sha"]),
+                "--source",
+                "tokate",
+                "--harness",
+                "pi",
+                "--provider",
+                "local-chat-completions",
+                "--model",
+                "synthetic/model:exact",
+                "--effort",
+                "absent",
+                "--node",
+                node,
+                "--endpoint",
+                endpoint,
+                "--seconds",
+                "90",
+                "--verification-reserve",
+                "30",
+                "--runs",
+                Path.Combine(flow.Flow.Temp.Root, "runs"),
+                "--non-interactive"
+            }
+            if mode == "on" {
+                args.Add("--allow-network")
+            }
+            if mode != "off" {
+                args.AddRange([]string{"--pi-root", root})
+            }
+            if mode == "off" {
+                for option in[]string{"--effort", "--model", "--endpoint"} {
+                    let rejected = args.ToArray()
+                    rejected[Array.IndexOf(rejected, option) + 1] = "unsupported"
+                    flow.Flow.Call(rejected, 1)
+                }
+            }
+            File.Delete(Path.Combine(flow.Flow.Bin, "codex"))
+            File.Delete(Path.Combine(flow.Flow.Bin, "codex-impl"))
+            let prepared = flow.Flow.Call(args.ToArray())
+            let index = prepared.Output.LastIndexOf("Run: ")
+            Check.That(index >= 0, "Pi preparation did not return a run")
+            let run = prepared.Output.Substring(index + 5).Trim()
+            let checkout = Path.Combine(run, "checkout")
+            let gitPath = Path.Combine(checkout, ".git/config")
+            let git = File.ReadAllText(gitPath)
+            let secret = Path.Combine(flow.Flow.Temp.Root, "private-credential")
+            File.WriteAllText(secret, "PRIVATE_CREDENTIAL_SENTINEL")
+            File.WriteAllText(
+                Path.Combine(directory, "fixture.json"),
+                Check.Map(
+                    "checkout",
                     checkout,
-                    "synthetic/model:exact",
-                    network
-                }
+                    "run",
+                    run,
+                    "private",
+                    secret,
+                    "outside",
+                    Path.Combine(flow.Flow.Temp.Root, "denied-write")
+                )
+                    .ToJsonString()
             )
-            let result = Commands.Run(
-                "/usr/bin/bwrap",
-                args.ToArray(),
-                checkout,
-                "Implement synthetic edits and return a report.",
-                seconds: 10,
-                isolated: true,
-                outputPath: Path.Combine(directory, "events.jsonl"),
-                errorPath: Path.Combine(directory, "stderr.log")
+            let success = mode == "off" || mode == "on"
+            flow.Flow.Call([]string{"work", "--run", run, "--yes", "--non-interactive"}, success ? 0: 1)
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(saved["state"]) == (success ? "generated": "failed"),
+                "Pi run reported the wrong final state"
             )
-            Console.Write(result.Output)
-            Console.Error.Write(result.Error)
-            if result.Code != 0 || result.Truncated || result.ReadFailed {
-                throw Exception("Pi synthetic bridge execution failed")
+            if success {
+                Check.That(Check.Text(saved["turn_completed"]) == "true", "Pi completion was not recorded")
+                Check.That(
+                    Check.Text(saved["verification"]?[0]?["exit_code"]) == "0",
+                    "Independent Pi verification did not pass"
+                )
+                Check.That(
+                    File.ReadAllText(Path.Combine(checkout, "result.txt")) == "final",
+                    "Pi tool changes were lost"
+                )
+                flow.Flow.Call([]string{"submit", "--run", run})
+                flow.Flow.Reload()
+                flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
+                flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                flow.Flow.Reload()
+                Check.That(flow.Flow.State["pulls"]?.AsArray().Count == 1, "Pi did not produce one draft PR")
+            } else {
+                Check.That(saved["turn_completed"] == nil, "Failed Pi response fabricated completion")
+                Check.That(
+                    saved["commit"] == nil && saved["verification"] == nil,
+                    "Failed Pi inference reached verification or publication"
+                )
             }
-            PiEvidence.Completed(directory, result.Output, "synthetic/model:exact")
-            let check = Verification.Run(
-                checkout,
-                []string{"/bin/sh", "-c", "test \"$$(cat result.txt)\" = final"},
-                false,
-                10
+            Check.Success(TestProcess.Run("/bin/sleep", []string{"3"}, flow.Flow.Temp.Env))
+            Check.That(
+                !File.Exists(Path.Combine(checkout, "timeout-escaped")),
+                "Pi tool timeout left a live descendant"
             )
-            Check.That(check.Code == 0, "Independent owner verification failed")
-        }
-
-        private func Signal(cancellation Chan[bool]) {
-            using let delay = after(TimeSpan.FromMilliseconds(200))
-            select {
-                case <- delay { }
-            }
-            cancellation <- true
-        }
-
-        internal func All() {
-            let storage = Directory.CreateDirectory(
-                Path.Combine("/tmp", "tokate-pi-tests-" + Guid.NewGuid().ToString("N")),
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            )
-            try {
-                let root = storage.FullName
-                PiBoundary.Endpoint("http://127.0.0.1:8080/v1")
-                PiBoundary.Endpoint("http://[::1]:8080/v1")
-                for endpoint in[]string{
-                    "https://127.0.0.1/v1",
-                    "http://remote.example/v1",
-                    "http://user:secret@127.0.0.1/v1",
-                    "http://127.0.0.1/v1?key=secret",
-                    "http://127.0.0.1/v1#secret",
-                    "http://127.0.0.1/other"
-                } {
-                    Reject(() -> PiBoundary.Endpoint(endpoint))
-                }
-                let policy = Policy(
-                    "{\"version\":2,\"model_policy\":\"whitelist\",\"models\":{\"org/model:exact\":[\"absent\"]},\"allowed_tools\":[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}],\"max_seconds\":60,\"allow_network\":false,\"verification\":[[\"true\"]],\"required_checks\":[\"test\"]}"
-                )
-                policy.ValidatePi("org/model:exact", "absent", 60, false)
-                Reject(() -> policy.ValidatePi("org/model:exact", "high", 60, false))
-                Reject(() -> policy.ValidatePi("org/model:other", "absent", 60, false))
-                Reject(() -> policy.ValidatePi("org/model:exact", "absent", 61, false))
-                Reject(() -> policy.ValidatePi("org/model:exact", "absent", 60, true))
-                Reject(() -> policy.Validate("org/model:exact", "high", 60, false))
-                let started = "{\"type\":\"pi.started\",\"model\":\"exact\",\"provider\":\"local-chat-completions\",\"effort\":\"absent\"}\n"
-                let completed = "{\"type\":\"pi.completed\",\"model\":\"exact\",\"stop_reason\":\"stop\",\"report\":\"Done\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}\n"
-                PiEvidence.Completed(root, started + completed, "exact")
-                Reject(() -> PiEvidence.Completed(root, started, "exact"))
-                Reject(() -> PiEvidence.Completed(root, started + completed + completed, "exact"))
-                Reject(() -> PiEvidence.Completed(root, started + completed, "other"))
-                Reject(() -> PiEvidence.Completed(root, started + completed.Replace("\"stop\"", "\"length\""), "exact"))
-                Reject(() -> PiEvidence.Completed(root, started + completed.Replace("\"Done\"", "\"\""), "exact"))
-                Reject(
-                    () -> PiEvidence.Completed(root, started + completed.Replace("tokens\":2", "tokens\":-1"), "exact")
-                )
-                Reject(() -> PiEvidence.Completed(root, started + "malformed", "exact"))
-                let checkout = Path.Combine(root, "checkout")
-                Directory.CreateDirectory(Path.Combine(checkout, ".git"))
-                File.WriteAllText(Path.Combine(checkout, ".git/config"), "private-git")
-                let secret = Path.Combine(root, "credential-sentinel")
-                File.WriteAllText(secret, "private-credential")
-                let modules = Path.Combine(root, "node_modules")
-                Directory.CreateDirectory(modules)
-                let control = PiBoundary.Control(root, "exact", "http://127.0.0.1:1/v1")
-                var args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, false)
-                args.AddRange(
-                    []string{
-                        "/bin/sh",
-                        "-c",
-                        "test ! -r \"$1\" && test ! -r .git/config && ! touch .git/config && ! touch /usr/bin/tokate-test && test -z \"$$PRIVATE_SENTINEL\" && touch work.txt && touch /tmp/temp.txt && test ! -e /tmp/tokate-pi-tests-outside",
-                        "probe",
-                        secret
-                    }
-                )
-                var result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, isolated: true)
-                Check.That(result.Code == 0, "Real pi filesystem boundary failed: " + result.Error)
-                Check.That(File.Exists(Path.Combine(checkout, "work.txt")), "Writable checkout was lost")
-                Check.That(File.ReadAllText(secret) == "private-credential", "Outside credential changed")
-                Check.That(
-                    File.ReadAllText(Path.Combine(checkout, ".git/config")) == "private-git",
-                    "Git metadata changed"
-                )
-                Check.That(!File.Exists(Path.Combine(root, "temp.txt")), "Private temporary storage escaped")
-                args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, false)
-                args.AddRange([]string{"/bin/sh", "-c", "setsid sh -c 'sleep 2; touch descendant-escaped' & wait"})
-                var interrupted bool
-                try {
-                    Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, milliseconds: 200, isolated: true)
-                } catch (error CommandInterrupted) {
-                    interrupted = true
-                }
-                Check.That(interrupted, "Pi deadline did not interrupt execution")
-                Commands.Checked("/bin/sleep", []string{"3"})
-                Check.That(
-                    !File.Exists(Path.Combine(checkout, "descendant-escaped")),
-                    "Timed-out pi descendant survived"
-                )
-                args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, true)
-                args.AddRange(
-                    []string{
-                        "/usr/bin/bwrap",
-                        "--die-with-parent",
-                        "--new-session",
-                        "--unshare-user",
-                        "--unshare-pid",
-                        "--unshare-ipc",
-                        "--unshare-uts",
-                        "--unshare-net",
-                        "--cap-drop",
-                        "ALL",
-                        "--clearenv",
-                        "--ro-bind",
-                        "/",
-                        "/",
-                        "--proc",
-                        "/proc",
-                        "--dev",
-                        "/dev",
-                        "--tmpfs",
-                        "/tmp",
-                        "--bind",
-                        checkout,
-                        checkout,
-                        "--tmpfs",
-                        Path.Combine(checkout, ".git"),
-                        "--chmod",
-                        "000",
-                        Path.Combine(checkout, ".git"),
-                        "--tmpfs",
-                        "/tokate-control",
-                        "--chmod",
-                        "000",
-                        "/tokate-control",
-                        "--chdir",
-                        checkout,
-                        "--",
-                        "/bin/sh",
-                        "-c",
-                        "test ! -r /tokate-control/models.json && test ! -r /proc/1/root/tokate-control/models.json && test ! -r .git/config && ! touch /usr/bin/nested-test && touch nested-work.txt"
-                    }
-                )
-                result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, isolated: true)
-                Check.That(
-                    result.Code == 0 && File.Exists(Path.Combine(checkout, "nested-work.txt")),
-                    "Real nested shell boundary failed: " + result.Error
-                )
-                let hostNetwork = Commands.Checked("/usr/bin/readlink", []string{"/proc/self/ns/net"})
-                args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, false)
-                args.AddRange([]string{"/usr/bin/readlink", "/proc/self/ns/net"})
-                result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, isolated: true)
-                Check.That(
-                    result.Code == 0 && result.Output.Trim() != hostNetwork,
-                    "Denied command network shared host namespace"
-                )
-                args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, true)
-                args.AddRange([]string{"/usr/bin/readlink", "/proc/self/ns/net"})
-                result = Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, isolated: true)
-                Check.That(
-                    result.Code == 0 && result.Output.Trim() == hostNetwork,
-                    "Allowed network lost host namespace"
-                )
-                args = PiBoundary.Boundary(checkout, modules, "/usr/bin/node", control, false)
-                args.AddRange([]string{"/bin/sh", "-c", "setsid sh -c 'sleep 2; touch cancellation-escaped' & wait"})
-                let cancellation = Chan[bool](1)
-                go Signal(cancellation)
-                interrupted = false
-                try {
-                    Commands.Run("/usr/bin/bwrap", args.ToArray(), checkout, isolated: true, cancellation: cancellation)
-                } catch (error CommandInterrupted) {
-                    interrupted = true
-                }
-                Commands.Checked("/bin/sleep", []string{"3"})
-                Check.That(
-                    interrupted && !File.Exists(Path.Combine(checkout, "cancellation-escaped")),
-                    "Cancelled pi descendant survived"
-                )
-                Console.WriteLine(
-                    "PASS pi exact policy, completion failures, real outer isolation, network namespaces and deadline/cancellation descendants"
-                )
-            } finally {
-                Directory.Delete(storage.FullName, true)
-            }
+            Check.That(File.ReadAllText(secret) == "PRIVATE_CREDENTIAL_SENTINEL", "Pi changed private data")
+            Check.That(!File.Exists(Path.Combine(flow.Flow.Temp.Root, "denied-write")), "Pi wrote outside the checkout")
+            Check.That(File.ReadAllText(gitPath) == git, "Pi changed Git metadata")
+            flow.Flow.NoInference()
+            Console.WriteLine("PASS native Pi workflow " + mode)
         }
     }
 }

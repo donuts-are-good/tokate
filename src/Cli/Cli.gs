@@ -19,11 +19,19 @@ internal class CliOption {
         Choices = choices
     }
 
-    internal func Describe(command string) string -> command == "amend" && Name == "seconds" ?
-    "Separate positive verification budget; required, at most the owner limit": Description.Replace(
-        "{{seconds}}",
-        command == "recover" ? "300": "min(3600, owner limit)"
-    )
+    internal func Describe(command string) string {
+        if command == "repair" && Name == "run" {
+            return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
+        }
+        if command == "repair" && Name == "path" {
+            return "Clean, self-contained candidate checkout; required and separate from repair evidence"
+        }
+        return (command == "amend" || command == "repair") && Name == "seconds" ?
+        "Separate positive verification budget; required, at most the owner limit": Description.Replace(
+            "{{seconds}}",
+            command == "recover" ? "300": "min(3600, owner limit)"
+        )
+    }
 }
 
 internal class CliCommand {
@@ -111,6 +119,16 @@ internal class Cli {
             CliOption("fork", "LOGIN/REPO", "Explicit donor fork; otherwise discover one or create it once"),
             CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
             CliOption("run", "DIR", "Saved run directory"),
+            CliOption(
+                "continue-from",
+                "DIR",
+                "Explicitly import unpublished interrupted same-donor v1 work into a fresh approved attempt"
+            ),
+            CliOption(
+                "continue-approval",
+                "SHA",
+                "Owner v1 continuation grant naming the current unrevoked predecessor approval; preserves its original base"
+            ),
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
             CliOption("pr", "N", "Positive pull request number"),
@@ -120,6 +138,7 @@ internal class Cli {
             CliOption("state", "SHA", "Exact coordination-state commit"),
             CliOption("source", "SOURCE", "Coding source", "external tokate"),
             CliOption("tools", "FILE", "Nonsecret JSON tool declarations"),
+            CliOption("summary", "FILE", "Bounded public JSON summary for the exact candidate commit"),
             CliOption("file", "FILE", "Strict claim or publication request JSON"),
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
@@ -241,10 +260,10 @@ internal class Cli {
             ),
             CliCommand(
                 "external",
-                "run,commit",
+                "run,commit,summary",
                 "run,commit",
                 "Fetch and verify an exact external commit in isolation; no inference or publication.",
-                "--run DIR --commit SHA",
+                "--run DIR --commit SHA [--summary FILE]",
                 "external --run /path/to/run --commit SHA"
                 ,
                 effects: "local_read local_write github_read"
@@ -268,11 +287,20 @@ internal class Cli {
                 effects: "local_read github_read github_write"
             ),
             CliCommand(
+                "repair",
+                "repo,pr,run,path,commit,sync,seconds,allow-network",
+                "repo,pr,run,path,commit,sync,seconds",
+                "Verify and repair a v1 draft PR when original private state is unavailable; no inference.",
+                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --path CHECKOUT --commit SHA --sync GRANT --seconds N [--allow-network]",
+                "repair --repo owner/project --pr 10 --run /path/to/repair --path /path/to/checkout --commit C --sync G --seconds 300",
+                effects: "local_read local_write github_read github_write"
+            ),
+            CliCommand(
                 "amend",
-                "run,commit,seconds,tools,sync",
+                "run,commit,seconds,tools,sync,summary",
                 "run,commit,seconds",
                 "Verify and publish a same-donor review correction; no inference.",
-                "--run DIR --commit SHA --seconds N [--tools FILE] [--sync GRANT]",
+                "--run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE] [--sync GRANT]",
                 "amend --run /path/to/run --commit SHA --seconds 300",
                 effects: "local_read local_write github_read github_write"
             ),
@@ -308,10 +336,10 @@ internal class Cli {
             ),
             CliCommand(
                 "approve",
-                "repo,issue,donor,base-branch",
+                "repo,issue,donor,base-branch,continue-approval",
                 "repo,issue",
                 "Write GitHub task approval and label; legacy scope also requires one donor assignment.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH | --continue-approval SHA]",
                 "approve https://github.com/owner/project/issues/42 --donor donor"
                 ,
                 effects: "local_read github_read github_write"
@@ -338,30 +366,30 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network",
+                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
                 ,
                 effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "work",
-                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run",
+                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
                 "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       tokate work --run DIR [--yes] [--non-interactive]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
                 ,
                 effects: "local_read local_write github_read github_write inference"
             ),
             CliCommand(
                 "recover",
-                "run,seconds,prepare,commit,tools",
+                "run,seconds,prepare,commit,tools,summary",
                 "run",
                 "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
-                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE]",
+                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
                 "recover --run /path/to/run --seconds 300"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -655,6 +683,13 @@ internal class Cli {
 
         internal func Validate(args Args) {
             let command = Find(args.Command)
+            if args.Get("continue-approval") != "" && args.Get("base-branch") != "" {
+                throw Exception("--continue-approval derives its original target and excludes --base-branch")
+            }
+            if args.Get("continue-from") != "" && !args.Help {
+                args.Need("seconds")
+                args.Need("verification-reserve")
+            }
             if args.Command == "doctor" {
                 var scopes int32
                 for key in[]string{"owner", "managed", "external"} {
@@ -668,11 +703,18 @@ internal class Cli {
             }
             if args.Command == "recover" {
                 if args.Get("prepare") == "true" &&
-                    (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {
-                    throw Exception("--prepare excludes --commit, --seconds and --tools")
+                    (
+                    args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "" || args.Get(
+                        "summary"
+                    ) != ""
+                ) {
+                    throw Exception("--prepare excludes --commit, --seconds, --tools and --summary")
                 }
                 if args.Get("commit") != "" && !args.Help {
                     args.Need("seconds")
+                }
+                if args.Get("summary") != "" && args.Get("commit") == "" {
+                    throw Exception("--summary requires an explicit corrected --commit")
                 }
                 if args.Get("tools") != "" && args.Get("commit") == "" {
                     throw Exception("--tools requires an explicit corrected --commit")
@@ -705,7 +747,7 @@ internal class Cli {
                     args.Values["--" + key] = RepositoryInput.Repo(args.Get(key))
                 }
             }
-            for key in[]string{"path", "run", "runs", "file", "tools", "event", "output"} {
+            for key in[]string{"path", "run", "runs", "file", "tools", "summary", "event", "output", "continue-from"} {
                 if args.Get(key) != "" {
                     Path.GetFullPath(args.Get(key))
                 }
@@ -735,7 +777,7 @@ internal class Cli {
                     throw Exception("Invalid value for --" + key)
                 }
             }
-            for key in[]string{"state", "commit", "grant", "upstream", "sync"} {
+            for key in[]string{"state", "commit", "grant", "upstream", "sync", "continue-approval"} {
                 if args.Get(key) != "" {
                     RepositoryIdentity.CommitSha(args.Get(key))
                 }

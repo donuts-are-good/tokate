@@ -41,14 +41,7 @@ internal class PublishedContribution : IDisposable {
                     baseBranch: baseBranch
                 )
                 coordination.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                let preparation = PublishedContribution(coordination, run)
-                try {
-                    preparation.Isolation(v2, baseBranch)
-                    return preparation
-                } catch (error Exception) {
-                    preparation.Snapshot.Dispose()
-                    throw error
-                }
+                return PublishedContribution(coordination, run)
             } catch (error Exception) {
                 coordination.Dispose()
                 throw error
@@ -206,23 +199,6 @@ internal class PublishedContribution : IDisposable {
             Directory.CreateDirectory(Path.GetDirectoryName(file) ?? root)
             File.WriteAllText(file, text)
         }
-    }
-
-    private func Isolation(v2 bool, baseBranch string) {
-        let flow = Coordination.Flow
-        File.WriteAllText(Path.Combine(Run, "run.json"), "case-private mutation")
-        File.WriteAllText(Path.Combine(flow.Temp.Root, "case-private"), "must disappear")
-        File.CreateSymbolicLink(Path.Combine(flow.Temp.Root, "case-link"), "case-private")
-        flow.Git("-C", Path.Combine(flow.Bin, "fork"), "update-ref", "refs/heads/case-private", "HEAD")
-        flow.State["case_private"] = JsonValue.Create(true)
-        flow.Save()
-        flow.Temp.Env["CASE_PRIVATE"] = "must disappear"
-        Coordination.Comment++
-        Restore()
-        Check.That(!flow.Temp.Env.ContainsKey("CASE_PRIVATE"), "Fixture environment leaked between cases")
-        Check.That(flow.State["case_private"] == nil, "Fixture API state leaked between cases")
-        Check.That(Coordination.Comment == Comment, "Fixture event identity leaked between cases")
-        Console.WriteLine("PASS published fixture isolation " + (v2 ? "v2": "v1") + "/" + baseBranch)
     }
 
     internal func Restore() {

@@ -4,53 +4,41 @@ Version 2 coordinates contributions on GitHub independently of the coding tool.
 The repository owner installs a small workflow; there is no hosted service or
 polling daemon. Approval, donor eligibility, reservations,
 contribution records, exact-commit CI and owner review do not require Codex.
-Tokate-launched inference currently uses Codex. Claude (#20), API providers
-(#21), local models (#22), OMP (#29) and pi (#30) can already contribute through
-the external exact-commit path; their launch integrations remain separate work.
+Tokate-launched inference currently uses Codex. Other coding tools can contribute
+through the external exact-commit path; their managed launch integrations are
+not provided by this path.
 
 ## Compatibility comes first
 
-`tokate init` still creates the unchanged version-1 policy and PR template.
-Version-1 approvals, saved runs and receipts keep their original meanings and
-commands. Nothing automatically converts them into reservations or interprets
-their reported model usage as attested usage. Version-1 recovery remains a
-version-1 operation. Explicit `recover --prepare` followed by
-`recover --commit SHA --seconds N` also supports completed managed v2 turns before
-first publication. It retains original source/tools and adds separate correction
-provenance; `submit` still uses the original unexpired reservation and coordinator.
-External v2 work is excluded. Existing default templates remain usable for version 2.
+`tokate init` creates version-1 policy and templates. To adopt version 2, commit
+an explicit policy change, install the coordinator workflow and approve again.
+The default PR template works with either version. Existing runs and receipts
+keep their original version; there is no automatic conversion.
 
-Opt-in requires an owner to commit policy version 2 and install the generated
-workflow, then issue fresh approval. Changing policy, task or template requires
-fresh approval. Assignment changes also stale legacy assignment-bound approvals. Old approval refs and local work are
-retained; their publication authority does not survive a changed approval or
-policy. Version-2 state history retains replaced contributions and all older
-outcomes in Git even when they leave the active window. Returning to version 1
-requires an explicit policy edit and fresh version-1 approval. It does not erase
-version-2 state or revive old authority. There is no in-place saved-run conversion.
+Changes to task, policy or template require fresh approval. Assignment changes
+also invalidate assignment-bound approvals. Old work and state history remain
+available, but changed approval does not preserve publication authority. Returning
+to version 1 requires another policy edit and fresh approval; it does not erase
+version-2 history or revive old authority.
 
-Review amendments require Tokate 0.2.17 on the donor and the v2 coordinator.
-Existing receipts remain readable without amendments; older v2 coordinators and
-receipt readers reject the new amendment operation/fields. Owners upgrade their
-pinned coordinator explicitly. Amendments support native v1 and v2 records
-without migrating approvals or changing original execution, model, effort, time or usage meanings. Original
-observations cover original execution only. Amendment tools, coding time and
-usage are separately donor-reported; omitted tools mean manual editing with
-unknown coding time and usage. V1 permits declared Codex/OpenAI tools with its
-existing model/effort policy; v2 applies every allowed tool and model pair.
-Amendments retain original evidence and exact previous/new heads locally. V2
-retains the original contribution and adds UUID-bound amendment history under
-the current published coordination revision.
+Upgrade both the donor CLI and owner-pinned coordinator before using these features:
 
-Synchronization amendments additionally require Tokate **0.2.21** on both donor
-and coordinator. [The synchronization commands](reference.md#synchronize-with-upstream)
-use a separate live owner ref, bound to exact candidate C, upstream U, previous
-published H and current coordination state S. They keep the original approval,
-reservation and contribution intact. The coordinator authenticates the grant,
-repeats complete protected-tree/ancestry proofs and uses its existing nonforce
-CAS. Historical synchronization records stay separate from later ordinary
-amendments; revocation or target movement invalidates readiness, including after
-physical PR/state effects. Upgrade the owner-pinned coordinator explicitly.
+| Feature | Minimum version |
+| --- | --- |
+| Review amendments | 0.2.17 |
+| Synchronization amendments | 0.2.21 |
+| Independent task eligibility | 0.2.22 |
+
+Original execution evidence stays separate from later edits. Amendment tools,
+coding time and usage are donor-reported; omitted tools mean manual editing with
+unknown time and usage. Synchronization requires a live owner grant for the exact
+candidate and upstream revision. Revocation or target movement invalidates
+readiness even after a physical PR update. See [amendments](#review-amendments)
+and [synchronization](reference.md#synchronize-with-upstream).
+
+For completed managed v2 work before publication, [explicit correction](reference.md#recover-or-correct-work)
+retains original source/tools and uses the original unexpired reservation through
+`submit`. External v2 work is excluded.
 
 ## Owner installation after a release
 
@@ -71,9 +59,8 @@ fails rather than silently following a replaced tag/asset.
 
 Review the output, then install it as `.github/workflows/tokate-coordinator.yml`
 and commit it yourself. Enable GitHub Actions PR creation in repository settings
-if necessary. This donor contribution does not install the workflow. The workflow
-never checks out/builds the repository and never runs donor code with its write
-token. Job permissions are `contents: write` for the state ref, `issues: read`
+if necessary. The workflow never checks out/builds the repository or runs donor
+code with its write token. Job permissions are `contents: write` for the state ref, `issues: read`
 for canonical comments/eligibility, and `pull-requests: write` for draft PRs.
 Keep fork verification in ordinary read-only `pull_request` CI without secrets.
 
@@ -105,8 +92,6 @@ meaning and need an exact whitelist allowance when filtering is enabled. Under
 either explicit mode, external effort `"absent"` declares a known lack of an effort
 control and needs its exact pair in whitelist mode. Managed work rejects unknown
 or absent controls. Never substitute a declaration to satisfy policy.
-Guided setup, access requests/history, pause/handoff/renewal and expanded readiness
-remain #12, #14, #27 and #28.
 
 Both policy versions support optional [`protected_paths`](reference.md#set-owner-policy-and-approve)
 with at most 64 literal paths, each at most 512 characters. Owners adopt it under
@@ -330,73 +315,30 @@ local evidence](reference.md#amend-a-published-pr).
 
 ## Traffic and validation
 
-Only created issue comments with a `/tokate ` prefix on real issues start a
-privileged job. Ordinary comments still create **skipped workflow run records**:
-count one event/workflow record per ordinary created comment, zero privileged jobs
-and zero coordinator API calls. Each meaningful request creates one workflow run
-and at most one privileged job. Duplicates still authenticate/read state but write
-nothing after a successful recorded outcome. Failed/interrupted mutations are not
-automatically retried. Repeating `request` or `submit` reads the existing canonical
-comment or recorded outcome without another comment or workflow event. Evidence
-must match the canonical repository/issue, numeric authenticated actor, UUID and
-entire canonical payload. Changed UUID bindings and ambiguous comments fail closed.
-`request --file FILE` keeps private write intent as `FILE.posting.json` beside
-FILE. Keep this evidence with the original request. A lost response is reconciled
-with bounded remote reads. If no
-unique evidence exists, subsequent commands retain the intent and refuse another
-POST. An existing recorded submission still checks current approval and reservation;
-expired, replaced or revoked donors cannot publish. There is no background polling
-or per-token update stream.
+Only created `/tokate ` comments on issues can start a privileged coordinator
+job. Ordinary comments create skipped workflow records. There is no background
+polling or per-token update stream. Repeated requests authenticate and read state
+but do not repeat a successfully recorded write. Failed mutations are not retried
+automatically.
 
-Measured actual-command budgets use successful GETs and an unchanged approved
-target, except the explicit lost-response rows. Focused command regressions
-enforce reads, mutations, live 304s and comment POST attempts:
+Keep `FILE.posting.json` beside its original `request --file FILE`. It records
+private posting intent. Lost responses require unique remote evidence matching
+the repository, issue, numeric actor, UUID and complete payload. Ambiguous or
+changed evidence refuses another POST. Current approval and reservation remain
+required, including for an already recorded submission. Cross-machine comment
+POSTs cannot be atomic; local locks and state compare-and-swap protect local
+duplicates and authoritative effects.
 
-| Path | Reads | Mutations | Live 304s | Comment POST attempts |
-| --- | ---: | ---: | ---: | ---: |
-| Version-1 claim | 9 | 1 | 0 | 0 |
-| Version-1 repeated publication | 10 | 0 | 0 | 0 |
-| Coordinator claim | 9 | 3 | 1 | 0 |
-| Coordinator identical replay | 4 | 0 | 0 | 0 |
-| Coordinator new draft publication | 31 | 4 | 19 | 0 |
-| Coordinator recovery with existing exact PR | 31 | 3 | 19 | 0 |
-| New claim request | 10 | 1 | 1 | 1 |
-| Identical pending request | 6 | 0 | 0 | 0 |
-| Request with recorded outcome | 4 | 0 | 0 | 0 |
-| Lost request response, unique remote comment | 14 | 1 | 3 | 1 |
-| Failed request without remote write | 13 | 1 | 4 | 1 |
-| Ambiguous lost request response | 15 | 1 | 3 | 1 |
-| External submit with lost response | 22 | 1 | 11 | 1 |
-| Identical pending external submit | 17 | 0 | 7 | 0 |
-| Submit with recorded outcome and live authority | 8 | 0 | 0 | 0 |
-| Saved-run v1 checks, one pending poll | 22 | 0 | 11 | 0 |
-| Saved-run v1 watch, two unchanged polls then pass | 66 | 0 | 54 | 0 |
+Check reads allow ten pages per endpoint; comment evidence allows twenty pages.
+Larger histories fail closed. `checks --watch` shares one `--timeout` deadline
+across authority reads, commands, retries and waits. Server polling and rate-limit
+delays take precedence over the two-second minimum. Both receipt versions recheck
+authority and head after reading checks. Unchanged snapshots produce no repeated
+output or local state write. Check rows retain status, name and link; `workflow`
+is empty because the REST endpoints do not supply it.
 
-These counts cover one page of comments/checks and each command's own in-memory
-validators. Check inspection is limited to ten pages per endpoint; comment evidence
-to twenty pages, with canonical matching-comment reads. Larger histories fail closed.
-Watches use a single monotonic `--timeout` deadline from initial authority reads
-through subprocesses, retries and waits. Server `X-Poll-Interval`, `Retry-After` and
-rate reset delays take precedence over the two-second minimum interval. Both
-receipt versions recheck authority and head after check reads. Unchanged snapshots
-produce no repeated output or local state write. Check rows retain status/name/link;
-the REST endpoints do not provide a workflow name, so `workflow` is empty.
-
-When the target advances, each snapshot freshness check adds two reads for absent
-instructions or three for present instructions. Legacy freshness is unchanged.
-
-Each state transition creates a tree, a single-parent commit, and a non-forced ref
-update. Pacing/retry bounds and `--traffic` numeric diagnostics reuse the existing
-transport. Counts exclude unseen Git/GitHub CLI transport and release downloads;
-workflow records/jobs are counted separately above. The fixture models one workflow
-record and at most one privileged job per successfully created request comment;
-duplicate commands add zero of each, and a pre-write failure adds zero. No real
-GitHub workflows run in these tests, so these are event-derived bounds, not measured
-runner executions. Cross-machine simultaneous comment POSTs cannot be made atomic
-by GitHub's comment API; the local request lock and coordinator compare-and-swap
-protect local duplicates and authoritative effects. Pause/resume/handoff remain
-#14 and have no measured command budgets in this scope. The suite exercises actual binaries and real local Git
-refs for competing claims, duplicate/changed replay, interrupted writes/responses,
-expiry/late donors, revocation after PR creation, external verification without
-Codex, bounded invalid events, released workflow setup and unchanged version-1
-flows. A real native sandbox doctor remains a separate environment check.
+`--traffic` reports this command's API reads, mutations, live 304s and retries.
+It excludes unseen Git/GitHub CLI traffic and release downloads. The
+[traffic regressions](../tests/Scenarios/Traffic.gs) enforce request budgets with
+fixtures; their workflow counts are event-derived bounds, not measurements of
+hosted runner executions. See the [API limits](reference.md#automate-commands).

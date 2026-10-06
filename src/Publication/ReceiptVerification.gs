@@ -8,7 +8,10 @@ internal class ReceiptVerification {
         internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data {
             let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
             let body = J.Text(pull, "body")
-            let receipt = J.Parse(PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"))
+            let receipt = RequestData.Parse(
+                PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"),
+                1024 * 1024
+            )
             if J.Number(receipt, "version") == 2 {
                 return ReceiptVerification.VerifyV2(repo, number, pull, receipt, ready, paths)
             }
@@ -27,6 +30,17 @@ internal class ReceiptVerification {
                 RepositoryIdentity.Login(J.Text(receipt, "donor"))
             )
             let approval = J.Get(record, "approval")
+            let predecessor = J.Get(receipt, "predecessor")
+            if J.Text(approval, "predecessor_approval") != "" && predecessor.ValueKind == JsonValueKind.Undefined {
+                throw Exception("Continuation receipt omitted interrupted-origin provenance")
+            }
+            if predecessor.ValueKind != JsonValueKind.Undefined {
+                V1Continuation.Grant(record, J.Text(predecessor, "approval"), J.Get(author, "id"))
+                V1Continuation.Receipt(predecessor, J.Text(receipt, "import_manifest_sha256"), approval)
+                if !PrBody.ReportText(body, "").Contains(PrBody.ContinuationReport(predecessor).Trim()) {
+                    throw Exception("PR report omitted interrupted-origin provenance")
+                }
+            }
             if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
                 receipt,
                 "policy"
@@ -84,7 +98,7 @@ internal class ReceiptVerification {
                     )
                 }
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     J.Get(record, "approval"),
@@ -95,7 +109,7 @@ internal class ReceiptVerification {
             }
             let amendment = J.Get(receipt, "amendment")
             if amendment.ValueKind != JsonValueKind.Undefined {
-                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))))
+                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))), J.Text(receipt, "head"))
                 RepositoryIdentity.CommitSha(J.Text(receipt, "original_head"))
                 if J.Text(amendment, "sync") != "" {
                     Synchronization.Live(
@@ -112,15 +126,27 @@ internal class ReceiptVerification {
                         ready: ready
                     )
                 }
-                let report = Amendment.Summary(
+                let report = PrBody.AmendmentReport(receipt)
+                let observedReport = PrBody.ReportText(body, report)
+                let prior = J.Get(receipt, "predecessor")
+                let legacy = (
+                    prior.ValueKind == JsonValueKind.Undefined ? "":
+                    PrBody.ContinuationReport(prior)
+                ) +
+                    Amendment
+                    .LegacySummary(
                     J.Text(amendment, "previous"),
                     J.Text(receipt, "head"),
                     J.Number(amendment, "seconds"),
                     J.Get(amendment, "tools")
                 )
-                if PrBody.ReportText(body, report) != report {
+                if observedReport != report &&
+                    (J.Get(amendment, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
                     throw Exception("PR amendment report differs from its exact-head receipt")
                 }
+            }
+            if J.Get(receipt, "repair").ValueKind != JsonValueKind.Undefined {
+                Repair.Receipt(repo, pull, receipt, record)
             }
             if history.GetArrayLength() > 0 {
                 if J.Text(
@@ -244,14 +270,28 @@ internal class ReceiptVerification {
             policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
             let amendment = J.Get(receipt, "amendment")
             if current.GetRawText() != contribution.GetRawText() {
-                Amendment.ValidateReceipt(amendment, policy)
+                Amendment.ValidateReceipt(amendment, policy, exactHead)
                 let report = Amendment.Summary(
+                    J.Text(amendment, "previous"),
+                    exactHead,
+                    J.Number(amendment, "seconds"),
+                    J.Get(amendment, "tools"),
+                    J.Get(current, "summary"),
+                    false,
+                    metadata
+                )
+                if !RequestData.Same(J.Get(amendment, "summary"), J.Get(current, "summary")) {
+                    throw Exception("PR amendment summary differs from coordination authority")
+                }
+                let observedReport = PrBody.ReportText(J.Text(pull, "body"), report)
+                let legacy = Amendment.LegacySummary(
                     J.Text(amendment, "previous"),
                     exactHead,
                     J.Number(amendment, "seconds"),
                     J.Get(amendment, "tools")
                 )
-                if PrBody.ReportText(J.Text(pull, "body"), report) != report {
+                if observedReport != report &&
+                    (J.Get(current, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
                     throw Exception("PR amendment report differs from coordination authority")
                 }
                 let failure = "Amendment receipt differs from current coordination record"
@@ -305,7 +345,7 @@ internal class ReceiptVerification {
                     exactHead
                 )
             } else if paths {
-                ProtectedPaths.Remote(
+                GitHubPathEvidence.Check(
                     repo,
                     J.Get(record, "policy"),
                     approval,

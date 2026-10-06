@@ -5,7 +5,6 @@ import System.Collections.Generic
 import System.IO
 import System.Text
 import System.Text.Json.Nodes
-import Tokate
 
 internal class DecreeFlow : IDisposable {
     internal let Flow NativeFixture
@@ -50,7 +49,7 @@ internal class DecreeFlow : IDisposable {
         if let coordination = V2 {
             let state = coordination.State()["state"] ?? throw Exception("Missing state")
             state["approval"] = approval.DeepClone()
-            state["approval_id"] = JsonValue.Create(Data.Hash(RequestData.Canonical(J.Parse(approval.ToJsonString()))))
+            state["approval_id"] = JsonValue.Create(Check.FixtureDigest(approval))
             coordination.RewriteState(state)
             return
         }
@@ -126,7 +125,7 @@ internal class DecreeFlow : IDisposable {
             Check.That(!prompt.Contains("<tokate-owner-instructions>"), "Absent instructions became present")
             return
         }
-        Check.Contains(prompt, "SHA-256: " + Data.Hash(text))
+        Check.Contains(prompt, "SHA-256: " + (text == Exact ? ExactHash: Check.TextHash(text)))
         let marker = "<tokate-owner-instructions>\n"
         let start = prompt.IndexOf(marker, StringComparison.Ordinal) + marker.Length
         let end = prompt.LastIndexOf("\n</tokate-owner-instructions>", StringComparison.Ordinal)
@@ -141,12 +140,16 @@ internal class DecreeFlow : IDisposable {
         Check.That(Check.Text(decree["present"]) == (present ? "true": "false"), "Incorrect snapshot presence")
         Check.That(Check.Text(decree["text"]) == text, "Snapshot text changed")
         Check.That(
-            present ? Check.Text(decree["sha256"]) == Data.Hash(text): decree["sha256"] == nil,
+            present ? Check.Text(decree["sha256"]) == (text == Exact ? ExactHash: Check.TextHash(text)): decree[
+                "sha256"
+            ] == nil,
             "Incorrect snapshot SHA-256"
         )
     }
 
     shared {
+        internal let ExactHash string = "5369117ed38370758ff030d12507229369fa0120e27423be9cf5ddc2c5d8ad0a"
+
         internal func Create(binary string, version int32) DecreeFlow {
             let test = DecreeFlow(binary, version)
             test.Initialize()
@@ -251,6 +254,9 @@ internal class DecreeFlow : IDisposable {
 
         internal func Freshness(binary string, version int32) {
             for change in[]string{"add", "change", "delete", "unsupported", "unrelated"} {
+                if !CiShard.Include("Decree/Freshness/v" + version.ToString() + "/" + change) {
+                    continue
+                }
                 using let test = Create(binary, version)
                 if change != "add" {
                     test.Text(Exact)
@@ -297,6 +303,7 @@ internal class DecreeFlow : IDisposable {
                         test.Prompt(change == "delete" ? "": "New owner instructions\n", change != "delete")
                     }
                 }
+                Console.WriteLine("PASS DECREE v" + version.ToString() + " Freshness/" + change)
             }
         }
 
@@ -461,7 +468,7 @@ internal class DecreeFlow : IDisposable {
                 } else if kind == "text" {
                     snapshot["text"] = JsonValue.Create("Tampered owner text")
                 } else if kind == "uppercase" {
-                    snapshot["sha256"] = JsonValue.Create(Data.Hash(Exact).ToUpperInvariant())
+                    snapshot["sha256"] = JsonValue.Create(ExactHash.ToUpperInvariant())
                 } else {
                     snapshot["present"] = JsonValue.Create(false)
                 }
@@ -702,6 +709,9 @@ internal class DecreeFlow : IDisposable {
                     continue
                 }
                 matched = true
+                if name != "Freshness" && !CiShard.Include("Decree/" + name) {
+                    continue
+                }
                 for version in[]int32{1, 2} {
                     if (name == "ExternalProtection" && version != 2) ||
                         ((name == "LegacyRecovery" || name == "PublicationProtection") && version != 1) {
@@ -739,7 +749,9 @@ internal class DecreeFlow : IDisposable {
                             PublicationProtection(binary)
                         }
                     }
-                    Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
+                    if name != "Freshness" {
+                        Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
+                    }
                 }
             }
             Check.That(matched, "Unknown DECREE selector: " + selected)

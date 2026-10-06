@@ -151,7 +151,12 @@ internal partial class Fixture {
         }
         if push >= 0 {
             Check.That(
-                File.Exists(
+                (
+                    Check.Text(State["repair_directory"]) != "" && File.Exists(
+                        Path.Combine(Check.Text(State["repair_directory"]), "publication.json")
+                    )
+                ) ||
+                    File.Exists(
                     Path.Combine(Path.GetDirectoryName(Directory.GetCurrentDirectory()) ?? "", "publication.json")
                 ) ||
                     Directory
@@ -192,6 +197,30 @@ internal partial class Fixture {
                 Console.Error.WriteLine("Synthetic push failure: synthetic-raw-push-secret")
                 return 1
             }
+            if Check.Text(State["mode"]) == "repair_race_before_push" {
+                let head = State["pulls"]?[0]?["head"] ?? throw Exception("Missing race PR")
+                let previous = Check.Text(head["sha"])
+                let tree = Git("fork", []string{"rev-parse", previous + "^{tree}"})
+                let concurrent = Git(
+                    "fork",
+                    []string{
+                        "-c",
+                        "user.name=Concurrent",
+                        "-c",
+                        "user.email=fixture@example.test",
+                        "commit-tree",
+                        tree,
+                        "-p",
+                        previous,
+                        "-m",
+                        "Concurrent remote update"
+                    }
+                )
+                Git("fork", []string{"update-ref", "refs/heads/" + Check.Text(head["ref"]), concurrent, previous})
+                head["sha"] = JsonValue.Create(concurrent)
+                State["mode"] = JsonValue.Create("")
+                Save()
+            }
         } else {
             for key in[]string{"GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "CODEX_HOME", "DBUS_SESSION_BUS_ADDRESS"} {
                 Check.That(Environment.GetEnvironmentVariable(key) == nil, "Authentication reached local Git: " + key)
@@ -220,7 +249,7 @@ internal partial class Fixture {
             latest["push_count"] = JsonValue.Create(
                 Int32.Parse(Check.Text(latest["push_count"] ?? JsonValue.Create(0))) + 1
             )
-            File.WriteAllText(StatePath, latest.ToJsonString())
+            Check.SaveJson(StatePath, latest)
             Console.Error.WriteLine("Synthetic lost push response")
             return 1
         }
@@ -249,7 +278,7 @@ internal partial class Fixture {
             let latest = Check.Json(File.ReadAllText(StatePath))
             let issue = latest["issue"] ?? throw Exception("Missing issue")
             issue["labels"] = JsonArray()
-            File.WriteAllText(StatePath, latest.ToJsonString())
+            Check.SaveJson(StatePath, latest)
         }
         if result.Code == 0 && command.Contains("fetch") && Directory.GetCurrentDirectory().EndsWith(".staging") &&
             Check.Text(State["preparation_revoke_after_fetch"]) == "true" {

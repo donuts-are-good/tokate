@@ -2,8 +2,8 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.22 discovers tools, handles data, and
-delegates authentication. Source links support the behavior described below.
+This document describes Tokate's tool discovery, authentication and data access,
+with links to the source.
 
 ## Current harness discovery and settings
 
@@ -105,6 +105,16 @@ it excludes unseen GitHub CLI/Git requests and workflow executions. See
 [API output and retry limits](reference.md#automate-commands) and
 [ApiTransport.gs](../src/GitHub/ApiTransport.gs).
 
+Version-1 `repair` uses a separate evidence directory when the original private
+run is unavailable. It stores the exact original public receipt, numeric donor and
+repository identities, live owner grant, candidate snapshot, new verification logs
+and publication intent. It starts no inference and never reconstructs or attests
+original private logs, usage or checks. The public repair provenance discloses this
+gap; original public execution observations describe original work only. An exact
+head lease plus ancestry validation protects branch publication, and saved intent
+allows explicit publication resume without repeating passed verification. CI and
+owner review remain required. See [Repair.gs](../src/Publication/Repair.gs).
+
 Version-2 `request --file FILE` writes a local posting intent and lock beside the
 request file. The intent contains the canonical repository/issue, numeric actor,
 exact validated payload and binding hash, with no credentials or API response logs.
@@ -179,10 +189,13 @@ run artifacts. The namespace is not whole-harness data isolation: the trusted
 harness retains its host file access outside the private temporary directory.
 
 Independent owner verification directly invokes Linux bubblewrap and does not
-discover or launch Codex. Each command starts with an empty mount namespace:
-the canonical checkout is writable, its actual `.git` directory is read-only,
-and `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system tool links in
-`/etc/alternatives` are read-only when present.
+discover or launch Codex. Tokate copies the candidate checkout, including
+ignored and untracked files, into a private disposable host directory. Ordered
+checks share that copy; the saved checkout is not writable by verification.
+The copy is removed after success, failure or handled interruption. Each command
+starts with an empty mount namespace: the copy is writable and its `.git`
+directory is read-only. `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, and the system
+tool links in `/etc/alternatives` are read-only when present.
 Only explicit nonsecret loader, certificate-bundle and DNS files from `/etc`
 are copied into private invocation storage (at most 4 MiB each) and mounted
 read-only. Copies stay linked until process cleanup finishes and are then removed,
@@ -202,8 +215,12 @@ cleanup. Missing or unsupported bubblewrap fails closed without host execution.
 Nested sandbox probes remain permitted. This verifies a checkout; it makes no
 claim that coding work performed outside the managed path was sandboxed.
 
-Source: [Process.gs](../src/Execution/Process.gs), [Worker.gs](../src/Execution/Worker.gs),
-[Verification.gs](../src/Execution/Verification.gs), [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
+Source: [Process.gs](../src/Execution/Process.gs),
+[Worker.gs](../src/Execution/Worker.gs),
+[Verification.gs](../src/Execution/Verification.gs),
+[VerificationWorkspace.gs](../src/Execution/VerificationWorkspace.gs),
+[Publish.gs](../src/Publication/Publish.gs), and
+[Amendment.gs](../src/Publication/Amendment.gs).
 
 ## Files, logs, and network destinations
 
@@ -306,45 +323,6 @@ This document is not a claim about their retention practices.
 Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
 [Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
 [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
-
-## Bounded public-content audit
-
-Owner audit evidence at main `22c3c80e77a526802488c84d4dccc0e489ed86e6`
-covered 95 tracked files, 57 history messages/contact records, 56 anonymously
-accessible patches plus the remaining patch through owner access, current asset
-metadata, 49 served website files, three stable release archives/checksums, and
-33 public issue/PR entries at that snapshot. No attachments were present. Owner
-review scanned 76 available workflow log archives (237 entries, 21,930 lines)
-with bounded patterns. Pages artifact `11219216581` contained 49 regular files
-matching the tracked site. This change reuses that evidence without repeating
-the audit.
-
-No recognized credential values were identified in that review. It does not
-cover deleted or edited prior material, all historical binaries and deployments,
-arbitrary encodings, donor home credential stores, or private configuration and
-`.env` files; it does not establish an absolute absence of secrets. The
-harness, repository-content, local raw output, and external-service limitations
-described above remain; runtime data boundaries are tracked in
-[#17](https://github.com/obselate/tokate/issues/17).
-Historical contact details are not reproduced here; their follow-up is tracked
-in [#36](https://github.com/obselate/tokate/issues/36). An exposed credential would
-require private revocation/rotation and removal coordination; deleting it from
-the latest commit is insufficient. No history rewrite is authorized without a
-separate concrete review.
-
-Managed shell home and caches live at `/tmp/tokate-home` in private temporary
-storage, outside recursive repository scans. Verification gets fresh storage
-for each command. Historical `.tokate-scratch/` remains ignored,
-alongside local run artifacts and environment files. Release packaging uses
-fresh temporary staging, explicit current product documentation/license paths,
-numeric zero archive ownership, and staging cleanup. Existing releases remain
-unchanged. Direct Pages upload tightening belongs to owner-side
-[#35](https://github.com/obselate/tokate/issues/35); ignore rules do not constrain
-every publication path or prevent inclusion of already tracked files.
-
-Users should be able to compare this document with the source for the version
-they run. Update it whenever discovery, authentication, data handling, or
-publication behavior changes.
 
 Managed pi uses a separate SDK bridge and outer bubblewrap boundary; it imports no
 user settings or authentication. Endpoint/runtime paths remain in private run state.
