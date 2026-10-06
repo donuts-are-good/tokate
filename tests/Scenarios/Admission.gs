@@ -103,7 +103,9 @@ internal class AdmissionChecks {
             test.Flow.Reload()
             Check.That(
                 Check.Text(test.Flow.State["pulls"]?[0]?["state"]) == expected,
-                "Admission changed the wrong PR state"
+                "Admission state after " + action + ": expected " + expected + ", got " + Check.Text(
+                    test.Flow.State["pulls"]?[0]?["state"]
+                )
             )
             if code == 0 && initiallyOpen && expected == "closed" {
                 var reads int32
@@ -133,6 +135,13 @@ internal class AdmissionChecks {
             test.Flow.Save()
         }
 
+        private func Target(test CoordinationFixture, branch string) {
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            (pull["base"] ?? throw Exception("Missing base"))["ref"] = JsonValue.Create(branch)
+            test.Flow.Save()
+        }
+
         private func Authority(binary string) {
             for mode in[]string{"open", "trusted", "manual"} {
                 using let test = CoordinationFixture(binary)
@@ -146,6 +155,10 @@ internal class AdmissionChecks {
                 Pull(test, "<!-- tokate-receipt:{\"repo\":\"other/project\",\"issue\":1,\"donor\":\"owner\"} -->")
                 Admit(test, mode == "manual" ? "closed": "open")
                 Access(test, "grant", "1")
+                Pull(test, "Fixes #1\nIncomplete draft without a receipt or verification")
+                Admit(test, "open")
+                Target(test, "other")
+                Admit(test, mode == "manual" ? "closed": "open", action: "edited")
                 Pull(test, "Fixes #1\nIncomplete draft without a receipt or verification")
                 Admit(test, "open")
                 Pull(test, "Fixes #2")
@@ -173,6 +186,9 @@ internal class AdmissionChecks {
             legacy.Flow.Approve()
             Pull(legacy, "Fixes #1")
             Admit(legacy, "open")
+            Target(legacy, "other")
+            Admit(legacy, "closed", action: "edited")
+            Target(legacy, "main")
             legacy.Flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
             Reopen(legacy)
             Admit(legacy, "closed", action: "reopened")
@@ -237,17 +253,54 @@ internal class AdmissionChecks {
             withoutClaims["body"] = JsonValue.Create("<!-- tokate-receipt:forged -->")
             test.Flow.Save()
             Admit(test, "open", action: "edited")
+            let work = Path.Combine(test.Flow.Temp.Root, "donor-work")
+            File.AppendAllText(Path.Combine(work, "result.txt"), "Amended\n")
+            test.Flow.Git("-C", work, "add", "result.txt")
+            test.Flow.Git(
+                "-C",
+                work,
+                "-c",
+                "user.name=Donor",
+                "-c",
+                "user.email=donor@example.test",
+                "commit",
+                "-m",
+                "Amend result"
+            )
+            let amended = test.Flow.Git("-C", work, "rev-parse", "HEAD")
+            test.Flow.Git("-C", work, "push", Path.Combine(test.Flow.Bin, "fork"), "HEAD:refs/heads/" + branch)
+            test.Flow.Reload()
+            let advancing = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            (advancing["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(amended)
+            test.Flow.Save()
+            Admit(test, "open", action: "synchronize")
             let recorded = test.State()["state"] ?? throw Exception("Missing state")
-            let expired = recorded["reservation"] ?? throw Exception("Missing reservation")
-            expired["expires"] = JsonValue.Create(1)
+            for fault in[]string{"expired", "paused", "released", "actor", "reservation"} {
+                recorded["reservation"] = saved.DeepClone()
+                let current = recorded["reservation"] ?? throw Exception("Missing reservation")
+                if fault == "expired" {
+                    current["expires"] = JsonValue.Create(1)
+                } else if fault == "paused" || fault == "released" {
+                    current["status"] = JsonValue.Create(fault)
+                    current["attempt"] = JsonValue.Create("")
+                } else if fault == "actor" {
+                    current["actor"] = JsonValue.Create(124)
+                } else {
+                    current["reservation"] = JsonValue.Create("other")
+                }
+                test.RewriteState(recorded)
+                Reopen(test)
+                Admit(test, "closed", action: "synchronize")
+            }
+            recorded["reservation"] = saved.DeepClone()
             test.RewriteState(recorded)
-            Admit(test, "open")
+            Reopen(test)
             test.Flow.Reload()
             let physical = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
             (physical["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(String('b', 40))
             test.Flow.Save()
             Admit(test, "closed", action: "synchronize")
-            (physical["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(head)
+            (physical["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(amended)
             physical["state"] = JsonValue.Create("open")
             test.Flow.State["pulls"] = JsonArray(physical.DeepClone())
             test.Flow.Save()
@@ -385,7 +438,7 @@ internal class AdmissionChecks {
                 "evaluate",
                 "rules",
                 Check.Json(
-                    "[{\"type\":\"restrict_actions_events\",\"parameters\":{\"allowed_events\":[\"issue_comment\"]}}]"
+                    "[{\"type\":\"restrict_action_events\",\"parameters\":{\"allowed_events\":[\"issue_comment\"]}}]"
                 )
             )
             setup.Flow.Save()
@@ -421,7 +474,7 @@ internal class AdmissionChecks {
                 ),
                 "rules",
                 Check.Json(
-                    "[{\"type\":\"restrict_actions_events\",\"parameters\":{\"allowed_events\":[\"issue_comment\",\"pull_request_target\",\"workflow_call\"]}}]"
+                    "[{\"type\":\"restrict_action_events\",\"parameters\":{\"allowed_events\":[\"issue_comment\",\"pull_request_target\",\"workflow_call\"]}}]"
                 )
             )
             setup.Flow.Save()
@@ -431,6 +484,31 @@ internal class AdmissionChecks {
             )
             File.Delete(output)
             setup.Flow.Reload()
+            let active = setup.Flow.State["actions_policy"] ?? throw Exception("Missing policy")
+            let rules = active["rules"]?.AsArray() ?? throw Exception("Missing policy rules")
+            rules.Add(
+                Check.Map(
+                    "type",
+                    "restrict_actions_actors",
+                    "parameters",
+                    Check.Map("allowed_actors", Check.Json("[{\"id\":1,\"type\":\"User\"}]"))
+                )
+            )
+            setup.Flow.Save()
+            Check.Contains(
+                setup
+                    .Flow
+                    .Call(
+                    []string{"coordinator-setup", "--repo", "owner/project", "--output", output, "--yes"},
+                    1,
+                    owner: true
+                )
+                    .Error,
+                "actor policy"
+            )
+            Check.That(!File.Exists(output), "Active actor policy enabled automatic closure")
+            setup.Flow.Reload()
+            setup.Flow.State["actions_policy"] = nil
             setup.Flow.State["actions_policies"] = Check.Map("total_count", 0, "policies", JsonArray())
             setup.Flow.Save()
             setup.Flow.Call(

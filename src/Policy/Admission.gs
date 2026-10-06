@@ -208,6 +208,9 @@ internal class Admission {
                     1024 * 1024
                 )
                 Authority(approval, repo, issue, 1)
+                if J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
+                    return false
+                }
                 if !String.Equals(J.Text(approval, "donor"), login, StringComparison.OrdinalIgnoreCase) ||
                     !access.Allows(actor, mode, issue, assigned: true) {
                     return false
@@ -238,6 +241,9 @@ internal class Admission {
                 throw Exception("Malformed coordination revocation state")
             }
             Authority(approval, repo, issue, 2)
+            if J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
+                return false
+            }
             var taskScoped bool = false
             try {
                 taskScoped = AccessState.Task(approval)
@@ -312,15 +318,31 @@ internal class Admission {
                 RepositoryIdentity.CommitSha(J.Text(outcome, "head"))
                 RepositoryIdentity.Branch(J.Text(metadata, "branch"))
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
-                if J.Number(outcome, "pr") != J.Number(pull, "number") || J.Text(outcome, "head") != J.Text(
-                    head,
-                    "sha"
-                ) ||
-                    J.Text(metadata, "branch") != branch || !RepositoryIdentity.SameRepo(
-                    J.Text(metadata, "fork"),
-                    fork
-                ) {
+                if J.Number(outcome, "pr") != J.Number(pull, "number") || J.Text(metadata, "branch") != branch ||
+                    !RepositoryIdentity.SameRepo(J.Text(metadata, "fork"), fork) {
                     return JsonElement{}
+                }
+                if J.Text(outcome, "head") != J.Text(head, "sha") {
+                    let reservation = J.Get(value, "reservation")
+                    if reservation.ValueKind != JsonValueKind.Object || J.Text(reservation, "status") != "active" ||
+                        branch != "tokate/v2-" +
+                        J.Text(reservation, "reservation") || RepositoryIdentity.PositiveId(
+                        J.Get(reservation, "actor")
+                    ) != RepositoryIdentity.PositiveId(J.Get(contribution, "actor")) || !String.Equals(
+                        J.Text(reservation, "donor"),
+                        J.Text(contribution, "donor"),
+                        StringComparison.OrdinalIgnoreCase
+                    ) {
+                        return JsonElement{}
+                    }
+                    try {
+                        state.Reservation(J.Get(contribution, "actor"))
+                    } catch (error CliFailure) {
+                        if error.Code == "stale_approval" {
+                            return JsonElement{}
+                        }
+                        throw error
+                    }
                 }
                 binding = contribution
             } else {

@@ -51,7 +51,13 @@ internal class CoordinatorSetup {
                     continue
                 }
                 for rule in J.Items(J.Get(policy, "rules")) {
-                    if J.Text(rule, "type") != "restrict_actions_events" {
+                    let type = J.Text(rule, "type")
+                    if type == "restrict_actions_actors" && enforcement == "active" {
+                        throw Exception(
+                            "Active Actions actor policy may prevent outsider admission; review Settings > Actions > Policies before setup"
+                        )
+                    }
+                    if type != "restrict_action_events" {
                         continue
                     }
                     let events = J.Get(J.Get(rule, "parameters"), "allowed_events")

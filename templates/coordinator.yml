@@ -28,6 +28,17 @@ jobs:
       issues: read
       pull-requests: write
     steps:
+      - &namespace
+        name: Permit command namespace
+        run: |
+          sudo tee /etc/apparmor.d/tokate-unshare <<'EOF'
+          abi <abi/4.0>,
+          profile unshare /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/tokate-unshare
+          /usr/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
       - &bootstrap
         name: Fetch pinned coordinator
         env:
@@ -62,6 +73,7 @@ jobs:
       issues: read
       pull-requests: write
     steps:
+      - *namespace
       - *bootstrap
       - name: Admit canonical pull request
         env:
