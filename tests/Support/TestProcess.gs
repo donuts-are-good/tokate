@@ -9,6 +9,29 @@ import System.Text
 
 internal class TestProcess {
     shared {
+        internal func HostPid(child Process) string {
+            for task in Directory.EnumerateDirectories("/proc/self/task") {
+                for pid in File.ReadAllText(Path.Combine(task, "children")).Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries
+                ) {
+                    let status = Status("/proc/" + pid.Trim() + "/status")
+                    if status == nil {
+                        continue
+                    }
+                    for line in status.Split('\n') {
+                        if line.StartsWith("NSpid:") &&
+                            line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)[^1] == child
+                            .Id
+                            .ToString() {
+                            return pid.Trim()
+                        }
+                    }
+                }
+            }
+            throw Exception("Cannot identify owned child in host proc mount")
+        }
+
         internal func Fields(stat string)[]string -> stat.Substring(stat.LastIndexOf(')') + 2).Split(
             ' ',
             StringSplitOptions.RemoveEmptyEntries
