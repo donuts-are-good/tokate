@@ -86,7 +86,8 @@ const resources = {
     extendResources: () => {},
     reload: async () => {},
 };
-const runtime = await sdk.ModelRuntime.create({ authPath: '/tokate-control/auth.json', modelsPath: '/tokate-control/models.json',
+await writeFile('/tmp/tokate-agent/auth.json', '{}');
+const runtime = await sdk.ModelRuntime.create({ authPath: '/tmp/tokate-agent/auth.json', modelsPath: '/tokate-control/models.json',
     modelsStorePath: '/tmp/tokate-agent/models-store.json', allowModelNetwork: false, refreshOnCreate: false });
 if (typeof runtime.getModel !== 'function') throw new Error('Unsupported ModelRuntime capability');
 const model = runtime.getModel('tokate-local', modelId);
@@ -117,7 +118,7 @@ try {
         }
         if (denied !== 4) throw new Error('Tool isolation failed');
         await files.writeFile(`${cwd}/probe.txt`, 'before');
-        await customTools[1].execute('probe-edit', { path: 'probe.txt', oldText: 'before', newText: 'after' });
+        await customTools[1].execute('probe-edit', { path: 'probe.txt', edits: [{ oldText: 'before', newText: 'after' }] });
         if (String(await files.readFile(`${cwd}/probe.txt`)) !== 'after') throw new Error('SDK edit contract failed');
         const result = await shell.exec('test ! -r .git/config && test ! -r /tokate-control/models.json && ! touch /usr/bin/tokate-pi-probe && touch probe-shell.txt', cwd,
             { onData: () => {}, timeout: 5 });

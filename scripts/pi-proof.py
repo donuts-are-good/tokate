@@ -82,7 +82,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
     for case in ['off', 'on', 'failed', 'malformed', 'incomplete', 'empty', 'cancel']:
-        with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/tmp') as directory:
+        with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
             server.calls = 0
             server.case = case
@@ -92,7 +92,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
             code = f"from pathlib import Path; import socket; p=Path({str(private)!r}); assert not p.exists(); assert not Path('.git/config').exists(); assert not Path('/tokate-control/models.json').exists(); denied=False\ntry: Path({str(outside)!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{port})); connected=True\nexcept OSError: pass\nassert connected == {case == 'on'}\nPath('result.txt').write_text('final')"
             import shlex
             shell = 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE'
-            server.planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}), ('edit', {'path': 'result.txt', 'oldText': 'before', 'newText': 'after'}),
+            server.planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}), ('edit', {'path': 'result.txt', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
                               ('read', {'path': str(private)}), ('write', {'path': str(outside), 'content': 'escaped'}), ('read', {'path': '.git/config'}),
                               ('read', {'path': '/tokate-control/models.json'}), ('bash', {'command': shell, 'timeout': 4}),
                               ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]

@@ -113,7 +113,6 @@ internal class PiBoundary {
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
             File.WriteAllText(Path.Combine(control, "bridge.mjs"), ApplicationInfo.Resource("pi-bridge.mjs"))
-            File.WriteAllText(Path.Combine(control, "auth.json"), "{}")
             File.WriteAllText(
                 Path.Combine(control, "models.json"),
                 J.Write(
