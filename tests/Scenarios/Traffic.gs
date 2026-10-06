@@ -362,7 +362,15 @@ internal class CommandTrafficChecks {
             return run
         }
 
-        private func Watch(flow NativeFixture, run string, timeout string, code int32 = 8) Result -> flow.Call(
+        private func Watch(
+            flow NativeFixture,
+            run string,
+            timeout string,
+            code int32 = 8,
+            direct bool = false
+        ) Result -> flow
+            .Call(
+            direct ? []string{"checks", "--repo", "owner/project", "--pr", "10", "--watch", "--timeout", timeout}:
             []string{"checks", "--run", run, "--watch", "--timeout", timeout},
             code,
             traffic: true
@@ -495,6 +503,9 @@ internal class CommandTrafficChecks {
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
             Budgets(flow, pending, 21, 0, 0, 10)
+            flow.ResetTraffic()
+            let direct = flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, traffic: true)
+            Budgets(flow, direct, 21, 0, 0, 10)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -514,22 +525,28 @@ internal class CommandTrafficChecks {
                 ),
                 "Unchanged pending polls rewrote local state"
             )
+            flow.State["check_polls"] = JsonValue.Create(0)
+            flow.Save()
+            flow.ResetTraffic()
+            Budgets(flow, Watch(flow, run, "10", 0, true), 63, 0, 0, 51)
         }
 
         private func WatchChanges(binary string) {
             using let flow = NativeFixture(binary)
             let run = Published(flow)
             using let baseline = FixtureSnapshot(flow.Temp.Root)
-            for kind in[]string{"head", "approval"} {
-                baseline.Restore()
-                flow.Reload()
-                flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
-                flow.State["check_read_effect"] = JsonValue.Create(kind)
-                flow.Save()
-                flow.ResetTraffic()
-                let result = Watch(flow, run, "5", 1)
-                Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
+            for direct in[]bool{false, true} {
+                for kind in[]string{"head", "approval"} {
+                    baseline.Restore()
+                    flow.Reload()
+                    flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+                    flow.State["check_read_effect"] = JsonValue.Create(kind)
+                    flow.Save()
+                    flow.ResetTraffic()
+                    let result = Watch(flow, run, "5", 1, direct)
+                    Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
+                    Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
+                }
             }
         }
 
