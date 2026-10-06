@@ -1530,11 +1530,42 @@ internal partial class NativeFlow : NativeFixture {
                 }
             }
             Check.That(File.Exists(ready), "Owned task namespace readiness timed out")
-            let pid = Int32.Parse(File.ReadAllText(ready))
-            Check.That(pid > 0, "Invalid owned task PID")
+            let innerPid = File.ReadAllText(ready).Trim()
+            let expectedPid = File.ReadAllText(Path.Combine(run, "checkout/expected-pid-namespace"))
+            var hostPid string = ""
+            for task in Directory.EnumerateDirectories("/proc") {
+                var status string?
+                try {
+                    status = TestProcess.Status(Path.Combine(task, "status"))
+                } catch (error UnauthorizedAccessException) {
+                    continue
+                } catch (error IOException) {
+                    continue
+                }
+                if status == nil {
+                    continue
+                }
+                for line in status.Split('\n') {
+                    if !line.StartsWith("NSpid:") {
+                        continue
+                    }
+                    let fields = line.Split([]char{' ', '\t'}, StringSplitOptions.RemoveEmptyEntries)
+                    if fields.Length > 2 && fields[^1] == innerPid {
+                        try {
+                            if FileInfo(Path.Combine(task, "ns/pid")).LinkTarget == expectedPid {
+                                hostPid = Path.GetFileName(task)
+                            }
+                        } catch (error UnauthorizedAccessException) { } catch (error IOException) { }
+                    }
+                }
+                if hostPid != "" {
+                    break
+                }
+            }
+            Check.That(hostPid != "", "Cannot resolve owned task host PID")
             for name in[]string{"pid", "user", "ipc", "uts", "mnt", "net"} {
                 let pin = File.OpenHandle(
-                    "/proc/" + pid.ToString() + "/ns/" + name,
+                    "/proc/" + hostPid + "/ns/" + name,
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.Read

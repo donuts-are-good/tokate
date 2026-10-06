@@ -211,6 +211,11 @@ internal partial class Fixture {
             return 1
         }
         if mode == "temporary_isolation" {
+            let pid = FileInfo("/proc/self/ns/pid").LinkTarget
+            Check.That(
+                pid != nil && pid == FileInfo("/proc/1/ns/pid").LinkTarget,
+                "Managed /proc is outside the worker PID namespace"
+            )
             let sentinel = Check.Text(State["temporary_sentinel"])
             Check.That(!File.Exists(sentinel), "Host temporary file reached the managed namespace")
             File.WriteAllText(sentinel, "private agent temporary data")

@@ -49,6 +49,8 @@ internal class Worker {
                 "--bind",
                 "/",
                 "/",
+                "--proc",
+                "/proc",
                 "--dev",
                 "/dev",
                 "--tmpfs",
