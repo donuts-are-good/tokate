@@ -615,6 +615,33 @@ internal class Amendment {
                         ),
                         J.Parse(J.Write(updatedReceipt))
                     )
+                    let metadata = PublicSummary.Attach(
+                        J.Map(
+                            "fork",
+                            run.Text("head_repo"),
+                            "branch",
+                            run.Text("branch"),
+                            "previous",
+                            amendment.Text("previous"),
+                            "head",
+                            amendment.Text("commit"),
+                            "pr",
+                            amendment.Number("pr"),
+                            "seconds",
+                            amendment.Number("seconds"),
+                            "tools",
+                            J.Get(amendment.Element(), "tools"),
+                            "verification",
+                            "donor-reported-pass"
+                        ),
+                        J.Get(amendment.Element(), "public_summary")
+                    )
+                    if run.Text("attempt") != "" {
+                        metadata["attempt"] = run.Text("attempt")
+                    }
+                    if amendment.Text("sync") != "" {
+                        metadata["sync"] = amendment.Text("sync")
+                    }
                     amendment.Fields["request"] = J.Map(
                         "uuid",
                         amendment.Text("id"),
@@ -625,56 +652,8 @@ internal class Amendment {
                         "action",
                         "amend",
                         "metadata",
-                        PublicSummary.Attach(
-                            J.Map(
-                                "fork",
-                                run.Text("head_repo"),
-                                "branch",
-                                run.Text("branch"),
-                                "previous",
-                                amendment.Text("previous"),
-                                "head",
-                                amendment.Text("commit"),
-                                "pr",
-                                amendment.Number("pr"),
-                                "seconds",
-                                amendment.Number("seconds"),
-                                "tools",
-                                J.Get(amendment.Element(), "tools"),
-                                "verification",
-                                "donor-reported-pass"
-                            ),
-                            J.Get(amendment.Element(), "public_summary")
-                        )
+                        metadata
                     )
-                }
-                if run.Number("version") == 2 && run.Text("attempt") != "" {
-                    let request = J.Get(amendment.Element(), "request")
-                    let metadata = J.Map()
-                    for field in J.Get(request, "metadata").EnumerateObject() {
-                        metadata[field.Name] = field.Value.Clone()
-                    }
-                    metadata["attempt"] = run.Text("attempt")
-                    let updated = J.Map()
-                    for field in request.EnumerateObject() {
-                        updated[field.Name] = field.Value.Clone()
-                    }
-                    updated["metadata"] = metadata
-                    amendment.Fields["request"] = updated
-                }
-                if run.Number("version") == 2 && amendment.Text("sync") != "" {
-                    let request = J.Get(amendment.Element(), "request")
-                    let metadata = Dictionary[string, Object?]()
-                    for field in J.Get(request, "metadata").EnumerateObject() {
-                        metadata[field.Name] = field.Value
-                    }
-                    metadata["sync"] = amendment.Text("sync")
-                    let updated = Dictionary[string, Object?]()
-                    for field in request.EnumerateObject() {
-                        updated[field.Name] = field.Value
-                    }
-                    updated["metadata"] = metadata
-                    amendment.Fields["request"] = updated
                 }
                 amendment.Fields["state"] = "publishing"
                 amendment.Save(location)
