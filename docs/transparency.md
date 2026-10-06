@@ -2,8 +2,8 @@
 
 [Setup guide](../README.md) · [Command and isolation reference](reference.md)
 
-This document describes how Tokate 0.2.22 discovers tools, handles data, and
-delegates authentication. Source links support the behavior described below.
+This document describes Tokate's tool discovery, authentication and data access,
+with links to the source.
 
 ## Current harness discovery and settings
 
@@ -323,42 +323,3 @@ This document is not a claim about their retention practices.
 Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
 [Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
 [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
-
-## Bounded public-content audit
-
-Owner audit evidence at main `22c3c80e77a526802488c84d4dccc0e489ed86e6`
-covered 95 tracked files, 57 history messages/contact records, 56 anonymously
-accessible patches plus the remaining patch through owner access, current asset
-metadata, 49 served website files, three stable release archives/checksums, and
-33 public issue/PR entries at that snapshot. No attachments were present. Owner
-review scanned 76 available workflow log archives (237 entries, 21,930 lines)
-with bounded patterns. Pages artifact `11219216581` contained 49 regular files
-matching the tracked site. This change reuses that evidence without repeating
-the audit.
-
-No recognized credential values were identified in that review. It does not
-cover deleted or edited prior material, all historical binaries and deployments,
-arbitrary encodings, donor home credential stores, or private configuration and
-`.env` files; it does not establish an absolute absence of secrets. The
-harness, repository-content, local raw output, and external-service limitations
-described above remain; runtime data boundaries are tracked in
-[#17](https://github.com/obselate/tokate/issues/17).
-Historical contact details are not reproduced here; their follow-up is tracked
-in [#36](https://github.com/obselate/tokate/issues/36). An exposed credential would
-require private revocation/rotation and removal coordination; deleting it from
-the latest commit is insufficient. No history rewrite is authorized without a
-separate concrete review.
-
-Managed shell home and caches live at `/tmp/tokate-home` in private temporary
-storage, outside recursive repository scans. Verification gets fresh storage
-for each command. Historical `.tokate-scratch/` remains ignored,
-alongside local run artifacts and environment files. Release packaging uses
-fresh temporary staging, explicit current product documentation/license paths,
-numeric zero archive ownership, and staging cleanup. Existing releases remain
-unchanged. Direct Pages upload tightening belongs to owner-side
-[#35](https://github.com/obselate/tokate/issues/35); ignore rules do not constrain
-every publication path or prevent inclusion of already tracked files.
-
-Users should be able to compare this document with the source for the version
-they run. Update it whenever discovery, authentication, data handling, or
-publication behavior changes.
