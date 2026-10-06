@@ -45,7 +45,8 @@ internal class ProtectedPaths {
 
         private func Matches(entry string, path string) bool {
             if entry.EndsWith("/", StringComparison.Ordinal) {
-                return path == entry.Substring(0, entry.Length - 1) || path.StartsWith(entry, StringComparison.Ordinal)
+                return (entry.Length == path.Length + 1 && entry.StartsWith(path, StringComparison.Ordinal)) ||
+                    path.StartsWith(entry, StringComparison.Ordinal)
             }
             return path == entry
         }
@@ -64,7 +65,7 @@ internal class ProtectedPaths {
             }
         }
 
-        private func Relation(policy JsonElement, approval JsonElement, path string) int32 {
+        private func Relation(configured List[string], approval JsonElement, path string) int32 {
             if Decree.Protected(path, approval) || Matches(".github/workflows/", path) || path.StartsWith(
                 ".github/tokate",
                 StringComparison.Ordinal
@@ -72,12 +73,12 @@ internal class ProtectedPaths {
                 return 2
             }
             var ancestor = path == ".github"
-            for entry in J.Items(J.Get(policy, "protected_paths")) {
-                let name = entry.GetString() ?? ""
+            let prefix = configured.Count == 0 ? "": path + "/"
+            for name in configured {
                 if Matches(name, path) {
                     return 2
                 }
-                if name.StartsWith(path + "/", StringComparison.Ordinal) {
+                if name.StartsWith(prefix, StringComparison.Ordinal) {
                     ancestor = true
                 }
             }
@@ -148,10 +149,14 @@ internal class ProtectedPaths {
             trusted Dictionary[string, string],
             candidate Dictionary[string, string]
         ) {
+            let configured = List[string]()
+            for entry in J.Items(J.Get(policy, "protected_paths")) {
+                configured.Add(entry.GetString() ?? "")
+            }
             let paths = HashSet[string](trusted.Keys, StringComparer.Ordinal)
             paths.UnionWith(candidate.Keys)
             for path in paths {
-                let relation = Relation(policy, approval, path)
+                let relation = Relation(configured, approval, path)
                 if relation == 0 {
                     continue
                 }

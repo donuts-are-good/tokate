@@ -494,7 +494,7 @@ internal class CommandTrafficChecks {
             let run = Published(flow)
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
-            Budgets(flow, pending, 22, 0, 0, 11)
+            Budgets(flow, pending, 21, 0, 0, 10)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -503,7 +503,7 @@ internal class CommandTrafficChecks {
             flow.Save()
             flow.ResetTraffic()
             let result = Watch(flow, run, "10", 0)
-            Budgets(flow, result, 66, 0, 0, 54)
+            Budgets(flow, result, 63, 0, 0, 51)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
             let observations = flow.State["check_state_times"]
@@ -528,8 +528,8 @@ internal class CommandTrafficChecks {
                 flow.Save()
                 flow.ResetTraffic()
                 let result = Watch(flow, run, "5", 1)
-                Check.Contains(result.Error, kind == "head" ? "PR changed": "Issue needs Tokate approval")
-                Budgets(flow, result, kind == "head" ? 13: 15, 0, 0, kind == "head" ? 1: 3)
+                Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
+                Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
             }
         }
 
