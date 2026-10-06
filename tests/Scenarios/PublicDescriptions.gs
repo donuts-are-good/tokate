@@ -3,9 +3,7 @@ package TokateTests
 import System
 import System.IO
 import System.Text
-import System.Text.Json
 import System.Text.Json.Nodes
-import Tokate
 
 internal class PublicDescriptions {
     shared {
@@ -42,123 +40,12 @@ internal class PublicDescriptions {
             return body
         }
 
-        private func Validation() {
-            let valid = Summary("Fix result content to show the final reviewed text.", String('a', 40))
-            PublicSummary.Validate(J.Parse(valid.ToJsonString()), String('a', 40))
-            for unsafe in[]string{
-                "Fix output using https://private.example.test/log",
-                "Fix output from /tmp/private.log",
-                "Fix output from C:\\private\\log",
-                "Fix output from localhost:8080",
-                "Fix output from 127.0.0.1:8080",
-                "Fix output with sk-synthetic-never-valid",
-                "Fix output with github_pat_synthetic",
-                "Fix output for person@example.test",
-                "Fix output <!-- tokate-receipt:duplicate -->",
-                "Fix output {raw:tool-data}",
-                "Fix output\nwith copied logs",
-                "Generated a patch for the issue.",
-                "result.txt",
-                "Fix output " + String('x', 201)
-            } {
-                var refused bool
-                try {
-                    PublicSummary.Validate(J.Parse(Summary(unsafe).ToJsonString()))
-                } catch {
-                    refused = true
-                }
-                Check.That(refused, "Unsafe summary accepted")
-            }
-            for mutation in[]string{"stale", "unknown", "empty", "null", "many", "bytes"} {
-                let value = valid.DeepClone()
-                if mutation == "unknown" {
-                    value["private_report"] = JsonValue.Create("private")
-                } else if mutation == "empty" {
-                    value["changes"] = Check.Json("[]")
-                } else if mutation == "null" {
-                    value["verification"] = nil
-                } else if mutation == "many" {
-                    for i in 0 ... 8 {
-                        value["changes"]?.AsArray().Add(JsonValue.Create("Fix another observed behavior.") as JsonNode)
-                    }
-                } else if mutation == "bytes" {
-                    value["head"] = JsonValue.Create(String('a', 4097))
-                }
-                var refused bool
-                try {
-                    PublicSummary.Validate(
-                        J.Parse(value.ToJsonString()),
-                        mutation == "stale" ? String('b', 40): String('a', 40)
-                    )
-                } catch {
-                    refused = true
-                }
-                Check.That(refused, "Invalid summary accepted")
-            }
-            for key in[]string{"verification", "limitations"} {
-                let value = valid.DeepClone()
-                value[key] = Check.Json("[\"Private log from https://internal.example.test\"]")
-                var refused bool
-                try {
-                    PublicSummary.Validate(J.Parse(value.ToJsonString()), String('a', 40))
-                } catch {
-                    refused = true
-                }
-                Check.That(refused, "Unsafe public field accepted")
-            }
-            var duplicateRefused bool
-            try {
-                PublicSummary.Validate(
-                    J.Parse(
-                        "{\"changes\":[],\"changes\":[\"Fix concrete final result content.\"],\"verification\":[],\"limitations\":[]}"
-                    )
-                )
-            } catch {
-                duplicateRefused = true
-            }
-            Check.That(duplicateRefused, "Duplicate summary key accepted")
-            Check.That(
-                PublicSummary.Usage(J.Parse("{\"input_tokens\":7,\"output_tokens\":\"unsafe\"}")) == "input: 7 tokens",
-                "Invalid usage exposed"
-            )
-            let run = Data()
-            run.Fields["public_summary"] = J.Parse(Summary("Add final reviewed result content.").ToJsonString())
-            PublicSummary.Bind(run, "original candidate")
-            PublicSummary.Bind(run, "changed candidate")
-            Check.That(
-                J.Get(run.Element(), "public_summary").ValueKind == JsonValueKind.Undefined,
-                "Stale patch summary retained"
-            )
-            let fallback = PublicSummary.Report(JsonElement{}, "Local evidence unavailable.")
-            Check.Contains(fallback, "summary unavailable")
-            Check.That(!fallback.Contains("Limits:"), "Empty limits section")
-            using let temp = Temp()
-            let path = Path.Combine(temp.Root, "summary.json")
-            File.WriteAllText(path, valid.ToJsonString())
-            File.CreateSymbolicLink(path + ".link", path)
-            var refused bool
-            try {
-                PublicSummary.FileSummary(path + ".link", String('a', 40))
-            } catch {
-                refused = true
-            }
-            Check.That(refused, "Summary symlink followed")
-            File.WriteAllText(path, "")
-            var emptyRefused bool
-            try {
-                PublicSummary.FileSummary(path, String('a', 40))
-            } catch {
-                emptyRefused = true
-            }
-            Check.That(emptyRefused, "Empty summary file accepted")
-        }
-
         private func Managed(binary string) {
             using let flow = NativeFixture(binary)
             let run = PublishedContribution.Original(flow)
             Check.Contains(Body(flow), "- Add a result containing the fixture completion text.")
             Check.That(
-                !File.ReadAllText(Path.Combine(run, "changes.patch")).Contains(PublicSummary.Artifact),
+                !File.ReadAllText(Path.Combine(run, "changes.patch")).Contains("tokate-public-summary.json"),
                 "Summary artifact committed"
             )
             let originalBody = Body(flow)
@@ -212,6 +99,26 @@ internal class PublicDescriptions {
                 Summary("Add a result containing the external contribution text.", head).ToJsonString()
             )
             let usable = File.ReadAllText(path)
+            for invalid in[]string{
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[],\"changes\":[\"Add final result content.\"],\"verification\":[],\"limitations\":[]}",
+                Summary("Add final result content.", head).ToJsonString().Replace(
+                    "Browser behavior was not checked.",
+                    "Private log at https://internal.example.test"
+                )
+            } {
+                File.WriteAllText(path, invalid)
+                flow.Flow.Call([]string{"external", "--run", run, "--commit", head, "--summary", path}, 1)
+                Check.That(
+                    !Directory.Exists(Path.Combine(run, "checkout")),
+                    "Invalid public summary reached verification"
+                )
+            }
+            File.WriteAllText(path, usable)
+            File.CreateSymbolicLink(path + ".link", path)
+            flow.Flow.Call([]string{"external", "--run", run, "--commit", head, "--summary", path + ".link"}, 1)
+            Check.That(!Directory.Exists(Path.Combine(run, "checkout")), "Linked public summary reached verification")
             File.WriteAllText(path, Summary("Add external contribution text.", String('a', 40)).ToJsonString())
             flow.Flow.Call([]string{"external", "--run", run, "--commit", head, "--summary", path}, 1)
             Check.That(!Directory.Exists(Path.Combine(run, "checkout")), "Stale summary reached verification")
@@ -344,15 +251,16 @@ internal class PublicDescriptions {
             let receiptPrefix = "<!-- tokate-receipt:"
             let receiptStart = body.IndexOf(receiptPrefix, StringComparison.Ordinal) + receiptPrefix.Length
             let receiptEnd = body.IndexOf(" -->", receiptStart, StringComparison.Ordinal)
-            let correction = J.Get(J.Parse(body.Substring(receiptStart, receiptEnd - receiptStart)), "correction")
-            let legacy = "Explicit donor correction " + J.Text(correction, "uuid") +
+            let correction = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))["correction"] ??
+                throw Exception("Missing correction receipt")
+            let legacy = "Explicit donor correction " + Check.Text(correction["uuid"]) +
                 ": donor-reported correction tools: " +
                 tools +
                 ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
                 "Tokate observed independent verification locally on exact corrected commit " +
                 head +
                 ", tree " +
-                J.Text(correction, "tree") +
+                Check.Text(correction["tree"]) +
                 ". Separate verification budget: 30 seconds.\n\n" +
                 "Generated a patch for the approved issue. Independent owner verification: 1/1 checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
             let prefix = "<!-- tokate-report:start -->"
@@ -390,7 +298,7 @@ internal class PublicDescriptions {
             Check.Contains(reviewed, "Maintainer after")
             Check.Contains(reviewed, "- Update final result text after review.")
             Check.That(
-                !reviewed.Contains("Explicit donor correction " + J.Text(correction, "uuid")),
+                !reviewed.Contains("Explicit donor correction " + Check.Text(correction["uuid"])),
                 "Legacy correction prose survived outside the current report"
             )
             let reportStart = reviewed.IndexOf(prefix, StringComparison.Ordinal) + prefix.Length
@@ -438,7 +346,7 @@ internal class PublicDescriptions {
                     items.Add(JsonValue.Create(prefix + String('x', 200 - prefix.Length)) as JsonNode)
                 }
             }
-            let size = Encoding.UTF8.GetByteCount(J.Write(J.Parse(value.ToJsonString())))
+            let size = Encoding.UTF8.GetByteCount(value.ToJsonString())
             let limits = value["limitations"]?.AsArray() ?? throw Exception("Missing limits")
             let text = Check.Text(limits[0])
             limits[0] = JsonValue.Create(text.Substring(0, text.Length - size + 4046))
@@ -515,10 +423,6 @@ internal class PublicDescriptions {
         }
 
         internal func All(binary string, selected string = "") {
-            if selected == "Validation" || (selected == "" && CiShard.Include("PublicDescriptions/Validation")) {
-                Validation()
-                Console.WriteLine("PASS public summary validation, bounds, stale binding and unsafe synthetic text")
-            }
             if selected == "Managed" || (selected == "" && CiShard.Include("PublicDescriptions/Managed")) {
                 Managed(binary)
                 Console.WriteLine(

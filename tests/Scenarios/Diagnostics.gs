@@ -211,8 +211,8 @@ internal class Diagnostics {
                 "--tmpfs",
                 "/tmp",
                 "--bind",
-                "/var/tmp",
-                "/var/tmp",
+                flow.Temp.Root,
+                flow.Temp.Root,
                 "--ro-bind",
                 Path.Combine(flow.Temp.Root, "broken-helper"),
                 helper,
@@ -231,19 +231,26 @@ internal class Diagnostics {
             File.Copy("/usr/bin/setsid", runner)
             File.SetUnixFileMode(runner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             File.WriteAllText(Path.Combine(flow.Temp.Root, "broken-helper"), "")
-            for helper in[]string{"/usr/bin/env", "/usr/bin/setsid"} {
+            for helper in[]string{"/usr/bin/env", "/usr/bin/setsid", "/usr/bin/bwrap"} {
                 Check.Envelope(FixedCall(binary, flow, helper, []string{"doctor", "--owner"}), "doctor", "ok")
-                let selection = Check.Envelope(
-                    FixedCall(binary, flow, helper, []string{"select", "--repo", "owner/project", "--non-interactive"}),
-                    "select",
-                    "error",
-                    "missing_tools"
-                )
-                Check.That(
-                    Check.Text(Row(selection, helper)["status"]) == "failed",
-                    "Broken fixed catalog helper accepted"
-                )
-                let doctorScope = helper == "/usr/bin/setsid" ? "--external": "--managed"
+                if helper != "/usr/bin/bwrap" {
+                    let selection = Check.Envelope(
+                        FixedCall(
+                            binary,
+                            flow,
+                            helper,
+                            []string{"select", "--repo", "owner/project", "--non-interactive"}
+                        ),
+                        "select",
+                        "error",
+                        "missing_tools"
+                    )
+                    Check.That(
+                        Check.Text(Row(selection, helper)["status"]) == "failed",
+                        "Broken fixed catalog helper accepted"
+                    )
+                }
+                let doctorScope = helper == "/usr/bin/env" ? "--managed": "--external"
                 let doctor = Check.Envelope(
                     FixedCall(binary, flow, helper, []string{"doctor", doctorScope}),
                     "doctor",

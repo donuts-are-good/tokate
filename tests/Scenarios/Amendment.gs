@@ -672,7 +672,7 @@ internal class AmendmentFlow {
                     let pull = flow.Flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
                     let body = Check.Text(pull["body"])
                     let metadata = request["metadata"] ?? throw Exception("Missing amendment metadata")
-                    let declared = J.Parse(metadata["tools"]?.ToJsonString() ?? "[]")
+                    let declared = metadata["tools"]?.AsArray() ?? JsonArray()
                     let legacyReport = "Review amendment: " + Check.Text(metadata["previous"]) + " → " + Check.Text(
                         metadata["head"]
                     ) +
@@ -681,8 +681,8 @@ internal class AmendmentFlow {
                         " second verification budget; no inference was launched by amend.\n\n" +
                         "Original execution/model/effort/runtime/usage observations cover original work only. Amendment editing: " +
                         (
-                        J.Items(declared).Count == 0 ? "manual; coding time and usage unknown":
-                        "donor-reported tools " + RequestData.Canonical(declared) +
+                        declared.Count == 0 ? "manual; coding time and usage unknown":
+                        "donor-reported tools " + declared.ToJsonString() +
                             "; identity, coding time and usage not independently attested"
                     ) +
                         ". Owner CI and review must validate this exact amended commit."

@@ -10,7 +10,6 @@ import System.IO
 import System.Net
 import System.Net.Sockets
 import System.Text.Json.Nodes
-import Tokate
 
 internal open class NativeFixture : IDisposable {
     internal let Temp Temp = Temp()
@@ -208,6 +207,12 @@ internal open class NativeFixture : IDisposable {
     internal func NoPr() {
         Reload()
         Check.That(State["pulls"] == nil, "Unexpected PR")
+    }
+
+    internal func Reject(args[]string, reason string, owner bool = false) {
+        Check.Contains(Call(args, 1, owner).Error, reason)
+        NoInference()
+        NoPr()
     }
 
     internal func SetModelPolicy(mode string, models string = "") {
