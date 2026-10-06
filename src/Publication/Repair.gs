@@ -130,8 +130,6 @@ internal class Repair {
                 }
                 return ""
             }
-            // Older native v1 bodies delimit the report with these two section headings.
-            // Never infer ownership from a missing or partial report marker pair.
             let headings = Regex.Matches(body, "(?m)^## (Changes and verification|Donated AI usage)\r?$")
             if headings.Count != 2 ||
                 headings[0]

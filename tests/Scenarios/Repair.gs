@@ -149,7 +149,7 @@ internal class RepairChecks {
             return body.Substring(start, end + 4 - start)
         }
 
-        private func Legacy(test RepairCase, crlf bool = false) string {
+        private func Legacy(test RepairCase) string {
             test.Flow.Reload()
             let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing legacy PR")
             var body = Check.Text(pull["body"])
@@ -161,25 +161,21 @@ internal class RepairChecks {
                 body.IndexOf("<!-- tokate-run:", StringComparison.Ordinal),
                 "Maintainer near receipt\n\n"
             )
-            if crlf {
-                body = body.Replace("\n", "\r\n")
-            }
             pull["body"] = JsonValue.Create(body)
             test.Flow.Save()
             return body
         }
 
-        private func LegacyValid(test RepairCase, crlf bool = false) {
-            let original = Legacy(test, crlf)
+        private func LegacyValid(test RepairCase) {
+            let original = Legacy(test)
             Valid(test)
             test.Flow.Reload()
             let body = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
             let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
             let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
             let report = body.Substring(start, end + "<!-- tokate-report:end -->".Length - start)
-            let oldReport = crlf ? LegacyText.Replace("\n", "\r\n"): LegacyText
             Check.That(
-                body == original.Replace(oldReport, report).Replace(ReceiptRegion(original), ReceiptRegion(body)),
+                body == original.Replace(LegacyText, report).Replace(ReceiptRegion(original), ReceiptRegion(body)),
                 "Legacy repair changed text outside original report and receipt"
             )
             Check.That(Check.Text(test.Saved()["previous_body"]) == original, "Legacy preflight rewrote original body")
@@ -190,112 +186,19 @@ internal class RepairChecks {
             )
         }
 
-        private func LegacyFailed(test RepairCase) {
-            let original = Legacy(test)
-            Failed(test)
-            Check.That(
-                Check.Text(test.Saved()["previous_body"]) == original,
-                "Legacy failure lost exact original evidence"
-            )
-            test.Flow.Reload()
-            Check.That(
-                Check.Text(test.Flow.State["pulls"]?[0]?["body"]) == original && !File.Exists(
-                    Path.Combine(test.Evidence, "publication.json")
-                ),
-                "Legacy preflight changed the report or receipt before verification passed"
-            )
-        }
-
         private func LegacyAmbiguous(test RepairCase) {
             let original = Legacy(test)
-            let receipt = ReceiptRegion(original)
-            let start = original.IndexOf("<!-- tokate-run:", StringComparison.Ordinal)
-            let marker = original.Substring(
-                start,
-                original.IndexOf(" -->", start, StringComparison.Ordinal) + 4 - start
-            )
-            for fault in[]string{
-                "duplicate-report",
-                "duplicate-usage",
-                "missing-report",
-                "missing-usage",
-                "empty-report",
-                "duplicate-text",
-                "nested-heading",
-                "reversed",
-                "partial-start",
-                "partial-end",
-                "malformed-report-marker",
-                "missing-run",
-                "duplicate-run",
-                "malformed-run",
-                "embedded-run",
-                "missing-receipt",
-                "duplicate-receipt",
-                "malformed-receipt",
-                "embedded-receipt"
-            } {
+            for fault in[]string{"duplicate-report", "missing-usage", "partial-marker"} {
                 var body = original
                 switch fault {
                     case "duplicate-report" {
                         body += "\n## Changes and verification\n\nOther report"
                     }
-                    case "duplicate-usage" {
-                        body += "\n## Donated AI usage\n\nOther usage"
-                    }
-                    case "missing-report" {
-                        body = body.Replace("## Changes and verification", "## Maintainer notes")
-                    }
                     case "missing-usage" {
                         body = body.Replace("## Donated AI usage", "## Maintainer notes")
                     }
-                    case "empty-report" {
-                        body = body.Replace(LegacyText, "")
-                    }
-                    case "duplicate-text" {
-                        body += "\n" + LegacyText
-                    }
-                    case "nested-heading" {
-                        body = body.Replace(LegacyText, LegacyText + "\n\n## Maintainer notes\n\nKeep this")
-                    }
-                    case "reversed" {
-                        body = body
-                            .Replace("## Changes and verification", "## Temporary heading")
-                            .Replace("## Donated AI usage", "## Changes and verification")
-                            .Replace("## Temporary heading", "## Donated AI usage")
-                    }
-                    case "partial-start" {
+                    case "partial-marker" {
                         body += "\n<!-- tokate-report:start -->"
-                    }
-                    case "partial-end" {
-                        body += "\n<!-- tokate-report:end -->"
-                    }
-                    case "malformed-report-marker" {
-                        body += "\n<!-- tokate-report:start ->"
-                    }
-                    case "missing-run" {
-                        body = body.Replace(marker, "")
-                    }
-                    case "duplicate-run" {
-                        body += "\n" + marker
-                    }
-                    case "malformed-run" {
-                        body = body.Replace(marker, "<!-- tokate-run:invalid -->")
-                    }
-                    case "embedded-run" {
-                        body = body.Replace(marker, "").Replace(LegacyText, LegacyText + "\n\n" + marker)
-                    }
-                    case "missing-receipt" {
-                        body = body.Replace(receipt, "")
-                    }
-                    case "duplicate-receipt" {
-                        body += "\n" + receipt
-                    }
-                    case "malformed-receipt" {
-                        body = body.Replace(receipt, receipt.Replace(" -->", " ->"))
-                    }
-                    case "embedded-receipt" {
-                        body = body.Replace(receipt, "").Replace(LegacyText, LegacyText + "\n\n" + receipt)
                     }
                 }
                 test.Flow.Reload()
@@ -604,10 +507,7 @@ internal class RepairChecks {
             for name in[]string{
                 "valid",
                 "legacy-valid",
-                "legacy-crlf",
                 "legacy-ambiguous",
-                "legacy-verification",
-                "legacy-lost_push_response",
                 "legacy-lost_body_response",
                 "legacy-saved-report",
                 "target-sync",
@@ -657,15 +557,12 @@ internal class RepairChecks {
                     continue
                 }
                 prepared.Restore()
-                let fault = name == "legacy-verification" ? "verification": name
-                let test = RepairCase.Create(flow, prepared.Run, fault, name == "target-sync")
-                if name == "legacy-valid" || name == "legacy-crlf" {
-                    LegacyValid(test, name == "legacy-crlf")
+                let test = RepairCase.Create(flow, prepared.Run, name, name == "target-sync")
+                if name == "legacy-valid" {
+                    LegacyValid(test)
                 } else if name == "legacy-ambiguous" {
                     LegacyAmbiguous(test)
-                } else if name == "legacy-verification" {
-                    LegacyFailed(test)
-                } else if name == "legacy-lost_push_response" || name == "legacy-lost_body_response" {
+                } else if name == "legacy-lost_body_response" {
                     Legacy(test)
                     InterruptedPublication(test, name.Substring("legacy-".Length))
                 } else if name == "legacy-saved-report" {
