@@ -229,13 +229,7 @@ internal class RepairChecks {
             )
             let saved = test.Saved()
             if measure {
-                SynchronizationChecks.TreeTraffic(
-                    test.Flow,
-                    Check.Text(saved["base"]),
-                    saved["synchronizations"] ?? throw Exception("Missing repair history"),
-                    test.Candidate,
-                    true
-                )
+                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, true)
             }
             let checks = Check.Text(saved["verification"])
             let id = Check.Text(saved["id"])
@@ -261,13 +255,7 @@ internal class RepairChecks {
             }
             test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             if measure {
-                SynchronizationChecks.TreeTraffic(
-                    test.Flow,
-                    Check.Text(saved["base"]),
-                    saved["synchronizations"] ?? throw Exception("Missing repair history"),
-                    test.Candidate,
-                    false
-                )
+                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, false)
             }
             test.Call()
             Check.That(

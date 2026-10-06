@@ -271,7 +271,6 @@ internal class Synchronization {
                 predecessor = candidate
             }
             Commands.Git(checkout, "merge-base", "--is-ancestor", predecessor, head)
-            // The last pair was checked in this checkout at these exact commits.
             if baselineTree != nil && head == predecessor {
                 return
             }
@@ -314,7 +313,6 @@ internal class Synchronization {
                 predecessor = candidate
             }
             Ancestor(repo, predecessor, fork, head)
-            // Repository identities are fixed for this pass; only the exact pair is reusable.
             if baselineTree != nil && head == predecessor {
                 return
             }

@@ -649,10 +649,6 @@ internal partial class Fixture {
         if tail.StartsWith("git/trees/") {
             let sha = tail.Substring(10).Split('?')[0]
             let recursive = tail.EndsWith("?recursive=1", StringComparison.Ordinal)
-            let treeTrace = Path.Combine(Root, "local-tree-heads.txt")
-            if recursive && File.Exists(treeTrace) {
-                File.AppendAllText(treeTrace, "api:" + ApiPath + "\n")
-            }
             let entries = JsonArray()
             let args = recursive ? []string{"ls-tree", "-r", "-t", "-z", sha}: []string{"ls-tree", "-z", sha}
             for line in GitRaw(folder, args).Split('\0') {
@@ -689,13 +685,6 @@ internal partial class Fixture {
                     if Check.Text(entries[i]?["path"]) == ".github" {
                         entries.RemoveAt(i)
                         break
-                    }
-                }
-                result["tree"] = entries.DeepClone()
-            } else if recursive && fault == "protected" {
-                for entry in entries {
-                    if Check.Text(entry["path"]) == "protected/content" {
-                        entry["sha"] = JsonValue.Create(String('a', 40))
                     }
                 }
                 result["tree"] = entries.DeepClone()
