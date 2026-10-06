@@ -532,6 +532,58 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.NoInference()
     }
 
+    internal func CoordinatorPermissions() {
+        for permissions in[]string{"{}", "{\"push\":false}"} {
+            for denied in[]bool{false, true} {
+                using let test = CoordinationFixture(Flow.Binary)
+                test.Initialize()
+                let initial = test.State()
+                let request = test.ClaimRequest()
+                let path = test.Event(request)
+                test.Flow.Reload()
+                test.Flow.State["repo_permissions"] = Check.Json(permissions)
+                test.Flow.Save()
+                Check.Contains(
+                    test
+                        .Flow
+                        .Call(
+                        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+                        1,
+                        owner: true
+                    )
+                        .Error,
+                    "Repository write permission is required"
+                )
+                if denied {
+                    test.Flow.Faults(
+                        "repos/owner/project/git/refs/heads/tokate/contributions/1",
+                        Check.Json("[{\"status\":403}]")
+                    )
+                    Check.Contains(test.Coordinate(path, 1).Error, "No automatic retry was made")
+                    let state = test.State()
+                    Check.That(
+                        Check.Text(state["sha"]) == Check.Text(initial["sha"]) && state["state"]?.ToJsonString() ==
+                        initial["state"]?.ToJsonString(),
+                        "Denied state write changed authority or acquired a reservation"
+                    )
+                    test.Flow.Reload()
+                    Check.That(Check.Text(test.Flow.State["fault_index"]) == "1", "Denied state write was retried")
+                } else {
+                    test.Coordinate(path)
+                    let state = test.State()
+                    Check.That(
+                        Check.Text(state["sha"]) != Check.Text(initial["sha"]) && Check.Text(
+                            state["state"]?["reservation"]?["reservation"]
+                        ) == Check.Text(request["uuid"]) && state["state"]?["outcomes"]?.AsArray().Count == 1,
+                        "Claim did not record a reservation without push permission metadata"
+                    )
+                }
+                test.Flow.NoInference()
+                test.Flow.NoPr()
+            }
+        }
+    }
+
     internal func InterruptedWrite() {
         let request = ClaimRequest()
         let path = Event(request)
