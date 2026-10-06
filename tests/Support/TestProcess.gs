@@ -5,6 +5,7 @@ import System
 import System.Collections.Generic
 import System.Diagnostics
 import System.IO
+import System.Text
 
 internal class TestProcess {
     shared {
@@ -48,7 +49,8 @@ internal class TestProcess {
             args[]string,
             env Dictionary[string, string],
             input string? = nil,
-            cwd string = ""
+            cwd string = "",
+            seconds int32 = 120
         ) Result {
             let info = ProcessStartInfo(exe)
             info.UseShellExecute = false
@@ -66,20 +68,34 @@ internal class TestProcess {
                 info.WorkingDirectory = cwd
             }
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
+            using let outputReader = StreamReader(process.StandardOutput.BaseStream, UTF8Encoding(false), false)
             let output = Chan[string](1)
             let error = Chan[string](1)
-            go Read(process.StandardOutput, output)
+            go Read(outputReader, output)
             go Read(process.StandardError, error)
-            if input != nil {
-                process.StandardInput.Write(input)
+            let onCancel = ConsoleCancelEventHandler(
+                (sender Object?, event ConsoleCancelEventArgs) -> {
+                    event.Cancel = true
+                    try {
+                        process.Kill(true)
+                    } catch (error InvalidOperationException) { }
+                }
+            )
+            Console.CancelKeyPress += onCancel
+            try {
+                if input != nil {
+                    process.StandardInput.Write(input)
+                }
+                process.StandardInput.Close()
+                if !process.WaitForExit(seconds * 1000) {
+                    process.Kill(true)
+                    process.WaitForExit()
+                    throw Exception("Test process timed out: " + exe)
+                }
+                return Result{Code: process.ExitCode, Output: <-output, Error: <-error}
+            } finally {
+                Console.CancelKeyPress -= onCancel
             }
-            process.StandardInput.Close()
-            if !process.WaitForExit(120000) {
-                process.Kill(true)
-                process.WaitForExit()
-                throw Exception("Test process timed out: " + exe)
-            }
-            return Result{Code: process.ExitCode, Output: <-output, Error: <-error}
         }
     }
 }

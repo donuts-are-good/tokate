@@ -22,6 +22,10 @@ internal class ExternalContribution {
             }
             let record = ContributionClaim.RecheckV2(run)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
+            let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
+            if summary.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = summary
+            }
             let metadata = J.Parse(
                 J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", commit))
             )

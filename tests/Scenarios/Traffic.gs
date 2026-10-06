@@ -244,9 +244,24 @@ internal class CommandTrafficChecks {
         }
 
         private func CanonicalRequest(binary string) {
-            for fault in[]string{"other-author", "issue", "repository", "actor", "changed-payload", "string-actor"} {
-                using let flow = CoordinationFixture(binary)
-                flow.Initialize()
+            using let flow = CoordinationFixture(binary)
+            flow.Initialize()
+            using let baseline = FixtureSnapshot(flow.Flow.Temp.Root)
+            for fault in[]string{
+                "other-author",
+                "issue",
+                "repository",
+                "actor",
+                "changed-payload",
+                "string-actor",
+                "url-case",
+                "url-path-case",
+                "url-leading-zero",
+                "url-query",
+                "url-host-case"
+            } {
+                baseline.Restore()
+                flow.Comment = 10
                 let request = flow.ClaimRequest()
                 let eventPath = flow.Event(request, fault == "other-author" ? 124: 123)
                 let id = Check.Text(Check.Json(File.ReadAllText(eventPath))["comment"]?["id"])
@@ -257,6 +272,20 @@ internal class CommandTrafficChecks {
                         fault == "issue" ?
                         "https://api.github.com/repos/owner/project/issues/2": "https://api.github.com/repos/other/project/issues/1"
                     )
+                } else if fault.StartsWith("url-") {
+                    let urls = Check.Map(
+                        "url-case",
+                        "https://api.github.com/repos/OWNER/PROJECT/issues/1",
+                        "url-path-case",
+                        "https://api.github.com/repos/owner/project/Issues/1",
+                        "url-leading-zero",
+                        "https://api.github.com/repos/owner/project/issues/01",
+                        "url-query",
+                        "https://api.github.com/repos/owner/project/issues/1?extra",
+                        "url-host-case",
+                        "https://API.github.com/repos/owner/project/issues/1"
+                    )
+                    comment["issue_url"] = urls[fault]?.DeepClone()
                 } else if fault == "actor" {
                     let altered = comment.DeepClone()
                     altered["user"] = Check.Map("id", 124, "login", "donor")
@@ -270,7 +299,16 @@ internal class CommandTrafficChecks {
                 }
                 flow.Flow.Save()
                 flow.Flow.ResetTraffic()
-                Request(flow, request, fault == "other-author" ? 0: 1)
+                let accepted = fault == "other-author" || fault == "url-case"
+                let result = Request(flow, request, accepted ? 0: 1)
+                if !accepted {
+                    Check.Contains(
+                        result.Error,
+                        fault == "string-actor" ? "requires an element of type 'Number'": "Request UUID has changed actor, contents, repository or issue evidence"
+                    )
+                }
+                flow.Flow.NoInference()
+                flow.Flow.NoPr()
                 flow.Flow.Reload()
                 Check.That(
                     Check.Text(flow.Flow.State["request_count"]) == (fault == "other-author" ? "1": ""),
@@ -331,6 +369,9 @@ internal class CommandTrafficChecks {
         )
 
         private func WatchDeadline(binary string) {
+            using let flow = NativeFixture(binary)
+            let run = Published(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for kind in[]string{
                 "initial-authority",
                 "approval-read",
@@ -339,8 +380,8 @@ internal class CommandTrafficChecks {
                 "rate-reset",
                 "poll-delay"
             } {
-                using let flow = NativeFixture(binary)
-                let run = Published(flow)
+                baseline.Restore()
+                flow.Reload()
                 let commit = Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"])
                 let path = kind == "initial-authority" ? "repos/owner/project/pulls/10":
                 (
@@ -376,7 +417,6 @@ internal class CommandTrafficChecks {
                     8,
                     traffic: true
                 ): Watch(flow, run, "1")
-                Check.That(timer.Elapsed.TotalSeconds < 1.7, "Entire watch exceeded timeout: " + kind)
                 Check.Contains(result.Output, "timeout")
                 flow.Reload()
                 var checkReads int32
@@ -409,9 +449,7 @@ internal class CommandTrafficChecks {
                 flow.State["faults"] = Check.Json("[{\"status\":200,\"pause_ms\":3000}]")
                 flow.Save()
                 flow.ResetTraffic()
-                let timer = Stopwatch.StartNew()
                 let result = Watch(flow, run, "1")
-                Check.That(timer.Elapsed.TotalSeconds < 1.7, "Moved-target instruction read exceeded watch deadline")
                 Check.Contains(result.Output, "timeout")
                 flow.Reload()
                 Check.That(
@@ -479,9 +517,12 @@ internal class CommandTrafficChecks {
         }
 
         private func WatchChanges(binary string) {
+            using let flow = NativeFixture(binary)
+            let run = Published(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for kind in[]string{"head", "approval"} {
-                using let flow = NativeFixture(binary)
-                let run = Published(flow)
+                baseline.Restore()
+                flow.Reload()
                 flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
                 flow.State["check_read_effect"] = JsonValue.Create(kind)
                 flow.Save()

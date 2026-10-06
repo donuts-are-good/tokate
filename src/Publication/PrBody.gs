@@ -36,10 +36,109 @@ internal class PrBody {
             let recovery = run.Flag(
                 "recovered"
             ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
+            let imported = V1Continuation.Has(run) ? ContinuationReport(J.Get(run.Element(), "continuation")): ""
             return recovery +
+                imported +
                 "Generated a patch for the approved issue. Independent owner verification: " +
                 count.ToString() + "/" + count.ToString() +
                 " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
+        }
+
+        internal func LegacyVerificationReport(run Data, record JsonElement, receipt JsonElement) string {
+            let report = VerificationReport(run, record)
+            let correction = J.Get(receipt, "correction")
+            if correction.ValueKind == JsonValueKind.Undefined {
+                return report
+            }
+            let tools = J.Get(correction, "tools")
+            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
+            "donor-reported correction tools: " + J.Write(tools)
+            return "Explicit donor correction " + J.Text(correction, "uuid") +
+                ": " +
+                editing +
+                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
+                "Tokate observed independent verification locally on exact corrected commit " +
+                J.Text(correction, "head") + ", tree " + J.Text(correction, "tree") +
+                ". Separate verification budget: " +
+                J
+                .Number(correction, "seconds").ToString() + " seconds.\n\n" + report
+        }
+
+        internal func ManagedReport(run Data, record JsonElement) string {
+            let count = Verification.Results(run, record)
+            return PublicSummary.Report(
+                PublicSummary.ForHead(run, run.Text("commit")),
+                "Tokate observed locally: " + count.ToString() + "/" + count.ToString() +
+                    " checks passed on this candidate."
+            ) +
+                (
+                run.Flag("recovered") ?
+                "\n- Recovery: original verification failed; verification-only recovery passed without new inference.": ""
+            ) +
+                (V1Continuation.Has(run) ? "\n\n" + ContinuationReport(J.Get(run.Element(), "continuation")).Trim(): "")
+        }
+
+        internal func CoordinatedReport(metadata JsonElement) string {
+            let summary = J.Get(metadata, "summary")
+            if summary.ValueKind != JsonValueKind.Undefined {
+                PublicSummary.Validate(summary, J.Text(metadata, "head"))
+            }
+            return PublicSummary.Report(
+                summary,
+                "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
+            ) +
+                OriginalProvenance(metadata)
+        }
+
+        internal func OriginalProvenance(metadata JsonElement) string {
+            var report = "\n\n- Original source: " +
+                (J.Text(metadata, "source") == "tokate" ? "managed Tokate": "external") +
+                "; coding execution and usage are donor-reported to the coordinator." +
+                PublicSummary.Tools(J.Get(metadata, "tools"), "Original donor-reported tools")
+            let correction = J.Get(metadata, "correction")
+            if correction.ValueKind != JsonValueKind.Undefined {
+                report += "\n\n- Correction: separate " + J.Number(correction, "seconds").ToString() +
+                    " second verification budget; original declarations cover only the original completed turn." +
+                    PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
+            }
+            return report
+        }
+
+        internal func ContinuationReport(
+            prior JsonElement
+        ) string -> "Fresh v1 attempt seeded from unpublished interrupted attempt " +
+            J.Text(prior, "id") + " under predecessor approval " + J.Text(prior, "approval") +
+            ". Preserved origin state: " +
+            J.Text(prior, "state") + "; failure: " + J.Text(prior, "failure_reason") +
+            ". Prior donor-reported tool: " +
+            J.Text(prior, "harness") + "/" + J.Text(prior, "provider") + ", " + J.Text(prior, "model") + " / " + J.Text(
+            prior,
+            "effort"
+        ) +
+            ". The predecessor is not retroactively successful. Missing prior usage, reports and verification are not reconstructed. Usage and checks below describe the new attempt; all checks cover the complete final diff from the original approved base.\n\n"
+
+        internal func AmendmentReport(receipt JsonElement) string {
+            let prior = J.Get(receipt, "predecessor")
+            let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
+            let amendment = J.Get(receipt, "amendment")
+            let report = Amendment.Summary(
+                J.Text(amendment, "previous"),
+                J.Text(receipt, "head"),
+                J.Number(amendment, "seconds"),
+                J.Get(amendment, "tools"),
+                J.Get(amendment, "summary"),
+                true
+            ) +
+                (origin == "" ? "": "\n\n" + origin.Trim())
+            let repair = J.Get(receipt, "repair")
+            if repair.ValueKind == JsonValueKind.Undefined {
+                return report
+            }
+            if J.Text(repair, "id") == J.Text(amendment, "id") {
+                return report + "\n\n" + Repair.Summary(repair)
+            }
+            return report + "\n\nEarlier repair on " + J.Text(repair, "head") +
+                ": original private state was unavailable. Its independent verification covered that earlier commit only; original logs, usage and verification were not reconstructed."
         }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))

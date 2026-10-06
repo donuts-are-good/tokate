@@ -94,25 +94,23 @@ internal class CorrectionPublication {
         }
 
         private func NativeBody(run Data, correction Data, record JsonElement, receipt JsonElement) string {
-            let tools = J.Get(correction.Element(), "tools")
-            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
-            "donor-reported correction tools: " + J.Write(tools)
             let values = Dictionary[string, string]()
             values["issue"] = run.Number("issue").ToString()
-            let seconds = correction.Number("seconds").ToString()
-            values["report"] = "Explicit donor correction " + correction.Text("uuid") +
-                ": " +
-                editing +
-                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
-                "Tokate observed independent verification locally on exact corrected commit " +
-                correction.Text("commit") + ", tree " + correction.Text("tree") +
-                ". Separate verification budget: " +
-                seconds +
-                " seconds.\n\n" +
-                PrBody.VerificationReport(run, record)
+            values["report"] = PrBody.Report(
+                PublicSummary.Report(
+                    PublicSummary.ForHead(correction, correction.Text("commit")),
+                    "Tokate observed locally: " + Verification.Results(correction, record).ToString() +
+                        " original owner checks passed on this corrected candidate."
+                ) +
+                    "\n\n- Correction: separate " +
+                    correction
+                    .Number("seconds").ToString() +
+                    " second verification budget; original declarations cover only the original completed turn." +
+                    PublicSummary.Tools(J.Get(correction.Element(), "tools"), "Donor-reported correction tools")
+            )
             values["donor"] = run.Text("donor")
-            values["model"] = run.Text("model")
-            values["effort"] = run.Text("effort")
+            values["model"] = PublicSummary.Identifier(run.Text("model"))
+            values["effort"] = PublicSummary.Identifier(run.Text("effort"))
             values["seconds"] = run.Flag("recovered") ? "unknown (original runtime not recorded)":
             (
                 run.Fields.ContainsKey("execution_seconds") ? run.Number("execution_seconds").ToString() +
