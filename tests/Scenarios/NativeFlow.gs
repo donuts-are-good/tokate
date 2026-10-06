@@ -282,9 +282,10 @@ internal partial class NativeFlow : NativeFixture {
             }
             flow.Reject(flow.ClaimArgs(seconds: "3601"), "Runtime exceeds repository policy")
             flow.Reject(flow.ClaimArgs(network: true), "Repository policy forbids command network access")
-            for effort in[]string{"unknown", "absent", "invalid"} {
+            for effort in[]string{"unknown", "invalid"} {
                 flow.Reject(flow.ClaimArgs(effort: effort), "Invalid value for --effort")
             }
+            flow.Reject(flow.ClaimArgs(effort: "absent"), "requires a known model and supported effort control")
             flow.NoInference()
             let model = "gpt-6-sol"
             let run = flow.Claim(model: model, effort: "high")

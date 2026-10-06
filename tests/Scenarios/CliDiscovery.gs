@@ -1,15 +1,85 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.Diagnostics
 import System.IO
+import System.Net.Sockets
+import System.Runtime.InteropServices
 import System.Text
 import System.Text.Json.Nodes
+
+@DllImport("libc", EntryPoint: "getsockopt", SetLastError: true)
+func DiscoveryPeer(socket int32, level int32, option int32, value[]byte, length[]uint32) int32;
 
 internal class CliDiscovery {
     shared {
         private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external authorize-sync revoke-sync repair amend submit coordinate policy approve assign revoke claim work recover publish status verify-pr overlaps checks completion help --version"
             .Split(' ')
+
+        private func Address(root string) UnixDomainSocketEndPoint -> UnixDomainSocketEndPoint(
+            "\0tokate-discovery-" + Check.TextHash(root)
+        )
+
+        internal func Holder() int32 {
+            let root = Directory.GetCurrentDirectory()
+            Console.Write("detached-prefix\n")
+            Console.Out.Flush()
+            Console.Error.Write("detached-error-prefix\n")
+            Console.Error.Flush()
+            using let socket = Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+            socket.Connect(Address(root))
+            socket.Send([]byte{1})
+            let ack = [1]byte
+            Check.That(socket.Receive(ack) == 1, "Missing detached-holder acknowledgement")
+            File.WriteAllText(Path.Combine(root, "holder-ready"), "ready")
+            select {
+                case <- after(TimeSpan.FromSeconds(20.0)) { }
+            }
+            return 0
+        }
+
+        private func Observe(listener Socket, observed Chan[string]) {
+            try {
+                let clock = Stopwatch.StartNew()
+                while !listener.Poll(0, SelectMode.SelectRead) {
+                    Check.That(clock.Elapsed.TotalSeconds < 5, "Detached holder did not connect")
+                    select {
+                        case <- after(TimeSpan.FromMilliseconds(5.0)) { }
+                    }
+                }
+                using let socket = listener.Accept()
+                let credentials = [12]byte
+                let length = []uint32{12}
+                Check.That(
+                    DiscoveryPeer(socket.SafeHandle.DangerousGetHandle().ToInt32(), 1, 17, credentials, length) == 0 &&
+                        length[0] == 12,
+                    "Cannot identify owned holder"
+                )
+                let pid = BitConverter.ToInt32(credentials, 0).ToString()
+                let message = [1]byte
+                Check.That(socket.Receive(message) == 1 && message[0] == 1, "Wrong holder readiness")
+                let stat = TestProcess.Status("/proc/" + pid + "/stat") ?? throw Exception("Ready holder is absent")
+                Check.That(TestProcess.Fields(stat)[3] == pid, "Pipe holder did not leave the original session")
+                socket.Send([]byte{1})
+                observed <- pid
+            } catch (error Exception) {
+                observed <- "error: " + error.Message
+            }
+        }
+
+        private func Collected(pid string) {
+            let clock = Stopwatch.StartNew()
+            while TestProcess.Status("/proc/" + pid + "/stat") != nil && clock.Elapsed.TotalSeconds < 2 {
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(5.0)) { }
+                }
+            }
+            Check.That(
+                TestProcess.Status("/proc/" + pid + "/stat") == nil,
+                "Repository discovery left a detached holder"
+            )
+        }
 
         internal func Call(binary string, args[]string, temp Temp, code int32 = 0) Result {
             let result = TestProcess.Run(binary, args, temp.Env, cwd: temp.Root)
@@ -213,7 +283,7 @@ internal class CliDiscovery {
             temp.Env["PATH"] = empty
             let doctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let diagnosis = Check.Envelope(doctor, "doctor", "error", "missing_tools")
-            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 8, "Doctor omitted checks")
+            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 9, "Doctor omitted checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
             let blocked = Check.Envelope(
                 TestProcess.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),
@@ -603,13 +673,57 @@ internal class CliDiscovery {
                 Check.That(!result.Error.Contains("Usage:"), "Valid URL input rejected")
                 File.Delete(log)
             }
-            File.WriteAllText(Path.Combine(bin, "git"), "#!/bin/sh\n/bin/sleep 120 &\necho $$! > child.pid\nexit 0\n")
-            Check.Contains(Call(binary, []string{"policy"}, temp, 1).Error, "No GitHub remote")
-            TestProcess.Collected(
-                File.ReadAllText(Path.Combine(temp.Root, "child.pid")),
-                "Repository discovery left a detached pipe holder"
+            temp.Tool("holder")
+            using let listener = Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified)
+            listener.Bind(Address(temp.Root))
+            listener.Listen(1)
+            let observed = Chan[string](1)
+            go Observe(listener, observed)
+            File.WriteAllText(
+                Path.Combine(bin, "git"),
+                "#!/bin/sh\nprintf '%s' \"$$LANG\" > child-lang\n" +
+                    "[ -z \"$${LC_ALL+x}\" ] && : > child-lc-all-unset\n" +
+                    "/usr/bin/setsid ./bin/holder --discovery-holder &\ni=0\n" +
+                    "while [ ! -f holder-ready ] && [ \"$$i\" -lt 500 ]; do /bin/sleep 0.01; i=$$((i + 1)); done\n" +
+                    "[ -f holder-ready ]\n"
             )
+            let clock = Stopwatch.StartNew()
+            let discovery = Call(binary, []string{"policy"}, temp, 1)
+            let pid = <-observed
+            Check.That(!pid.StartsWith("error:"), pid)
+            Check.That(clock.Elapsed.TotalSeconds < 8, "Repository discovery exceeded its cleanup bound")
+            Check.Contains(discovery.Error, "Ambiguous or unsupported local remotes")
+            Check.That(
+                File.ReadAllText(Path.Combine(temp.Root, "child-lang")) == temp.Env["LANG"],
+                "Child LANG changed"
+            )
+            Check.That(File.Exists(Path.Combine(temp.Root, "child-lc-all-unset")), "Child LC_ALL changed")
+            Collected(pid)
             Check.That(!File.Exists(log), "Failed repository discovery invoked GitHub")
+            File.WriteAllText(Path.Combine(bin, "git"), "#!/bin/sh\n: > namespace-command-started\n")
+            let unavailable = TestProcess.Run(
+                "/usr/bin/bwrap",
+                []string{
+                    "--unshare-user",
+                    "--unshare-pid",
+                    "--disable-userns",
+                    "--bind",
+                    "/",
+                    "/",
+                    "--",
+                    binary,
+                    "policy",
+                    "--json"
+                },
+                temp.Env,
+                cwd: temp.Root
+            )
+            let blocked = Check.Envelope(unavailable, "policy", "error", "missing_tools")
+            Check.Contains(Check.Text(blocked["error"]?["message"]), "PID namespace")
+            Check.That(
+                !File.Exists(Path.Combine(temp.Root, "namespace-command-started")),
+                "Git ran without a namespace"
+            )
             File.Delete(Path.Combine(bin, "git"))
             File.CreateSymbolicLink(Path.Combine(bin, "git"), "/usr/bin/git")
             Check.Success(TestProcess.Run("/usr/bin/git", []string{"init", "-b", "main", temp.Root}, temp.Env))

@@ -323,3 +323,7 @@ This document is not a claim about their retention practices.
 Source: [Policy.gs](../src/Policy/Policy.gs), [GitHub.gs](../src/GitHub/GitHub.gs), [OwnerApproval.gs](../src/Policy/OwnerApproval.gs),
 [Worker.gs](../src/Execution/Worker.gs), [Contribution.gs](../src/Execution/Contribution.gs),
 [Publish.gs](../src/Publication/Publish.gs), [Amendment.gs](../src/Publication/Amendment.gs).
+
+Managed pi uses a separate SDK bridge and outer bubblewrap boundary; it imports no
+user settings or authentication. Endpoint/runtime paths remain in private run state.
+See [pi filesystem/network limits and evidence](pi.md).

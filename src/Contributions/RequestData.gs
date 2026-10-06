@@ -109,6 +109,8 @@ internal class RequestData {
             return value
         }
 
+        internal func ModelIdentifier(value string) string -> PublicSummary.Identifier(value, model: true)
+
         internal func Tools(value JsonElement) {
             let items = J.Items(value)
             if value.ValueKind != JsonValueKind.Array || items.Count < 1 || items.Count > 16 {
@@ -116,9 +118,10 @@ internal class RequestData {
             }
             for tool in items {
                 Keys(tool, "harness,provider,model,effort,usage,coding_seconds")
-                for name in[]string{"harness", "provider", "model", "effort"} {
+                for name in[]string{"harness", "provider", "effort"} {
                     PublicSummary.Identifier(Token(J.Text(tool, name)))
                 }
+                ModelIdentifier(J.Text(tool, "model"))
                 let number = J.Get(tool, "coding_seconds")
                 var seconds int64
                 if number.ValueKind != JsonValueKind.Undefined &&

@@ -446,7 +446,8 @@ internal class Verification {
                         cancellation: cancellation,
                         outputPath: outputPath,
                         errorPath: errorPath,
-                        budget: budget
+                        budget: budget,
+                        pidNamespace: true
                     )
                 } catch (error Exception) {
                     CleanupRuntime(storage.FullName, error)

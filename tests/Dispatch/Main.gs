@@ -5,6 +5,9 @@ import System.IO
 
 func Main(args[]string) int32 {
     try {
+        if args.Length == 1 && args[0] == "--discovery-holder" {
+            return CliDiscovery.Holder()
+        }
         let exe = Environment.ProcessPath ?? throw Exception("Missing process path")
         if Path.GetFileName(exe) == "curl" {
             return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")
@@ -24,6 +27,10 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 6 && args[0] == "--pi-proof" {
+            PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
+            return 0
+        }
         if args.Length == 4 && args[0] == "--local-codex" {
             LocalCodex.All(binary, args[1], args[2], args[3])
             return 0
