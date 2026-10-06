@@ -118,16 +118,54 @@ internal class Repair {
             }
         }
 
+        private func LegacyReport(body string) string {
+            let failure = "Repair requires unambiguous native v1 report boundaries"
+            if body.Contains("<!-- tokate-report") {
+                if Regex.Matches(body, "<!-- tokate-report").Count != 2 {
+                    throw Exception(failure)
+                }
+                let report = PrBody.ReportText(body, "")
+                if report == "" || report.Contains("<!-- tokate-run") || report.Contains("<!-- tokate-receipt") {
+                    throw Exception(failure)
+                }
+                return ""
+            }
+            let headings = Regex.Matches(body, "(?m)^## (Changes and verification|Donated AI usage)\r?$")
+            if headings.Count != 2 ||
+                headings[0]
+                .Groups[1]
+                .Value != "Changes and verification" ||
+                headings[1]
+                .Groups[1]
+                .Value != "Donated AI usage" {
+                throw Exception(failure)
+            }
+            let start = headings[0].Index + headings[0].Length
+            let report = body.Substring(start, headings[1].Index - start).Trim()
+            if report == "" || Regex.IsMatch(report, "(?m)^#{1,6}(?:[ \t]|$)") || report.Contains("<!-- tokate-run") ||
+                report.Contains("<!-- tokate-receipt") || body.IndexOf(
+                "<!-- tokate-run:",
+                StringComparison.Ordinal
+            ) < headings[1].Index ||
+                body.IndexOf("<!-- tokate-receipt:", StringComparison.Ordinal) < headings[1].Index {
+                throw Exception(failure)
+            }
+            return PrBody.ReportText(body, report)
+        }
+
+        private func Owned(body string) string -> PrBody.Owned(body, LegacyReport(body))
+
         private func Marker(body string) string {
             let matches = Regex.Matches(body, "<!-- tokate-run:[0-9a-f]{32} -->")
-            if matches.Count != 1 || Regex.Matches(body, "<!-- tokate-run:").Count != 1 || body.Contains(
-                "<!-- tokate-v2:"
-            ) ||
-                !body
-                .Contains("<!-- tokate-report:start -->") {
-                throw Exception("Repair requires unambiguous native v1 ownership and marked report regions")
+            if matches.Count != 1 || Regex.Matches(body, "<!-- tokate-run").Count != 1 || Regex.Matches(
+                body,
+                "<!-- tokate-receipt"
+            )
+                .Count != 1 ||
+                body.Contains("<!-- tokate-v2") {
+                throw Exception("Repair requires unambiguous native v1 ownership and report regions")
             }
-            PrBody.Owned(body, "")
+            Owned(body)
             return matches[0].Value
         }
 
@@ -511,12 +549,12 @@ internal class Repair {
             Candidate(directory, intent, record)
             let pull = Pull(intent)
             let oldBody = intent.Text("previous_body")
-            let oldOwned = PrBody.Owned(oldBody, "")
+            let legacyReport = LegacyReport(oldBody)
+            let oldOwned = Owned(oldBody)
             if intent.Text("state") == "verified" {
-                if PrBody.Owned(J.Text(pull, "body"), "") != oldOwned || J.Text(
-                    J.Get(pull, "head"),
-                    "sha"
-                ) != intent.Text("previous") {
+                if Owned(J.Text(pull, "body")) != oldOwned || J.Text(J.Get(pull, "head"), "sha") != intent.Text(
+                    "previous"
+                ) {
                     throw Exception("Original owned receipt/report or head changed before repair publication")
                 }
                 let fields = Dictionary[string, Object?]()
@@ -562,7 +600,7 @@ internal class Repair {
                 let receipt = J.Parse(J.Write(fields))
                 intent.Fields["body"] = PrBody.ReplaceBody(
                     J.Text(pull, "body"),
-                    "",
+                    legacyReport,
                     PrBody.AmendmentReport(receipt),
                     receipt
                 )
@@ -570,9 +608,9 @@ internal class Repair {
                 intent.Write(Path.Combine(directory, "repair.json"))
                 File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(intent.Element()) + "\n")
             }
-            let candidateOwned = PrBody.Owned(intent.Text("body"), "")
+            let candidateOwned = Owned(intent.Text("body"))
             var latest = Pull(intent)
-            let owned = PrBody.Owned(J.Text(latest, "body"), "")
+            let owned = Owned(J.Text(latest, "body"))
             if owned != oldOwned && owned != candidateOwned {
                 throw Exception("Repair owned regions changed; uncertain physical state retained")
             }
@@ -609,13 +647,13 @@ internal class Repair {
                 intent.Text("commit")
             )
             let body = J.Text(latest, "body")
-            if PrBody.Owned(body, "") != candidateOwned {
-                if PrBody.Owned(body, "") != oldOwned || intent.Text("state") == "published" {
+            if Owned(body) != candidateOwned {
+                if Owned(body) != oldOwned || intent.Text("state") == "published" {
                     throw Exception("PR owned regions changed during repair publication")
                 }
                 let updated = PrBody.ReplaceBody(
                     body,
-                    "",
+                    legacyReport,
                     PrBody.ReportText(intent.Text("body"), ""),
                     PrBody.Receipt(intent.Text("body"))
                 )
@@ -632,7 +670,7 @@ internal class Repair {
             }
             Authority(intent)
             Candidate(directory, intent, record)
-            if PrBody.Owned(J.Text(Pull(intent), "body"), "") != candidateOwned {
+            if Owned(J.Text(Pull(intent), "body")) != candidateOwned {
                 throw Exception("Published repair report/receipt changed")
             }
             ReceiptVerification.Verify(intent.Text("repo"), intent.Number("pr"))
