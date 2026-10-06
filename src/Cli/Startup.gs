@@ -128,6 +128,7 @@ internal class Startup {
                 command == "publish" ||
                 command == "submit" ||
                 command == "amend" ||
+                command == "reconcile" ||
                 command == "repair" ||
                 command == "recover" {
                 names.Add("git")

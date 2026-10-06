@@ -161,6 +161,9 @@ func Dispatch(options Args) int32 {
         V2Preparation.Prepare(options)
     } else if options.Command == "external" {
         ExternalContribution.External(options)
+    } else if options.Command == "reconcile" {
+        Reconciliation.Run(options)
+        return 0
     } else if options.Command == "authorize-sync" {
         Synchronization.Authorize(options)
     } else if options.Command == "revoke-sync" {
