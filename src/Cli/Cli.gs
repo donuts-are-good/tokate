@@ -135,6 +135,7 @@ internal class Cli {
             CliOption("state", "SHA", "Exact coordination-state commit"),
             CliOption("source", "SOURCE", "Coding source", "external tokate"),
             CliOption("tools", "FILE", "Nonsecret JSON tool declarations"),
+            CliOption("summary", "FILE", "Bounded public JSON summary for the exact candidate commit"),
             CliOption("file", "FILE", "Strict claim or publication request JSON"),
             CliOption("event", "FILE", "Trusted issue_comment event JSON"),
             CliOption("output", "FILE", "New workflow file outside .github"),
@@ -256,10 +257,10 @@ internal class Cli {
             ),
             CliCommand(
                 "external",
-                "run,commit",
+                "run,commit,summary",
                 "run,commit",
                 "Fetch and verify an exact external commit in isolation; no inference or publication.",
-                "--run DIR --commit SHA",
+                "--run DIR --commit SHA [--summary FILE]",
                 "external --run /path/to/run --commit SHA"
                 ,
                 effects: "local_read local_write github_read"
@@ -293,10 +294,10 @@ internal class Cli {
             ),
             CliCommand(
                 "amend",
-                "run,commit,seconds,tools,sync",
+                "run,commit,seconds,tools,sync,summary",
                 "run,commit,seconds",
                 "Verify and publish a same-donor review correction; no inference.",
-                "--run DIR --commit SHA --seconds N [--tools FILE] [--sync GRANT]",
+                "--run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE] [--sync GRANT]",
                 "amend --run /path/to/run --commit SHA --seconds 300",
                 effects: "local_read local_write github_read github_write"
             ),
@@ -382,10 +383,10 @@ internal class Cli {
             ),
             CliCommand(
                 "recover",
-                "run,seconds,prepare,commit,tools",
+                "run,seconds,prepare,commit,tools,summary",
                 "run",
                 "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
-                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE]",
+                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
                 "recover --run /path/to/run --seconds 300"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -699,11 +700,18 @@ internal class Cli {
             }
             if args.Command == "recover" {
                 if args.Get("prepare") == "true" &&
-                    (args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "") {
-                    throw Exception("--prepare excludes --commit, --seconds and --tools")
+                    (
+                    args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "" || args.Get(
+                        "summary"
+                    ) != ""
+                ) {
+                    throw Exception("--prepare excludes --commit, --seconds, --tools and --summary")
                 }
                 if args.Get("commit") != "" && !args.Help {
                     args.Need("seconds")
+                }
+                if args.Get("summary") != "" && args.Get("commit") == "" {
+                    throw Exception("--summary requires an explicit corrected --commit")
                 }
                 if args.Get("tools") != "" && args.Get("commit") == "" {
                     throw Exception("--tools requires an explicit corrected --commit")
@@ -736,7 +744,7 @@ internal class Cli {
                     args.Values["--" + key] = RepositoryInput.Repo(args.Get(key))
                 }
             }
-            for key in[]string{"path", "run", "runs", "file", "tools", "event", "output", "continue-from"} {
+            for key in[]string{"path", "run", "runs", "file", "tools", "summary", "event", "output", "continue-from"} {
                 if args.Get(key) != "" {
                     Path.GetFullPath(args.Get(key))
                 }

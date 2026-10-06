@@ -258,7 +258,7 @@ internal class ContinuationChecks {
             let initialBody = Check.Text(flow.State["pulls"]?[0]?["body"])
             let start = initialBody.IndexOf("Fresh v1 attempt seeded from unpublished interrupted attempt ")
             Check.That(start >= 0, "Initial contribution lost interrupted origin")
-            let end = initialBody.IndexOf("\n\n", start)
+            let end = initialBody.IndexOf("\n<!-- tokate-report:end -->", start)
             Check.That(end > start, "Initial origin report is incomplete")
             let origin = initialBody.Substring(start, end - start)
             Check.Contains(origin, "unpublished interrupted attempt " + Check.Text(old["id"]))

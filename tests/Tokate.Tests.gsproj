@@ -29,5 +29,6 @@
     <Compile Include="../src/Json.gs" />
     <Compile Include="../src/GitHub/ApiTransport.gs" />
     <Compile Include="../src/Contributions/RequestData.gs" />
+    <Compile Include="../src/Publication/PublicSummary.gs" />
   </ItemGroup>
 </Project>

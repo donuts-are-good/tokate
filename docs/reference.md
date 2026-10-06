@@ -440,3 +440,43 @@ bash scripts/verify.sh
 The verification script runs the formatter, build and full suite. Check managed
 isolation separately with `artifacts/linux-x64/tokate doctor` and compatible native
 Codex on PATH; simulated checks do not prove that boundary.
+
+### Public PR summaries
+
+Managed tasks request a dedicated `tokate-public-summary.json` in the checkout.
+Tokate reads at most 4096 UTF-8 bytes, removes this untracked artifact before staging,
+and binds its validated contents to the candidate patch. Managed summaries allow
+4046 serialized bytes, reserving 50 bytes for the commit head within the final
+4096-byte bound. Tokate never generates public
+summaries from private harness reports, logs or prompts. A repository-owned file at
+that name or a symlink is refused.
+
+For `external`, explicit `recover --commit`, and `amend`, supply `--summary FILE`:
+
+```json
+{
+  "head": "0123456789abcdef0123456789abcdef01234567",
+  "changes": ["Fix empty results to display a useful message."],
+  "verification": ["Empty result behavior check passed."],
+  "limitations": ["Browser layout was not checked."]
+}
+```
+
+`head` must equal the exact candidate commit; managed artifacts omit it because
+Tokate binds the final patch before creating a commit. Use 1–8 concrete final
+behavior changes, 0–8 donor-reported verification results, and 0–4 material limits.
+Each item is 3–200 characters of plain ASCII prose; change bullets start with a
+supported action verb such as Add, Update, Remove, Fix, Preserve or Reject. Unknown
+fields, duplicate keys, markup, multiline output, URLs, paths, email addresses,
+endpoint patterns and known credential markers are rejected. This deliberately
+restricted format is not a universal credential detector or an attestation of
+semantic accuracy. Donors must review every public field before submission.
+
+Missing summaries produce an explicit request to review the candidate diff; invalid
+or stale commit summaries refuse the operation. A changed patch invalidates its old
+summary. Amendments require a new summary for the entire final diff, including any
+original changes retained. Saved publication intents keep their summary immutable.
+Observed local checks, donor declarations and GitHub CI are labeled separately;
+pending or missing CI is never described as success. Original execution and later
+editing tools and usage remain separate. Owner templates, receipts and acceptance
+policy remain authoritative and unchanged.

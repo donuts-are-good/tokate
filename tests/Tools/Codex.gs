@@ -294,6 +294,14 @@ internal partial class Fixture {
             Check.Contains(File.ReadAllText(Path.Combine(checkout, ".env")), "synthetic-repository-secret")
             Check.Contains(File.ReadAllText(Path.Combine(checkout, "ordinary.data")), "synthetic-repository-secret")
         }
+        if Check.Text(State["public_summary"]) != "missing" {
+            File.WriteAllText(
+                Path.Combine(checkout, "tokate-public-summary.json"),
+                State["public_summary"] == nil ?
+                "{\"changes\":[\"Add a result containing the fixture completion text.\"],\"verification\":[],\"limitations\":[]}":
+                Check.Text(State["public_summary"])
+            )
+        }
         File.WriteAllText(
             args[Array.IndexOf(args, "--output-last-message") + 1],
             "### Changes\nAdded result.\n### Acceptance criteria addressed\nFixture.\n### Verification\nFixture check passed.\n### Unresolved limitations\nNone.\nsynthetic-raw-report-secret " +

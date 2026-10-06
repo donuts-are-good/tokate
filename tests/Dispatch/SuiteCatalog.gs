@@ -91,6 +91,9 @@ internal class SuiteCatalog {
                     if CiShard.Include("SuiteDriver") {
                         SuiteChecks.All()
                     }
+                    if CiShard.Include("PublicDescriptions") {
+                        PublicDescriptions.All(binary)
+                    }
                     for name in NativeFlow.SerialGroups {
                         if CiShard.Include("Native/" + name) {
                             NativeFlow.All(binary, name)
