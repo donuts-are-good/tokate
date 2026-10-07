@@ -426,8 +426,11 @@ internal class CliDiscovery {
             ]?["commands"]?[0]
             Check.That(Check.Text(defaults?["effects"]?["local_write"]) == "true", "Defaults write effect missing")
             Check.That(
-                defaults?["operations"]?[0]?["required_inputs"]?.AsArray().Count == 4,
-                "Defaults set tuple missing"
+                JsonNode.DeepEquals(
+                    defaults?["operations"]?[0]?["required_inputs"],
+                    Check.Json("[\"model\",\"effort\"]")
+                ),
+                "Defaults set required inputs differ"
             )
             Check.That(
                 Check.Text(defaults?["operations"]?[1]?["effects"]?["local_write"]) == "false",

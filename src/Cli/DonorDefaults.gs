@@ -8,6 +8,19 @@ import System.Text.RegularExpressions
 
 internal class DonorDefaults {
     shared {
+        internal func NormalizePair(args Args) {
+            if args.Get("harness") == "" && args.Get("provider") == "" {
+                args.Values["--harness"] = "codex"
+            }
+            for pair in[][]string{[]string{"codex", "openai"}, []string{"pi", "local-chat-completions"}} {
+                if args.Get("harness") == pair[0] && args.Get("provider") == "" {
+                    args.Values["--provider"] = pair[1]
+                } else if args.Get("harness") == "" && args.Get("provider") == pair[1] {
+                    args.Values["--harness"] = pair[0]
+                }
+            }
+        }
+
         internal func Name(value string) string {
             if !Regex.IsMatch(value, "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\z") {
                 throw Exception("Invalid profile name: use 1 to 64 letters, digits, dots, underscores or hyphens")
