@@ -158,9 +158,11 @@ internal class V2Preparation {
         internal func Acquire(args Args) string {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let info = GitHub.Api("repos/" + repo)
-            let policy = Policy.Load(repo, J.Text(info, "default_branch"))
+            let branch = J.Text(info, "default_branch")
+            let revision = GitHub.Branch(repo, branch)
+            let policy = Policy.Load(repo, revision)
             if J.Number(policy.Value, "version") == 1 {
-                return ContributionClaim.Claim(args)
+                return ContributionClaim.Claim(args, ValueTuple[string, string, Policy](branch, revision, policy))
             }
             if args.Get("continue-from") != "" {
                 throw Exception("Version-2 claims cannot import version-1 work")

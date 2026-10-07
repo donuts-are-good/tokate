@@ -7,12 +7,12 @@ import System.Text.Json
 
 internal class ContributionClaim {
     shared {
-        internal func Claim(args Args) string {
+        internal func Claim(args Args, snapshot ValueTuple[string, string, Policy]? = nil) string {
             let repo = RepositoryIdentity.Repo(args.Need("repo"))
             let number = args.Number("issue")
             let viewer = GitHub.Api("user")
             let donor = RepositoryIdentity.Login(J.Text(viewer, "login"))
-            let record = OwnerApproval.Approved(repo, number, donor)
+            let record = OwnerApproval.Approved(repo, number, donor, snapshot: snapshot)
             let approval = J.Get(record, "approval")
             if J.Text(approval, "predecessor_approval") != "" && args.Get("continue-from") == "" {
                 throw Exception(

@@ -27,7 +27,7 @@ internal class CliOption {
             return "Clean, self-contained candidate checkout; required and separate from repair evidence"
         }
         if (command == "work" || command == "claim") && Name == "seconds" {
-            return "Budget in seconds, 1..86400; required for v2; v1 default: min(3600, owner limit)"
+            return "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
         }
         return (command == "amend" || command == "repair") && Name == "seconds" ?
         "Separate positive verification budget; required, at most the owner limit": Description.Replace(
