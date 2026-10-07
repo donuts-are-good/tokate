@@ -24,20 +24,20 @@ internal class CommitChecks {
                     if items.ValueKind != JsonValueKind.Array {
                         throw Exception("Cannot read complete commit checks")
                     }
-                    let checks = J.Items(items)
-                    inspected += checks.Count
-                    if checks.Count > 100 {
+                    let count = items.GetArrayLength()
+                    inspected += count
+                    if count > 100 {
                         throw Exception("Cannot read complete commit checks")
                     }
                     if kind == "check-runs" {
                         var total int32
                         if !J.Get(response, "total_count").TryGetInt32(out total) ||
                             total < inspected ||
-                            (checks.Count < 100 && total != inspected) {
+                            (count < 100 && total != inspected) {
                             throw Exception("Cannot read complete commit checks")
                         }
                     }
-                    for check in checks {
+                    for check in items.EnumerateArray() {
                         if kind == "check-runs" && J.Get(check, "head_sha")
                             .ValueKind != JsonValueKind.Undefined &&
                             J.Text(check, "head_sha") != head {
@@ -76,7 +76,7 @@ internal class CommitChecks {
                             )
                         )
                     }
-                    if checks.Count < 100 {
+                    if count < 100 {
                         break
                     }
                     if page == 10 {

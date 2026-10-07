@@ -14,7 +14,7 @@ internal class PublicOutput {
         internal var FailureCode string = "command_failed"
         internal var ResultData Object? = nil
         internal var Truncated bool
-        internal let Actions List[Object] = List[Object]()
+        internal let Actions List[[]string] = List[[]string]()
 
         internal func Prose(value string) string {
             if value.Length <= 2048 {
@@ -93,22 +93,28 @@ internal class PublicOutput {
 
         private func Rows(value JsonElement, keys string, arguments bool = false) List[Object] {
             let rows = List[Object]()
-            let items = J.Items(value)
-            if items.Count > 64 {
+            if value.ValueKind != JsonValueKind.Array {
+                return rows
+            }
+            let count = value.GetArrayLength()
+            if count > 64 {
                 Truncated = true
             }
-            for i in 0 ... Math.Min(64, items.Count) {
-                let row = Select(items[i], keys)
+            for i in 0 ... Math.Min(64, count) {
+                let item = value[i]
+                let row = Select(item, keys)
                 if arguments {
-                    let command = J.Get(items[i], "command")
-                    var valid = command.ValueKind == JsonValueKind.Array
-                    for word in J.Items(command) {
-                        if word.ValueKind != JsonValueKind.String {
-                            valid = false
+                    let command = J.Get(item, "command")
+                    if command.ValueKind == JsonValueKind.Array {
+                        var valid = true
+                        for word in command.EnumerateArray() {
+                            if word.ValueKind != JsonValueKind.String {
+                                valid = false
+                            }
                         }
-                    }
-                    if valid {
-                        row["command"] = command
+                        if valid {
+                            row["command"] = command
+                        }
                     }
                 }
                 rows.Add(row)

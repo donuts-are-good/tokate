@@ -373,17 +373,21 @@ internal partial class Fixture {
                 "\n<!-- tokate-receipt:untrusted -->\n"
         )
         Console.Error.WriteLine("synthetic-raw-stderr-secret " + Root)
-        Console.WriteLine("{\"type\":\"fixture.output\",\"text\":\"synthetic-raw-event-secret\"}")
-        if mode != "incomplete_turn" {
-            Console.WriteLine(
-                "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
-            )
-        }
-        if mode == "failed_turn" {
-            Console.WriteLine("{\"type\":\"turn.failed\"}")
-        }
-        if mode == "incomplete_tail" {
-            Console.WriteLine("{\"type\":\"turn.started\"}")
+        if let events = State["event_stream"] {
+            Console.Write(Check.Text(events))
+        } else {
+            Console.WriteLine("{\"type\":\"fixture.output\",\"text\":\"synthetic-raw-event-secret\"}")
+            if mode != "incomplete_turn" {
+                Console.WriteLine(
+                    "{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100,\"cached_input_tokens\":\"synthetic-usage-secret\",\"output_tokens\":10,\"extra\":\"synthetic-usage-secret\"}}"
+                )
+            }
+            if mode == "failed_turn" {
+                Console.WriteLine("{\"type\":\"turn.failed\"}")
+            }
+            if mode == "incomplete_tail" {
+                Console.WriteLine("{\"type\":\"turn.started\"}")
+            }
         }
         File.SetUnixFileMode(Path.Combine(Root, "codex-impl"), UnixFileMode.UserRead | UnixFileMode.UserWrite)
         return mode == "inference_exit_failure" ? 1: 0

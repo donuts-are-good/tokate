@@ -65,7 +65,7 @@ internal class CoordinationState {
             throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
         }
         let configuration = ApprovalBase.Check(repo, approval, 2)
-        let mode = Policy(J.Write(J.Get(configuration, "policy"))).Eligibility
+        let mode = configuration.Item1.Eligibility
         if scoped != (mode != "") || (scoped && J.Text(approval, "eligibility") != mode) {
             throw CliFailure("stale_approval", "Task eligibility declaration differs from current policy")
         }
@@ -78,9 +78,9 @@ internal class CoordinationState {
                     "approval",
                     approval,
                     "policy",
-                    J.Get(configuration, "policy"),
+                    configuration.Item1.Value,
                     "template",
-                    J.Text(configuration, "template"),
+                    configuration.Item2,
                     "issue",
                     task
                 )

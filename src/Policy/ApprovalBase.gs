@@ -19,7 +19,7 @@ internal class ApprovalBase {
             return RepositoryIdentity.Branch(fallback)
         }
 
-        internal func Check(repo string, approval JsonElement, version int32) JsonElement {
+        internal func Check(repo string, approval JsonElement, version int32) ValueTuple[Policy, string] {
             let branch = J.Text(GitHub.Api("repos/" + repo), "default_branch")
             let selected = J.Get(approval, "authority_branch").ValueKind != JsonValueKind.Undefined
             let authority = selected ? J.Text(approval, "authority_branch"): J.Text(approval, "base_branch")
@@ -56,7 +56,7 @@ internal class ApprovalBase {
                 }
             }
             Decree.CheckCurrent(repo, target, approval)
-            return J.Parse(J.Write(J.Map("policy", policy.Value, "template", template)))
+            return ValueTuple[Policy, string](policy, template)
         }
     }
 }

@@ -299,9 +299,9 @@ internal class OwnerApproval {
                         "issue",
                         issue,
                         "policy",
-                        J.Get(configuration, "policy"),
+                        configuration.Item1.Value,
                         "template",
-                        J.Text(configuration, "template")
+                        configuration.Item2
                     )
                 )
             )

@@ -574,8 +574,9 @@ internal class Cli {
                     inputs.Add([]string{"run"})
                 }
                 let effects = J.Map()
+                let declaredEffects = command.Effects.Split(' ')
                 for effect in[]string{"local_read", "local_write", "github_read", "github_write"} {
-                    effects[effect] = Array.IndexOf(command.Effects.Split(' '), effect) >= 0
+                    effects[effect] = Array.IndexOf(declaredEffects, effect) >= 0
                 }
                 let modes = List[Object]()
                 if command.Name == "defaults" {

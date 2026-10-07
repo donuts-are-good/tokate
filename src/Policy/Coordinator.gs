@@ -380,6 +380,13 @@ internal class Coordinator {
                 false,
                 old
             )
+            let retainedHistory = List[Object]()
+            let amendments = J.Get(value, "amendments")
+            if amendments.ValueKind == JsonValueKind.Array {
+                for prior in amendments.EnumerateArray() {
+                    retainedHistory.Add(prior)
+                }
+            }
             let oldCanonical = RequestData.Canonical(oldReceipt)
             let candidateCanonical = RequestData.Canonical(receipt)
             if oldCanonical == candidateCanonical {
@@ -401,7 +408,7 @@ internal class Coordinator {
                 if oldCanonical != RequestData.Canonical(ContributionReceipt.FromState(value)) {
                     throw Exception("PR receipt differs from saved previous or candidate state")
                 }
-                let previousReport = J.Items(J.Get(value, "amendments")).Count == 0 ? PrBody.CoordinatedReport(old):
+                let previousReport = retainedHistory.Count == 0 ? PrBody.CoordinatedReport(old):
                 Amendment.Summary(
                     J.Text(current, "previous"),
                     J.Text(current, "head"),
@@ -411,7 +418,7 @@ internal class Coordinator {
                     false,
                     old
                 )
-                let legacyReport = J.Items(J.Get(value, "amendments")).Count == 0 ? PrBody.OriginalReport(old):
+                let legacyReport = retainedHistory.Count == 0 ? PrBody.OriginalReport(old):
                 Amendment.LegacySummary(
                     J.Text(current, "previous"),
                     J.Text(current, "head"),
@@ -419,7 +426,7 @@ internal class Coordinator {
                     J.Get(current, "tools")
                 )
                 let observedReport = PrBody.ReportText(body, PrBody.OriginalReport(old))
-                let priorSummary = J.Items(J.Get(value, "amendments")).Count == 0 ? J.Get(old, "summary"):
+                let priorSummary = retainedHistory.Count == 0 ? J.Get(old, "summary"):
                 J.Get(current, "summary")
                 if observedReport != previousReport &&
                     (priorSummary.ValueKind != JsonValueKind.Undefined || observedReport != legacyReport) {
@@ -461,10 +468,6 @@ internal class Coordinator {
                 "reservation",
                 run.Text("id")
             )
-            let retainedHistory = List[Object]()
-            for prior in J.Items(J.Get(value, "amendments")) {
-                retainedHistory.Add(prior)
-            }
             let entry = J.Map(
                 "request",
                 J.Text(request, "uuid"),

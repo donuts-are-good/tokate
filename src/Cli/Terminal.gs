@@ -211,16 +211,33 @@ internal class Terminal {
 
         internal func Command(command JsonElement, flatten bool = true) string {
             let words = StringBuilder()
-            for item in J.Items(command) {
-                if words.Length > 0 {
-                    words.Append(' ')
+            if command.ValueKind == JsonValueKind.Array {
+                for item in command.EnumerateArray() {
+                    AppendWord(words, item.ToString())
                 }
-                let word = item.ToString()
-                words.Append(
-                    Regex.IsMatch(word, "^[A-Za-z0-9_./:-]+$") ? word:
-                    "'" + word.Replace("'", "'\"'\"'") + "'"
-                )
             }
+            return CommandText(words, flatten)
+        }
+
+        internal func Command(command[]string, flatten bool = true) string {
+            let words = StringBuilder()
+            for word in command {
+                AppendWord(words, word)
+            }
+            return CommandText(words, flatten)
+        }
+
+        private func AppendWord(words StringBuilder, word string) {
+            if words.Length > 0 {
+                words.Append(' ')
+            }
+            words.Append(
+                Regex.IsMatch(word, "^[A-Za-z0-9_./:-]+$") ? word:
+                "'" + word.Replace("'", "'\"'\"'") + "'"
+            )
+        }
+
+        private func CommandText(words StringBuilder, flatten bool) string {
             let text = Clean(words.ToString())
             return flatten ? text.Replace('\n', ' '): text
         }
@@ -304,7 +321,7 @@ internal class Terminal {
                 let summary = RunSummaryArtifacts(PublicOutput.RunDirectory)
                 Message("Saved artifacts: " + summary, "default", true)
                 for action in PublicOutput.Actions {
-                    Message("Next: " + Command(J.Parse(J.Write(action))), "default", true)
+                    Message("Next: " + Command(action), "default", true)
                 }
             } catch (error Exception) { }
         }
