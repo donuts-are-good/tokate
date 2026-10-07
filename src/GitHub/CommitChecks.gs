@@ -43,37 +43,38 @@ internal class CommitChecks {
                             J.Text(check, "head_sha") != head {
                             throw Exception("Commit check belongs to a different head")
                         }
-                        let state = kind == "check-runs" ? (
-                            J.Text(check, "status") == "completed" ?
-                            J.Text(check, "conclusion"): J.Text(check, "status")
-                        ): J.Text(check, "state")
-                        var bucket = "pending"
-                        if state == "success" {
-                            bucket = "pass"
+                        let state = if kind == "check-runs" {
+                            if J.Text(check, "status") == "completed" {
+                                J.Text(check, "conclusion")
+                            } else {
+                                J.Text(check, "status")
+                            }
+                        } else {
+                            J.Text(check, "state")
+                        }
+                        let bucket = if state == "success" {
+                            "pass"
                         } else if state == "failure" ||
                             state == "error" ||
                             state == "timed_out" ||
                             state == "action_required" ||
                             state == "startup_failure" {
-                            bucket = "fail"
+                            "fail"
                         } else if state == "cancelled" {
-                            bucket = "cancel"
+                            "cancel"
                         } else if state == "skipped" || state == "neutral" {
-                            bucket = "skipping"
+                            "skipping"
+                        } else {
+                            "pending"
                         }
                         rows.Add(
-                            J.Map(
-                                "name",
-                                J.Text(check, kind == "check-runs" ? "name": "context"),
-                                "state",
-                                state.ToUpperInvariant(),
-                                "bucket",
-                                bucket,
-                                "link",
-                                J.Text(check, kind == "check-runs" ? "html_url": "target_url"),
-                                "workflow",
-                                ""
-                            )
+                            map[string, Object?]{
+                                "name": J.Text(check, kind == "check-runs" ? "name": "context"),
+                                "state": state.ToUpperInvariant(),
+                                "bucket": bucket,
+                                "link": J.Text(check, kind == "check-runs" ? "html_url": "target_url"),
+                                "workflow": ""
+                            }
                         )
                     }
                     if count < 100 {

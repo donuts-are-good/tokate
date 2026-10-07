@@ -98,16 +98,13 @@ internal class LeaseLifecycle {
                 ) == RepositoryIdentity.PositiveId(actor)
                 let id = same ? J.Text(identity, "id"): uuid
                 if !same {
-                    let next = J.Map("id", id, "actor", actor)
+                    let next = map[string, Object?]{"id": id, "actor": actor}
                     if Supported(value) {
-                        next["predecessor"] = J.Map(
-                            "revision",
-                            state.Sha,
-                            "id",
-                            J.Text(identity, "id"),
-                            "actor",
-                            J.Get(identity, "actor")
-                        )
+                        next["predecessor"] = map[string, Object?]{
+                            "revision": state.Sha,
+                            "id": J.Text(identity, "id"),
+                            "actor": J.Get(identity, "actor")
+                        }
                     }
                     state.Fields["identity"] = next
                     state.Fields["contribution"] = nil
@@ -116,24 +113,16 @@ internal class LeaseLifecycle {
                 } else {
                     Pin(state)
                 }
-                let outcome = J.Map(
-                    "reservation",
-                    id,
-                    "lease",
-                    uuid,
-                    "donor",
-                    donor,
-                    "actor",
-                    actor,
-                    "created",
-                    now,
-                    "expires",
-                    now + duration,
-                    "status",
-                    "active",
-                    "attempt",
-                    uuid
-                )
+                let outcome = map[string, Object?]{
+                    "reservation": id,
+                    "lease": uuid,
+                    "donor": donor,
+                    "actor": actor,
+                    "created": now,
+                    "expires": now + duration,
+                    "status": "active",
+                    "attempt": uuid
+                }
                 state.Fields["reservation"] = outcome
                 return outcome
             }
@@ -146,7 +135,7 @@ internal class LeaseLifecycle {
                 throw Exception("Lifecycle transition does not match the current lease state")
             }
             Pin(state)
-            let fields = J.Map()
+            let fields = map[string, Object?]{}
             for field in reservation.EnumerateObject() {
                 fields[field.Name] = field.Value.Clone()
             }

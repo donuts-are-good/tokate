@@ -31,18 +31,13 @@ internal class Reconciliation {
             let upstream = GitHub.Branch(run.Text("repo"), run.Text("base_branch"))
             return J.Parse(
                 J.Write(
-                    J.Map(
-                        "record",
-                        record,
-                        "pr",
-                        pr,
-                        "receipt",
-                        receipt,
-                        "upstream",
-                        upstream,
-                        "expected",
-                        run.Number("version") == 2 ? J.Text(authority, "sha"): ""
-                    )
+                    map[string, Object?]{
+                        "record": record,
+                        "pr": pr,
+                        "receipt": receipt,
+                        "upstream": upstream,
+                        "expected": run.Number("version") == 2 ? J.Text(authority, "sha"): ""
+                    }
                 )
             )
         }
@@ -201,18 +196,13 @@ internal class Reconciliation {
             saved.Fields["candidate"] = candidate
             run.Fields["reconciliation"] = saved.Element()
             run.Save(directory)
-            PublicOutput.ResultData = J.Map(
-                "candidate",
-                candidate,
-                "upstream",
-                J.Text(intent, "upstream"),
-                "previous",
-                J.Text(intent, "previous"),
-                "local",
-                true,
-                "verified",
-                false
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "candidate": candidate,
+                "upstream": J.Text(intent, "upstream"),
+                "previous": J.Text(intent, "previous"),
+                "local": true,
+                "verified": false
+            }
             PublicOutput.Actions.Add(
                 []string{
                     "tokate",
@@ -287,30 +277,19 @@ internal class Reconciliation {
                     "Local head does not descend from published H; inspect committed work and use the original contribution checkout. No reset was performed."
                 )
             }
-            let intent = J.Map(
-                "previous",
-                run.Text("commit"),
-                "upstream",
-                J.Text(live, "upstream"),
-                "start",
-                start,
-                "head_ref",
-                headRef,
-                "target",
-                run.Text("base_branch"),
-                "base",
-                run.Text("base"),
-                "approval",
-                run.Text("approval"),
-                "expected",
-                J.Text(live, "expected"),
-                "pr",
-                J.Number(live, "pr"),
-                "receipt",
-                J.Get(live, "receipt"),
-                "phase",
-                "fetching"
-            )
+            let intent = map[string, Object?]{
+                "previous": run.Text("commit"),
+                "upstream": J.Text(live, "upstream"),
+                "start": start,
+                "head_ref": headRef,
+                "target": run.Text("base_branch"),
+                "base": run.Text("base"),
+                "approval": run.Text("approval"),
+                "expected": J.Text(live, "expected"),
+                "pr": J.Number(live, "pr"),
+                "receipt": J.Get(live, "receipt"),
+                "phase": "fetching"
+            }
             run.Fields["reconciliation"] = intent
             run.Save(directory)
             let bound = J.Parse(J.Write(intent))

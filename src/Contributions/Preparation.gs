@@ -26,34 +26,21 @@ internal class Preparation {
 
         private func Identity(run Data, normalized bool = true) string -> Data.Hash(
             J.Write(
-                J.Map(
-                    "version",
-                    run.Number("version"),
-                    "id",
-                    run.Text("id"),
-                    "repo",
-                    normalized ? run.Text("repo").ToLowerInvariant(): run.Text("repo"),
-                    "issue",
-                    run.Number("issue"),
-                    "donor_id",
-                    J.Get(run.Element(), "donor_id"),
-                    "approval",
-                    run.Text("approval"),
-                    "state_sha",
-                    run.Text("state_sha"),
-                    "base",
-                    run.Text("base"),
-                    "base_branch",
-                    run.Text("base_branch"),
-                    "branch",
-                    run.Text("branch"),
-                    "source",
-                    run.Text("source"),
-                    "fork",
-                    normalized ? run.Text("requested_fork").ToLowerInvariant(): run.Text("requested_fork"),
-                    "head_repo",
-                    normalized ? run.Text("head_repo").ToLowerInvariant(): run.Text("head_repo")
-                )
+                map[string, Object?]{
+                    "version": run.Number("version"),
+                    "id": run.Text("id"),
+                    "repo": normalized ? run.Text("repo").ToLowerInvariant(): run.Text("repo"),
+                    "issue": run.Number("issue"),
+                    "donor_id": J.Get(run.Element(), "donor_id"),
+                    "approval": run.Text("approval"),
+                    "state_sha": run.Text("state_sha"),
+                    "base": run.Text("base"),
+                    "base_branch": run.Text("base_branch"),
+                    "branch": run.Text("branch"),
+                    "source": run.Text("source"),
+                    "fork": normalized ? run.Text("requested_fork").ToLowerInvariant(): run.Text("requested_fork"),
+                    "head_repo": normalized ? run.Text("head_repo").ToLowerInvariant(): run.Text("head_repo")
+                }
             )
         )
 
@@ -312,7 +299,10 @@ internal class Preparation {
                 run.Fields["fork_creation_attempted"] = true
                 run.Save(directory)
                 try {
-                    let created = GitHub.Api("repos/" + run.Text("repo") + "/forks", J.Map("name", head.Split('/')[1]))
+                    let created = GitHub.Api(
+                        "repos/" + run.Text("repo") + "/forks",
+                        map[string, Object?]{"name": head.Split('/')[1]}
+                    )
                     RepositoryAccess.ValidateRepository(
                         run.Text("repo"),
                         head,
@@ -438,7 +428,7 @@ internal class Preparation {
                 try {
                     GitHub.Api(
                         "repos/" + run.Text("head_repo") + "/git/refs",
-                        J.Map("ref", "refs/heads/" + run.Text("branch"), "sha", run.Text("base"))
+                        map[string, Object?]{"ref": "refs/heads/" + run.Text("branch"), "sha": run.Text("base")}
                     )
                 } catch (error Exception) {
                     run.Fields["branch_creation_error"] = error.Message
@@ -451,16 +441,12 @@ internal class Preparation {
         }
 
         private func Marker(run Data) string -> J.Write(
-            J.Map(
-                "identity",
-                run.Text("preparation_identity"),
-                "head_repo",
-                run.Text("preparation_head"),
-                "head_id",
-                J.Get(run.Element(), "preparation_head_id"),
-                "repo_id",
-                J.Get(run.Element(), "preparation_repo_id")
-            )
+            map[string, Object?]{
+                "identity": run.Text("preparation_identity"),
+                "head_repo": run.Text("preparation_head"),
+                "head_id": J.Get(run.Element(), "preparation_head_id"),
+                "repo_id": J.Get(run.Element(), "preparation_repo_id")
+            }
         )
 
         private func Owned(checkout string, run Data) {

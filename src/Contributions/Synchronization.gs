@@ -68,9 +68,13 @@ internal class Synchronization {
                 items.Add(item)
             }
             items.Add(
-                J.Map("grant", grant, "candidate", J.Text(value, "candidate"), "upstream", J.Text(value, "upstream"))
+                map[string, Object?]{
+                    "grant": grant,
+                    "candidate": J.Text(value, "candidate"),
+                    "upstream": J.Text(value, "upstream")
+                }
             )
-            return History(J.Parse(J.Write(J.Map("synchronizations", items))))
+            return History(J.Parse(J.Write(map[string, Object?]{"synchronizations": items})))
         }
 
         private func Ref(value JsonElement) string -> "tokate/synchronizations/" + J.Number(value, "issue").ToString() +
@@ -393,61 +397,39 @@ internal class Synchronization {
             Ancestor(repo, J.Text(approval, "base"), repo, upstream)
             let value = J.Parse(
                 J.Write(
-                    J.Map(
-                        "version",
-                        1,
-                        "id",
-                        Guid.NewGuid().ToString("D"),
-                        "repo",
-                        repo,
-                        "repository_id",
-                        J.Get(info, "id"),
-                        "issue",
-                        issue,
-                        "pr",
-                        pr,
-                        "approval_version",
-                        J.Number(receipt, "version"),
-                        "approval",
-                        J.Text(receipt, "approval"),
-                        "base",
-                        J.Text(approval, "base"),
-                        "target",
-                        target,
-                        "upstream",
-                        upstream,
-                        "previous",
-                        previous,
-                        "candidate",
-                        candidate,
-                        "expected",
-                        expected,
-                        "fork",
-                        fork,
-                        "branch",
-                        J.Text(J.Get(pull, "head"), "ref"),
-                        "receipt",
-                        receipt
-                    )
+                    map[string, Object?]{
+                        "version": 1,
+                        "id": Guid.NewGuid().ToString("D"),
+                        "repo": repo,
+                        "repository_id": J.Get(info, "id"),
+                        "issue": issue,
+                        "pr": pr,
+                        "approval_version": J.Number(receipt, "version"),
+                        "approval": J.Text(receipt, "approval"),
+                        "base": J.Text(approval, "base"),
+                        "target": target,
+                        "upstream": upstream,
+                        "previous": previous,
+                        "candidate": candidate,
+                        "expected": expected,
+                        "fork": fork,
+                        "branch": J.Text(J.Get(pull, "head"), "ref"),
+                        "receipt": receipt
+                    }
                 )
             )
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
-                J.Map(
-                    "tree",
-                    []Object{
-                        J.Map(
-                            "path",
-                            "synchronization.json",
-                            "mode",
-                            "100644",
-                            "type",
-                            "blob",
-                            "content",
-                            J.Write(value)
-                        )
+                map[string, Object?]{
+                    "tree": []Object{
+                        map[string, Object?]{
+                            "path": "synchronization.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "content": J.Write(value)
+                        }
                     }
-                )
+                }
             )
             let commit = GitHub.Api(
                 "repos/" + repo + "/git/commits",
@@ -460,10 +442,13 @@ internal class Synchronization {
             let grant = RepositoryIdentity.CommitSha(J.Text(commit, "sha"))
             Fresh(repo, pr, value, approval)
             RepositoryAccess.RequireOwner(repo)
-            GitHub.Api("repos/" + repo + "/git/refs", J.Map("ref", "refs/heads/" + Ref(value), "sha", grant))
+            GitHub.Api(
+                "repos/" + repo + "/git/refs",
+                map[string, Object?]{"ref": "refs/heads/" + Ref(value), "sha": grant}
+            )
             Load(repo, grant)
             Fresh(repo, pr, value, approval)
-            PublicOutput.ResultData = J.Map("repo", repo, "pr", pr, "grant", grant)
+            PublicOutput.ResultData = map[string, Object?]{"repo": repo, "pr": pr, "grant": grant}
             Terminal.Message(
                 "Synchronization grant: " +
                     grant +
@@ -480,21 +465,16 @@ internal class Synchronization {
             let value = Load(repo, grant)
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
-                J.Map(
-                    "tree",
-                    []Object{
-                        J.Map(
-                            "path",
-                            "revocation.json",
-                            "mode",
-                            "100644",
-                            "type",
-                            "blob",
-                            "content",
-                            J.Write(J.Map("grant", grant, "revoked", true))
-                        )
+                map[string, Object?]{
+                    "tree": []Object{
+                        map[string, Object?]{
+                            "path": "revocation.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "content": J.Write(map[string, Object?]{"grant": grant, "revoked": true})
+                        }
                     }
-                )
+                }
             )
             let commit = GitHub.Api(
                 "repos/" + repo + "/git/commits",
@@ -505,7 +485,7 @@ internal class Synchronization {
             RepositoryAccess.RequireOwner(repo)
             GitHub.Api(
                 "repos/" + repo + "/git/refs/heads/" + Ref(value),
-                J.Map("sha", revoked, "force", false),
+                map[string, Object?]{"sha": revoked, "force": false},
                 "PATCH"
             )
             let reference = GitHub.Api("repos/" + repo + "/git/ref/heads/" + Ref(value))
@@ -517,7 +497,7 @@ internal class Synchronization {
             ) != grant {
                 throw Exception("Revocation ref changed; inspect physical authority without retrying")
             }
-            PublicOutput.ResultData = J.Map("repo", repo, "grant", grant)
+            PublicOutput.ResultData = map[string, Object?]{"repo": repo, "grant": grant}
             Terminal.Message("Synchronization revoked; original grant preserved: " + grant)
         }
     }

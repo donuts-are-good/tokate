@@ -237,16 +237,12 @@ internal class Verification {
             )
             let outputPath = Path.Combine(attempt, "stdout.log")
             let errorPath = Path.Combine(attempt, "stderr.log")
-            let check = J.Map(
-                "command",
-                command,
-                "state",
-                "running",
-                "output_file",
-                Path.GetRelativePath(root, outputPath),
-                "error_file",
-                Path.GetRelativePath(root, errorPath)
-            )
+            let check = map[string, Object?]{
+                "command": command,
+                "state": "running",
+                "output_file": Path.GetRelativePath(root, outputPath),
+                "error_file": Path.GetRelativePath(root, errorPath)
+            }
             results.Add(check)
             let record = Path.Combine(root, "verification.json")
             File.WriteAllText(record, J.Write(results))

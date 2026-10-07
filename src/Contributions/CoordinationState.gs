@@ -14,10 +14,16 @@ internal class CoordinationState {
     internal func Write(repo string, issue int32, expected string, expires int64 = 0) {
         let tree = GitHub.Api(
             "repos/" + repo + "/git/trees",
-            J.Map(
-                "tree",
-                []Object{J.Map("path", "state.json", "mode", "100644", "type", "blob", "content", J.Write(Fields))}
-            ),
+            map[string, Object?]{
+                "tree": []Object{
+                    map[string, Object?]{
+                        "path": "state.json",
+                        "mode": "100644",
+                        "type": "blob",
+                        "content": J.Write(Fields)
+                    }
+                }
+            },
             expires: expires
         )
         let commit = GitHub.Api(
@@ -33,13 +39,13 @@ internal class CoordinationState {
         if Sha == "" {
             GitHub.Api(
                 "repos/" + repo + "/git/refs",
-                J.Map("ref", "refs/heads/" + Ref(issue), "sha", next),
+                map[string, Object?]{"ref": "refs/heads/" + Ref(issue), "sha": next},
                 expires: expires
             )
         } else {
             GitHub.Api(
                 "repos/" + repo + "/git/refs/heads/" + Ref(issue),
-                J.Map("sha", next, "force", false),
+                map[string, Object?]{"sha": next, "force": false},
                 "PATCH",
                 expires: expires
             )
@@ -74,16 +80,12 @@ internal class CoordinationState {
         }
         return J.Parse(
             J.Write(
-                J.Map(
-                    "approval",
-                    approval,
-                    "policy",
-                    configuration.Item1.Value,
-                    "template",
-                    configuration.Item2,
-                    "issue",
-                    task
-                )
+                map[string, Object?]{
+                    "approval": approval,
+                    "policy": configuration.Item1.Value,
+                    "template": configuration.Item2,
+                    "issue": task
+                }
             )
         )
     }

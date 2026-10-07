@@ -8,19 +8,14 @@ import System.Text.Json
 internal class GitHub {
     shared {
         internal func AutomationCommit(message string, tree string, parents IEnumerable[string]) Object {
-            let identity = J.Map("name", "Tokate", "email", "tokate@users.noreply.github.com")
-            return J.Map(
-                "message",
-                message,
-                "tree",
-                tree,
-                "parents",
-                parents,
-                "author",
-                identity,
-                "committer",
-                identity
-            )
+            let identity = map[string, Object?]{"name": "Tokate", "email": "tokate@users.noreply.github.com"}
+            return map[string, Object?]{
+                "message": message,
+                "tree": tree,
+                "parents": parents,
+                "author": identity,
+                "committer": identity
+            }
         }
 
         internal suspend func Api(
@@ -78,7 +73,7 @@ internal class GitHub {
         }
 
         internal func Fingerprint(issue JsonElement) string -> Data.Hash(
-            J.Write(J.Map("title", J.Text(issue, "title"), "body", J.Text(issue, "body")))
+            J.Write(map[string, Object?]{"title": J.Text(issue, "title"), "body": J.Text(issue, "body")})
         )
     }
 }

@@ -40,15 +40,17 @@ internal class DonorDefaults {
         internal func Run(args Args) JsonElement {
             if args.Subject == "read" {
                 let saved = Read()
-                return J.Parse(J.Write(J.Map("default", saved.ValueKind == JsonValueKind.Undefined ? nil: saved)))
+                return J.Parse(
+                    J.Write(map[string, Object?]{"default": saved.ValueKind == JsonValueKind.Undefined ? nil: saved})
+                )
             }
             let path = Location()
             if args.Subject == "remove" {
                 let existed = File.Exists(path)
                 File.Delete(path)
-                return J.Parse(J.Write(J.Map("removed", existed)))
+                return J.Parse(J.Write(map[string, Object?]{"removed": existed}))
             }
-            let choice = J.Map()
+            let choice = map[string, Object?]{}
             for key in[]string{"harness", "provider", "model", "effort"} {
                 choice[key] = RequestData.Token(args.Need(key))
             }
@@ -75,7 +77,7 @@ internal class DonorDefaults {
             } finally {
                 File.Delete(temporary)
             }
-            return J.Parse(J.Write(J.Map("default", choice)))
+            return J.Parse(J.Write(map[string, Object?]{"default": choice}))
         }
     }
 }

@@ -6,7 +6,7 @@ import System.Text.Json
 internal class ContributionReceipt {
     shared {
         internal func Native(run Data, head string, version int32 = 1) Dictionary[string, Object?] {
-            let receipt = J.Map("version", version)
+            let receipt = map[string, Object?]{"version": version}
             receipt["repo"] = run.Text("repo")
             receipt["issue"] = run.Number("issue")
             receipt["donor"] = run.Text("donor")
@@ -35,7 +35,7 @@ internal class ContributionReceipt {
             donor string,
             head string
         ) Dictionary[string, Object?] {
-            let receipt = J.Map("version", 2)
+            let receipt = map[string, Object?]{"version": 2}
             receipt["repo"] = repo
             receipt["issue"] = issue
             receipt["approval"] = approval
@@ -63,16 +63,12 @@ internal class ContributionReceipt {
                 fields["correction"] = correction
             }
             if J.Items(J.Get(state, "amendments")).Count > 0 {
-                let amended = J.Map(
-                    "id",
-                    J.Text(current, "request"),
-                    "previous",
-                    J.Text(current, "previous"),
-                    "seconds",
-                    J.Number(current, "seconds"),
-                    "tools",
-                    J.Get(current, "tools")
-                )
+                let amended = map[string, Object?]{
+                    "id": J.Text(current, "request"),
+                    "previous": J.Text(current, "previous"),
+                    "seconds": J.Number(current, "seconds"),
+                    "tools": J.Get(current, "tools")
+                }
                 if J.Text(current, "sync") != "" {
                     amended["sync"] = J.Text(current, "sync")
                 }

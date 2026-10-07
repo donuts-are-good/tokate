@@ -549,16 +549,12 @@ internal class Cli {
                 for option in Options {
                     if command.Has(option.Name) {
                         options.Add(
-                            J.Map(
-                                "name",
-                                "--" + option.Name,
-                                "value",
-                                option.Value,
-                                "description",
-                                option.Describe(command.Name),
-                                "choices",
-                                option.Choices == "" ? []string{}: option.Choices.Split(' ')
-                            )
+                            map[string, Object?]{
+                                "name": "--" + option.Name,
+                                "value": option.Value,
+                                "description": option.Describe(command.Name),
+                                "choices": option.Choices == "" ? []string{}: option.Choices.Split(' ')
+                            }
                         )
                     }
                 }
@@ -573,7 +569,7 @@ internal class Cli {
                 if command.Name == "work" || command.Name == "checks" || command.Name == "prepare" {
                     inputs.Add([]string{"run"})
                 }
-                let effects = J.Map()
+                let effects = map[string, Object?]{}
                 let declaredEffects = command.Effects.Split(' ')
                 for effect in[]string{"local_read", "local_write", "github_read", "github_write"} {
                     effects[effect] = Array.IndexOf(declaredEffects, effect) >= 0
@@ -582,66 +578,57 @@ internal class Cli {
                 if command.Name == "defaults" {
                     for mode in[]string{"set", "read", "remove"} {
                         modes.Add(
-                            J.Map(
-                                "name",
-                                mode,
-                                "required_inputs",
-                                mode == "set" ? []string{"harness", "provider", "model", "effort"}: []string{},
-                                "effects",
-                                J.Map(
-                                    "local_read",
-                                    true,
-                                    "local_write",
-                                    mode != "read",
-                                    "github_read",
-                                    false,
-                                    "github_write",
-                                    false
-                                )
-                            )
+                            map[string, Object?]{
+                                "name": mode,
+                                "required_inputs": mode == "set" ? []string{
+                                    "harness",
+                                    "provider",
+                                    "model",
+                                    "effort"
+                                }: []string{},
+                                "effects": map[string, Object?]{
+                                    "local_read": true,
+                                    "local_write": mode != "read",
+                                    "github_read": false,
+                                    "github_write": false
+                                }
+                            }
                         )
                     }
                 }
-                let positional = command.Name == "defaults" ? []string{"set|read|remove"}: (
-                    command.Name == "help" ? []string{"COMMAND"}:
-                    (
-                        command.Name == "completion" ? []string{"bash|zsh|fish"}:
-                        (command.Has("issue") ? []string{"ISSUE_URL"}: []string{})
-                    )
-                )
+                let positional = if command.Name == "defaults" {
+                    []string{"set|read|remove"}
+                } else if command.Name == "help" {
+                    []string{"COMMAND"}
+                } else if command.Name == "completion" {
+                    []string{"bash|zsh|fish"}
+                } else if command.Has("issue") {
+                    []string{"ISSUE_URL"}
+                } else {
+                    []string{}
+                }
                 commands.Add(
-                    J.Map(
-                        "command",
-                        command.Name,
-                        "summary",
-                        command.Summary,
-                        "arguments",
-                        options,
-                        "positional_arguments",
-                        positional,
-                        "operations",
-                        modes,
-                        "required_inputs",
-                        inputs,
-                        "repository_inputs",
-                        command.Has("repo") ? (
+                    map[string, Object?]{
+                        "command": command.Name,
+                        "summary": command.Summary,
+                        "arguments": options,
+                        "positional_arguments": positional,
+                        "operations": modes,
+                        "required_inputs": inputs,
+                        "repository_inputs": command.Has("repo") ? (
                             command.Has("issue") ? []string{"repo", "issue_url", "local_github_remote"}: []string{
                                 "repo",
                                 "local_github_remote"
                             }
                         ): []string{},
-                        "exclusive_run_inputs",
-                        conflicts,
-                        "effects",
-                        effects,
-                        "inference",
-                        command.Effects.Contains("inference"),
-                        "noninteractive",
-                        true
-                    )
+                        "exclusive_run_inputs": conflicts,
+                        "effects": effects,
+                        "inference": command.Effects.Contains("inference"),
+                        "noninteractive": true
+                    }
                 )
             }
-            return J.Map("version", ApplicationInfo.Version(), "subject", name, "commands", commands)
+            return map[string, Object?]{"version": ApplicationInfo.Version(), "subject": name, "commands": commands}
         }
 
         internal func ErrorUsage(args[]string) string {

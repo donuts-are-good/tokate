@@ -35,7 +35,7 @@ internal class Decree {
                 }
             }
             if entry.ValueKind == JsonValueKind.Undefined {
-                return J.Parse(J.Write(J.Map("present", false, "sha256", nil, "text", "")))
+                return J.Parse(J.Write(map[string, Object?]{"present": false, "sha256": nil, "text": ""}))
             }
             let mode = J.Text(entry, "mode")
             if (mode != "100644" && mode != "100755") || J.Text(entry, "type") != "blob" {
@@ -84,7 +84,7 @@ internal class Decree {
                 throw Exception("DECREE.md must be strict UTF-8")
             }
             ValidateText(text)
-            return J.Parse(J.Write(J.Map("present", true, "sha256", Data.Hash(text), "text", text)))
+            return J.Parse(J.Write(map[string, Object?]{"present": true, "sha256": Data.Hash(text), "text": text}))
         }
 
         private func ValidateText(text string) {

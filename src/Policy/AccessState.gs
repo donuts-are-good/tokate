@@ -24,14 +24,20 @@ internal class AccessState {
         return !denied && (mode == "open" || granted || assigned || (mode == "trusted" && trusted))
     }
 
-    internal func Value() JsonElement -> J.Parse(J.Write(J.Map("version", 1, "repo_id", RepoId, "members", Members)))
+    internal func Value() JsonElement -> J.Parse(
+        J.Write(map[string, Object?]{"version": 1, "repo_id": RepoId, "members": Members})
+    )
 
     internal func Write(repo string, expected string) {
         let text = J.Write(Value())
         RequestData.Parse(text, 65536)
         let tree = GitHub.Api(
             "repos/" + repo + "/git/trees",
-            J.Map("tree", []Object{J.Map("path", "access.json", "mode", "100644", "type", "blob", "content", text)})
+            map[string, Object?]{
+                "tree": []Object{
+                    map[string, Object?]{"path": "access.json", "mode": "100644", "type": "blob", "content": text}
+                }
+            }
         )
         let commit = GitHub.Api(
             "repos/" + repo + "/git/commits",
@@ -40,11 +46,14 @@ internal class AccessState {
         let next = RepositoryIdentity.CommitSha(J.Text(commit, "sha"))
         try {
             if Sha == "" {
-                GitHub.Api("repos/" + repo + "/git/refs", J.Map("ref", "refs/heads/tokate/access", "sha", next))
+                GitHub.Api(
+                    "repos/" + repo + "/git/refs",
+                    map[string, Object?]{"ref": "refs/heads/tokate/access", "sha": next}
+                )
             } else {
                 GitHub.Api(
                     "repos/" + repo + "/git/refs/heads/tokate/access",
-                    J.Map("sha", next, "force", false),
+                    map[string, Object?]{"sha": next, "force": false},
                     "PATCH"
                 )
             }
@@ -139,7 +148,12 @@ internal class AccessState {
             if !Task(approval) {
                 return
             }
-            PublicOutput.ResultData = J.Map("repo", repo, "issue", issue, "eligible", false, "authority", "unknown")
+            PublicOutput.ResultData = map[string, Object?]{
+                "repo": repo,
+                "issue": issue,
+                "eligible": false,
+                "authority": "unknown"
+            }
             let recovery = []string{
                 "tokate",
                 "access",
@@ -161,20 +175,14 @@ internal class AccessState {
                 let access = Load(repo, repoId)
                 let mode = J.Text(approval, "eligibility")
                 let allowed = access.Allows(id, mode, issue)
-                PublicOutput.ResultData = J.Map(
-                    "repo",
-                    repo,
-                    "issue",
-                    issue,
-                    "actor",
-                    id,
-                    "eligibility",
-                    mode,
-                    "eligible",
-                    allowed,
-                    "access_sha",
-                    access.Sha
-                )
+                PublicOutput.ResultData = map[string, Object?]{
+                    "repo": repo,
+                    "issue": issue,
+                    "actor": id,
+                    "eligibility": mode,
+                    "eligible": allowed,
+                    "access_sha": access.Sha
+                }
                 if !allowed {
                     throw CliFailure(
                         "invalid_state",
@@ -185,7 +193,12 @@ internal class AccessState {
             } catch (error CliFailure) {
                 throw error
             } catch (error Exception) {
-                PublicOutput.ResultData = J.Map("repo", repo, "issue", issue, "eligible", false, "authority", "unknown")
+                PublicOutput.ResultData = map[string, Object?]{
+                    "repo": repo,
+                    "issue": issue,
+                    "eligible": false,
+                    "authority": "unknown"
+                }
                 throw CliFailure(
                     "invalid_state",
                     "Donor access authority is unavailable or malformed. Inspect owner-controlled access before proceeding.",
@@ -231,18 +244,13 @@ internal class AccessState {
                 let user = J.Get(comment, "user")
                 return J.Parse(
                     J.Write(
-                        J.Map(
-                            "comment",
-                            RepositoryIdentity.PositiveId(J.Get(comment, "id")),
-                            "actor",
-                            RepositoryIdentity.PositiveId(J.Get(user, "id")),
-                            "donor",
-                            RepositoryIdentity.Login(J.Text(user, "login")),
-                            "issue",
-                            issue,
-                            "scope",
-                            requestScope
-                        )
+                        map[string, Object?]{
+                            "comment": RepositoryIdentity.PositiveId(J.Get(comment, "id")),
+                            "actor": RepositoryIdentity.PositiveId(J.Get(user, "id")),
+                            "donor": RepositoryIdentity.Login(J.Text(user, "login")),
+                            "issue": issue,
+                            "scope": requestScope
+                        }
                     )
                 )
             } catch (error Exception) {
@@ -266,38 +274,32 @@ internal class AccessState {
                     J.Get(request, "actor")
                 ) == actor &&
                     J.Text(request, "scope") == requestScope {
-                    PublicOutput.ResultData = J.Map(
-                        "repo",
-                        repo,
-                        "issue",
-                        issue,
-                        "scope",
-                        requestScope,
-                        "posted",
-                        false,
-                        "comment",
-                        J.Get(request, "comment")
-                    )
+                    PublicOutput.ResultData = map[string, Object?]{
+                        "repo": repo,
+                        "issue": issue,
+                        "scope": requestScope,
+                        "posted": false,
+                        "comment": J.Get(request, "comment")
+                    }
                     Terminal.Message("An access request already exists; owner review is still required.")
                     return
                 }
             }
             let comment = GitHub.Api(
                 "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
-                J.Map("body", "/tokate-access " + J.Write(J.Map("version", 1, "scope", requestScope, "issue", issue)))
+                map[string, Object?]{
+                    "body": "/tokate-access " + J.Write(
+                        map[string, Object?]{"version": 1, "scope": requestScope, "issue": issue}
+                    )
+                }
             )
-            PublicOutput.ResultData = J.Map(
-                "repo",
-                repo,
-                "issue",
-                issue,
-                "scope",
-                requestScope,
-                "posted",
-                true,
-                "comment",
-                J.Get(comment, "id")
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "repo": repo,
+                "issue": issue,
+                "scope": requestScope,
+                "posted": true,
+                "comment": J.Get(comment, "id")
+            }
             Terminal.Message(
                 "Access requested. The owner can grant this issue or persistent trust; the request grants no eligibility."
             )
@@ -317,16 +319,12 @@ internal class AccessState {
             let trusted = List[JsonElement]()
             for member in access.Members {
                 if actor == 0 || RepositoryIdentity.PositiveId(J.Get(member, "actor")) == actor {
-                    let displayed = J.Map(
-                        "actor",
-                        J.Get(member, "actor"),
-                        "trusted",
-                        J.Get(member, "trusted"),
-                        "denied",
-                        J.Get(member, "denied"),
-                        "issues",
-                        J.Get(member, "issues")
-                    )
+                    let displayed = map[string, Object?]{
+                        "actor": J.Get(member, "actor"),
+                        "trusted": J.Get(member, "trusted"),
+                        "denied": J.Get(member, "denied"),
+                        "issues": J.Get(member, "issues")
+                    }
                     let identity = GitHub.Api(
                         "user/" + RepositoryIdentity.PositiveId(J.Get(member, "actor")).ToString()
                     )
@@ -361,20 +359,14 @@ internal class AccessState {
                             continue
                         }
                         history.Add(
-                            J.Map(
-                                "pr",
-                                J.Number(pull, "number"),
-                                "issue",
-                                J.Number(receipt, "issue"),
-                                "donor",
-                                donorLogin,
-                                "state",
-                                J.Text(pull, "state"),
-                                "merged",
-                                J.Get(pull, "merged_at").ValueKind == JsonValueKind.String,
-                                "evidence",
-                                "unverified PR receipt; inspect verify-pr and owner review"
-                            )
+                            map[string, Object?]{
+                                "pr": J.Number(pull, "number"),
+                                "issue": J.Number(receipt, "issue"),
+                                "donor": donorLogin,
+                                "state": J.Text(pull, "state"),
+                                "merged": J.Get(pull, "merged_at").ValueKind == JsonValueKind.String,
+                                "evidence": "unverified PR receipt; inspect verify-pr and owner review"
+                            }
                         )
                     } catch (error Exception) { }
                 }
@@ -416,20 +408,14 @@ internal class AccessState {
                     }
                 }
             }
-            PublicOutput.ResultData = J.Map(
-                "repo",
-                repo,
-                "access_sha",
-                access.Sha,
-                "members",
-                members,
-                "trusted",
-                trusted,
-                "pending",
-                pending,
-                "history",
-                history
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "repo": repo,
+                "access_sha": access.Sha,
+                "members": members,
+                "trusted": trusted,
+                "pending": pending,
+                "history": history
+            }
             if !PublicOutput.Enabled {
                 Terminal.Json(J.Parse(J.Write(PublicOutput.ResultData)), "Donor access and owner review")
             }
@@ -464,16 +450,12 @@ internal class AccessState {
                     J.Get(viewer, "id")
                 )
                 if !Task(J.Get(record, "approval")) {
-                    PublicOutput.ResultData = J.Map(
-                        "repo",
-                        repo,
-                        "issue",
-                        issue,
-                        "eligible",
-                        true,
-                        "eligibility",
-                        "assignment"
-                    )
+                    PublicOutput.ResultData = map[string, Object?]{
+                        "repo": repo,
+                        "issue": issue,
+                        "eligible": true,
+                        "eligibility": "assignment"
+                    }
                 }
                 if !PublicOutput.Enabled {
                     Terminal.Json(J.Parse(J.Write(PublicOutput.ResultData)), "Donor eligibility")
@@ -548,7 +530,16 @@ internal class AccessState {
                 }
                 if trusted || denied || issues.Count > 0 {
                     access.Members.Add(
-                        J.Parse(J.Write(J.Map("actor", actor, "trusted", trusted, "denied", denied, "issues", issues)))
+                        J.Parse(
+                            J.Write(
+                                map[string, Object?]{
+                                    "actor": actor,
+                                    "trusted": trusted,
+                                    "denied": denied,
+                                    "issues": issues
+                                }
+                            )
+                        )
                     )
                 }
             }
@@ -558,18 +549,13 @@ internal class AccessState {
                 "cyan",
                 true
             )
-            PublicOutput.ResultData = J.Map(
-                "repo",
-                repo,
-                "repo_id",
-                repoId,
-                "actor",
-                actor,
-                "operation",
-                operation,
-                "access_sha",
-                access.Sha
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "repo": repo,
+                "repo_id": repoId,
+                "actor": actor,
+                "operation": operation,
+                "access_sha": access.Sha
+            }
             if !PublicOutput.Enabled {
                 Terminal.Json(J.Parse(J.Write(PublicOutput.ResultData)), "Owner access updated")
             }

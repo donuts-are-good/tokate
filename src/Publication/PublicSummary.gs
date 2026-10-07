@@ -118,7 +118,7 @@ internal class PublicSummary {
                 Validate(summary, head)
                 return summary
             }
-            let fields = J.Map("head", head)
+            let fields = map[string, Object?]{"head": head}
             for field in summary.EnumerateObject() {
                 fields[field.Name] = field.Value.Clone()
             }

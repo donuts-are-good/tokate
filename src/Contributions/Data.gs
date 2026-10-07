@@ -17,7 +17,7 @@ internal class Data {
 
     private func Field(key string) JsonElement {
         var value Object?
-        return Fields.TryGetValue(key, out value) ? J.Parse(J.Write(J.Map(key, value))): JsonElement{}
+        return Fields.TryGetValue(key, out value) ? J.Parse(J.Write(map[string, Object?]{key: value})): JsonElement{}
     }
 
     internal func Element() JsonElement -> J.Parse(J.Write(Fields))

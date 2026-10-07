@@ -70,32 +70,20 @@ internal class PiHarness {
             let limits = PiBoundary.ModelLimits(args.Need("pi-root"), args.Need("node"), model, endpoint)
             return J.Parse(
                 J.Write(
-                    J.Map(
-                        "harness",
-                        "pi",
-                        "provider",
-                        "local-chat-completions",
-                        "model",
-                        model,
-                        "effort",
-                        effort,
-                        "source",
-                        "explicit invocation",
-                        "policy_hash",
-                        policy.Digest,
-                        "policy_eligible",
-                        true,
-                        "capability",
-                        "pi SDK import and isolated noninteractive session probe; absent effort only",
-                        "availability",
-                        "unknown",
-                        "availability_evidence",
-                        "Exact donor-selected model; no endpoint or inference probe",
-                        "context_window",
-                        J.Number(limits, "contextWindow"),
-                        "max_tokens",
-                        J.Number(limits, "maxTokens")
-                    )
+                    map[string, Object?]{
+                        "harness": "pi",
+                        "provider": "local-chat-completions",
+                        "model": model,
+                        "effort": effort,
+                        "source": "explicit invocation",
+                        "policy_hash": policy.Digest,
+                        "policy_eligible": true,
+                        "capability": "pi SDK import and isolated noninteractive session probe; absent effort only",
+                        "availability": "unknown",
+                        "availability_evidence": "Exact donor-selected model; no endpoint or inference probe",
+                        "context_window": J.Number(limits, "contextWindow"),
+                        "max_tokens": J.Number(limits, "maxTokens")
+                    }
                 )
             )
         }
@@ -155,24 +143,16 @@ internal class PiHarness {
                 run.Fields["failure_stage"] = "inference"
                 run.Fields["failure_reason"] = "inference_failed"
                 run.Fields["pi_version"] = J.Text(runtime, "version")
-                run.Fields["observed_invocation"] = J.Map(
-                    "harness",
-                    "pi",
-                    "sdk_version",
-                    J.Text(runtime, "version"),
-                    "node_version",
-                    J.Text(runtime, "node"),
-                    "provider",
-                    "local-chat-completions",
-                    "model",
-                    run.Text("model"),
-                    "effort",
-                    "absent",
-                    "context_window",
-                    J.Number(limits, "contextWindow"),
-                    "max_tokens",
-                    J.Number(limits, "maxTokens")
-                )
+                run.Fields["observed_invocation"] = map[string, Object?]{
+                    "harness": "pi",
+                    "sdk_version": J.Text(runtime, "version"),
+                    "node_version": J.Text(runtime, "node"),
+                    "provider": "local-chat-completions",
+                    "model": run.Text("model"),
+                    "effort": "absent",
+                    "context_window": J.Number(limits, "contextWindow"),
+                    "max_tokens": J.Number(limits, "maxTokens")
+                }
                 run.Save(directory)
                 try {
                     PublicOutput.FailureCode = "inference_failed"

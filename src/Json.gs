@@ -1,5 +1,6 @@
 package Tokate
 
+import Gsharp.Extensions.Json
 import System
 import System.Collections
 import System.Collections.Generic
@@ -27,18 +28,11 @@ internal class J {
             ) ? result: JsonElement{}
         }
 
-        internal func Text(value JsonElement, key string) string {
-            let item = J.Get(value, key)
-            return item.ValueKind == JsonValueKind.String ? item.GetString() ?? "": ""
-        }
+        internal func Text(value JsonElement, key string) string -> value.GetStringOrNil(key) ?? ""
 
-        internal func Number(value JsonElement, key string) int32 {
-            var number int32
-            let item = J.Get(value, key)
-            return item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out number) ? number: 0
-        }
+        internal func Number(value JsonElement, key string) int32 -> value.GetInt32OrNil(key) ?? 0
 
-        internal func Bool(value JsonElement, key string) bool -> J.Get(value, key).ValueKind == JsonValueKind.True
+        internal func Bool(value JsonElement, key string) bool -> value.GetBoolOrNil(key) ?? false
 
         internal func Items(value JsonElement) List[JsonElement] {
             let items = List[JsonElement]()
@@ -48,18 +42,6 @@ internal class J {
                 }
             }
             return items
-        }
-
-        internal func Map(values ...Object?) Dictionary[string, Object?] {
-            let result = Dictionary[string, Object?]()
-            for i in 0 ... values.Length / 2 {
-                if values[i * 2] is string key {
-                    result.Add(key, values[i * 2 + 1])
-                } else {
-                    throw ArgumentException("JSON object keys must be strings")
-                }
-            }
-            return result
         }
 
         internal func Write(value Object) string {

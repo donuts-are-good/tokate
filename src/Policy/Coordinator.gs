@@ -85,7 +85,7 @@ internal class Coordinator {
             }
             let action = J.Text(request, "action")
             let record = action == "release" ? JsonElement{}: state.Check(repo, number, donor, actor)
-            var outcome Object = J.Map()
+            var outcome Object = map[string, Object?]{}
             let originalExpiry = J.Get(initial, "reservation")
                 .ValueKind == JsonValueKind.Object ? CoordinationState.Unix(J.Get(initial, "reservation"), "expires"): 0
             if action == "claim" || LeaseLifecycle.Transition(action) {
@@ -165,20 +165,14 @@ internal class Coordinator {
                     AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                     pull = GitHub.Api(
                         "repos/" + repo + "/pulls",
-                        J.Map(
-                            "title",
-                            J.Text(J.Get(record, "issue"), "title"),
-                            "body",
-                            Body(record, metadata, donor, receipt, marker),
-                            "head",
-                            donor + ":" + J.Text(metadata, "branch"),
-                            "base",
-                            J.Text(J.Get(record, "approval"), "base_branch"),
-                            "draft",
-                            true,
-                            "maintainer_can_modify",
-                            true
-                        ),
+                        map[string, Object?]{
+                            "title": J.Text(J.Get(record, "issue"), "title"),
+                            "body": Body(record, metadata, donor, receipt, marker),
+                            "head": donor + ":" + J.Text(metadata, "branch"),
+                            "base": J.Text(J.Get(record, "approval"), "base_branch"),
+                            "draft": true,
+                            "maintainer_can_modify": true
+                        },
                         expires: CoordinationState.Unix(J.Get(value, "reservation"), "expires")
                     )
                 }
@@ -187,32 +181,21 @@ internal class Coordinator {
                 if J.Text(J.Get(pull, "head"), "sha") != J.Text(metadata, "head") {
                     throw Exception("PR commit differs from declaration")
                 }
-                outcome = J.Map(
-                    "pr",
-                    J.Number(pull, "number"),
-                    "url",
-                    J.Text(pull, "html_url"),
-                    "head",
-                    J.Text(metadata, "head"),
-                    "reservation",
-                    reservation
-                )
-                state.Fields["contribution"] = J.Map(
-                    "request",
-                    J.Text(request, "uuid"),
-                    "expected",
-                    J.Text(request, "expected"),
-                    "metadata",
-                    metadata,
-                    "actor",
-                    actor,
-                    "donor",
-                    donor,
-                    "outcome",
-                    outcome,
-                    "verification_provenance",
-                    "donor-reported; exact-commit owner CI required"
-                )
+                outcome = map[string, Object?]{
+                    "pr": J.Number(pull, "number"),
+                    "url": J.Text(pull, "html_url"),
+                    "head": J.Text(metadata, "head"),
+                    "reservation": reservation
+                }
+                state.Fields["contribution"] = map[string, Object?]{
+                    "request": J.Text(request, "uuid"),
+                    "expected": J.Text(request, "expected"),
+                    "metadata": metadata,
+                    "actor": actor,
+                    "donor": donor,
+                    "outcome": outcome,
+                    "verification_provenance": "donor-reported; exact-commit owner CI required"
+                }
             }
             if action == "publish" || action == "amend" {
                 state.Fields["publication_revision"] = nil
@@ -221,7 +204,7 @@ internal class Coordinator {
             for i in Math.Max(0, outcomes.Count - 31) ... outcomes.Count {
                 retained.Add(outcomes[i])
             }
-            retained.Add(J.Map("uuid", J.Text(request, "uuid"), "binding", binding, "outcome", outcome))
+            retained.Add(map[string, Object?]{"uuid": J.Text(request, "uuid"), "binding": binding, "outcome": outcome})
             state.Fields["outcomes"] = retained
             let updated = state.Value()
             if J.Text(request, "action") == "amend" {
@@ -443,7 +426,7 @@ internal class Coordinator {
                 AccessState.Check(repo, number, J.Get(record, "approval"), actor)
                 GitHub.Api(
                     "repos/" + repo + "/pulls/" + J.Number(metadata, "pr").ToString(),
-                    J.Map("body", updated),
+                    map[string, Object?]{"body": updated},
                     "PATCH",
                     expires: CoordinationState.Unix(reservation, "expires")
                 )
@@ -458,38 +441,24 @@ internal class Coordinator {
             ) != report {
                 throw Exception("Physical PR receipt changed; amendment has no coordination authority")
             }
-            let outcome = J.Map(
-                "pr",
-                J.Number(metadata, "pr"),
-                "url",
-                J.Text(latest, "html_url"),
-                "head",
-                J.Text(metadata, "head"),
-                "reservation",
-                run.Text("id")
-            )
-            let entry = J.Map(
-                "request",
-                J.Text(request, "uuid"),
-                "expected",
-                J.Text(request, "expected"),
-                "previous",
-                J.Text(metadata, "previous"),
-                "head",
-                J.Text(metadata, "head"),
-                "seconds",
-                J.Number(metadata, "seconds"),
-                "tools",
-                J.Get(metadata, "tools"),
-                "actor",
-                actor,
-                "donor",
-                donor,
-                "outcome",
-                outcome,
-                "verification_provenance",
-                "donor-reported; exact-commit owner CI required"
-            )
+            let outcome = map[string, Object?]{
+                "pr": J.Number(metadata, "pr"),
+                "url": J.Text(latest, "html_url"),
+                "head": J.Text(metadata, "head"),
+                "reservation": run.Text("id")
+            }
+            let entry = map[string, Object?]{
+                "request": J.Text(request, "uuid"),
+                "expected": J.Text(request, "expected"),
+                "previous": J.Text(metadata, "previous"),
+                "head": J.Text(metadata, "head"),
+                "seconds": J.Number(metadata, "seconds"),
+                "tools": J.Get(metadata, "tools"),
+                "actor": actor,
+                "donor": donor,
+                "outcome": outcome,
+                "verification_provenance": "donor-reported; exact-commit owner CI required"
+            }
             if J.Get(metadata, "summary").ValueKind != JsonValueKind.Undefined {
                 entry["summary"] = J.Get(metadata, "summary")
             }

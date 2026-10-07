@@ -201,7 +201,15 @@ internal class Submission {
                 )
                 using let writer = StreamWriter(file)
                 writer.WriteLine(
-                    J.Write(J.Map("repo", repo, "issue", issue, "actor", actor, "binding", binding, "request", value))
+                    J.Write(
+                        map[string, Object?]{
+                            "repo": repo,
+                            "issue": issue,
+                            "actor": actor,
+                            "binding": binding,
+                            "request": value
+                        }
+                    )
                 )
                 writer.Flush()
                 file.Flush(true)
@@ -214,7 +222,7 @@ internal class Submission {
             try {
                 let posted = GitHub.Api(
                     "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
-                    J.Map("body", "/tokate " + RequestData.Canonical(request)),
+                    map[string, Object?]{"body": "/tokate " + RequestData.Canonical(request)},
                     expires: expires
                 )
                 let failure = "Comment write response lacks exact request evidence"
@@ -243,20 +251,14 @@ internal class Submission {
         }
 
         internal func PublicationRequest(run Data, correction Data? = nil) JsonElement {
-            let metadata = J.Map(
-                "fork",
-                run.Text("head_repo"),
-                "branch",
-                run.Text("branch"),
-                "head",
-                correction?.Text("commit") ?? run.Text("commit"),
-                "source",
-                run.Text("source"),
-                "tools",
-                J.Get(run.Element(), "tools"),
-                "verification",
-                "donor-reported-pass"
-            )
+            let metadata = map[string, Object?]{
+                "fork": run.Text("head_repo"),
+                "branch": run.Text("branch"),
+                "head": correction?.Text("commit") ?? run.Text("commit"),
+                "source": run.Text("source"),
+                "tools": J.Get(run.Element(), "tools"),
+                "verification": "donor-reported-pass"
+            }
             if run.Text("attempt") != "" {
                 metadata["attempt"] = run.Text("attempt")
             }
@@ -269,20 +271,15 @@ internal class Submission {
             }
             return J.Parse(
                 J.Write(
-                    J.Map(
-                        "uuid",
-                        correction?.Text("publication_uuid") ?? run.Text("publication_uuid"),
-                        "expected",
-                        run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text(
+                    map[string, Object?]{
+                        "uuid": correction?.Text("publication_uuid") ?? run.Text("publication_uuid"),
+                        "expected": run.Text("publication_expected") == "" ? run.Text("state_sha"): run.Text(
                             "publication_expected"
                         ),
-                        "approval",
-                        run.Text("approval"),
-                        "action",
-                        "publish",
-                        "metadata",
-                        PublicSummary.Attach(metadata, summary)
-                    )
+                        "approval": run.Text("approval"),
+                        "action": "publish",
+                        "metadata": PublicSummary.Attach(metadata, summary)
+                    }
                 )
             )
         }
