@@ -18,7 +18,7 @@ internal class V2ContinuationChecks {
             run.ToJsonString()
         )
 
-        private func Pi(test CoordinationFlow) {
+        private func Pi(test CoordinationFlow, endpoint string) {
             let root = Path.Combine(test.Flow.Temp.Root, "runtime/node_modules")
             let installed = Path.Combine(root, "@earendil-works/pi-coding-agent")
             Directory.CreateDirectory(Path.Combine(installed, "dist"))
@@ -32,7 +32,9 @@ internal class V2ContinuationChecks {
             test.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = config
             File.WriteAllText(
                 Path.Combine(config, "models.json"),
-                "{\"providers\":{\"local\":{\"baseUrl\":\"http://127.0.0.1:1/v1\",\"api\":\"openai-completions\",\"models\":[{\"id\":\"fixture-model\",\"reasoning\":false,\"contextWindow\":32768,\"maxTokens\":4096}]}}}"
+                "{\"providers\":{\"local\":{\"baseUrl\":\"" +
+                    endpoint +
+                    "\",\"api\":\"openai-completions\",\"models\":[{\"id\":\"fixture-model\",\"reasoning\":false,\"contextWindow\":32768,\"maxTokens\":4096}]}}}"
             )
         }
 
@@ -42,7 +44,8 @@ internal class V2ContinuationChecks {
             harness string = "codex",
             consent bool = true,
             seconds string = "40",
-            reserve string = "12"
+            reserve string = "12",
+            endpoint string = ""
         )[]string {
             let args = List[string]{
                 "prepare",
@@ -77,7 +80,7 @@ internal class V2ContinuationChecks {
                         "--node",
                         "/usr/bin/node",
                         "--endpoint",
-                        "http://127.0.0.1:1/v1"
+                        endpoint
                     }
                 )
             }
@@ -96,7 +99,12 @@ internal class V2ContinuationChecks {
             return index < 0 ? "": result.Output.Substring(index + 5).Trim()
         }
 
-        private func Setup(test CoordinationFlow, actual string = "", harness string = "codex") string {
+        private func Setup(
+            test CoordinationFlow,
+            actual string = "",
+            harness string = "codex",
+            endpoint string = ""
+        ) string {
             test.Initialize(approve: false)
             test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
             test.Flow.Call(
@@ -114,7 +122,7 @@ internal class V2ContinuationChecks {
                 "[[\"/bin/bash\",\"-c\",\"test -f result.txt && test \\\"$$(cat tracked.txt)\\\" = preserved && test \\\"$$(cat imported.txt)\\\" = untracked && test \\\"$$(git show HEAD:tracked.txt)\\\" = approved\"]]"
             )
             if harness == "pi" {
-                Pi(test)
+                Pi(test, endpoint)
                 policy["model_policy"] = JsonValue.Create("whitelist")
                 policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
                 policy["models"] = Check.Json("{\"fixture-model\":[\"absent\"]}")
@@ -128,7 +136,8 @@ internal class V2ContinuationChecks {
                     test,
                     harness: harness,
                     seconds: actual == "timeout" ? "3": "45",
-                    reserve: actual == "timeout" ? "1": "15"
+                    reserve: actual == "timeout" ? "1": "15",
+                    endpoint: endpoint
                 )
             )
             args.Add("--allow-network")
@@ -247,14 +256,28 @@ internal class V2ContinuationChecks {
 
         private func Flow(binary string, mode string, harness string = "codex") {
             using let test = CoordinationFlow(binary)
-            let source = Setup(test, mode, harness)
+            using let catalog = harness == "pi" ? PiCatalog(): nil
+            let endpoint = catalog?.Endpoint ?? ""
+            if catalog != nil {
+                let response = TestProcess.Run(
+                    "/usr/bin/curl",
+                    []string{"-qfsS", "--max-time", "2", endpoint + "/models"},
+                    test.Flow.Temp.Env
+                )
+                Check.Success(response)
+                Check.That(
+                    Check.Text(Check.Json(response.Output)["data"]?[0]?["id"]) == "fixture-model",
+                    "Pi catalog did not advertise the selected fixture model"
+                )
+            }
+            let source = Setup(test, mode, harness, endpoint)
             let original = Bytes(source)
             let prior = Read(source)
             if mode != "crash" && mode != "cancel" {
                 FreshAttempt(test, mode == "incomplete_turn")
             }
             let state = Check.Text(test.State()["sha"])
-            let fresh = Prepare(test, Args(test, source, harness))
+            let fresh = Prepare(test, Args(test, source, harness, endpoint: endpoint))
             let run = Read(fresh)
             Check.That(
                 fresh != source && Check.Text(run["id"]) == Check.Text(prior["id"]) && Check.Text(
@@ -281,7 +304,7 @@ internal class V2ContinuationChecks {
             )
             test.Flow.Call([]string{"prepare", "--run", fresh})
             test.Flow.Call([]string{"prepare", "--run", fresh})
-            Prepare(test, Args(test, source, harness), 1)
+            Prepare(test, Args(test, source, harness, endpoint: endpoint), 1)
             test.Flow.Call([]string{"work", "--run", source, "--yes"}, 1)
             test.Flow.Call([]string{"work", "--run", fresh}, 1)
             Check.That(Check.Text(test.State()["sha"]) == state, "Preparation acquired or renewed authority")
