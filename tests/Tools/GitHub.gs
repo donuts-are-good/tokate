@@ -935,7 +935,11 @@ internal partial class Fixture {
                         pull["head"]?["ref"]
                     ) == head
                 ) {
-                    pulls.Add(pull.DeepClone())
+                    let listed = pull.DeepClone()
+                    if Check.Text(State["pull_list_omit_merged"]) == "true" {
+                        listed.AsObject().Remove("merged")
+                    }
+                    pulls.Add(listed)
                 }
             }
             if Check.Text(State["pull_history_invalid"]) == "true" {
@@ -982,6 +986,17 @@ internal partial class Fixture {
                     Console.Error.WriteLine("Synthetic lost amendment body response")
                     return 1
                 }
+            }
+            if method == "GET" && State["pull_read_effect"] != nil {
+                let observed = pull.DeepClone()
+                for field in State["pull_read_effect"]?.AsObject() ?? JsonObject() {
+                    pull[field.Key] = field.Value?.DeepClone()
+                }
+                State["pull_read_effect"] = nil
+                return Answer(observed)
+            }
+            if method == "GET" && State["pull_response_override"] != nil {
+                return Answer(State["pull_response_override"] ?? throw Exception("Missing PR override"))
             }
             return Answer(pull)
         }
