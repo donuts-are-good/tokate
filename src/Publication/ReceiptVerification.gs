@@ -174,6 +174,7 @@ internal class ReceiptVerification {
             run.Fields["commit"] = J.Text(head, "sha")
             run.Fields["policy"] = J.Get(record, "policy")
             Binding(run, receipt, approval, J.Text(record, "sha"))
+            Synchronization.Keep(run.Fields, history)
             return run
         }
 
@@ -426,6 +427,7 @@ internal class ReceiptVerification {
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["policy"] = J.Get(record, "policy")
             ReceiptVerification.Binding(run, receipt, approval, state.Sha)
+            Synchronization.Keep(run.Fields, history)
             return run
         }
     }

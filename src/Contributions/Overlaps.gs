@@ -206,16 +206,18 @@ internal class Overlaps {
                     "version,issue,approval,authority_revision,donor,base,base_branch,commit"
                 )
                 try {
+                    let history = J.Items(J.Get(binding.Element(), "synchronizations"))
+                    let base = history.Count > 0 ? J.Text(history[history.Count - 1], "upstream"): binding.Text("base")
                     let files = GitHubPathEvidence.Diff(
                         repo,
-                        binding.Text("base"),
+                        base,
                         J.Text(J.Get(head, "repo"), "full_name"),
                         binding.Text("commit")
                     )
                     item.Files = files
                     facts["diff_status"] = "complete"
                     facts["file_count"] = files.Count
-                    facts["diff_base"] = binding.Text("base")
+                    facts["diff_base"] = base
                     facts["diff_head"] = binding.Text("commit")
                 } catch (error Exception) {
                     Failure(facts, "diff", error)
@@ -268,7 +270,7 @@ internal class Overlaps {
                     }
                     if let binding = item.Binding {
                         let live = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
-                        let fields = "version,issue,approval,authority_revision,base,base_branch,commit"
+                        let fields = "version,issue,approval,authority_revision,base,base_branch,commit,synchronizations"
                         let current = J.Write(PublicOutput.Select(live.Element(), fields))
                         let original = J.Write(PublicOutput.Select(binding.Element(), fields))
                         if current != original {
