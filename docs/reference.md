@@ -278,6 +278,9 @@ Managed [Pi preparation](pi.md) uses the same work/submission sequence; external
 coding uses [prepare, external and submit](coordination-v2.md#external-or-tokate-launched-work).
 
 **Inference spends donor usage.** Obtain donor authorization before `work`.
+`work --continue-truncated` lets Pi continue once after a length stop in the same
+session and original budget. It defaults off, preserves configured limits and
+cannot resume an ended failed run.
 Tokate does not automatically retry failed inference or switch models. A new
 inference attempt after failure requires fresh owner approval.
 

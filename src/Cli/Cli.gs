@@ -76,7 +76,7 @@ internal class CliCommand {
         name != "plain" &&
         name != "ascii" &&
         (
-        (Name == "work" && name != "yes" && name != "non-interactive") ||
+        (Name == "work" && name != "yes" && name != "non-interactive" && name != "continue-truncated") ||
             (Name == "checks" && name != "watch" && name != "timeout") ||
             Name == "prepare" ||
             Name == "status"
@@ -153,6 +153,11 @@ internal class Cli {
             ),
             CliOption("non-interactive", "", "Never prompt; require an eligible default or explicit choice"),
             CliOption("yes", "", "Confirm inference with the selected pair; never accept a substitute"),
+            CliOption(
+                "continue-truncated",
+                "",
+                "Continue one truncated Pi response in this session and budget; default: off"
+            ),
             CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
             CliOption(
                 "verification-reserve",
@@ -442,10 +447,10 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
                 "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
                 ,
                 effects: "local_read local_write github_read github_write inference"

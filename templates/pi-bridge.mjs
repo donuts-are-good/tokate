@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 
-const [mode, cwd, modelId, commandNetwork, sentinel] = process.argv.slice(2);
+const [mode, cwd, modelId, commandNetwork, sentinel, continueTruncated = 'false'] = process.argv.slice(2);
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sdkPath = '/tokate-runtime/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
 const sdk = await import(sdkPath);
@@ -46,6 +46,33 @@ const validCount = value => Number.isSafeInteger(value) && value >= 0;
 const usageView = usage => {
     if (!usage || !validCount(usage.input) || !validCount(usage.output) || !validCount(usage.cacheRead)) return undefined;
     return { input_tokens: usage.input, cached_input_tokens: usage.cacheRead, output_tokens: usage.output };
+};
+const partialView = content => {
+    const counts = { text: 0, thinking: 0, toolCall: 0, other: 0 };
+    let textCharacters = 0;
+    let thinkingCharacters = 0;
+    let partialText = '';
+    let partialBytes = 0;
+    let truncated = false;
+    for (const part of content) {
+        const type = ['text', 'thinking', 'toolCall'].includes(part.type) ? part.type : 'other';
+        counts[type]++;
+        if (type === 'thinking') {
+            for (const character of part.thinking ?? '') thinkingCharacters++;
+        }
+        if (type !== 'text') continue;
+        for (const character of part.text ?? '') {
+            textCharacters++;
+            const bytes = Buffer.byteLength(character, 'utf8');
+            if (truncated || partialBytes + bytes > 65536) truncated = true;
+            else {
+                partialText += character;
+                partialBytes += bytes;
+            }
+        }
+    }
+    return { partial_text: partialText, partial_text_truncated: truncated, content_counts: counts,
+        text_characters: textCharacters, thinking_characters: thinkingCharacters };
 };
 const files = {
     readFile: path => withFile(path, constants.O_RDONLY, file => file.readFile()),
@@ -139,6 +166,11 @@ try {
         if (result.exitCode !== 0) throw new Error('Nested shell isolation failed');
         emit({ type: 'pi.probe', version: sdk.VERSION, node: process.version });
     } else if (mode === 'run') {
+        if (!['true', 'false'].includes(continueTruncated) || typeof session.steer !== 'function' ||
+            typeof session.agent?.finishTurn !== 'function' || typeof session.agent?.prepareRequest !== 'function') {
+            throw new Error('Unsupported bounded continuation interface');
+        }
+        const lengthContinuationLimit = continueTruncated === 'true' ? 1 : 0;
         let bytes = 0;
         const chunks = [];
         for await (const chunk of process.stdin) {
@@ -146,13 +178,54 @@ try {
             if (bytes > 4 * 1024 * 1024) throw new Error('Task input exceeds limit');
             chunks.push(chunk);
         }
-        emit({ type: 'pi.started', model: modelId, provider: 'local-chat-completions', effort: 'absent' });
+        emit({ type: 'pi.started', model: modelId, provider: 'local-chat-completions', effort: 'absent',
+            length_continuation_limit: lengthContinuationLimit });
         let ended = 0;
         let failureReason;
         let report = '';
+        let lastStopReason;
+        let lengthContinuations = 0;
         const fail = reason => {
             failureReason ??= reason;
             session.setAutoCompactionEnabled(false);
+        };
+        const previousFinishTurn = session.agent.finishTurn;
+        session.agent.finishTurn = async (turn, signal) => {
+            if (signal?.aborted) {
+                fail('aborted');
+                return { action: 'end' };
+            }
+            const decision = await previousFinishTurn.call(session.agent, turn, signal);
+            if (signal?.aborted) fail('aborted');
+            if (failureReason) return { action: 'end' };
+            if (turn.message.stopReason !== 'length') return decision;
+            if (decision?.action === 'end' || lengthContinuations >= lengthContinuationLimit) {
+                fail('length');
+                return { action: 'end' };
+            }
+            const queued = await session.steer('Continue the existing approved work and return a complete concise final report.');
+            if (signal?.aborted) fail('aborted');
+            else if (queued !== 'queued') fail('incomplete');
+            if (failureReason) return { action: 'end' };
+            lengthContinuations++;
+            emit({ type: 'pi.event', event: 'length_continuation', count: lengthContinuations, limit: lengthContinuationLimit });
+            return { action: 'continue' };
+        };
+        const previousPrepareRequest = session.agent.prepareRequest;
+        const guardRequest = signal => {
+            if (signal?.aborted) fail('aborted');
+            if (failureReason) throw new Error('Pi execution stopped');
+        };
+        session.agent.prepareRequest = async (request, signal) => {
+            guardRequest(signal);
+            const update = await previousPrepareRequest.call(session.agent, request, signal);
+            guardRequest(signal);
+            const selected = update?.model ?? request.model;
+            if (selected?.id !== modelId || selected?.provider !== 'tokate-local') {
+                fail('identity');
+                guardRequest(signal);
+            }
+            return update;
         };
         session.subscribe(event => {
             if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
@@ -160,16 +233,21 @@ try {
             }
             if (event.type === 'message_end' && event.message?.role === 'assistant') {
                 const message = event.message;
-                if (message.model !== modelId || message.provider !== 'tokate-local') fail('identity');
-                else if (!['stop', 'toolUse'].includes(message.stopReason)) {
-                    fail(['length', 'error', 'aborted'].includes(message.stopReason) ? message.stopReason : 'incomplete');
+                lastStopReason = message.stopReason;
+                report = '';
+                if (message.model !== modelId || message.provider !== 'tokate-local' ||
+                    (message.responseModel != null && message.responseModel !== modelId)) fail('identity');
+                else if (!['stop', 'toolUse', 'length'].includes(message.stopReason)) {
+                    fail(['error', 'aborted'].includes(message.stopReason) ? message.stopReason : 'incomplete');
                 }
                 if (!usageView(message.usage)) fail('usage');
                 if (message.stopReason === 'stop' && message.model === modelId && message.provider === 'tokate-local') {
                     report = message.content.filter(x => x.type === 'text').map(x => x.text).join('\n');
                     if (!report.trim()) fail('incomplete');
                 }
-                emit({ type: 'pi.event', event: 'assistant_end', stop_reason: message.stopReason, model: message.model, response_model: message.responseModel ?? null, usage: message.usage });
+                emit({ type: 'pi.event', event: 'assistant_end', stop_reason: message.stopReason, model: message.model,
+                    provider: message.provider, response_model: message.responseModel ?? null, usage: message.usage,
+                    ...(message.stopReason === 'length' ? partialView(message.content) : {}) });
             }
             if (event.type === 'compaction_end') {
                 const reason = ['threshold', 'overflow', 'manual'].includes(event.reason) ? event.reason : 'unknown';
@@ -185,16 +263,16 @@ try {
                 if (event.willRetry === true) fail('incomplete');
             }
         });
-        await session.prompt(Buffer.concat(chunks).toString('utf8'));
+        try { await session.prompt(Buffer.concat(chunks).toString('utf8')); } catch { fail('error'); }
         if (ended !== 1) fail('incomplete');
         if (session.model?.id !== modelId || session.model?.provider !== 'tokate-local') fail('identity');
-        if (!report.trim()) fail('incomplete');
+        if (lastStopReason !== 'stop' || !report.trim()) fail('incomplete');
         const usage = usageView(session.getSessionStats().tokens);
         if (!usage) fail('usage');
         if (failureReason) {
-            emit({ type: 'pi.failed', reason: failureReason });
+            emit({ type: 'pi.failed', reason: failureReason, length_continuations: lengthContinuations });
             process.exitCode = 1;
-        } else emit({ type: 'pi.completed', model: modelId, stop_reason: 'stop', report, usage });
+        } else emit({ type: 'pi.completed', model: modelId, stop_reason: 'stop', report, usage, length_continuations: lengthContinuations });
     } else throw new Error('Unsupported bridge operation');
 } finally {
     session.dispose();

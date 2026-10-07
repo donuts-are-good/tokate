@@ -9,7 +9,14 @@ internal class PiChecks {
     shared {
         internal func Run(binary string, root string, node string, directory string, endpoint string, mode string) {
             let flow = CoordinationFixture(binary)
-            using let cleanup = mode == "cancel" ? nil: flow
+            let interrupted = mode == "cancel" || mode == "length-cancel"
+            let continuation = mode == "continued" ||
+                mode == "repeated" ||
+                mode == "identity" ||
+                mode == "usage" ||
+                mode == "length-cancel" ||
+                mode == "length-timeout"
+            using let cleanup = interrupted ? nil: flow
             flow.Initialize(approve: false)
             let policyPath = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
@@ -70,9 +77,9 @@ internal class PiChecks {
                 "--endpoint",
                 endpoint,
                 "--seconds",
-                "90",
+                mode == "length-timeout" ? "20": "90",
                 "--verification-reserve",
-                "30",
+                mode == "length-timeout" ? "5": "30",
                 "--runs",
                 Path.Combine(flow.Flow.Temp.Root, "runs"),
                 "--non-interactive"
@@ -190,16 +197,35 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "off" || mode == "on" || mode == "compact"
-            flow.Flow.Call(
-                mode == "off" ? []string{"work", "--run", run, "--non-interactive"}:
-                []string{"work", "--run", run, "--yes", "--non-interactive"},
-                success ? 0: 1
-            )
+            let success = mode == "off" || mode == "on" || mode == "compact" || mode == "continued"
+            let work = List[string]{"work", "--run", run, "--non-interactive"}
+            if mode != "off" {
+                work.Add("--yes")
+            }
+            if continuation {
+                work.Add("--continue-truncated")
+            }
+            flow.Flow.Call(work.ToArray(), success ? 0: 1)
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             File.WriteAllText(
                 Path.Combine(directory, "result.json"),
-                Check.Map("usage", saved["usage"], "error", Check.Text(saved["error"])).ToJsonString()
+                Check.Map(
+                    "usage",
+                    saved["usage"],
+                    "error",
+                    Check.Text(saved["error"]),
+                    "state",
+                    saved["state"],
+                    "failure_reason",
+                    saved["failure_reason"],
+                    "events",
+                    File.ReadAllText(Path.Combine(run, "events.jsonl"))
+                )
+                    .ToJsonString()
+            )
+            Check.That(
+                Check.Text(saved["observed_invocation"]?["length_continuation_limit"]) == (continuation ? "1": "0"),
+                "Pi did not record the work invocation's continuation allowance"
             )
             Check.That(
                 Check.Text(saved["observed_invocation"]?["context_window"]) == "65536" && Check.Text(
@@ -221,18 +247,40 @@ internal class PiChecks {
                     File.ReadAllText(Path.Combine(checkout, "result.txt")) == "final",
                     "Pi tool changes were lost"
                 )
+                if mode == "continued" {
+                    let report = File.ReadAllText(Path.Combine(run, "report.md"))
+                    Check.Contains(report, "Changes: synthetic edits.")
+                    Check.Contains(report, "Verification: constrained tools.")
+                    Check.Contains(report, "Limitations: no inference.")
+                    Check.That(
+                        !report.Contains("PRIVATE_PARTIAL_LENGTH_SENTINEL"),
+                        "Partial output became the final report"
+                    )
+                }
                 flow.Flow.Call([]string{"submit", "--run", run})
                 flow.Flow.Reload()
                 flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
                 flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
                 flow.Flow.Reload()
                 Check.That(flow.Flow.State["pulls"]?.AsArray().Count == 1, "Pi did not produce one draft PR")
+                if mode == "continued" {
+                    Check.That(
+                        !Check.Text(flow.Flow.State["pulls"]?[0]?["body"]).Contains("PRIVATE_PARTIAL_LENGTH_SENTINEL"),
+                        "Private partial output escaped into the draft PR"
+                    )
+                }
             } else {
                 Check.That(saved["turn_completed"] == nil, "Failed Pi response fabricated completion")
                 Check.That(
                     saved["commit"] == nil && saved["verification"] == nil,
                     "Failed Pi inference reached verification or publication"
                 )
+                if mode == "repeated" {
+                    Check.That(
+                        File.ReadAllText(Path.Combine(checkout, "result.txt")) == "final",
+                        "Exhausted continuation discarded the prior tool edit"
+                    )
+                }
             }
             Check.Success(TestProcess.Run("/bin/sleep", []string{"3"}, flow.Flow.Temp.Env))
             Check.That(
@@ -241,6 +289,7 @@ internal class PiChecks {
             )
             Check.That(File.ReadAllText(secret) == "PRIVATE_CREDENTIAL_SENTINEL", "Pi changed private data")
             Check.That(!File.Exists(Path.Combine(flow.Flow.Temp.Root, "denied-write")), "Pi wrote outside the checkout")
+            Check.That(!File.Exists(Path.Combine(checkout, "truncated-executed")), "Pi executed a truncated tool call")
             Check.That(File.ReadAllText(gitPath) == git, "Pi changed Git metadata")
             flow.Flow.NoInference()
             Console.WriteLine("PASS native Pi workflow " + mode)

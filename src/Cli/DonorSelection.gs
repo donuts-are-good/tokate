@@ -102,6 +102,9 @@ internal class DonorSelection {
         internal func Resolve(args Args, policy Policy) JsonElement {
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
+            if args.Get("continue-truncated") == "true" && harness != "pi" {
+                throw Exception("--continue-truncated requires managed Pi. No inference started.")
+            }
             if harness != "pi" && (args.Get("endpoint") != "" || args.Get("pi-root") != "" || args.Get("node") != "") {
                 throw Exception("Pi runtime options require the pi harness")
             }

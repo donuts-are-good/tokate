@@ -100,10 +100,11 @@ internal class PiHarness {
             }
         }
 
-        internal func Execute(directory string, run Data, record JsonElement, prompt string) {
+        internal func Execute(directory string, run Data, record JsonElement, prompt string, continueTruncated bool) {
             if run.Number("version") != 2 || run.Text("source") != "tokate" || run.Number("preparation_version") != 1 {
                 throw Exception("Managed pi requires a prepared version-2 contribution")
             }
+            let continuationLimit = continueTruncated ? 1: 0
             let timer = Stopwatch.StartNew()
             let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
             Preparation.Ready(directory, run)
@@ -134,7 +135,9 @@ internal class PiHarness {
                         "run",
                         checkout,
                         run.Text("model"),
-                        run.Flag("network") ? "true": "false"
+                        run.Flag("network") ? "true": "false",
+                        "",
+                        continueTruncated ? "true": "false"
                     }
                 )
                 ContributionClaim.Recheck(run)
@@ -151,9 +154,13 @@ internal class PiHarness {
                     "model": run.Text("model"),
                     "effort": "absent",
                     "context_window": J.Number(limits, "contextWindow"),
-                    "max_tokens": J.Number(limits, "maxTokens")
+                    "max_tokens": J.Number(limits, "maxTokens"),
+                    "length_continuation_limit": continuationLimit
                 }
                 run.Save(directory)
+                if continueTruncated {
+                    Terminal.Step("Pi may continue one truncated response within the original coding budget.")
+                }
                 try {
                     PublicOutput.FailureCode = "inference_failed"
                     var result CommandResult
@@ -184,7 +191,7 @@ internal class PiHarness {
                     if result.Code != 0 || result.Truncated || result.ReadFailed {
                         throw Exception(PiEvidence.Failure(result.Output))
                     }
-                    let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"))
+                    let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"), continuationLimit)
                     run.Fields["turn_completed"] = true
                     run.Fields["usage"] = usage
                     run.Fields[

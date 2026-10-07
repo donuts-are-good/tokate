@@ -178,6 +178,9 @@ internal class Worker {
                     "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
                 )
             }
+            if options.Get("continue-truncated") == "true" && run.Text("harness") != "pi" {
+                throw Exception("--continue-truncated requires managed Pi. No inference started.")
+            }
             Terminal.Step("Checking owner approval and donor login...")
             let selected = J.Get(run.Element(), "selection")
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
@@ -196,7 +199,7 @@ internal class Worker {
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
             if run.Text("harness") == "pi" {
-                PiHarness.Execute(directory, run, record, prompt)
+                PiHarness.Execute(directory, run, record, prompt, options.Get("continue-truncated") == "true")
                 return
             }
             let login = Commands.Run(CodexPath(), []string{"login", "status"}, harness: true)
