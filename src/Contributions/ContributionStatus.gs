@@ -252,7 +252,7 @@ internal class ContributionStatus {
                         RepositoryIdentity.Login(donor)
                         RepositoryIdentity.Branch(branch)
                         let pulls = GitHub.Api(
-                            "repos/" + repo + "/pulls?state=open&head=" + Uri.EscapeDataString(donor + ":" + branch) +
+                            "repos/" + repo + "/pulls?state=all&head=" + Uri.EscapeDataString(donor + ":" + branch) +
                                 "&base=" +
                                 Uri.EscapeDataString(J.Text(approval, "base_branch")) + "&per_page=5&page=1"
                         )
@@ -264,7 +264,13 @@ internal class ContributionStatus {
                             Truncated = true
                         }
                         for pull in J.Items(pulls) {
-                            Draft(repo, issue, pull, state, approval, policy, drafts, approvalSha)
+                            let canonical = GitHub.Api(
+                                "repos/" + repo + "/pulls/" + J.Number(pull, "number").ToString()
+                            )
+                            if J.Number(canonical, "number") != J.Number(pull, "number") {
+                                throw Exception("Canonical PR number differs from discovery")
+                            }
+                            Draft(repo, issue, canonical, state, approval, policy, drafts, approvalSha)
                         }
                     }
                 }
@@ -341,10 +347,12 @@ internal class ContributionStatus {
         let number = J.Number(pull, "number")
         let head = J.Get(pull, "head")
         let base = J.Get(pull, "base")
+        let recorded = J.Number(J.Get(CoordinationState.Current(state.Value()), "outcome"), "pr")
         if number < 1 || !RepositoryIdentity.SameRepo(J.Text(J.Get(base, "repo"), "full_name"), repo) ||
             RepositoryIdentity.PositiveId(J.Get(J.Get(base, "repo"), "id")) != RepositoryIdentity.PositiveId(
             J.Get(Info, "id")
-        ) {
+        ) ||
+            (recorded > 0 && recorded != number) {
             throw Exception("Canonical PR upstream identity differs")
         }
         let sha = RepositoryIdentity.CommitSha(J.Text(head, "sha"))
@@ -354,6 +362,7 @@ internal class ContributionStatus {
             "head": sha,
             "state": J.Text(pull, "state"),
             "draft": J.Bool(pull, "draft"),
+            "lifecycle": "unknown",
             "binding": "unknown",
             "receipt": "incomplete",
             "checks_status": "unknown",
@@ -361,6 +370,33 @@ internal class ContributionStatus {
             "next": Next("owner", "Inspect the PR and its current binding.", View(repo, number))
         }
         drafts.Add(draft)
+        if J.Text(pull, "state") == "closed" {
+            Observe(
+                draft,
+                "history",
+                async () -> {
+                    let bound = HistoricalBinding(repo, issue, pull, state, approval, approvalSha)
+                    draft["binding"] = bound ? "historical": "mismatch"
+                    if bound {
+                        draft["receipt"] = "historical identity matched; current readiness is not established"
+                        draft["history_status"] = "observed"
+                    }
+                }
+            )
+            Observe(draft, "remote", async () -> Reobserve(repo, pull, draft))
+            if Text(draft, "binding") == "historical" && Text(draft, "remote_status") == "observed" {
+                let merged = J.Get(pull, "merged")
+                if merged.ValueKind == JsonValueKind.True {
+                    draft["lifecycle"] = "merged"
+                } else if merged.ValueKind == JsonValueKind.False && J.Text(pull, "merged_at") == "" {
+                    draft["lifecycle"] = "closed_unmerged"
+                }
+            }
+            return
+        }
+        if J.Text(pull, "state") != "open" {
+            throw Exception("Unknown canonical PR lifecycle")
+        }
         var bound bool
         if state.Sha != "" {
             bound = Admission.DonorBinding(repo, pull, state, requireLease: false).ValueKind == JsonValueKind.Object
@@ -420,25 +456,105 @@ internal class ContributionStatus {
             ] = "Current required-check policy is unknown because approval is stale or unavailable."
         }
         Observe(draft, "review", async () -> Reviews(repo, number, sha, draft))
-        Observe(
-            draft,
-            "remote",
-            async () -> {
-                let latest = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
-                if J.Text(J.Get(latest, "head"), "sha") != sha || J.Text(J.Get(latest, "base"), "ref") != J.Text(
-                    base,
-                    "ref"
-                ) ||
-                    J.Text(latest, "state") != J.Text(pull, "state") || J.Bool(latest, "draft") != J.Bool(
-                    pull,
-                    "draft"
-                ) {
-                    draft["remote_status"] = "stale"
-                } else {
-                    draft["remote_status"] = "observed"
-                }
+        Observe(draft, "remote", async () -> Reobserve(repo, pull, draft))
+        if Text(draft, "remote_status") == "observed" {
+            draft["lifecycle"] = "open"
+        }
+    }
+
+    private func HistoricalBinding(
+        repo string,
+        issue int32,
+        pull JsonElement,
+        state CoordinationState,
+        approval JsonElement,
+        approvalSha string
+    ) bool {
+        let head = J.Get(pull, "head")
+        let fork = J.Get(head, "repo")
+        RepositoryIdentity.PositiveId(J.Get(fork, "id"))
+        let owner = J.Get(fork, "owner")
+        let receipt = PrBody.Receipt(J.Text(pull, "body"))
+        var donor string
+        var actor int64
+        var branch string
+        var repository string
+        if state.Sha != "" {
+            let value = state.Value()
+            let contribution = J.Get(value, "contribution")
+            if contribution.ValueKind != JsonValueKind.Object {
+                throw Exception("Historical contribution evidence is unavailable")
             }
+            let current = CoordinationState.Current(value)
+            let outcome = J.Get(current, "outcome")
+            let metadata = J.Get(contribution, "metadata")
+            donor = RepositoryIdentity.Login(J.Text(contribution, "donor"))
+            actor = RepositoryIdentity.PositiveId(J.Get(contribution, "actor"))
+            branch = RepositoryIdentity.Branch(J.Text(metadata, "branch"))
+            repository = RepositoryIdentity.Repo(J.Text(metadata, "fork"))
+            if J.Number(outcome, "pr") != J.Number(pull, "number") || J.Text(outcome, "head") != J.Text(head, "sha") ||
+                J.Number(J.Get(contribution, "outcome"), "pr") != J.Number(pull, "number") ||
+                RepositoryIdentity.PositiveId(J.Get(current, "actor")) != actor || !String.Equals(
+                J.Text(current, "donor"),
+                donor,
+                StringComparison.OrdinalIgnoreCase
+            ) ||
+                !RequestData.Same(receipt, ContributionReceipt.FromState(value)) || J.Text(metadata, "head") != J.Text(
+                J.Get(contribution, "outcome"),
+                "head"
+            ) ||
+                (
+                !AccessState.Task(approval) && !String.Equals(
+                    donor,
+                    J.Text(approval, "donor"),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            ) {
+                return false
+            }
+        } else {
+            donor = RepositoryIdentity.Login(J.Text(approval, "donor"))
+            actor = RepositoryIdentity.PositiveId(J.Get(GitHub.Api("users/" + donor), "id"))
+            branch = "tokate/issue-" + issue.ToString() + "-" + approvalSha.Substring(0, 12)
+            repository = RepositoryIdentity.Repo(J.Text(fork, "full_name"))
+            if J.Number(receipt, "version") != 1 || !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) ||
+                J.Number(receipt, "issue") != issue || J.Text(receipt, "head") != J.Text(head, "sha") || J.Text(
+                receipt,
+                "approval"
+            ) != approvalSha ||
+                !String.Equals(J.Text(receipt, "donor"), donor, StringComparison.OrdinalIgnoreCase) || J.Text(
+                receipt,
+                "policy"
+            ) != J.Text(approval, "policy_hash") {
+                return false
+            }
+        }
+        let live = GitHub.Api("repos/" + repository)
+        RepositoryAccess.ValidateRepository(
+            repo,
+            repository,
+            J.Parse(actor.ToString()),
+            live,
+            push: false,
+            upstream: Info
         )
+        return J.Text(J.Get(pull, "base"), "ref") == J.Text(approval, "base_branch") && J.Text(head, "ref") == branch &&
+            RepositoryIdentity.PositiveId(J.Get(live, "id")) == RepositoryIdentity.PositiveId(J.Get(fork, "id")) &&
+            RepositoryIdentity.SameRepo(J.Text(fork, "full_name"), repository) && RepositoryIdentity.PositiveId(
+            J.Get(owner, "id")
+        ) == actor &&
+            String.Equals(J.Text(owner, "login"), donor, StringComparison.OrdinalIgnoreCase)
+    }
+
+    private func Reobserve(repo string, pull JsonElement, draft Dictionary[string, Object?]) {
+        let latest = GitHub.Api("repos/" + repo + "/pulls/" + J.Number(pull, "number").ToString())
+        for key in[]string{"number", "base", "head", "state", "draft", "merged", "merged_at", "body"} {
+            if !RequestData.Same(J.Get(latest, key), J.Get(pull, key)) {
+                draft["remote_status"] = "stale"
+                return
+            }
+        }
+        draft["remote_status"] = "observed"
     }
 
     private func CheckHead(repo string, head string, policy JsonElement, draft Dictionary[string, Object?]) {
@@ -639,6 +755,9 @@ internal class ContributionStatus {
             }
             for item in drafts {
                 let draft = item as Dictionary[string, Object?] ?? throw Exception("Invalid status draft")
+                if Text(draft, "state") == "closed" {
+                    continue
+                }
                 var draftNext = Next(
                     "owner",
                     "Inspect the PR and Actions links.",
@@ -710,6 +829,41 @@ internal class ContributionStatus {
                 draft["next"] = draftNext
                 next = draftNext
             }
+        }
+        for item in drafts {
+            let draft = item as Dictionary[string, Object?] ?? throw Exception("Invalid status draft")
+            if Text(draft, "state") != "closed" {
+                continue
+            }
+            next = Next(
+                "owner",
+                "Inspect the PR and its historical contribution evidence.",
+                View(repo, Int32.Parse(Text(draft, "pr")))
+            )
+            stage = "unknown"
+            if Text(draft, "history_status") == "unavailable" || Text(draft, "remote_status") == "unavailable" {
+                stage = "unavailable"
+            } else if Text(draft, "remote_status") == "stale" {
+                stage = "stale_remote_data"
+                next = Next(
+                    "owner",
+                    "Refresh status; the PR changed during this read.",
+                    []string{"tokate", "status", "--repo", repo, "--issue", Text(row, "issue")}
+                )
+            } else if Text(draft, "binding") == "mismatch" {
+                stage = "binding_mismatch"
+            } else if Text(draft, "lifecycle") == "merged" || Text(draft, "lifecycle") == "closed_unmerged" {
+                let merged = Text(draft, "lifecycle") == "merged"
+                stage = merged ? "merged_contribution": "closed_unmerged_contribution"
+                next = Next(
+                    "owner",
+                    merged ?
+                    "Review the remaining open issue and approve follow-up work if needed; this contribution is already merged.":
+                    "Review the remaining open issue and approve further work if needed; this contribution was closed without merging.",
+                    []string{"gh", "issue", "view", Text(row, "issue"), "--repo", repo}
+                )
+            }
+            draft["next"] = next
         }
         if Text(row, "approval_status") == "unavailable" ||
             Text(row, "coordination_status") == "unavailable" ||

@@ -405,6 +405,309 @@ internal class ContributionStatusChecks {
             )
         }
 
+        private func Close(test CoordinationFixture, merged bool = true, deleted bool = false) {
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            pull["state"] = JsonValue.Create("closed")
+            pull["merged"] = JsonValue.Create(merged)
+            pull["merged_at"] = merged ? JsonValue.Create("2026-10-01T00:00:00Z"): nil
+            test.Flow.Save()
+            if deleted {
+                test.Flow.Git(
+                    "-C",
+                    Path.Combine(test.Flow.Bin, "fork"),
+                    "update-ref",
+                    "-d",
+                    "refs/heads/" + Check.Text(pull["head"]?["ref"])
+                )
+            }
+        }
+
+        private func Historical(binary string) {
+            using let published = PublishedContribution.Create(binary, v2: true)
+            let test = published.Coordination
+            for merged in[]bool{true, false} {
+                for deleted in[]bool{false, true} {
+                    published.Restore()
+                    Close(test, merged, deleted)
+                    let result = Read(test, index: true)
+                    let row = Row(result)
+                    let lifecycle = merged ? "merged": "closed_unmerged"
+                    Check.That(
+                        Check.Text(row["state"]) == lifecycle + "_contribution",
+                        "Closed contribution lifecycle omitted"
+                    )
+                    Check.That(
+                        Check.Text(row["drafts"]?[0]?["binding"]) == "historical" && Check.Text(
+                            row["drafts"]?[0]?["lifecycle"]
+                        ) == lifecycle,
+                        "History required a live donor branch"
+                    )
+                    Check.Contains(Check.Text(row["drafts"]?[0]?["receipt"]), "current readiness is not established")
+                    Check.Contains(Check.Text(row["next"]?["action"]), "remaining open issue")
+                    Check.That(
+                        Check.Text(row["next"]?["command"]?[1]) == "issue",
+                        "History suggested completion or PR review"
+                    )
+                    for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                        let path = Check.Text(call["path"])
+                        Check.That(
+                            !path.StartsWith("repos/donor/project/git/ref/heads/") && !path.Contains("/check-runs?") &&
+                                !path.Contains("/reviews?"),
+                            "History used current branch or readiness authority"
+                        )
+                    }
+                    let human = test.Flow.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--plain"})
+                    Check.Contains(human.Output, "State: " + (lifecycle + "_contribution").Replace('_', ' '))
+                    Check.Contains(human.Output, "Contribution: " + lifecycle.Replace('_', ' '))
+                    Check.Contains(human.Output, Check.Text(row["next"]?["action"]))
+                    let owner = Row(Read(test, owner: true))
+                    Check.That(
+                        Check.Text(owner["state"]) == Check.Text(row["state"]) && owner["next"]?.ToJsonString() == row[
+                            "next"
+                        ]?.ToJsonString(),
+                        "Owner and donor history or next actions differ"
+                    )
+                }
+            }
+            for stale in[]string{"issue", "revoked", "expired"} {
+                published.Restore()
+                Close(test, deleted: true)
+                if stale == "issue" {
+                    test.Flow.Reload()
+                    (test.Flow.State["issue"] ?? throw Exception("Missing issue"))["title"] = JsonValue.Create(
+                        "Remaining work changed"
+                    )
+                    test.Flow.Save()
+                } else if stale == "revoked" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    value["revoked"] = JsonValue.Create(true)
+                    test.RewriteState(value)
+                } else {
+                    test.Expire()
+                }
+                let row = Row(Read(test))
+                Check.That(
+                    Check.Text(row["state"]) == "merged_contribution",
+                    "Stale execution authority hid historical merge"
+                )
+                Check.That(
+                    stale == "expired" || Check.Text(row["approval_status"]) == "stale",
+                    "History revived stale approval"
+                )
+                Check.That(
+                    Check.Text(row["next"]?["command"]?[1]) == "issue",
+                    "History granted work or publication authority"
+                )
+            }
+            for mismatch in[]string{
+                "repository",
+                "repository_id",
+                "pr",
+                "donor",
+                "actor",
+                "head",
+                "fork",
+                "fork_id",
+                "branch",
+                "receipt",
+                "recorded"
+            } {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let head = pull["head"] ?? throw Exception("Missing head")
+                let upstream = pull["base"]?["repo"] ?? throw Exception("Missing upstream")
+                if mismatch == "repository" {
+                    upstream["full_name"] = JsonValue.Create("other/project")
+                } else if mismatch == "repository_id" {
+                    upstream["id"] = JsonValue.Create(3)
+                } else if mismatch == "pr" {
+                    let response = pull.DeepClone()
+                    response["number"] = JsonValue.Create(11)
+                    test.Flow.State["pull_response_override"] = response
+                } else if mismatch == "donor" || mismatch == "actor" {
+                    let owner = head["repo"]?["owner"] ?? throw Exception("Missing donor")
+                    owner[mismatch == "donor" ? "login": "id"] = mismatch == "donor" ? JsonValue.Create(
+                        "other"
+                    ): JsonValue.Create(456)
+                } else if mismatch == "head" || mismatch == "branch" {
+                    head[mismatch == "head" ? "sha": "ref"] = JsonValue.Create(
+                        mismatch == "head" ? String('a', 40): "other"
+                    )
+                } else if mismatch == "fork" || mismatch == "fork_id" {
+                    (head["repo"] ?? throw Exception("Missing fork"))[
+                        mismatch == "fork" ? "full_name": "id"
+                    ] = mismatch == "fork" ? JsonValue.Create("donor/other"): JsonValue.Create(3)
+                } else if mismatch == "receipt" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]).Replace("\"donor\":\"donor\"", "\"donor\":\"other\"")
+                    )
+                }
+                test.Flow.Save()
+                if mismatch == "recorded" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    (value["contribution"]?["metadata"] ?? throw Exception("Missing metadata"))[
+                        "head"
+                    ] = JsonValue.Create(String('a', 40))
+                    test.RewriteState(value)
+                }
+                let row = Row(
+                    Read(test, mismatch == "repository" || mismatch == "repository_id" || mismatch == "pr" ? 1: 0)
+                )
+                Check.That(
+                    Check.Text(row["state"]) == "binding_mismatch" || Check.Text(row["state"]) == "unavailable",
+                    "Mismatched history was accepted: " + mismatch
+                )
+                Check.That(
+                    row["drafts"]?.AsArray().Count == 0 || Check.Text(row["drafts"]?[0]?["lifecycle"]) != "merged",
+                    "Mismatched history displayed a merge"
+                )
+            }
+            for missing in[]string{"merged", "fork", "remote_fork", "receipt", "ambiguous_receipt", "contribution"} {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                if missing == "merged" {
+                    pull.AsObject().Remove("merged")
+                } else if missing == "fork" {
+                    (pull["head"] ?? throw Exception("Missing head"))["repo"] = nil
+                } else if missing == "remote_fork" {
+                    test.Flow.State["missing_fork"] = JsonValue.Create(true)
+                } else if missing == "receipt" || missing == "ambiguous_receipt" {
+                    pull["body"] = JsonValue.Create(
+                        missing == "receipt" ? "Missing receipt": Check.Text(pull["body"]) + "\n" + Check.Text(
+                            pull["body"]
+                        )
+                    )
+                }
+                test.Flow.Save()
+                if missing == "contribution" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    value["contribution"] = nil
+                    test.RewriteState(value)
+                }
+                let row = Row(Read(test, missing == "merged" ? 0: 1))
+                Check.That(
+                    Check.Text(row["state"]) == "unknown" || Check.Text(row["state"]) == "unavailable",
+                    "Missing history became a known lifecycle: " + missing
+                )
+            }
+            for changed in[]string{"merged", "state", "head", "base", "body"} {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let patch = JsonObject()
+                if changed == "merged" {
+                    patch["merged"] = JsonValue.Create(false)
+                    patch["merged_at"] = nil
+                } else if changed == "head" || changed == "base" {
+                    let part = pull[changed]?.DeepClone() ?? throw Exception("Missing PR identity")
+                    part[changed == "head" ? "sha": "ref"] = JsonValue.Create(
+                        changed == "head" ? String('a', 40): "release"
+                    )
+                    patch[changed] = part
+                } else {
+                    patch[changed] = JsonValue.Create(changed == "state" ? "open": "Changed receipt")
+                }
+                test.Flow.State["pull_read_effect"] = patch
+                test.Flow.Save()
+                let row = Row(Read(test))
+                Check.That(
+                    Check.Text(row["state"]) == "stale_remote_data" && Check.Text(
+                        row["drafts"]?[0]?["lifecycle"]
+                    ) == "unknown",
+                    "Changed remote history was presented as current"
+                )
+                Check.That(
+                    Check.Text(row["next"]?["command"]?[1]) == "status",
+                    "Changed history did not request a refresh"
+                )
+            }
+            for mismatch in[]string{"deleted", "moved"} {
+                published.Restore()
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let branch = "refs/heads/" + Check.Text(pull["head"]?["ref"])
+                if mismatch == "deleted" {
+                    test.Flow.Git("-C", Path.Combine(test.Flow.Bin, "fork"), "update-ref", "-d", branch)
+                } else {
+                    (pull["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(String('a', 40))
+                    test.Flow.Save()
+                }
+                let row = Row(Read(test))
+                Check.That(Check.Text(row["state"]) == "binding_mismatch", "Open PR bypassed live exact-head binding")
+            }
+            published.Restore()
+            test.Flow.Reload()
+            (test.Flow.State["issue"] ?? throw Exception("Missing issue"))["title"] = JsonValue.Create(
+                "Open work changed"
+            )
+            test.Flow.Save()
+            let staleOpen = Row(Read(test))
+            Check.That(
+                Check.Text(staleOpen["approval_status"]) == "stale" && Check.Text(
+                    staleOpen["state"]
+                ) == "approval_waiting",
+                "Open PR revived stale approval"
+            )
+            using let legacy = CoordinationFixture(binary)
+            legacy.Flow.Initialize()
+            legacy.Flow.Approve()
+            let approvalSha = legacy.Flow.Git("-C", legacy.Flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
+            let approval = Check.Json(
+                legacy.Flow.Git("-C", legacy.Flow.Upstream, "show", approvalSha + ":.github/tokate-approval.json")
+            )
+            let fork = Path.Combine(legacy.Flow.Bin, "fork")
+            let head = legacy.Flow.Git("-C", fork, "rev-parse", "main")
+            let branch = "tokate/issue-1-" + approvalSha.Substring(0, 12)
+            Draft(legacy, Check.Map("uuid", Guid.NewGuid().ToString("D")), head)
+            legacy.Flow.Reload()
+            let pull = legacy.Flow.State["pulls"]?[0] ?? throw Exception("Missing legacy PR")
+            legacy.Flow.State["pull_list_omit_merged"] = JsonValue.Create(true)
+            (pull["head"] ?? throw Exception("Missing legacy head"))["ref"] = JsonValue.Create(branch)
+            pull["body"] = JsonValue.Create(
+                "<!-- tokate-receipt:" + Check.Map(
+                    "version",
+                    1,
+                    "repo",
+                    "owner/project",
+                    "issue",
+                    1,
+                    "approval",
+                    approvalSha,
+                    "donor",
+                    "donor",
+                    "head",
+                    head,
+                    "model",
+                    "gpt-6.1-sol",
+                    "effort",
+                    "high",
+                    "policy",
+                    Check.Text(approval["policy_hash"])
+                )
+                    .ToJsonString() + " -->"
+            )
+            legacy.Flow.Save()
+            for merged in[]bool{true, false} {
+                legacy.Flow.Git("-C", fork, "update-ref", "refs/heads/" + branch, head)
+                Close(legacy, merged, deleted: true)
+                let row = Row(Read(legacy))
+                Check.That(
+                    Check.Text(row["state"]) == (merged ? "merged_contribution": "closed_unmerged_contribution"),
+                    "Legacy history required a live donor branch"
+                )
+                Check.That(
+                    Check.Text(row["drafts"]?[0]?["binding"]) == "historical",
+                    "Legacy historical identity was not checked"
+                )
+            }
+        }
+
         private func Discovery(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -650,11 +953,12 @@ internal class ContributionStatusChecks {
             Leases(binary)
             Drafts(binary)
             Published(binary)
+            Historical(binary)
             Discovery(binary)
             LegacyAndTerminal(binary)
             RepeatedReads(binary)
             Console.WriteLine(
-                "PASS remote status access, discovery, leases, drafts, checks, stale authority, API failures, repeated reads, roles, narrow terminals and JSON"
+                "PASS remote status access, discovery, leases, drafts, checks, historical lifecycle, stale authority, API failures, repeated reads, roles, narrow terminals and JSON"
             )
         }
     }
