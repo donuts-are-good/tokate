@@ -179,13 +179,17 @@ internal class ReceiptVerification {
         }
 
         internal func Binding(run Data, receipt JsonElement, approval JsonElement, revision string) {
-            for key in[]string{"version", "issue", "approval", "donor"} {
-                run.Fields[key] = J.Get(receipt, key)
+            for key in[]string{"version", "issue", "approval", "donor", "expected", "reservation"} {
+                if J.Get(receipt, key).ValueKind != JsonValueKind.Undefined {
+                    run.Fields[key] = J.Get(receipt, key)
+                }
             }
             for key in[]string{"base", "base_branch"} {
                 run.Fields[key] = J.Get(approval, key)
             }
             run.Fields["authority_revision"] = revision
+            run.Fields["receipt_hash"] = Data.Hash(RequestData.Canonical(receipt))
+            run.Fields["policy_hash"] = J.Get(approval, "policy_hash")
         }
 
         internal func VerifyV2(

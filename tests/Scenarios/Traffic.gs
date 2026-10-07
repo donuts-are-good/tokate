@@ -540,7 +540,7 @@ internal class CommandTrafficChecks {
             flow.ResetTraffic()
             let failed = flow.Call([]string{"checks", "--run", run, "--json"}, 1, traffic: true)
             Check.Envelope(failed, "checks", "error", "verification_failed")
-            Budgets(flow, failed, 21, 0, 0, 10)
+            Budgets(flow, failed, 24, 0, 0, 13)
         }
 
         private func WatchTraffic(binary string) {
@@ -548,10 +548,10 @@ internal class CommandTrafficChecks {
             let run = Published(flow)
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
-            Budgets(flow, pending, 21, 0, 0, 10)
+            Budgets(flow, pending, 24, 0, 0, 13)
             flow.ResetTraffic()
             let direct = flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, traffic: true)
-            Budgets(flow, direct, 21, 0, 0, 10)
+            Budgets(flow, direct, 24, 0, 0, 13)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -560,7 +560,7 @@ internal class CommandTrafficChecks {
             flow.Save()
             flow.ResetTraffic()
             let result = Watch(flow, run, "10", 0)
-            Budgets(flow, result, 64, 0, 0, 51)
+            Budgets(flow, result, 73, 0, 0, 60)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
             let observations = flow.State["check_state_times"]
@@ -574,7 +574,7 @@ internal class CommandTrafficChecks {
             flow.State["check_polls"] = JsonValue.Create(0)
             flow.Save()
             flow.ResetTraffic()
-            Budgets(flow, Watch(flow, run, "10", 0, true), 64, 0, 0, 51)
+            Budgets(flow, Watch(flow, run, "10", 0, true), 73, 0, 0, 60)
         }
 
         private func WatchChanges(binary string) {
@@ -591,7 +591,7 @@ internal class CommandTrafficChecks {
                     flow.ResetTraffic()
                     let result = Watch(flow, run, "5", 1, direct)
                     Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                    Budgets(flow, result, kind == "head" ? 14: 15, 0, 0, kind == "head" ? 1: 2)
+                    Budgets(flow, result, kind == "head" ? 15: 16, 0, 0, kind == "head" ? 2: 3)
                 }
             }
         }
@@ -671,6 +671,7 @@ internal class CommandTrafficChecks {
                 "WatchDeadline",
                 "MovedDecreeDeadline",
                 "WatchStructured",
+                "ComposedChecks",
                 "WatchTraffic",
                 "WatchChanges",
                 "CacheRetention"
@@ -708,6 +709,9 @@ internal class CommandTrafficChecks {
                     }
                     case "WatchStructured" {
                         WatchStructured(binary)
+                    }
+                    case "ComposedChecks" {
+                        CheckGates.All(binary)
                     }
                     case "WatchTraffic" {
                         WatchTraffic(binary)

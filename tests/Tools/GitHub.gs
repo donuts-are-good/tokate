@@ -176,16 +176,20 @@ internal partial class Fixture {
                         case <- after(TimeSpan.FromMilliseconds(Int32.Parse(pause))) { }
                     }
                 }
-                let status = Int32.Parse(Check.Text(fault["status"]))
-                if status == 0 {
-                    Console.Error.WriteLine("synthetic-response-secret HTTP 404 in an unauthoritative transport error")
-                    return 1
+                if Check.Text(fault["passthrough"]) != "true" {
+                    let status = Int32.Parse(Check.Text(fault["status"]))
+                    if status == 0 {
+                        Console.Error.WriteLine(
+                            "synthetic-response-secret HTTP 404 in an unauthoritative transport error"
+                        )
+                        return 1
+                    }
+                    return Response(
+                        status,
+                        Check.Map("message", Check.Text(fault["message"])),
+                        Check.Text(fault["headers"])
+                    )
                 }
-                return Response(
-                    status,
-                    Check.Map("message", Check.Text(fault["message"])),
-                    Check.Text(fault["headers"])
-                )
             }
         }
         if path == "user" {
@@ -491,6 +495,19 @@ internal partial class Fixture {
             } else if effect == "approval" {
                 let issue = State["issue"] ?? throw Exception("Missing issue")
                 issue["labels"] = JsonArray()
+            } else if effect == "closed" || effect == "merged" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["state"] = JsonValue.Create("closed")
+                if effect == "merged" {
+                    pull["merged"] = JsonValue.Create(true)
+                    pull["merged_at"] = JsonValue.Create("2026-01-01T00:00:00Z")
+                }
+            } else if effect == "draft" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["draft"] = JsonValue.Create(false)
+            } else if effect == "receipt" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["body"] = JsonValue.Create(Check.Text(pull["body"]) + "\nChanged owner-facing text\n")
             }
             let move = State["overlap_move_target"]
             if move != nil {
