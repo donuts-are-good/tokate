@@ -2,6 +2,7 @@ package Tokate
 
 import System
 import System.Collections.Generic
+import System.Text.Json
 import System.Text.RegularExpressions
 
 internal class Args {
@@ -10,6 +11,7 @@ internal class Args {
     internal var Help bool = false
     internal var Subject string = ""
     internal var IssueUrl string = ""
+    internal var SavedDefaults JsonElement
     internal init(args[]string) {
         if args.Length == 0 {
             Help = true

@@ -207,17 +207,21 @@ before donating; no global installation or sudo is required for Codex.
 ```sh
 tokate defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high
 tokate defaults read
+tokate defaults list
 tokate defaults remove
 ```
 
-Defaults store only donor choices locally. New Codex work uses eligible defaults;
-explicit model/effort options override them. `select` checks policy and the offline
-Codex catalog without reserving or spending usage. Catalog presence does not prove
+Defaults store nonsecret donor choices locally. Add `--profile NAME` to set, read or
+remove a named profile, then reuse it with `select`, new `claim`/`work`, or managed
+`prepare`. Compatible explicit choices override it without changing the saved file.
+Missing or incompatible named profiles fail. Saved runs and external preparation
+reject `--profile`. Profiles store no budget or network consent. `select` checks
+policy and the offline Codex catalog without reserving or spending usage. Catalog presence does not prove
 account availability; `--availability` is donor-reported. Missing/rejected choices
 require explicit selection; noninteractive/JSON mode never picks a substitute.
 Terminal choices require confirmation; `--yes` confirms, without choosing a replacement.
-Pi requires explicit selection with its runtime and endpoint options; follow its
-guide rather than assuming Codex catalog or defaults behavior applies.
+Pi profiles also keep the private endpoint and explicit runtime overrides. Pi still
+reads current model limits from its SDK on each use. See the [Pi guide](pi.md).
 
 ## Allocate time and network consent
 

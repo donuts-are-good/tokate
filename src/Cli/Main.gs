@@ -111,6 +111,7 @@ func Dispatch(options Args) int32 {
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
+        DonorSelection.ApplyDefaults(options)
         Startup.Check(options)
     }
     if options.Command == "doctor" {

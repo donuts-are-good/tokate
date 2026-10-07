@@ -136,6 +136,7 @@ internal class Cli {
             CliOption("model", "MODEL", "Owner-approved model"),
             CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
             CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
+            CliOption("profile", "NAME", "Named local donor profile; explicit compatible choices override it"),
             CliOption("endpoint", "URL", "Private pi no-auth loopback Chat Completions base URL"),
             CliOption("pi-root", "DIR", "Donor-installed pi node_modules directory; no installation"),
             CliOption("node", "FILE", "Donor-installed Node executable for pi"),
@@ -226,16 +227,16 @@ internal class Cli {
             ),
             CliCommand(
                 "defaults",
-                "harness,provider,model,effort",
+                "profile,harness,provider,model,effort,endpoint,pi-root,node",
                 "",
-                "Set, read or remove donor-entered Tokate defaults locally; no discovery or inference.",
-                "set --harness HARNESS --provider PROVIDER --model MODEL --effort EFFORT\n       tokate defaults read|remove",
+                "Set, read, list or remove local nonsecret donor choices; no discovery or inference.",
+                "set [--profile NAME] --harness HARNESS --provider PROVIDER --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
                 "defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high",
                 effects: "local_read local_write"
             ),
             CliCommand(
                 "select",
-                "repo,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive",
+                "repo,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive",
                 "repo",
                 "Select under current owner policy and offline harness capabilities; no inference or reservation.",
                 "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
@@ -293,7 +294,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       tokate prepare --run DIR",
@@ -427,7 +428,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
@@ -437,7 +438,7 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
                 "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive]",
@@ -580,7 +581,7 @@ internal class Cli {
                 }
                 let modes = List[Object]()
                 if command.Name == "defaults" {
-                    for mode in[]string{"set", "read", "remove"} {
+                    for mode in[]string{"set", "read", "remove", "list"} {
                         modes.Add(
                             J.Map(
                                 "name",
@@ -592,7 +593,7 @@ internal class Cli {
                                     "local_read",
                                     true,
                                     "local_write",
-                                    mode != "read",
+                                    mode == "set" || mode == "remove",
                                     "github_read",
                                     false,
                                     "github_write",
@@ -602,7 +603,7 @@ internal class Cli {
                         )
                     }
                 }
-                let positional = command.Name == "defaults" ? []string{"set|read|remove"}: (
+                let positional = command.Name == "defaults" ? []string{"set|read|remove|list"}: (
                     command.Name == "help" ? []string{"COMMAND"}:
                     (
                         command.Name == "completion" ? []string{"bash|zsh|fish"}:
@@ -822,9 +823,14 @@ internal class Cli {
             }
             if args.Get("model") != "" && !Regex.IsMatch(
                 args.Get("model"),
-                args.Get("harness") == "pi" ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                args.Get("harness") == "pi" || args.Get("harness") == "" || args.Get(
+                    "profile"
+                ) != "" ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             ) {
                 throw Exception("Invalid model name: --model")
+            }
+            if args.Get("profile") != "" {
+                DonorDefaults.Name(args.Get("profile"))
             }
             for key in[]string{"harness", "provider"} {
                 if args.Get(key) != "" && !Regex.IsMatch(args.Get(key), "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$") {
@@ -856,12 +862,22 @@ internal class Cli {
                 return
             }
             if args.Command == "defaults" {
-                if args.Subject != "set" && args.Subject != "read" && args.Subject != "remove" {
-                    throw Exception("Required defaults operation: set, read or remove")
+                if args.Subject != "set" &&
+                    args.Subject != "read" &&
+                    args.Subject != "remove" &&
+                    args.Subject != "list" {
+                    throw Exception("Required defaults operation: set, read, list or remove")
                 }
-                for key in[]string{"harness", "provider", "model", "effort"} {
+                if args.Subject == "list" && args.Get("profile") != "" {
+                    throw Exception("defaults list does not take --profile")
+                }
+                for key in[]string{"harness", "provider", "model", "effort", "endpoint", "pi-root", "node"} {
                     if args.Subject == "set" {
-                        args.Need(key)
+                        if key == "harness" || key == "provider" || key == "model" || key == "effort" {
+                            args.Need(key)
+                        } else if args.Get("harness") != "pi" && args.Get(key) != "" {
+                            throw Exception("Pi runtime options require the pi harness")
+                        }
                     } else if args.Get(key) != "" {
                         throw Exception("defaults " + args.Subject + " does not take --" + key)
                     }
@@ -870,6 +886,7 @@ internal class Cli {
             if args.Command == "prepare" && args.Get("source") == "external" {
                 args.Need("tools")
                 for key in[]string{
+                    "profile",
                     "harness",
                     "provider",
                     "model",

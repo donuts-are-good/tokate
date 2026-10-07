@@ -104,6 +104,56 @@ internal class PiChecks {
             }
             File.Delete(Path.Combine(flow.Flow.Bin, "codex"))
             File.Delete(Path.Combine(flow.Flow.Bin, "codex-impl"))
+            let profilePath = Path.Combine(flow.Flow.Temp.Env["HOME"], ".local/state/tokate/donor-profiles/local.json")
+            var originalProfile = ""
+            if mode == "off" {
+                let stored = flow.Flow.Call(
+                    []string{
+                        "defaults",
+                        "set",
+                        "--profile",
+                        "local",
+                        "--harness",
+                        "pi",
+                        "--provider",
+                        "local-chat-completions",
+                        "--model",
+                        "synthetic/model:exact",
+                        "--effort",
+                        "absent",
+                        "--endpoint",
+                        endpoint,
+                        "--pi-root",
+                        root,
+                        "--node",
+                        node,
+                        "--json"
+                    }
+                )
+                Check.Envelope(stored, "defaults", "ok")
+                originalProfile = File.ReadAllText(profilePath)
+                File.Delete(Path.Combine(flow.Flow.Bin, "pi"))
+                let defaultPath = Path.Combine(flow.Flow.Temp.Env["HOME"], ".local/state/tokate/donor-defaults.json")
+                File.Copy(profilePath, defaultPath)
+                let unnamed = Check.Envelope(
+                    flow.Flow.Call(
+                        []string{"select", "--repo", "owner/project", "--model", "synthetic/model:exact", "--json"}
+                    ),
+                    "select",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(unnamed["data"]?["harness"]) == "pi",
+                    "Unnamed Pi default rejected a compatible exact override"
+                )
+                File.Delete(defaultPath)
+                for option in[]string{"--harness", "--provider", "--effort", "--endpoint", "--node"} {
+                    let position = args.IndexOf(option)
+                    args.RemoveAt(position + 1)
+                    args.RemoveAt(position)
+                }
+                args.AddRange([]string{"--profile", "local"})
+            }
             let prepared = flow.Flow.Call(args.ToArray())
             let selected = provider["models"]?[0] ?? throw Exception("Missing model")
             selected["maxTokens"] = JsonValue.Create(8192)
@@ -111,6 +161,16 @@ internal class PiChecks {
             let index = prepared.Output.LastIndexOf("Run: ")
             Check.That(index >= 0, "Pi preparation did not return a run")
             let run = prepared.Output.Substring(index + 5).Trim()
+            if mode == "off" {
+                let state = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+                Check.That(
+                    Check.Text(state["selection"]?["source"]) == "saved donor profile local with explicit overrides" &&
+                        Check.Text(state["pi_root"]) == root && Check.Text(state["pi_node"]) == node,
+                    "Profile preparation lost private runtime overrides or source"
+                )
+                Check.That(File.ReadAllText(profilePath) == originalProfile, "Pi preparation rewrote its profile")
+                flow.Flow.Call([]string{"defaults", "remove", "--profile", "local"})
+            }
             let checkout = Path.Combine(run, "checkout")
             let gitPath = Path.Combine(checkout, ".git/config")
             let git = File.ReadAllText(gitPath)
@@ -131,7 +191,11 @@ internal class PiChecks {
                     .ToJsonString()
             )
             let success = mode == "off" || mode == "on" || mode == "compact"
-            flow.Flow.Call([]string{"work", "--run", run, "--yes", "--non-interactive"}, success ? 0: 1)
+            flow.Flow.Call(
+                mode == "off" ? []string{"work", "--run", run, "--non-interactive"}:
+                []string{"work", "--run", run, "--yes", "--non-interactive"},
+                success ? 0: 1
+            )
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             File.WriteAllText(
                 Path.Combine(directory, "result.json"),

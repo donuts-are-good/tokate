@@ -9,9 +9,9 @@ with links to the source.
 
 Managed execution supports native Codex with a ChatGPT login and version-2
 [Pi local execution](pi.md) with a compatible installed SDK/runtime and an existing no-auth
-loopback endpoint. Donors select exact tools and models; Codex also supports
-explicitly saved Tokate-owned defaults. Pi requires explicit selection and
-`absent` effort. Its guide covers runtime discovery, isolation and evidence limits.
+loopback endpoint. Donors select exact tools and models and may save nonsecret
+Tokate-owned defaults or named profiles. Pi requires `absent` effort. Its guide
+covers runtime discovery, isolation and evidence limits.
 
 - Help and shell completion use local command definitions without scanning tools,
   inspecting remotes, accessing GitHub, or starting inference. Invalid CLI inputs
@@ -38,9 +38,13 @@ explicitly saved Tokate-owned defaults. Pi requires explicit selection and
 - Starting Codex work invokes `codex login status` and checks the output for a ChatGPT
   login. Codex handles access to its own authentication storage. Tokate does not
   open that storage or request the credential value.
-- `defaults set|read|remove` handles only four donor-entered tokens in
-  `~/.local/state/tokate/donor-defaults.json`, with bounded strict JSON, private
-  file permissions and symlink refusal. It reads no harness settings or credentials.
+- `defaults set|read|list|remove` stores donor-entered harness, provider, exact model
+  and effort in `~/.local/state/tokate/donor-defaults.json` or named files under
+  `donor-profiles/`. Pi adds its private endpoint and only explicit runtime path
+  overrides. Storage uses bounded strict JSON, private modes, atomic replacement
+  and symlink refusal. Public output omits endpoint and runtime paths. Profiles
+  contain no credentials, configured limits, budgets or network consent and read
+  no harness settings. Pi rechecks model limits through its SDK on each use.
 - Codex `select`, new claims and managed v2 preparation check exact owner restrictions
   and native Codex controls. `codex exec --help` and `codex debug models --bundled`
   run offline in an empty temporary `HOME`/`CODEX_HOME`, without inherited

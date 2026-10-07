@@ -54,7 +54,7 @@ internal class PiHarness {
             args.Values["--node"] = node
         }
 
-        internal func Select(args Args, policy Policy) JsonElement {
+        internal func Select(args Args, policy Policy, source string) JsonElement {
             if args.Need("provider") != "local-chat-completions" {
                 throw Exception("Unsupported pi provider; only local-chat-completions is managed")
             }
@@ -80,7 +80,7 @@ internal class PiHarness {
                         "effort",
                         effort,
                         "source",
-                        "explicit invocation",
+                        source,
                         "policy_hash",
                         policy.Digest,
                         "policy_eligible",

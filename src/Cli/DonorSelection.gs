@@ -55,40 +55,90 @@ internal class DonorSelection {
             !Console.IsOutputRedirected &&
             !Console.IsErrorRedirected
 
+        internal func ApplyDefaults(args Args) {
+            if args.Get("run") != "" ||
+                (
+                args.Command != "select" &&
+                    args.Command != "claim" &&
+                    args.Command != "work" &&
+                    (args.Command != "prepare" || args.Get("source") != "tokate")
+            ) {
+                return
+            }
+            let profile = args.Get("profile")
+            var saved JsonElement
+            try {
+                saved = DonorDefaults.Read(profile)
+            } catch (error Exception) {
+                if profile != "" {
+                    throw Exception(
+                        "Named donor profile is invalid, missing or inaccessible; use defaults read --profile NAME. No inference started."
+                    )
+                }
+                return
+            }
+            args.SavedDefaults = saved
+            let harness = J.Text(saved, "harness")
+            let provider = J.Text(saved, "provider")
+            let supported = (harness == "codex" && provider == "openai") ||
+                (harness == "pi" && provider == "local-chat-completions")
+            let compatible = (args.Get("harness") == "" || args.Get("harness") == harness) &&
+                (args.Get("provider") == "" || args.Get("provider") == provider)
+            if !supported || !compatible {
+                if profile != "" {
+                    throw Exception(
+                        "Named donor profile conflicts with the selected managed harness/provider. No inference started."
+                    )
+                }
+                return
+            }
+            for key in[]string{"harness", "provider", "endpoint", "pi-root", "node"} {
+                if args.Get(key) == "" && J.Text(saved, key) != "" {
+                    args.Values["--" + key] = J.Text(saved, key)
+                }
+            }
+        }
+
         internal func Resolve(args Args, policy Policy) JsonElement {
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
-            if harness == "pi" {
-                return PiHarness.Select(args, policy)
-            }
-            if args.Get("endpoint") != "" || args.Get("pi-root") != "" || args.Get("node") != "" {
+            if harness != "pi" && (args.Get("endpoint") != "" || args.Get("pi-root") != "" || args.Get("node") != "") {
                 throw Exception("Pi runtime options require the pi harness")
             }
-            if harness != "codex" || provider != "openai" {
+            if harness != "pi" && (harness != "codex" || provider != "openai") {
                 throw Exception(
                     "Unsupported managed harness/provider: choose codex/openai explicitly. No inference started."
                 )
             }
-            if J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider) {
+            if harness != "pi" && J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider) {
                 throw Exception(
                     "No eligible pair: codex/openai is rejected by current exact owner tool restrictions. No inference started."
                 )
             }
-            let capabilities = Capabilities()
-            var saved = JsonElement{}
-            var reason = "No saved default."
-            if args.Get("model") == "" || args.Get("effort") == "" {
-                try {
-                    saved = DonorDefaults.Read()
-                } catch (error Exception) {
-                    reason = "Saved default is invalid or inaccessible."
-                }
-            }
+            let saved = args.SavedDefaults
+            var reason = "No usable saved default."
             let compatible = J.Text(saved, "harness") == harness && J.Text(saved, "provider") == provider
             var model = args.Get("model", compatible ? J.Text(saved, "model"): "")
             var effort = args.Get("effort", compatible ? J.Text(saved, "effort"): "")
             let explicitPair = args.Get("model") != "" || args.Get("effort") != ""
-            var source = explicitPair ? "explicit invocation": "saved donor default"
+            var overridden = explicitPair
+            for key in[]string{"endpoint", "pi-root", "node"} {
+                overridden = overridden || (args.Get(key) != "" && args.Get(key) != J.Text(saved, key))
+            }
+            var source = args.Get("profile") != "" ? "saved donor profile " + args.Get("profile") +
+                (overridden ? " with explicit overrides": ""): (
+                explicitPair ? "explicit invocation": "saved donor default"
+            )
+            if harness == "pi" {
+                if model != "" {
+                    args.Values["--model"] = model
+                }
+                if effort != "" {
+                    args.Values["--effort"] = effort
+                }
+                return PiHarness.Select(args, policy, source)
+            }
+            let capabilities = Capabilities()
             var availability = args.Get("availability", "unknown")
             let unavailable = availability == "unavailable" ? model: ""
             let choices = SortedDictionary[string, JsonElement](StringComparer.Ordinal)
@@ -123,7 +173,7 @@ internal class DonorSelection {
                         rejection = "Model is donor-reported unavailable."
                     }
                 }
-                if explicitPair && model != "" && effort != "" {
+                if (explicitPair || args.Get("profile") != "") && model != "" && effort != "" {
                     throw Exception(
                         rejection +
                             " Explicit donor choice required: --model MODEL --effort EFFORT. Eligible pairs: " +
@@ -189,7 +239,10 @@ internal class DonorSelection {
 
         internal func Confirm(args Args, selection JsonElement) {
             let source = J.Text(selection, "source")
-            if args.Get("yes") == "true" || source == "explicit invocation" || source == "saved donor default" {
+            if args.Get("yes") == "true" ||
+                source == "explicit invocation" ||
+                source == "saved donor default" ||
+                source.StartsWith("saved donor profile ") {
                 return
             }
             let pair = J.Text(selection, "model") + " / " + J.Text(selection, "effort")

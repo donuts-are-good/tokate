@@ -12,22 +12,25 @@ internal class DonorSelectionChecks {
             model string = "gpt-6.1-sol",
             effort string = "high",
             harness string = "codex",
-            provider string = "openai"
+            provider string = "openai",
+            profile string = ""
         ) {
-            flow.Call(
-                []string{
-                    "defaults",
-                    "set",
-                    "--harness",
-                    harness,
-                    "--provider",
-                    provider,
-                    "--model",
-                    model,
-                    "--effort",
-                    effort
-                }
-            )
+            let args = List[string]{
+                "defaults",
+                "set",
+                "--harness",
+                harness,
+                "--provider",
+                provider,
+                "--model",
+                model,
+                "--effort",
+                effort
+            }
+            if profile != "" {
+                args.AddRange([]string{"--profile", profile})
+            }
+            flow.Call(args.ToArray())
         }
 
         private func Select(flow NativeFixture, extra[]string, code int32 = 0) JsonNode {
@@ -77,6 +80,72 @@ internal class DonorSelectionChecks {
             Check.Contains(flow.Call([]string{"defaults", "read"}).Output, "gpt-6.1-sol")
             flow.Call([]string{"defaults", "remove"})
             Check.That(!File.Exists(path), "Defaults were not removed")
+            let named = Path.Combine(flow.Temp.Env["HOME"], ".local/state/tokate/donor-profiles/local.json")
+            let privateRoot = Path.Combine(flow.Temp.Root, "private-runtime", "node_modules")
+            let privateNode = Path.Combine(flow.Temp.Root, "private-runtime", "node")
+            let pi = flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "local",
+                    "--harness",
+                    "pi",
+                    "--provider",
+                    "local-chat-completions",
+                    "--model",
+                    "synthetic/model:exact",
+                    "--effort",
+                    "absent",
+                    "--endpoint",
+                    "http://127.0.0.1:12345/v1",
+                    "--pi-root",
+                    privateRoot,
+                    "--node",
+                    privateNode
+                }
+            )
+            let stored = Check.Json(File.ReadAllText(named)).AsObject()
+            Check.That(
+                stored.Count == 7 && Check.Text(stored["pi-root"]) == privateRoot && Check.Text(
+                    stored["node"]
+                ) == privateNode,
+                "Pi profile dropped explicit private overrides"
+            )
+            Check.That(
+                File.GetUnixFileMode(named) == (UnixFileMode.UserRead | UnixFileMode.UserWrite) && File.GetUnixFileMode(
+                    Path.GetDirectoryName(named) ?? ""
+                ) ==
+                (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute),
+                "Named profile permissions are not private"
+            )
+            for output in[]string{
+                pi.Output,
+                flow.Call([]string{"defaults", "read", "--profile", "local"}).Output,
+                flow.Call([]string{"defaults", "list"}).Output
+            } {
+                Check.Contains(output, "synthetic/model:exact")
+                Check.That(
+                    !output.Contains("127.0.0.1") && !output.Contains(privateRoot) && !output.Contains(privateNode),
+                    "Public profile output exposed private settings"
+                )
+            }
+            for invalid in[]string{"../escape", ".", "x/y", "bad name"} {
+                flow.Call([]string{"defaults", "read", "--profile", invalid}, 1)
+            }
+            flow.Call([]string{"defaults", "read", "--profile", "missing"}, 1)
+            let original = File.ReadAllText(named)
+            for invalid in[]string{
+                "{\"harness\":\"pi\",\"credentials\":\"synthetic-private-account-data\"}",
+                "{\"harness\":\"pi\",\"harness\":\"codex\"}",
+                String('x', 16385)
+            } {
+                File.WriteAllText(named, invalid)
+                flow.Call([]string{"defaults", "read", "--profile", "local"}, 1)
+            }
+            File.WriteAllText(named, original)
+            flow.Call([]string{"defaults", "remove", "--profile", "local"})
+            Check.That(!File.Exists(named), "Named profile was not removed")
             let privateFile = Path.Combine(flow.Temp.Root, "private-config")
             File.WriteAllText(privateFile, "synthetic-private-account-data")
             File.CreateSymbolicLink(path, privateFile)
@@ -481,6 +550,64 @@ internal class DonorSelectionChecks {
             Check.That(Check.Text(saved["data"]?["default"]?["model"]) == "gpt-6.1-sol", "JSON defaults dropped tuple")
             flow.Temp.Env["PATH"] = path
             flow.Initialize()
+            ExpandPolicy(flow)
+            Set(flow, profile: "cloud")
+            let profilePath = Path.Combine(flow.Temp.Env["HOME"], ".local/state/tokate/donor-profiles/cloud.json")
+            let originalProfile = File.ReadAllText(profilePath)
+            let profiled = Check.Envelope(
+                flow.Call([]string{"select", "--repo", "owner/project", "--profile", "cloud", "--json"}),
+                "select",
+                "ok"
+            )
+            Check.That(
+                Check.Text(profiled["data"]?["source"]) == "saved donor profile cloud",
+                "Named selection lost its source"
+            )
+            let overridden = Check.Envelope(
+                flow.Call(
+                    []string{"select", "--repo", "owner/project", "--profile", "cloud", "--effort", "xhigh", "--json"}
+                ),
+                "select",
+                "ok"
+            )
+            Check.That(
+                Check.Text(overridden["data"]?["effort"]) == "xhigh" && Check.Text(overridden["data"]?["source"]) ==
+                "saved donor profile cloud with explicit overrides" && File.ReadAllText(profilePath) == originalProfile,
+                "Named profile override changed saved preferences or source"
+            )
+            flow.Reload()
+            let calls = flow.State["api_calls"]?.DeepClone()
+            for rejected in[]string{"--profile=missing", "--harness=pi", "--provider=local-chat-completions"} {
+                let args = List[string]{"select", "--repo", "owner/project", "--json"}
+                if rejected != "--profile=missing" {
+                    args.AddRange([]string{"--profile", "cloud"})
+                }
+                args.Add(rejected)
+                Check.Envelope(flow.Call(args.ToArray(), 1), "select", "error", "command_failed")
+            }
+            flow.Reload()
+            Check.That(JsonNode.DeepEquals(calls, flow.State["api_calls"]), "Rejected profile reached GitHub")
+            for args in[][]string{
+                []string{"work", "--run", "unused", "--profile", "cloud", "--json"},
+                []string{
+                    "prepare",
+                    "--repo",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--state",
+                    String('a', 40),
+                    "--source",
+                    "external",
+                    "--tools",
+                    "unused",
+                    "--profile",
+                    "cloud",
+                    "--json"
+                }
+            } {
+                Check.Envelope(flow.Call(args, 1), args[0], "error", "invalid_arguments")
+            }
             for availability in[]string{"unknown", "available"} {
                 let selected = Check.Envelope(
                     flow.Call([]string{"select", "--repo", "owner/project", "--availability", availability, "--json"}),

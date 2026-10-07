@@ -24,7 +24,12 @@ tokate submit --run RUN_DIRECTORY
 
 Runtime paths are optional when PATH resolves pi's scoped package
 `dist/bundle/cli.js` and Node. The module tree must be self-contained.
-Endpoint and runtime paths stay in private run state.
+Save repeated choices with `tokate defaults set --profile NAME` and the same
+harness, provider, model, effort, endpoint and optional runtime flags. Then use
+`tokate prepare ... --source tokate --profile NAME` with a fresh budget and network
+consent. Only explicit runtime overrides are saved. `defaults read` and `list`
+show tool/model summaries without endpoint or runtime paths.
+Endpoint and runtime paths stay in private local state.
 Configure the exact model and endpoint in Pi. Tokate reads their context and output
 limits through Pi's SDK with credentials and network access disabled, then rechecks
 them before work. The coding session receives generated model settings and an empty
