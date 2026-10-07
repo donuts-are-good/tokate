@@ -500,6 +500,7 @@ internal class Terminal {
                 Row("Issue URL", J.Text(task, "url"))
                 for draft in J.Items(J.Get(task, "drafts")) {
                     Row("PR", J.Text(draft, "url"))
+                    Row("Contribution", J.Text(draft, "lifecycle").Replace('_', ' '))
                     Row("Receipt", J.Text(draft, "receipt"))
                 }
             }
