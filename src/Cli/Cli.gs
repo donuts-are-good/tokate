@@ -20,6 +20,12 @@ internal class CliOption {
     }
 
     internal func Describe(command string) string {
+        if command == "external" && Name == "seconds" {
+            return "Separate positive verification budget, at most the owner limit; required only for correction"
+        }
+        if command == "external" && Name == "tools" {
+            return "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
+        }
         if command == "repair" && Name == "run" {
             return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
         }
@@ -313,10 +319,10 @@ internal class Cli {
             ),
             CliCommand(
                 "external",
-                "run,commit,summary",
+                "run,commit,summary,seconds,tools",
                 "run,commit",
                 "Fetch and verify an exact external commit in isolation; no inference or publication.",
-                "--run DIR --commit SHA [--summary FILE]",
+                "--run DIR --commit SHA [--summary FILE]\n       tokate external --run DIR --commit NEW --seconds N --tools FILE",
                 "external --run /path/to/run --commit SHA"
                 ,
                 effects: "local_read local_write github_read"
