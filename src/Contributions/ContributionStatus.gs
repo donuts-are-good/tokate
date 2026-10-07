@@ -205,6 +205,7 @@ internal class ContributionStatus {
                     StringComparison.OrdinalIgnoreCase
                 )
                 row["eligibility_status"] = eligible ? "eligible": "access_waiting"
+                row["eligibility_scope"] = "viewer"
                 row["eligibility"] = J.Map("donor", donor, "actor", actor, "mode", mode, "eligible", eligible)
                 if Access != nil {
                     for member in Access?.Members ?? List[JsonElement]() {
@@ -571,11 +572,14 @@ internal class ContributionStatus {
                     "donor",
                     "The assigned donor must select tools and a budget for a claim, or inspect their own saved work; no local run is known."
                 )
-            } else if Text(row, "eligibility_status") == "eligible" {
+            } else if Text(row, "eligibility_status") == "eligible" ||
+                (Text(row, "eligibility_status") == "access_waiting" && J.Bool(J.Get(Info, "permissions"), "push")) {
                 stage = "reservation_needed"
                 next = Next(
                     "donor",
-                    "Create a claim request file using the observed coordination state; a request file and work selections are still required."
+                    Text(row, "eligibility_status") == "eligible" ?
+                    "Create a claim request file using the observed coordination state; a request file and work selections are still required.":
+                    "An eligible donor must select the task and prepare a claim request. Inspect access grants if no donor is eligible."
                 )
             } else {
                 stage = "access_waiting"

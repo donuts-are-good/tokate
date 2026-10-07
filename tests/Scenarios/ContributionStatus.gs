@@ -87,6 +87,14 @@ internal class ContributionStatusChecks {
             Check.That(eligible["data"]?["pending_requests"]?.AsArray().Count == 0, "Granted access remained pending")
             Check.That(Check.Text(Row(eligible)["state"]) == "reservation_needed", "Trusted donor was not eligible")
             Check.That(Row(eligible)["next"]?["command"]?.AsArray().Count == 0, "Status invented a request file")
+            let owner = Row(Read(test, owner: true))
+            Check.That(
+                Check.Text(owner["state"]) == "reservation_needed" && Check.Text(
+                    owner["eligibility_scope"]
+                ) == "viewer",
+                "Owner eligibility was presented as task-wide access waiting"
+            )
+            Check.Contains(Check.Text(owner["next"]?["action"]), "An eligible donor must select the task")
             test.Flow.Reload()
             test.Flow.State["access_revoke_after_path"] = JsonValue.Create("repos/owner/project/issues/1")
             test.Flow.State["access_revoke_after_read"] = JsonValue.Create(1)
