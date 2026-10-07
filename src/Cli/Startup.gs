@@ -133,10 +133,11 @@ internal class Startup {
                 command == "recover" {
                 names.Add("git")
             }
-            if command == "work" {
+            if command == "work" || command == "claim" {
                 names.Add("bwrap")
             }
             let independent = command == "work" ||
+                command == "claim" ||
                 command == "external" ||
                 command == "amend" ||
                 command == "repair" ||

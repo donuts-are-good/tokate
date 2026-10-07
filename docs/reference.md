@@ -253,8 +253,14 @@ for credential, environment, filesystem and published-data boundaries.
 
 ## Run and inspect work
 
-For new version-2 work, first [claim through the coordinator](coordination-v2.md#requests-and-authoritative-state)
-and read the resulting state SHA. Managed Codex then uses:
+Managed version-2 work can start with `tokate work ISSUE_URL --seconds N` and an
+allowed profile or explicit selection. Readiness checks precede the claim request,
+preparation and inference. `claim` uses the same gates and prepares without inference.
+A pending claim exits 8 and retains its request and settings. Resume explicitly
+with `work --run DIR`, or use `prepare --run DIR` for preparation only.
+
+To [claim through the coordinator](coordination-v2.md#requests-and-authoritative-state)
+separately, read the resulting state SHA. Managed Codex then uses:
 
 ```sh
 tokate prepare --repo OWNER/REPO --issue 42 --state STATE_SHA --source tokate \

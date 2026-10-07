@@ -119,19 +119,35 @@ internal class Submission {
         internal func Request(args Args) {
             let path = Path.GetFullPath(args.Need("file"))
             let value = RequestData.FileData(path, 8192)
+            Request(args.Need("repo"), args.Number("issue"), value, path + ".posting.json")
+        }
+
+        internal func Request(
+            requestRepo string,
+            issue int32,
+            value JsonElement,
+            journal string,
+            expectedActor JsonElement? = nil
+        ) {
             RequestData.Request(value)
-            let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(args.Need("repo")))
+            let info = GitHub.Api("repos/" + RepositoryIdentity.Repo(requestRepo))
             let repo = RepositoryIdentity.Repo(J.Text(info, "full_name"))
-            if !String.Equals(repo, args.Need("repo"), StringComparison.OrdinalIgnoreCase) {
+            if !String.Equals(repo, requestRepo, StringComparison.OrdinalIgnoreCase) {
                 throw Exception("Canonical request repository differs from command")
             }
             RepositoryIdentity.PositiveId(J.Get(info, "id"))
-            let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
             let actor = J.Get(viewer, "id")
             RepositoryIdentity.PositiveId(actor)
+            if let expected = expectedActor {
+                if RepositoryIdentity.PositiveId(expected) != RepositoryIdentity.PositiveId(actor) {
+                    throw CliFailure(
+                        "authentication_required",
+                        "Active GitHub account differs from the saved pending donor; no request posted"
+                    )
+                }
+            }
             let binding = RequestData.Binding(actor, value)
-            let journal = path + ".posting.json"
             if FileInfo(journal).LinkTarget != nil {
                 throw Exception("Request posting journal must not be a symbolic link")
             }

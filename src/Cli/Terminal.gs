@@ -310,14 +310,16 @@ internal class Terminal {
                 } else if run.Text("state") == "generated" && exitCode != 0 {
                     stage = "Publication"
                 }
-                Message(
-                    stage +
-                        (exitCode == 0 ? " completed": " failed (" + code + ")") +
-                        ". Run: " +
-                        PublicOutput.RunDirectory,
-                    exitCode == 0 ? "green": "red",
-                    true
-                )
+                var outcome = " failed (" + code + ")"
+                var color = "red"
+                if exitCode == 0 {
+                    outcome = " completed"
+                    color = "green"
+                } else if exitCode == 8 {
+                    outcome = " pending"
+                    color = "yellow"
+                }
+                Message(stage + outcome + ". Run: " + PublicOutput.RunDirectory, color, true)
                 let summary = RunSummaryArtifacts(PublicOutput.RunDirectory)
                 Message("Saved artifacts: " + summary, "default", true)
                 for action in PublicOutput.Actions {

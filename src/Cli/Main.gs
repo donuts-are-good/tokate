@@ -165,7 +165,10 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "request" {
         Submission.Request(options)
     } else if options.Command == "prepare" {
-        V2Preparation.Prepare(options)
+        let directory = V2Preparation.Prepare(options)
+        if Data.Load(directory).Text("state") == "claim_pending" {
+            return 8
+        }
     } else if options.Command == "external" {
         ExternalContribution.External(options)
     } else if options.Command == "reconcile" {
@@ -186,12 +189,25 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "revoke" {
         OwnerApproval.Revoke(options)
     } else if options.Command == "claim" {
-        ContributionClaim.Claim(options)
+        let directory = V2Preparation.Acquire(options)
+        if Data.Load(directory).Text("state") == "claim_pending" {
+            return 8
+        }
     } else if options.Command == "work" {
-        let directory = options.Get("run") == "" ? ContributionClaim.Claim(options): Path.GetFullPath(
-            options.Need("run")
-        )
+        let directory = options.Get("run") == "" ? V2Preparation.Acquire(options): Path.GetFullPath(options.Need("run"))
         PublicOutput.RunDirectory = directory
+        if Data.Load(directory).Text("state") == "claim_pending" {
+            if options.Get("run") != "" {
+                V2Preparation.ResumePending(directory, options)
+            }
+            if Data.Load(directory).Text("state") == "claim_pending" {
+                return 8
+            }
+        }
+        let ready = Data.Load(directory)
+        if ready.Number("version") == 2 {
+            Overlaps.RequireDependencies(ready.Text("repo"), ready.Number("issue"))
+        }
         Worker.Execute(directory, options)
         PublicOutput.FailureCode = "command_failed"
         if Data.Load(directory).Number("version") == 2 {

@@ -26,6 +26,9 @@ internal class CliOption {
         if command == "repair" && Name == "path" {
             return "Clean, self-contained candidate checkout; required and separate from repair evidence"
         }
+        if (command == "work" || command == "claim") && Name == "seconds" {
+            return "Budget in seconds, 1..86400; required for v2; v1 default: min(3600, owner limit)"
+        }
         return (command == "amend" || command == "repair") && Name == "seconds" ?
         "Separate positive verification budget; required, at most the owner limit": Description.Replace(
             "{{seconds}}",
@@ -431,7 +434,7 @@ internal class Cli {
                 "claim",
                 "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
                 "repo,issue",
-                "Reserve a v1 GitHub branch and save a claim; no inference or PR publication.",
+                "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
                 ,

@@ -1,5 +1,6 @@
 package TokateTests
 
+import Gsharp.Concurrency
 import System
 import System.Collections.Generic
 import System.IO
@@ -492,8 +493,336 @@ internal class PreparationChecks {
             }
         }
 
+        private func Claiming(binary string, args[]string, env Dictionary[string, string], output Chan[Result]) {
+            output <- TestProcess.Run(binary, args, env)
+        }
+
+        private func AcquisitionArgs(flow NativeFixture, command string)[]string -> []string{
+            command,
+            "https://github.com/owner/project/issues/1",
+            "--model",
+            "gpt-6.1-sol",
+            "--effort",
+            "high",
+            "--seconds",
+            "60",
+            "--verification-reserve",
+            "20",
+            "--runs",
+            Path.Combine(flow.Temp.Root, "runs")
+        }
+
+        private func PostedEvent(test CoordinationFixture, comment JsonNode) string {
+            let path = Path.Combine(test.Flow.Temp.Root, "posted-event.json")
+            File.WriteAllText(
+                path,
+                Check.Map(
+                    "action",
+                    "created",
+                    "repository",
+                    Check.Map("full_name", "owner/project", "id", 1),
+                    "issue",
+                    Check.Map("number", 1),
+                    "comment",
+                    comment.DeepClone()
+                )
+                    .ToJsonString()
+            )
+            return path
+        }
+
+        private func Acquiring(test CoordinationFixture, command string, code int32 = 0) string {
+            let flow = test.Flow
+            let output = Chan[Result](1)
+            go Claiming(flow.Binary, AcquisitionArgs(flow, command), flow.Temp.Env, output)
+            var comment JsonNode? = nil
+            let deadline = DateTime.UtcNow.AddSeconds(30)
+            while comment == nil {
+                let snapshot = Check.Json(File.ReadAllText(Path.Combine(flow.Bin, "state.json")))
+                comment = snapshot["request_comments"]?.AsArray()[0]?.DeepClone()
+                if comment != nil {
+                    break
+                }
+                select {
+                    case let result = <- output {
+                        Check.Success(result)
+                        throw Exception("Acquisition completed without posting its claim")
+                    }
+                    case <- after(TimeSpan.FromMilliseconds(20)) { }
+                }
+                Check.That(DateTime.UtcNow < deadline, "Claim did not reach coordinator rendezvous")
+            }
+            let run = RunPath(flow)
+            let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(pending["state"]) == "claim_pending" && pending["id"] == nil,
+                "Pending claim granted local authority"
+            )
+            Check.That(
+                File.GetUnixFileMode(Path.Combine(run, "run.json")) == (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "Pending claim is not private"
+            )
+            Check.That(
+                pending["claim_request"]?["metadata"]?.AsObject().Count == 0,
+                "Claim exposes private readiness settings"
+            )
+            flow.NoInference()
+            test.Coordinate(PostedEvent(test, comment ?? throw Exception("Missing posted comment")))
+            let result = <-output
+            Check.That(result.Code == code, result.Output + result.Error)
+            return run
+        }
+
+        private func Acquisition(binary string) {
+            for command in[]string{"claim", "work"} {
+                using let test = CoordinationFixture(binary)
+                test.Initialize()
+                let run = Acquiring(test, command)
+                let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+                let uuid = Check.Text(saved["claim_request"]?["uuid"])
+                Check.That(
+                    Check.Text(saved["attempt"]) == uuid && Path.GetFileName(run) == uuid,
+                    "Acquisition changed the exact attempt"
+                )
+                test.Flow.Reload()
+                Check.That(Check.Text(test.Flow.State["request_count"]) == "1", "Acquisition duplicated its claim POST")
+                if command == "claim" {
+                    Check.That(Check.Text(saved["state"]) == "claimed", "Reserve-only claim did not prepare")
+                    test.Flow.NoInference()
+                    test.Flow.State["dependency_pages"] = Check.Map(
+                        "1",
+                        Check.Json(
+                            "[[{\"id\":2,\"number\":2,\"url\":\"https://api.github.com/repos/owner/project/issues/2\",\"state\":\"open\"}]]"
+                        )
+                    )
+                    test.Flow.Save()
+                    test.Flow.Call([]string{"work", "--run", run}, 1)
+                    test.Flow.NoInference()
+                } else {
+                    Check.That(Check.Text(saved["state"]) == "generated", "Composed work did not save verified work")
+                    Check.That(Check.Text(test.Flow.State["exec_count"]) == "1", "Composed work did not execute once")
+                    test.Flow.Call([]string{"work", "--run", run}, 1)
+                    test.Flow.Reload()
+                    Check.That(Check.Text(test.Flow.State["exec_count"]) == "1", "Saved work restarted inference")
+                }
+                test.Flow.NoPr()
+            }
+        }
+
+        private func PendingClaim(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "ready",
+                    "--harness",
+                    "codex",
+                    "--provider",
+                    "openai",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "high"
+                }
+            )
+            let result = flow.Call(
+                []string{
+                    "work",
+                    "https://github.com/owner/project/issues/1",
+                    "--profile",
+                    "ready",
+                    "--seconds",
+                    "60",
+                    "--verification-reserve",
+                    "20",
+                    "--runs",
+                    Path.Combine(flow.Temp.Root, "runs"),
+                    "--json"
+                },
+                8
+            )
+            let run = RunPath(flow)
+            let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            let envelope = Check.Json(result.Output)
+            Check.That(
+                Check.Text(envelope["status"]) == "pending" && Check.Text(
+                    envelope["data"]?["state"]
+                ) == "claim_pending",
+                "Pending JSON omitted its saved state"
+            )
+            Check.Contains(envelope["next_actions"]?.ToJsonString() ?? "", "prepare")
+            Check.Contains(envelope["next_actions"]?.ToJsonString() ?? "", "work")
+            Check.Contains(envelope["next_actions"]?.ToJsonString() ?? "", run)
+            let uuid = Check.Text(pending["claim_request"]?["uuid"])
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["request_count"]) == "1" && flow.State["fork_creations"] == nil,
+                "Pending claim posted or prepared twice"
+            )
+            flow.NoInference()
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "ready",
+                    "--harness",
+                    "codex",
+                    "--provider",
+                    "openai",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "minimal"
+                }
+            )
+            flow.Reload()
+            let comment = flow.State["request_comments"]?.AsArray()[0] ?? throw Exception("Missing posted claim")
+            test.Coordinate(PostedEvent(test, comment))
+            flow.Call([]string{"work", "--run", run})
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(saved["attempt"]) == uuid && Check.Text(saved["effort"]) == "high",
+                "Resume changed the frozen request or profile"
+            )
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["request_count"]) == "1" && Check.Text(flow.State["exec_count"]) == "1",
+                "Resume duplicated posting or inference"
+            )
+            Check.That(File.Exists(Path.Combine(run, "claim.posting.json")), "Promotion lost the posting journal")
+            flow.NoPr()
+        }
+
+        private func ClaimGates(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for gate in[]string{"budget", "dependency", "capability", "competing", "revoked", "missing"} {
+                baseline.Restore()
+                flow.Reload()
+                let args = List[string](AcquisitionArgs(flow, "work"))
+                if gate == "budget" {
+                    args.RemoveAt(args.IndexOf("--seconds") + 1)
+                    args.Remove("--seconds")
+                } else if gate == "dependency" {
+                    flow.Reload()
+                    flow.State["dependency_pages"] = Check.Map(
+                        "1",
+                        Check.Json(
+                            "[[{\"id\":2,\"number\":2,\"url\":\"https://api.github.com/repos/owner/project/issues/2\",\"state\":\"open\"}]]"
+                        )
+                    )
+                    flow.Save()
+                } else if gate == "capability" {
+                    flow.Mode("missing_controls")
+                } else if gate == "competing" {
+                    test.Claim()
+                } else if gate == "revoked" {
+                    flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
+                } else {
+                    flow.Git("-C", flow.Upstream, "update-ref", "-d", "refs/heads/tokate/contributions/1")
+                }
+                flow.Call(args.ToArray(), 1)
+                flow.Reload()
+                Check.That(
+                    flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,
+                    "Failed readiness mutated a request or fork"
+                )
+                flow.NoInference()
+                flow.NoPr()
+            }
+        }
+
+        private func PendingAuthority(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            flow.Call(AcquisitionArgs(flow, "claim"), 8)
+            let run = RunPath(flow)
+            let baselineComment = test.Comment
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for gate in[]string{"expired", "revoked", "stale", "actor", "unrecorded", "evicted"} {
+                baseline.Restore()
+                test.Comment = baselineComment
+                flow.Reload()
+                let comment = flow.State["request_comments"]?.AsArray()[0] ?? throw Exception("Missing posted claim")
+                if gate == "stale" {
+                    flow.Approve()
+                } else if gate == "actor" {
+                    flow.State["viewer_id"] = JsonValue.Create(999)
+                    flow.Save()
+                } else if gate == "unrecorded" {
+                    test.Claim()
+                } else {
+                    test.Coordinate(PostedEvent(test, comment))
+                    if gate == "expired" {
+                        test.Expire()
+                    } else if gate == "revoked" {
+                        flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
+                    } else {
+                        let state = test.State()["state"] ?? throw Exception("Missing state")
+                        state["outcomes"] = JsonArray()
+                        test.RewriteState(state)
+                    }
+                }
+                flow.Call([]string{"work", "--run", run}, 1)
+                flow.Reload()
+                Check.That(
+                    Check.Text(flow.State["request_count"]) == "1" && flow.State["fork_creations"] == nil,
+                    "Changed authority posted or prepared new work"
+                )
+                Check.That(
+                    Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["state"]) == "claim_pending",
+                    "Changed authority promoted pending work"
+                )
+                flow.NoInference()
+                flow.NoPr()
+            }
+        }
+
+        private func ClaimRecovery(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            test.Flow.Reload()
+            test.Flow.State["preparation_interrupt"] = JsonValue.Create("fetch")
+            test.Flow.Save()
+            let run = Acquiring(test, "work", 1)
+            let original = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(original["state"]) == "preparing" && Directory.Exists(Path.Combine(run, "checkout.staging")),
+                "Failed preparation lost partial work"
+            )
+            Check.That(File.Exists(Path.Combine(run, "claim.posting.json")), "Failed preparation lost its journal")
+            test.Flow.NoInference()
+            Resume(test.Flow, run)
+            test.Flow.NoInference()
+            test.Flow.Call([]string{"work", "--run", run})
+            let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(
+                Check.Text(saved["attempt"]) == Check.Text(original["attempt"]),
+                "Recovery changed the execution attempt"
+            )
+            test.Flow.Reload()
+            Check.That(
+                Check.Text(test.Flow.State["request_count"]) == "1" && Check.Text(test.Flow.State["exec_count"]) == "1",
+                "Recovery repeated a request or inference"
+            )
+            test.Flow.NoPr()
+        }
+
         internal func All(binary string, selected string = "") {
             for name in[]string{
+                "Acquisition",
+                "PendingClaim",
+                "ClaimGates",
+                "PendingAuthority",
+                "ClaimRecovery",
                 "Creation",
                 "Selection",
                 "Interruptions",
@@ -507,6 +836,21 @@ internal class PreparationChecks {
                     continue
                 }
                 switch name {
+                    case "Acquisition" {
+                        Acquisition(binary)
+                    }
+                    case "PendingClaim" {
+                        PendingClaim(binary)
+                    }
+                    case "ClaimGates" {
+                        ClaimGates(binary)
+                    }
+                    case "PendingAuthority" {
+                        PendingAuthority(binary)
+                    }
+                    case "ClaimRecovery" {
+                        ClaimRecovery(binary)
+                    }
                     case "Creation" {
                         Creation(binary)
                     }

@@ -71,6 +71,19 @@ internal class Preparation {
             run.Fields["preparation_version"] = 1
             run.Fields["preparation_identity"] = BoundIdentity(run)
             run.Fields["state"] = "preparing"
+            WriteNew(directory, run)
+        }
+
+        internal func Pending(directory string, run Data) {
+            for entry in Directory.EnumerateFileSystemEntries(directory) {
+                if Path.GetFileName(entry) != ".lock" {
+                    Reject(directory)
+                }
+            }
+            WriteNew(directory, run)
+        }
+
+        private func WriteNew(directory string, run Data) {
             using let file = FileStream(
                 Path.Combine(directory, "run.json"),
                 FileStreamOptions{
@@ -82,6 +95,35 @@ internal class Preparation {
             )
             using let writer = StreamWriter(file)
             writer.Write(J.Write(run.Fields) + "\n")
+            writer.Flush()
+            file.Flush(true)
+        }
+
+        internal func Promote(directory string, run Data) {
+            let pending = Data.Load(directory)
+            if pending.Number("version") != 2 || pending.Text("state") != "claim_pending" || pending.Fields.ContainsKey(
+                "id"
+            ) ||
+                pending
+                .Fields
+                .ContainsKey("attempt") || pending.Fields.ContainsKey("preparation_identity") {
+                Reject(directory)
+            }
+            for entry in Directory.EnumerateFileSystemEntries(directory) {
+                if Array.IndexOf([]string{".lock", "run.json", "claim.posting.json"}, Path.GetFileName(entry)) < 0 {
+                    Reject(directory)
+                }
+            }
+            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,network,harness,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
+                .Split(',') {
+                if !RequestData.Same(J.Get(pending.Element(), key), J.Get(run.Element(), key)) {
+                    Reject(directory)
+                }
+            }
+            run.Fields["preparation_version"] = 1
+            run.Fields["preparation_identity"] = BoundIdentity(run)
+            run.Fields["state"] = "preparing"
+            run.Save(directory)
         }
 
         private func Reject(path string) {
@@ -99,7 +141,7 @@ internal class Preparation {
             } catch (error Exception) {
                 throw Exception(error.Message + "; saved run directory: " + directory, error)
             }
-            for name in[]string{".lock", "run.json", "run.json.tmp"} {
+            for name in[]string{".lock", "run.json", "run.json.tmp", "claim.posting.json"} {
                 let path = Path.Combine(directory, name)
                 if FileInfo(path).LinkTarget != nil {
                     Reject(directory)
@@ -124,15 +166,6 @@ internal class Preparation {
                 FileAccess.ReadWrite,
                 FileShare.None
             )
-        }
-
-        internal func Resume(path string) {
-            let directory = Path.GetFullPath(path)
-            PublicOutput.RunDirectory = directory
-            using let lease = Lease(directory)
-            let run = Data.Load(directory)
-            Complete(directory, run)
-            Terminal.Message("Prepared contribution. Run: " + directory)
         }
 
         internal func Complete(directory string, run Data) {
