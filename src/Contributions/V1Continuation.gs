@@ -35,7 +35,7 @@ internal class V1Continuation {
         internal func Has(run Data) bool -> run.Text("continuation_source") != ""
 
         internal func Confirm(args Args, selection JsonElement) {
-            let confirmed = J.Map()
+            let confirmed = map[string, Object?]{}
             for field in selection.EnumerateObject() {
                 confirmed[field.Name] = field.Value.Clone()
             }
@@ -204,28 +204,18 @@ internal class V1Continuation {
 
         internal func Provenance(source Data) JsonElement -> J.Parse(
             J.Write(
-                J.Map(
-                    "id",
-                    source.Text("id"),
-                    "approval",
-                    source.Text("approval"),
-                    "base",
-                    source.Text("base"),
-                    "donor_id",
-                    J.Get(source.Element(), "donor_id"),
-                    "state",
-                    source.Text("state"),
-                    "failure_reason",
-                    source.Text("failure_reason"),
-                    "model",
-                    source.Text("model"),
-                    "effort",
-                    source.Text("effort"),
-                    "harness",
-                    source.Text("harness"),
-                    "provider",
-                    source.Text("provider")
-                )
+                map[string, Object?]{
+                    "id": source.Text("id"),
+                    "approval": source.Text("approval"),
+                    "base": source.Text("base"),
+                    "donor_id": J.Get(source.Element(), "donor_id"),
+                    "state": source.Text("state"),
+                    "failure_reason": source.Text("failure_reason"),
+                    "model": source.Text("model"),
+                    "effort": source.Text("effort"),
+                    "harness": source.Text("harness"),
+                    "provider": source.Text("provider")
+                }
             )
         )
 
@@ -662,13 +652,13 @@ internal class V1Continuation {
                 if hasOriginal && original == current {
                     continue
                 }
-                entries.Add(J.Map("path", path, "mode", mode, "blob", blob, "content", content))
+                entries.Add(map[string, Object?]{"path": path, "mode": mode, "blob": blob, "content": content})
             }
             return J.Parse(J.Write(entries))
         }
 
         private func Evidence(directory string) JsonElement {
-            let result = J.Map()
+            let result = map[string, Object?]{}
             for name in[]string{
                 "run.json",
                 "events.jsonl",
@@ -714,18 +704,13 @@ internal class V1Continuation {
             }
             let path = Path.Combine(directory, "continuation.json")
             let manifest = J.Write(
-                J.Map(
-                    "version",
-                    1,
-                    "source_metadata",
-                    sourceText,
-                    "evidence",
-                    evidence,
-                    "predecessor",
-                    Provenance(source),
-                    "entries",
-                    entries
-                )
+                map[string, Object?]{
+                    "version": 1,
+                    "source_metadata": sourceText,
+                    "evidence": evidence,
+                    "predecessor": Provenance(source),
+                    "entries": entries
+                }
             )
             if File.Exists(path) {
                 if Encoding.UTF8.GetString(Bytes(directory, "continuation.json", 48 * 1024 * 1024)) != manifest {

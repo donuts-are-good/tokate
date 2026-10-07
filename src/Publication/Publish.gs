@@ -203,20 +203,14 @@ internal class Publication {
             var body = J.Text(record, "template")
             body = PrBody.Render(body, values, J.Get(record, "policy"))
             File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
-            let publication = J.Map(
-                "title",
-                J.Text(J.Get(record, "issue"), "title"),
-                "body",
-                body,
-                "head",
-                run.Text("donor") + ":" + run.Text("branch"),
-                "base",
-                run.Text("base_branch"),
-                "draft",
-                true,
-                "maintainer_can_modify",
-                true
-            )
+            let publication = map[string, Object?]{
+                "title": J.Text(J.Get(record, "issue"), "title"),
+                "body": body,
+                "head": run.Text("donor") + ":" + run.Text("branch"),
+                "base": run.Text("base_branch"),
+                "draft": true,
+                "maintainer_can_modify": true
+            }
             File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(publication) + "\n")
             Terminal.Message("Publication content: " + Path.Combine(directory, "publication.json"))
             let remote = GitHub.Api("repos/" + run.Text("head_repo") + "/git/ref/heads/" + run.Text("branch"))

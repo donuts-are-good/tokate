@@ -219,12 +219,18 @@ internal class Amendment {
             RepositoryAccess.ValidateFork(
                 run.Text("repo"),
                 J.Parse(
-                    J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", remoteHead))
+                    J.Write(
+                        map[string, Object?]{
+                            "fork": run.Text("head_repo"),
+                            "branch": run.Text("branch"),
+                            "head": remoteHead
+                        }
+                    )
                 ),
                 J.Get(viewer, "id")
             )
             SyncAuthority(run, amendment, record)
-            return J.Parse(J.Write(J.Map("record", record, "state", value, "sha", state.Sha)))
+            return J.Parse(J.Write(map[string, Object?]{"record": record, "state": value, "sha": state.Sha}))
         }
 
         private func SyncAuthority(run Data, amendment Data?, record JsonElement) {
@@ -565,16 +571,12 @@ internal class Amendment {
                 if RequestData.Canonical(receipt) != RequestData.Canonical(previousReceipt) {
                     throw Exception("Previous receipt changed after amendment acceptance")
                 }
-                let intent = J.Map(
-                    "previous",
-                    amendment.Text("previous"),
-                    "head",
-                    amendment.Text("commit"),
-                    "pr",
-                    amendment.Number("pr"),
-                    "uuid",
-                    amendment.Text("id")
-                )
+                let intent = map[string, Object?]{
+                    "previous": amendment.Text("previous"),
+                    "head": amendment.Text("commit"),
+                    "pr": amendment.Number("pr"),
+                    "uuid": amendment.Text("id")
+                }
                 amendment.Fields["publication"] = intent
                 let updatedReceipt = Dictionary[string, Object?]()
                 for field in receipt.EnumerateObject() {
@@ -616,24 +618,16 @@ internal class Amendment {
                         J.Parse(J.Write(updatedReceipt))
                     )
                     let metadata = PublicSummary.Attach(
-                        J.Map(
-                            "fork",
-                            run.Text("head_repo"),
-                            "branch",
-                            run.Text("branch"),
-                            "previous",
-                            amendment.Text("previous"),
-                            "head",
-                            amendment.Text("commit"),
-                            "pr",
-                            amendment.Number("pr"),
-                            "seconds",
-                            amendment.Number("seconds"),
-                            "tools",
-                            J.Get(amendment.Element(), "tools"),
-                            "verification",
-                            "donor-reported-pass"
-                        ),
+                        map[string, Object?]{
+                            "fork": run.Text("head_repo"),
+                            "branch": run.Text("branch"),
+                            "previous": amendment.Text("previous"),
+                            "head": amendment.Text("commit"),
+                            "pr": amendment.Number("pr"),
+                            "seconds": amendment.Number("seconds"),
+                            "tools": J.Get(amendment.Element(), "tools"),
+                            "verification": "donor-reported-pass"
+                        },
                         J.Get(amendment.Element(), "public_summary")
                     )
                     if run.Text("attempt") != "" {
@@ -642,18 +636,13 @@ internal class Amendment {
                     if amendment.Text("sync") != "" {
                         metadata["sync"] = amendment.Text("sync")
                     }
-                    amendment.Fields["request"] = J.Map(
-                        "uuid",
-                        amendment.Text("id"),
-                        "expected",
-                        amendment.Text("expected"),
-                        "approval",
-                        run.Text("approval"),
-                        "action",
-                        "amend",
-                        "metadata",
-                        metadata
-                    )
+                    amendment.Fields["request"] = map[string, Object?]{
+                        "uuid": amendment.Text("id"),
+                        "expected": amendment.Text("expected"),
+                        "approval": run.Text("approval"),
+                        "action": "amend",
+                        "metadata": metadata
+                    }
                 }
                 amendment.Fields["state"] = "publishing"
                 amendment.Save(location)
@@ -757,7 +746,7 @@ internal class Amendment {
                     }
                     GitHub.Api(
                         "repos/" + run.Text("repo") + "/pulls/" + amendment.Number("pr").ToString(),
-                        J.Map("body", updated),
+                        map[string, Object?]{"body": updated},
                         "PATCH"
                     )
                 }
@@ -808,16 +797,12 @@ internal class Amendment {
         }
 
         internal func PublicRecord(amendment Data) Object {
-            let fields = J.Map(
-                "id",
-                amendment.Text("id"),
-                "previous",
-                amendment.Text("previous"),
-                "seconds",
-                amendment.Number("seconds"),
-                "tools",
-                J.Get(amendment.Element(), "tools")
-            )
+            let fields = map[string, Object?]{
+                "id": amendment.Text("id"),
+                "previous": amendment.Text("previous"),
+                "seconds": amendment.Number("seconds"),
+                "tools": J.Get(amendment.Element(), "tools")
+            }
             if amendment.Text("sync") != "" {
                 fields["sync"] = amendment.Text("sync")
             }
@@ -839,14 +824,11 @@ internal class Amendment {
             }
             if !found {
                 history.Add(
-                    J.Map(
-                        "id",
-                        amendment.Text("id"),
-                        "previous",
-                        amendment.Text("previous"),
-                        "head",
-                        amendment.Text("commit")
-                    )
+                    map[string, Object?]{
+                        "id": amendment.Text("id"),
+                        "previous": amendment.Text("previous"),
+                        "head": amendment.Text("commit")
+                    }
                 )
             }
             run.Fields["amendments"] = history

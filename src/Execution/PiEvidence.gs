@@ -27,7 +27,7 @@ internal class PiEvidence {
             var completed int32
             var started int32
             var report = ""
-            let usage = J.Map()
+            let usage = map[string, Object?]{}
             for line in output.Split('\n') {
                 if String.IsNullOrWhiteSpace(line) {
                     continue

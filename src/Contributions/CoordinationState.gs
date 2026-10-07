@@ -14,10 +14,16 @@ internal class CoordinationState {
     internal func Write(repo string, issue int32, expected string, expires int64 = 0) {
         let tree = GitHub.Api(
             "repos/" + repo + "/git/trees",
-            J.Map(
-                "tree",
-                []Object{J.Map("path", "state.json", "mode", "100644", "type", "blob", "content", J.Write(Fields))}
-            ),
+            map[string, Object?]{
+                "tree": []Object{
+                    map[string, Object?]{
+                        "path": "state.json",
+                        "mode": "100644",
+                        "type": "blob",
+                        "content": J.Write(Fields)
+                    }
+                }
+            },
             expires: expires
         )
         let commit = GitHub.Api(
@@ -33,13 +39,13 @@ internal class CoordinationState {
         if Sha == "" {
             GitHub.Api(
                 "repos/" + repo + "/git/refs",
-                J.Map("ref", "refs/heads/" + Ref(issue), "sha", next),
+                map[string, Object?]{"ref": "refs/heads/" + Ref(issue), "sha": next},
                 expires: expires
             )
         } else {
             GitHub.Api(
                 "repos/" + repo + "/git/refs/heads/" + Ref(issue),
-                J.Map("sha", next, "force", false),
+                map[string, Object?]{"sha": next, "force": false},
                 "PATCH",
                 expires: expires
             )
@@ -48,6 +54,13 @@ internal class CoordinationState {
     }
 
     internal func Check(repo string, issue int32, donor string, actor JsonElement) JsonElement {
+        let record = CheckApproval(repo, issue, donor: donor)
+        let approval = J.Get(record, "approval")
+        AccessState.Check(repo, issue, approval, actor)
+        return record
+    }
+
+    internal func CheckApproval(repo string, issue int32, quiet bool = false, donor string = "") JsonElement {
         let state = Value()
         let approval = J.Get(state, "approval")
         let task = GitHub.Issue(repo, issue)
@@ -64,26 +77,19 @@ internal class CoordinationState {
             J.Text(approval, "issue_hash") != GitHub.Fingerprint(task) {
             throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
         }
-        let configuration = ApprovalBase.Check(repo, approval, 2)
+        let configuration = ApprovalBase.Check(repo, approval, 2, quiet)
         let mode = configuration.Item1.Eligibility
         if scoped != (mode != "") || (scoped && J.Text(approval, "eligibility") != mode) {
             throw CliFailure("stale_approval", "Task eligibility declaration differs from current policy")
         }
-        if scoped {
-            AccessState.Check(repo, issue, approval, actor)
-        }
         return J.Parse(
             J.Write(
-                J.Map(
-                    "approval",
-                    approval,
-                    "policy",
-                    configuration.Item1.Value,
-                    "template",
-                    configuration.Item2,
-                    "issue",
-                    task
-                )
+                map[string, Object?]{
+                    "approval": approval,
+                    "policy": configuration.Item1.Value,
+                    "template": configuration.Item2,
+                    "issue": task
+                }
             )
         )
     }

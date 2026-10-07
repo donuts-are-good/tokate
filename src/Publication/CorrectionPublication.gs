@@ -113,15 +113,15 @@ internal class CorrectionPublication {
             values["donor"] = run.Text("donor")
             values["model"] = PublicSummary.Identifier(run.Text("model"))
             values["effort"] = PublicSummary.Identifier(run.Text("effort"))
-            values["seconds"] = run.Flag("recovered") ? "unknown (original runtime not recorded)":
-            (
-                run.Fields.ContainsKey("execution_seconds") ? run.Number("execution_seconds").ToString() +
-                    " (original execution only)":
-                (
-                    run.Fields.ContainsKey("elapsed_seconds") ? run.Number("elapsed_seconds").ToString() +
-                        " (original work including checks)": "unknown (original runtime not recorded)"
-                )
-            )
+            values["seconds"] = if run.Flag("recovered") {
+                "unknown (original runtime not recorded)"
+            } else if run.Fields.ContainsKey("execution_seconds") {
+                run.Number("execution_seconds").ToString() + " (original execution only)"
+            } else if run.Fields.ContainsKey("elapsed_seconds") {
+                run.Number("elapsed_seconds").ToString() + " (original work including checks)"
+            } else {
+                "unknown (original runtime not recorded)"
+            }
             values["base"] = run.Text("base")
             values["policy"] = run.Text("policy_hash")
             values["usage"] = Publication.Usage(run)
@@ -137,28 +137,19 @@ internal class CorrectionPublication {
                 var intent = J.Get(correction.Element(), "publication")
                 if intent.ValueKind == JsonValueKind.Undefined {
                     let body = NativeBody(run, correction, record, expectedReceipt)
-                    let request = J.Map(
-                        "title",
-                        J.Text(J.Get(record, "issue"), "title"),
-                        "body",
-                        body,
-                        "head",
-                        run.Text("donor") + ":" + run.Text("branch"),
-                        "base",
-                        run.Text("base_branch"),
-                        "draft",
-                        true,
-                        "maintainer_can_modify",
-                        true
-                    )
-                    correction.Fields["publication"] = J.Map(
-                        "stage",
-                        "prepared",
-                        "request",
-                        request,
-                        "receipt",
-                        expectedReceipt
-                    )
+                    let request = map[string, Object?]{
+                        "title": J.Text(J.Get(record, "issue"), "title"),
+                        "body": body,
+                        "head": run.Text("donor") + ":" + run.Text("branch"),
+                        "base": run.Text("base_branch"),
+                        "draft": true,
+                        "maintainer_can_modify": true
+                    }
+                    correction.Fields["publication"] = map[string, Object?]{
+                        "stage": "prepared",
+                        "request": request,
+                        "receipt": expectedReceipt
+                    }
                     Correction.Save(directory, correction)
                     intent = J.Get(correction.Element(), "publication")
                     File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
@@ -222,7 +213,7 @@ internal class CorrectionPublication {
         }
 
         private func SetStage(directory string, correction Data, stage string) {
-            let fields = J.Map()
+            let fields = map[string, Object?]{}
             for field in J.Get(correction.Element(), "publication").EnumerateObject() {
                 fields[field.Name] = field.Value.Clone()
             }
@@ -334,7 +325,7 @@ internal class CorrectionPublication {
                     let request = Submission.PublicationRequest(run, correction)
                     RequestData.Parse(J.Write(request))
                     RequestData.Request(request)
-                    correction.Fields["publication"] = J.Map("stage", "prepared", "request", request)
+                    correction.Fields["publication"] = map[string, Object?]{"stage": "prepared", "request": request}
                     Correction.Save(directory, correction)
                     intent = J.Get(correction.Element(), "publication")
                     File.WriteAllText(Path.Combine(directory, "request.json"), J.Write(request) + "\n")

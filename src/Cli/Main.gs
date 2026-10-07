@@ -27,16 +27,12 @@ func Main(args[]string) int32 {
             PublicOutput.RunDirectory = Path.GetFullPath(options.Need("run"))
             PublicOutput.FailureCode = "invalid_state"
         }
-        PublicOutput.ResultData = J.Map(
-            "repo",
-            options.Get("repo"),
-            "issue",
-            options.Get("issue"),
-            "donor",
-            options.Get("donor"),
-            "pr",
-            options.Get("pr")
-        )
+        PublicOutput.ResultData = map[string, Object?]{
+            "repo": options.Get("repo"),
+            "issue": options.Get("issue"),
+            "donor": options.Get("donor"),
+            "pr": options.Get("pr")
+        }
         exitCode = Dispatch(options)
         if exitCode == 1 {
             code = options.Command == "doctor" ? "missing_tools": (
@@ -89,7 +85,7 @@ func Dispatch(options Args) int32 {
     if options.Command == "completion" {
         let script = Completion.Script(options.Subject)
         if PublicOutput.Enabled {
-            PublicOutput.ResultData = J.Map("shell", options.Subject, "script", script)
+            PublicOutput.ResultData = map[string, Object?]{"shell": options.Subject, "script": script}
         } else {
             Console.Write(script)
         }
@@ -100,14 +96,17 @@ func Dispatch(options Args) int32 {
     }
     if options.Command == "--version" {
         if PublicOutput.Enabled {
-            PublicOutput.ResultData = J.Map("version", ApplicationInfo.Version())
+            PublicOutput.ResultData = map[string, Object?]{"version": ApplicationInfo.Version()}
         } else {
             Console.WriteLine("tokate " + ApplicationInfo.Version())
         }
         return 0
     }
     if options.Command == "update" || options.Command == "uninstall" {
-        PublicOutput.ResultData = J.Map("version", ApplicationInfo.Version(), "installation", options.Command)
+        PublicOutput.ResultData = map[string, Object?]{
+            "version": ApplicationInfo.Version(),
+            "installation": options.Command
+        }
         return Installation.Run(options.Command)
     }
     if options.Command != "doctor" && options.Command != "defaults" {
@@ -139,7 +138,10 @@ func Dispatch(options Args) int32 {
         OwnerSetup.Run(options)
     } else if options.Command == "coordinator-setup" {
         CoordinatorSetup.Run(options)
-        PublicOutput.ResultData = J.Map("repo", options.Get("repo"), "output", Path.GetFullPath(options.Need("output")))
+        PublicOutput.ResultData = map[string, Object?]{
+            "repo": options.Get("repo"),
+            "output": Path.GetFullPath(options.Need("output"))
+        }
     } else if options.Command == "access" {
         AccessState.Run(options)
     } else if options.Command == "coordinate" {
@@ -152,7 +154,7 @@ func Dispatch(options Args) int32 {
             PublicOutput.ResultData = PublicOutput.Coordination(state.Value(), state.Sha)
         } else {
             Terminal.Json(
-                J.Parse(J.Write(J.Map("sha", state.Sha, "state", state.Value()))),
+                J.Parse(J.Write(map[string, Object?]{"sha": state.Sha, "state": state.Value()})),
                 "Contribution coordination"
             )
         }
@@ -213,7 +215,7 @@ func Dispatch(options Args) int32 {
         let info = GitHub.Api("repos/" + repo)
         let value = Policy.Load(repo, J.Text(info, "default_branch")).Value
         if PublicOutput.Enabled {
-            PublicOutput.ResultData = J.Map("repo", repo, "policy", PublicOutput.Policy(value))
+            PublicOutput.ResultData = map[string, Object?]{"repo": repo, "policy": PublicOutput.Policy(value)}
         } else {
             Terminal.Json(value, "Repository policy")
         }
@@ -221,6 +223,8 @@ func Dispatch(options Args) int32 {
         let run = ReceiptVerification.Verify(RepositoryIdentity.Repo(options.Need("repo")), options.Number("pr"))
         PublicOutput.ResultData = PublicOutput.Select(run.Element(), "repo,pr,pr_url,commit")
         Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
+    } else if options.Command == "status" && options.Get("run") == "" {
+        ContributionStatus.Run(options)
     } else if options.Command == "status" && !PublicOutput.Enabled {
         let summary = PublicOutput.RunSummary(Path.GetFullPath(options.Need("run")))
         summary["truncated"] = PublicOutput.Truncated

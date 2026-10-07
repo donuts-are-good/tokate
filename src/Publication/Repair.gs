@@ -57,14 +57,11 @@ internal class Repair {
                 repo,
                 J.Parse(
                     J.Write(
-                        J.Map(
-                            "fork",
-                            J.Text(J.Get(head, "repo"), "full_name"),
-                            "branch",
-                            J.Text(head, "ref"),
-                            "head",
-                            J.Text(head, "sha")
-                        )
+                        map[string, Object?]{
+                            "fork": J.Text(J.Get(head, "repo"), "full_name"),
+                            "branch": J.Text(head, "ref"),
+                            "head": J.Text(head, "sha")
+                        }
                     )
                 ),
                 J.Get(value, "donor_id")
@@ -327,20 +324,14 @@ internal class Repair {
         }
 
         private func Output(directory string, intent Data) {
-            PublicOutput.ResultData = J.Map(
-                "repair",
-                PublicOutput.ChangeSummary(intent, directory),
-                "original_private_state",
-                "unavailable",
-                "repair_directory",
-                directory,
-                "repo",
-                intent.Text("repo"),
-                "pr",
-                intent.Number("pr"),
-                "pr_url",
-                intent.Text("pr_url")
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "repair": PublicOutput.ChangeSummary(intent, directory),
+                "original_private_state": "unavailable",
+                "repair_directory": directory,
+                "repo": intent.Text("repo"),
+                "pr": intent.Number("pr"),
+                "pr_url": intent.Text("pr_url")
+            }
         }
 
         internal func Run(args Args) {
@@ -559,36 +550,23 @@ internal class Repair {
                 if !fields.ContainsKey("original_head") {
                     fields["original_head"] = intent.Text("previous")
                 }
-                fields["amendment"] = J.Map(
-                    "id",
-                    intent.Text("id"),
-                    "previous",
-                    intent.Text("previous"),
-                    "seconds",
-                    intent.Number("seconds"),
-                    "tools",
-                    J.Parse("[]"),
-                    "sync",
-                    intent.Text("sync")
-                )
-                let provenance = J.Map(
-                    "id",
-                    intent.Text("id"),
-                    "previous",
-                    intent.Text("previous"),
-                    "head",
-                    intent.Text("commit"),
-                    "seconds",
-                    intent.Number("seconds"),
-                    "sync",
-                    intent.Text("sync"),
-                    "donor_id",
-                    J.Get(intent.Element(), "donor_id"),
-                    "head_repository_id",
-                    J.Get(intent.Element(), "head_repository_id"),
-                    "original_private_state",
-                    "unavailable"
-                )
+                fields["amendment"] = map[string, Object?]{
+                    "id": intent.Text("id"),
+                    "previous": intent.Text("previous"),
+                    "seconds": intent.Number("seconds"),
+                    "tools": J.Parse("[]"),
+                    "sync": intent.Text("sync")
+                }
+                let provenance = map[string, Object?]{
+                    "id": intent.Text("id"),
+                    "previous": intent.Text("previous"),
+                    "head": intent.Text("commit"),
+                    "seconds": intent.Number("seconds"),
+                    "sync": intent.Text("sync"),
+                    "donor_id": J.Get(intent.Element(), "donor_id"),
+                    "head_repository_id": J.Get(intent.Element(), "head_repository_id"),
+                    "original_private_state": "unavailable"
+                }
                 fields["repair"] = provenance
                 Synchronization.Keep(fields, Synchronization.History(intent.Element()))
                 let receipt = J.Parse(J.Write(fields))
@@ -658,7 +636,7 @@ internal class Repair {
                 }
                 GitHub.Api(
                     "repos/" + intent.Text("repo") + "/pulls/" + intent.Number("pr").ToString(),
-                    J.Map("body", updated),
+                    map[string, Object?]{"body": updated},
                     "PATCH"
                 )
             }

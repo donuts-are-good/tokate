@@ -191,16 +191,12 @@ internal class ApiTransport {
         internal func Report() {
             Console.Error.WriteLine(
                 "Tokate API traffic: " + J.Write(
-                    J.Map(
-                        "reads",
-                        Reads,
-                        "mutations",
-                        Mutations,
-                        "conditional_responses",
-                        ConditionalResponses,
-                        "retry_attempts",
-                        Retries
-                    )
+                    map[string, Object?]{
+                        "reads": Reads,
+                        "mutations": Mutations,
+                        "conditional_responses": ConditionalResponses,
+                        "retry_attempts": Retries
+                    }
                 )
             )
             Console.Error.WriteLine(

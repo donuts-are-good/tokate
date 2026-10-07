@@ -78,7 +78,7 @@ internal class Admission {
             if !commented && message != "" {
                 GitHub.Api(
                     "repos/" + repo + "/issues/" + number.ToString() + "/comments",
-                    J.Map("body", message + "\n\n" + marker)
+                    map[string, Object?]{"body": message + "\n\n" + marker}
                 )
             }
             pull = GitHub.Api(path)
@@ -87,12 +87,12 @@ internal class Admission {
                 Result(repo, number, J.Text(pull, "state"))
                 return
             }
-            GitHub.Api(path, J.Map("state", "closed"), "PATCH")
+            GitHub.Api(path, map[string, Object?]{"state": "closed"}, "PATCH")
             Result(repo, number, "closed")
         }
 
         private func Result(repo string, number int32, state string) {
-            PublicOutput.ResultData = J.Map("repo", repo, "pr", number, "admission", state)
+            PublicOutput.ResultData = map[string, Object?]{"repo": repo, "pr": number, "admission": state}
             Terminal.Message("Admission: PR #" + number.ToString() + " " + state)
         }
 
@@ -298,7 +298,12 @@ internal class Admission {
             }
         }
 
-        private func DonorBinding(repo string, pull JsonElement, state CoordinationState) JsonElement {
+        internal func DonorBinding(
+            repo string,
+            pull JsonElement,
+            state CoordinationState,
+            requireLease bool = true
+        ) JsonElement {
             let value = state.Value()
             let contribution = J.Get(value, "contribution")
             let current = CoordinationState.Current(value)
@@ -323,6 +328,9 @@ internal class Admission {
                     return JsonElement{}
                 }
                 if J.Text(outcome, "head") != J.Text(head, "sha") {
+                    if !requireLease {
+                        return JsonElement{}
+                    }
                     let reservation = J.Get(value, "reservation")
                     if reservation.ValueKind != JsonValueKind.Object || J.Text(reservation, "status") != "active" ||
                         branch != "tokate/v2-" +
@@ -365,13 +373,15 @@ internal class Admission {
                 ) {
                     return JsonElement{}
                 }
-                try {
-                    LeaseLifecycle.Owner(state, J.Get(reservation, "actor"), active: true)
-                } catch (error CliFailure) {
-                    if error.Code == "stale_approval" {
-                        return JsonElement{}
+                if requireLease {
+                    try {
+                        LeaseLifecycle.Owner(state, J.Get(reservation, "actor"), active: true)
+                    } catch (error CliFailure) {
+                        if error.Code == "stale_approval" {
+                            return JsonElement{}
+                        }
+                        throw error
                     }
-                    throw error
                 }
                 binding = reservation
             }

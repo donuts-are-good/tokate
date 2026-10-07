@@ -70,7 +70,9 @@ internal class Checks {
                 ApiTransport.CheckDeadline()
                 let status = failed ? "failed": (pending ? "pending": "passed")
                 PublicOutput.Checks(run, rows, status)
-                let snapshot = J.Write(J.Map("head", run.Text("commit"), "status", status, "checks", rows))
+                let snapshot = J.Write(
+                    map[string, Object?]{"head": run.Text("commit"), "status": status, "checks": rows}
+                )
                 if snapshot != previous {
                     if directory != "" {
                         let path = Path.Combine(directory, "checks.json")

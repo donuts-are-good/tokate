@@ -53,16 +53,12 @@ internal class V2Preparation {
                     tools = J.Parse(
                         J.Write(
                             []Object{
-                                J.Map(
-                                    "harness",
-                                    J.Text(selection, "harness"),
-                                    "provider",
-                                    J.Text(selection, "provider"),
-                                    "model",
-                                    J.Text(selection, "model"),
-                                    "effort",
-                                    J.Text(selection, "effort")
-                                )
+                                map[string, Object?]{
+                                    "harness": J.Text(selection, "harness"),
+                                    "provider": J.Text(selection, "provider"),
+                                    "model": J.Text(selection, "model"),
+                                    "effort": J.Text(selection, "effort")
+                                }
                             }
                         )
                     )

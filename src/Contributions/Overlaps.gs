@@ -15,20 +15,14 @@ internal class OverlapContribution {
     internal var Stable bool
     internal init(number int32) {
         Number = number
-        Facts = J.Map(
-            "pr",
-            number,
-            "binding_status",
-            "unknown",
-            "identity_status",
-            "unknown",
-            "diff_status",
-            "unknown",
-            "checks_status",
-            "unknown",
-            "dependency_gate",
-            "unknown"
-        )
+        Facts = map[string, Object?]{
+            "pr": number,
+            "binding_status": "unknown",
+            "identity_status": "unknown",
+            "diff_status": "unknown",
+            "checks_status": "unknown",
+            "dependency_gate": "unknown"
+        }
     }
 
     internal func Invalidate() {
@@ -56,18 +50,13 @@ internal class Overlaps {
         }
 
         private func Identity(pull JsonElement) string -> J.Write(
-            J.Map(
-                "head",
-                PublicOutput.Select(J.Get(pull, "head"), "sha,ref"),
-                "head_repo",
-                J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"),
-                "target",
-                J.Text(J.Get(pull, "base"), "ref"),
-                "target_repo",
-                J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name"),
-                "body_hash",
-                Data.Hash(J.Text(pull, "body"))
-            )
+            map[string, Object?]{
+                "head": PublicOutput.Select(J.Get(pull, "head"), "sha,ref"),
+                "head_repo": J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"),
+                "target": J.Text(J.Get(pull, "base"), "ref"),
+                "target_repo": J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name"),
+                "body_hash": Data.Hash(J.Text(pull, "body"))
+            }
         )
 
         private func Failure(facts Dictionary[string, Object?], key string, error Exception) {
@@ -334,22 +323,15 @@ internal class Overlaps {
                         )
                     )
                     pairs.Add(
-                        J.Map(
-                            "left_pr",
-                            left.Number,
-                            "right_pr",
-                            right.Number,
-                            "status",
-                            status,
-                            "target_branch",
-                            same ? left.Target: "",
-                            "paths",
-                            paths,
-                            "overlap_count",
-                            known ? count as Object: nil,
-                            "paths_output_complete",
-                            paths.Count == count
-                        )
+                        map[string, Object?]{
+                            "left_pr": left.Number,
+                            "right_pr": right.Number,
+                            "status": status,
+                            "target_branch": same ? left.Target: "",
+                            "paths": paths,
+                            "overlap_count": known ? count as Object: nil,
+                            "paths_output_complete": paths.Count == count
+                        }
                     )
                 }
             }
@@ -365,7 +347,12 @@ internal class Overlaps {
                     )
                 }
             }
-            let result = J.Map("repo", repo, "contributions", contributions, "pairs", pairs, "advisory", Advisory)
+            let result = map[string, Object?]{
+                "repo": repo,
+                "contributions": contributions,
+                "pairs": pairs,
+                "advisory": Advisory
+            }
             PublicOutput.ResultData = result
             if !PublicOutput.Enabled {
                 result["truncated"] = PublicOutput.Truncated

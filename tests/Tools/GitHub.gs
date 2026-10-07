@@ -11,6 +11,20 @@ import System.Text
 import System.Text.Json.Nodes
 
 internal partial class Fixture {
+    private func CommentPage(rows JsonArray) JsonArray {
+        let query = ApiPath.Substring(ApiPath.IndexOf('?') + 1).Split('&')
+        let pageField = Array.Find(query, field -> field.StartsWith("page=", StringComparison.Ordinal)) ?? "page=1"
+        let sizeField = Array.Find(query, field -> field.StartsWith("per_page=", StringComparison.Ordinal)) ??
+            "per_page=30"
+        let page = Int32.Parse(pageField.Substring(5))
+        let size = Int32.Parse(sizeField.Substring(9))
+        let result = JsonArray()
+        for i in(page - 1) * size ... Math.Min(page * size, rows.Count) {
+            result.Add(rows[i]?.DeepClone())
+        }
+        return result
+    }
+
     internal func Answer(value JsonNode) int32 {
         let padding = Check.Text(State["response_padding"]?[ApiPath])
         if padding != "" {
@@ -544,12 +558,31 @@ internal partial class Fixture {
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )
         }
+        if tail.StartsWith("issues?") {
+            let query = tail.Substring(tail.IndexOf('?') + 1).Split('&')
+            let sizeField = Array.Find(query, field -> field.StartsWith("per_page=", StringComparison.Ordinal)) ??
+                "per_page=30"
+            let size = Int32.Parse(sizeField.Substring(9))
+            let rows = JsonArray()
+            let issues = State["issues"]?.AsObject() ?? Check.Map("1", State["issue"]?.DeepClone()).AsObject()
+            for item in issues {
+                let issue = item.Value ?? throw Exception("Missing issue")
+                var labelled bool
+                for label in issue["labels"]?.AsArray() ?? JsonArray() {
+                    labelled = labelled || Check.Text(label["name"]) == "tokate:approved"
+                }
+                if labelled && Check.Text(issue["state"]) == "open" && rows.Count < size {
+                    rows.Add(issue.DeepClone())
+                }
+            }
+            return Answer(rows)
+        }
         if tail.StartsWith("issues/comments?") {
             let comments = JsonArray()
             for comment in State["comments"]?.AsObject() ?? JsonObject() {
                 comments.Add(comment.Value?.DeepClone())
             }
-            return Answer(comments)
+            return Answer(CommentPage(comments))
         }
         if tail.StartsWith("issues/") {
             let issueNumber = tail.Split('/')[1]
@@ -570,7 +603,7 @@ internal partial class Fixture {
                         comments.Add(comment.Value?.DeepClone())
                     }
                 }
-                return Answer(comments)
+                return Answer(CommentPage(comments))
             }
             if tail.EndsWith("/comments") && method == "POST" {
                 if Check.Text(State["mode"]) == "request_fail_before_write" {
@@ -926,6 +959,9 @@ internal partial class Fixture {
         }
         if tail.StartsWith("pulls/") {
             let number = tail.Split('/')[1]
+            if tail.Contains("/reviews?") {
+                return Answer(State["reviews"]?[number] ?? JsonArray())
+            }
             var selected JsonNode? = nil
             for candidate in State["pulls"]?.AsArray() ?? JsonArray() {
                 if Check.Text(candidate["number"]) == number {

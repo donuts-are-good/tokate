@@ -172,50 +172,37 @@ internal class PiBoundary {
             File.WriteAllText(
                 Path.Combine(control, "models.json"),
                 J.Write(
-                    J.Map(
-                        "providers",
-                        J.Map(
-                            "tokate-local",
-                            J.Map(
-                                "baseUrl",
-                                endpoint,
-                                "api",
-                                "openai-completions",
-                                "apiKey",
-                                "tokate-no-auth",
-                                "authHeader",
-                                false,
-                                "models",
-                                []Object{
-                                    J.Map(
-                                        "id",
-                                        model,
-                                        "name",
-                                        model,
-                                        "reasoning",
-                                        false,
-                                        "input",
-                                        []string{"text"},
-                                        "contextWindow",
-                                        contextWindow,
-                                        "maxTokens",
-                                        maxTokens,
-                                        "cost",
-                                        J.Map("input", 0, "output", 0, "cacheRead", 0, "cacheWrite", 0),
-                                        "compat",
-                                        J.Map(
-                                            "supportsDeveloperRole",
-                                            false,
-                                            "supportsReasoningEffort",
-                                            false,
-                                            "maxTokensField",
-                                            "max_tokens"
-                                        )
-                                    )
+                    map[string, Object?]{
+                        "providers": map[string, Object?]{
+                            "tokate-local": map[string, Object?]{
+                                "baseUrl": endpoint,
+                                "api": "openai-completions",
+                                "apiKey": "tokate-no-auth",
+                                "authHeader": false,
+                                "models": []Object{
+                                    map[string, Object?]{
+                                        "id": model,
+                                        "name": model,
+                                        "reasoning": false,
+                                        "input": []string{"text"},
+                                        "contextWindow": contextWindow,
+                                        "maxTokens": maxTokens,
+                                        "cost": map[string, Object?]{
+                                            "input": 0,
+                                            "output": 0,
+                                            "cacheRead": 0,
+                                            "cacheWrite": 0
+                                        },
+                                        "compat": map[string, Object?]{
+                                            "supportsDeveloperRole": false,
+                                            "supportsReasoningEffort": false,
+                                            "maxTokensField": "max_tokens"
+                                        }
+                                    }
                                 }
-                            )
-                        )
-                    )
+                            }
+                        }
+                    }
                 )
             )
         }

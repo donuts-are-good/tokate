@@ -75,7 +75,8 @@ internal class CliCommand {
         (
         (Name == "work" && name != "yes" && name != "non-interactive") ||
             (Name == "checks" && name != "watch" && name != "timeout") ||
-            Name == "prepare"
+            Name == "prepare" ||
+            Name == "status"
     )
 }
 
@@ -468,13 +469,13 @@ internal class Cli {
             ),
             CliCommand(
                 "status",
-                "run",
-                "run",
-                "Read saved run locally; no inference or publication.",
-                "--run DIR",
-                "status --run /path/to/run"
+                "run,repo,issue",
+                "repo",
+                "Read contribution state and the responsible role remotely, or a saved run offline; no writes or inference.",
+                "--repo OWNER/REPO [--issue N]\n       tokate status --run DIR",
+                "status --repo owner/project --issue 42"
                 ,
-                effects: "local_read"
+                effects: "local_read github_read"
             ),
             CliCommand(
                 "verify-pr",
@@ -550,16 +551,12 @@ internal class Cli {
                 for option in Options {
                     if command.Has(option.Name) {
                         options.Add(
-                            J.Map(
-                                "name",
-                                "--" + option.Name,
-                                "value",
-                                option.Value,
-                                "description",
-                                option.Describe(command.Name),
-                                "choices",
-                                option.Choices == "" ? []string{}: option.Choices.Split(' ')
-                            )
+                            map[string, Object?]{
+                                "name": "--" + option.Name,
+                                "value": option.Value,
+                                "description": option.Describe(command.Name),
+                                "choices": option.Choices == "" ? []string{}: option.Choices.Split(' ')
+                            }
                         )
                     }
                 }
@@ -571,10 +568,13 @@ internal class Cli {
                     }
                 }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
-                if command.Name == "work" || command.Name == "checks" || command.Name == "prepare" {
+                if command.Name == "work" ||
+                    command.Name == "checks" ||
+                    command.Name == "prepare" ||
+                    command.Name == "status" {
                     inputs.Add([]string{"run"})
                 }
-                let effects = J.Map()
+                let effects = map[string, Object?]{}
                 let declaredEffects = command.Effects.Split(' ')
                 for effect in[]string{"local_read", "local_write", "github_read", "github_write"} {
                     effects[effect] = Array.IndexOf(declaredEffects, effect) >= 0
@@ -583,66 +583,73 @@ internal class Cli {
                 if command.Name == "defaults" {
                     for mode in[]string{"set", "read", "remove", "list"} {
                         modes.Add(
-                            J.Map(
-                                "name",
-                                mode,
-                                "required_inputs",
-                                mode == "set" ? []string{"harness", "provider", "model", "effort"}: []string{},
-                                "effects",
-                                J.Map(
-                                    "local_read",
-                                    true,
-                                    "local_write",
-                                    mode == "set" || mode == "remove",
-                                    "github_read",
-                                    false,
-                                    "github_write",
-                                    false
-                                )
-                            )
+                            map[string, Object?]{
+                                "name": mode,
+                                "required_inputs": mode == "set" ? []string{
+                                    "harness",
+                                    "provider",
+                                    "model",
+                                    "effort"
+                                }: []string{},
+                                "effects": map[string, Object?]{
+                                    "local_read": true,
+                                    "local_write": mode == "set" || mode == "remove",
+                                    "github_read": false,
+                                    "github_write": false
+                                }
+                            }
                         )
                     }
                 }
-                let positional = command.Name == "defaults" ? []string{"set|read|remove|list"}: (
-                    command.Name == "help" ? []string{"COMMAND"}:
-                    (
-                        command.Name == "completion" ? []string{"bash|zsh|fish"}:
-                        (command.Has("issue") ? []string{"ISSUE_URL"}: []string{})
-                    )
-                )
+                if command.Name == "status" {
+                    for mode in[]string{"repository", "run"} {
+                        modes.Add(
+                            map[string, Object?]{
+                                "name": mode,
+                                "required_inputs": []string{mode == "run" ? "run": "repo"},
+                                "effects": map[string, Object?]{
+                                    "local_read": true,
+                                    "local_write": false,
+                                    "github_read": mode == "repository",
+                                    "github_write": false
+                                }
+                            }
+                        )
+                    }
+                }
+                let positional = if command.Name == "defaults" {
+                    []string{"set|read|remove|list"}
+                } else if command.Name == "help" {
+                    []string{"COMMAND"}
+                } else if command.Name == "completion" {
+                    []string{"bash|zsh|fish"}
+                } else if command.Has("issue") {
+                    []string{"ISSUE_URL"}
+                } else {
+                    []string{}
+                }
                 commands.Add(
-                    J.Map(
-                        "command",
-                        command.Name,
-                        "summary",
-                        command.Summary,
-                        "arguments",
-                        options,
-                        "positional_arguments",
-                        positional,
-                        "operations",
-                        modes,
-                        "required_inputs",
-                        inputs,
-                        "repository_inputs",
-                        command.Has("repo") ? (
+                    map[string, Object?]{
+                        "command": command.Name,
+                        "summary": command.Summary,
+                        "arguments": options,
+                        "positional_arguments": positional,
+                        "operations": modes,
+                        "required_inputs": inputs,
+                        "repository_inputs": command.Has("repo") ? (
                             command.Has("issue") ? []string{"repo", "issue_url", "local_github_remote"}: []string{
                                 "repo",
                                 "local_github_remote"
                             }
                         ): []string{},
-                        "exclusive_run_inputs",
-                        conflicts,
-                        "effects",
-                        effects,
-                        "inference",
-                        command.Effects.Contains("inference"),
-                        "noninteractive",
-                        true
-                    )
+                        "exclusive_run_inputs": conflicts,
+                        "effects": effects,
+                        "inference": command.Effects.Contains("inference"),
+                        "noninteractive": true
+                    }
                 )
             }
-            return J.Map("version", ApplicationInfo.Version(), "subject", name, "commands", commands)
+            return map[string, Object?]{"version": ApplicationInfo.Version(), "subject": name, "commands": commands}
         }
 
         internal func ErrorUsage(args[]string) string {
@@ -713,8 +720,9 @@ internal class Cli {
                 if command.Has("issue") {
                     text.AppendLine("An issue URL can replace --repo and --issue.")
                 }
-                if name == "work" || name == "checks" || name == "prepare" {
+                if name == "work" || name == "checks" || name == "prepare" || name == "status" {
                     text.AppendLine(
+                        name == "status" ? "Use --run DIR alone for offline status without GitHub or harness tools. Repository status is bounded and may report truncation; blocked work and failed CI still exit 0 after a successful read.":
                         name == "prepare" ? "Use --run DIR only for recorded preparation before coding; it never resumes coding.":
                         name == "work" ? "For a saved claim, use --run DIR instead of required inputs.":
                         "Use --run DIR instead of --repo/--pr to check a saved run."
@@ -784,7 +792,12 @@ internal class Cli {
                 }
             }
             if args.Get("run") != "" &&
-                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
+                (
+                args.Command == "work" ||
+                    args.Command == "checks" ||
+                    args.Command == "prepare" ||
+                    args.Command == "status"
+            ) {
                 for key in args.Values.Keys {
                     if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
@@ -903,7 +916,12 @@ internal class Cli {
                 }
             }
             if args.Get("run") != "" &&
-                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
+                (
+                args.Command == "work" ||
+                    args.Command == "checks" ||
+                    args.Command == "prepare" ||
+                    args.Command == "status"
+            ) {
                 return
             }
             for option in Options {

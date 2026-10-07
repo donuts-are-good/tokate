@@ -296,14 +296,11 @@ internal class ReceiptVerification {
                     repo,
                     J.Parse(
                         J.Write(
-                            J.Map(
-                                "fork",
-                                J.Text(metadata, "fork"),
-                                "branch",
-                                J.Text(metadata, "branch"),
-                                "head",
-                                exactHead
-                            )
+                            map[string, Object?]{
+                                "fork": J.Text(metadata, "fork"),
+                                "branch": J.Text(metadata, "branch"),
+                                "head": exactHead
+                            }
                         )
                     ),
                     J.Get(contribution, "actor")

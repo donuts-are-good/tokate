@@ -127,7 +127,7 @@ internal class Correction {
                 let path = relative == "" ? name: relative + "/" + name
                 let info = FileInfo(entry)
                 if info.LinkTarget != nil {
-                    links.Add(J.Map("path", path, "target", info.LinkTarget))
+                    links.Add(map[string, Object?]{"path": path, "target": info.LinkTarget})
                 } else if Directory.Exists(entry) {
                     CopyTree(entry, Path.Combine(target, name), links, path)
                 } else {
@@ -220,20 +220,14 @@ internal class Correction {
                 File.WriteAllText(
                     Path.Combine(temporary, "capture.json"),
                     J.Write(
-                        J.Map(
-                            "captured_at",
-                            DateTimeOffset.UtcNow.ToString("O"),
-                            "head",
-                            Commands.Git(checkout, "rev-parse", "HEAD"),
-                            "missing",
-                            missing,
-                            "links",
-                            links,
-                            "failure",
-                            run.Text("error"),
-                            "candidate_provenance",
-                            "Available staged/unstaged/untracked evidence captured at preparation; original model provenance is unproven. Missing original artifacts are not reconstructed."
-                        )
+                        map[string, Object?]{
+                            "captured_at": DateTimeOffset.UtcNow.ToString("O"),
+                            "head": Commands.Git(checkout, "rev-parse", "HEAD"),
+                            "missing": missing,
+                            "links": links,
+                            "failure": run.Text("error"),
+                            "candidate_provenance": "Available staged/unstaged/untracked evidence captured at preparation; original model provenance is unproven. Missing original artifacts are not reconstructed."
+                        }
                     ) +
                         "\n"
                 )
@@ -254,22 +248,15 @@ internal class Correction {
 
         internal func Provenance(correction Data) JsonElement -> J.Parse(
             J.Write(
-                J.Map(
-                    "uuid",
-                    correction.Text("uuid"),
-                    "head",
-                    correction.Text("commit"),
-                    "tree",
-                    correction.Text("tree"),
-                    "patch_sha256",
-                    correction.Text("patch_sha256"),
-                    "seconds",
-                    correction.Number("seconds"),
-                    "tools",
-                    J.Get(correction.Element(), "tools"),
-                    "verification",
-                    "tokate-observed-locally-exact-commit"
-                )
+                map[string, Object?]{
+                    "uuid": correction.Text("uuid"),
+                    "head": correction.Text("commit"),
+                    "tree": correction.Text("tree"),
+                    "patch_sha256": correction.Text("patch_sha256"),
+                    "seconds": correction.Number("seconds"),
+                    "tools": J.Get(correction.Element(), "tools"),
+                    "verification": "tokate-observed-locally-exact-commit"
+                }
             )
         )
 

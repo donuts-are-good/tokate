@@ -22,7 +22,9 @@ internal class ExternalContribution {
                 run.Fields["public_summary"] = summary
             }
             let metadata = J.Parse(
-                J.Write(J.Map("fork", run.Text("head_repo"), "branch", run.Text("branch"), "head", commit))
+                J.Write(
+                    map[string, Object?]{"fork": run.Text("head_repo"), "branch": run.Text("branch"), "head": commit}
+                )
             )
             RepositoryAccess.ValidateFork(run.Text("repo"), metadata, J.Get(run.Element(), "donor_id"))
             let checkout = Path.Combine(directory, "checkout")

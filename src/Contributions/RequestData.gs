@@ -189,16 +189,12 @@ internal class RequestData {
 
         internal func Binding(actor JsonElement, request JsonElement) string {
             RepositoryIdentity.PositiveId(actor)
-            let binding = J.Map(
-                "actor",
-                actor,
-                "expected",
-                J.Text(request, "expected"),
-                "approval",
-                J.Text(request, "approval"),
-                "request",
-                request
-            )
+            let binding = map[string, Object?]{
+                "actor": actor,
+                "expected": J.Text(request, "expected"),
+                "approval": J.Text(request, "approval"),
+                "request": request
+            }
             return Data.Hash(Canonical(J.Parse(J.Write(binding))))
         }
 

@@ -53,7 +53,7 @@ internal class OwnerSetup {
                     }
                 }
                 if key == "models" {
-                    let models = J.Map()
+                    let models = map[string, Object?]{}
                     while true {
                         let model = Answer("Model name (Enter finishes the list)").Trim()
                         if model == "" {
@@ -146,7 +146,7 @@ internal class OwnerSetup {
             let template = SetupPath(root, ".github/tokate-pr.md")
             let before = File.Exists(path) ? File.ReadAllText(path): ""
             var existing Policy? = nil
-            let fields = J.Map()
+            let fields = map[string, Object?]{}
             if before != "" {
                 existing = Policy(before)
                 for field in existing.Value.EnumerateObject() {
@@ -156,7 +156,7 @@ internal class OwnerSetup {
                 fields["version"] = 2
                 fields["approval_scope"] = "task"
                 fields["eligibility"] = "trusted"
-                fields["allowed_tools"] = []Object{J.Map("harness", "codex", "provider", "openai")}
+                fields["allowed_tools"] = []Object{map[string, Object?]{"harness": "codex", "provider": "openai"}}
                 fields["max_seconds"] = 3600
                 fields["allow_network"] = false
             }
@@ -199,7 +199,7 @@ internal class OwnerSetup {
             if args.Get("upgrade") == "true" {
                 fields["version"] = 2
                 if !fields.ContainsKey("allowed_tools") {
-                    fields["allowed_tools"] = []Object{J.Map("harness", "codex", "provider", "openai")}
+                    fields["allowed_tools"] = []Object{map[string, Object?]{"harness": "codex", "provider": "openai"}}
                 }
                 fields["approval_scope"] = "task"
                 if !fields.ContainsKey("eligibility") {
@@ -315,18 +315,13 @@ internal class OwnerSetup {
             if apply && (File.ReadAllText(path) != text || File.ReadAllText(workflow) != yaml) {
                 throw Exception("Setup output differs from the reviewed proposal")
             }
-            PublicOutput.ResultData = J.Map(
-                "applied",
-                apply,
-                "file_count",
-                File.Exists(template) ? 3: 2,
-                "policy_changed",
-                before != text,
-                "workflow_changed",
-                oldWorkflow == "",
-                "model_policy",
-                policy.ModelPolicy
-            )
+            PublicOutput.ResultData = map[string, Object?]{
+                "applied": apply,
+                "file_count": File.Exists(template) ? 3: 2,
+                "policy_changed": before != text,
+                "workflow_changed": oldWorkflow == "",
+                "model_policy": policy.ModelPolicy
+            }
         }
 
         private func Pretty(value JsonElement) string {

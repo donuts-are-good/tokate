@@ -149,7 +149,7 @@ internal class DonorSelection {
                 for candidateEffort in entry.Value {
                     if policy.Allows(entry.Key, candidateEffort) && policy.ManagedPair(entry.Key, candidateEffort) {
                         choices[entry.Key + " / " + candidateEffort] = J.Parse(
-                            J.Write(J.Map("model", entry.Key, "effort", candidateEffort))
+                            J.Write(map[string, Object?]{"model": entry.Key, "effort": candidateEffort})
                         )
                     }
                 }
@@ -211,28 +211,18 @@ internal class DonorSelection {
             policy.Validate(model, effort, 1, false)
             return J.Parse(
                 J.Write(
-                    J.Map(
-                        "harness",
-                        harness,
-                        "provider",
-                        provider,
-                        "model",
-                        model,
-                        "effort",
-                        effort,
-                        "source",
-                        source,
-                        "policy_hash",
-                        policy.Digest,
-                        "policy_eligible",
-                        true,
-                        "capability",
-                        "compatible: native Codex explicit controls and offline bundled model/effort catalog",
-                        "availability",
-                        availability == "unknown" ? "unknown": "donor-reported " + availability,
-                        "availability_evidence",
-                        "No account availability probe; catalog presence, PATH and login do not prove availability"
-                    )
+                    map[string, Object?]{
+                        "harness": harness,
+                        "provider": provider,
+                        "model": model,
+                        "effort": effort,
+                        "source": source,
+                        "policy_hash": policy.Digest,
+                        "policy_eligible": true,
+                        "capability": "compatible: native Codex explicit controls and offline bundled model/effort catalog",
+                        "availability": availability == "unknown" ? "unknown": "donor-reported " + availability,
+                        "availability_evidence": "No account availability probe; catalog presence, PATH and login do not prove availability"
+                    }
                 )
             )
         }

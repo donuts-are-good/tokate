@@ -25,7 +25,7 @@ internal class PublicOutput {
         }
 
         internal func Select(value JsonElement, keys string) Dictionary[string, Object?] {
-            let result = J.Map()
+            let result = map[string, Object?]{}
             for key in keys.Split(',') {
                 let item = J.Get(value, key)
                 if item.ValueKind == JsonValueKind.String ||
@@ -74,21 +74,16 @@ internal class PublicOutput {
             let rows = List[Object]()
             for tool in tools {
                 rows.Add(
-                    J.Map(
-                        "name",
-                        tool.Name,
-                        "status",
-                        tool.Status,
-                        "path",
-                        tool.Path,
-                        "hint",
-                        tool.Hint,
-                        "detail",
-                        tool.Detail
-                    )
+                    map[string, Object?]{
+                        "name": tool.Name,
+                        "status": tool.Status,
+                        "path": tool.Path,
+                        "hint": tool.Hint,
+                        "detail": tool.Detail
+                    }
                 )
             }
-            ResultData = J.Map("tools", rows, "tool_count", tools.Count, "inference", false)
+            ResultData = map[string, Object?]{"tools": rows, "tool_count": tools.Count, "inference": false}
         }
 
         private func Rows(value JsonElement, keys string, arguments bool = false) List[Object] {
@@ -143,8 +138,8 @@ internal class PublicOutput {
             result["close_message"] = Policy.CloseMessage(value)
             let mode = J.Text(value, "model_policy")
             result["model_policy"] = mode == "" ? "whitelist": mode
-            let models = J.Map()
-            let effortCounts = J.Map()
+            let models = map[string, Object?]{}
+            let effortCounts = map[string, Object?]{}
             let source = J.Get(value, "models")
             var count int32
             if source.ValueKind == JsonValueKind.Object {
@@ -210,7 +205,7 @@ internal class PublicOutput {
                 result["predecessor"] = J.Get(value, "continuation")
                 result["continuation_phase"] = run.Text("continuation_phase")
             }
-            let usage = J.Map()
+            let usage = map[string, Object?]{}
             for key in[]string{"input_tokens", "cached_input_tokens", "output_tokens"} {
                 let item = J.Get(J.Get(value, "usage"), key)
                 var count int64
@@ -249,7 +244,7 @@ internal class PublicOutput {
                     KnownReason(reason) ? reason: "command_failed"
                 )
                 result["failure_reason"] = code
-                result["error"] = J.Map("code", code, "message", Message(code))
+                result["error"] = map[string, Object?]{"code": code, "message": Message(code)}
             }
             result["artifacts"] = Artifacts(directory)
             if Encoding.UTF8.GetByteCount(J.Write(result)) > 65536 {
@@ -259,7 +254,7 @@ internal class PublicOutput {
         }
 
         internal func Artifacts(directory string) Dictionary[string, Object?] {
-            let artifacts = J.Map()
+            let artifacts = map[string, Object?]{}
             for name in[]string{
                 "run.json",
                 "events.jsonl",
@@ -314,7 +309,7 @@ internal class PublicOutput {
                     reason == "publication_interrupted" ? "command_failed": "invalid_state"
                 )
                 result["failure_reason"] = code
-                result["error"] = J.Map("code", code, "message", Message(code))
+                result["error"] = map[string, Object?]{"code": code, "message": Message(code)}
             }
             result["artifacts"] = Artifacts(directory)
             return result
@@ -437,37 +432,31 @@ internal class PublicOutput {
 
         internal func Emit(exitCode int32, code string = "", message string = "") int32 {
             var resultCode = exitCode
-            let failure Object? = exitCode == 0 || exitCode == 8 ? nil: J.Map(
-                "code",
-                code == "" ? "command_failed": code,
-                "message",
-                Prose(message == "" ? Message(code): message)
-            )
-            let envelope = J.Map(
-                "schema_version",
-                1,
-                "command",
-                Command,
-                "status",
-                exitCode == 8 ? "pending": (exitCode == 0 ? "ok": "error"),
-                "exit_code",
-                exitCode,
-                "data",
-                ResultData ?? J.Map(),
-                "error",
-                failure,
-                "next_actions",
-                Actions,
-                "truncated",
-                Truncated
-            )
+            let failure Object? = exitCode == 0 ||
+                exitCode == 8 ? nil: map[string, Object?]{
+                "code": code == "" ? "command_failed": code,
+                "message": Prose(message == "" ? Message(code): message)
+            }
+            let envelope = map[string, Object?]{
+                "schema_version": 1,
+                "command": Command,
+                "status": exitCode == 8 ? "pending": (exitCode == 0 ? "ok": "error"),
+                "exit_code": exitCode,
+                "data": ResultData ?? map[string, Object?]{},
+                "error": failure,
+                "next_actions": Actions,
+                "truncated": Truncated
+            }
             var text = J.Write(envelope)
             if Encoding.UTF8.GetByteCount(text) + 1 > 65536 {
                 envelope["command"] = Command.Length > 2048 ? "unknown": Command
                 envelope["status"] = "error"
                 envelope["exit_code"] = 1
-                envelope["data"] = J.Map()
-                envelope["error"] = J.Map("code", "output_too_large", "message", Message("output_too_large"))
+                envelope["data"] = map[string, Object?]{}
+                envelope["error"] = map[string, Object?]{
+                    "code": "output_too_large",
+                    "message": Message("output_too_large")
+                }
                 envelope["next_actions"] = []Object{}
                 envelope["truncated"] = true
                 text = J.Write(envelope)

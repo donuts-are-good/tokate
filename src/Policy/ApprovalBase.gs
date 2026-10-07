@@ -19,7 +19,10 @@ internal class ApprovalBase {
             return RepositoryIdentity.Branch(fallback)
         }
 
-        internal func Check(repo string, approval JsonElement, version int32) ValueTuple[Policy, string] {
+        internal func Check(repo string, approval JsonElement, version int32, quiet bool = false) ValueTuple[
+            Policy,
+            string
+        ] {
             let branch = J.Text(GitHub.Api("repos/" + repo), "default_branch")
             let selected = J.Get(approval, "authority_branch").ValueKind != JsonValueKind.Undefined
             let authority = selected ? J.Text(approval, "authority_branch"): J.Text(approval, "base_branch")
@@ -47,7 +50,7 @@ internal class ApprovalBase {
                 let baseBranch = RepositoryIdentity.Branch(J.Text(approval, "base_branch"))
                 let approved = RepositoryIdentity.CommitSha(J.Text(approval, "base"))
                 target = baseBranch == branch ? current: GitHub.Branch(repo, baseBranch)
-                if target != approved {
+                if target != approved && !quiet {
                     Terminal.Message(
                         "Target " + baseBranch + " is now " + target + "; approved base remains " + approved,
                         "cyan",

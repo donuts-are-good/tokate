@@ -63,7 +63,7 @@ internal class OwnerApproval {
             )
             let issuePath = "repos/" + repo + "/issues/" + number.ToString()
             if policy.Eligibility == "" && !continuing {
-                var assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", []string{donor}))
+                var assigned = GitHub.Api(issuePath + "/assignees", map[string, Object?]{"assignees": []string{donor}})
                 let others = List[string]()
                 var found bool
                 for person in J.Items(J.Get(assigned, "assignees")) {
@@ -80,7 +80,7 @@ internal class OwnerApproval {
                     )
                 }
                 if others.Count > 0 {
-                    assigned = GitHub.Api(issuePath + "/assignees", J.Map("assignees", others), "DELETE")
+                    assigned = GitHub.Api(issuePath + "/assignees", map[string, Object?]{"assignees": others}, "DELETE")
                 }
                 if !GitHub.Assigned(assigned, donor) {
                     throw Exception("Issue assignment changed. Approve again with exactly one donor.")
@@ -90,42 +90,27 @@ internal class OwnerApproval {
             if label.ValueKind == JsonValueKind.Undefined {
                 GitHub.Api(
                     "repos/" + repo + "/labels",
-                    J.Map(
-                        "name",
-                        "tokate:approved",
-                        "color",
-                        "0e8a16",
-                        "description",
-                        "Approved and assigned for donated AI usage"
-                    )
+                    map[string, Object?]{
+                        "name": "tokate:approved",
+                        "color": "0e8a16",
+                        "description": "Approved and assigned for donated AI usage"
+                    }
                 )
             }
-            let approval = J.Map(
-                "version",
-                1,
-                "repo",
-                repo,
-                "issue",
-                number,
-                "donor",
-                donor,
-                "issue_hash",
-                GitHub.Fingerprint(issue),
-                "policy_hash",
-                policy.Digest,
-                "template_hash",
-                Data.Hash(template),
-                "base",
-                revision,
-                "base_branch",
-                branch,
-                "decree",
-                decree,
-                "authority_branch",
-                authority,
-                "nonce",
-                Guid.NewGuid().ToString("N")
-            )
+            let approval = map[string, Object?]{
+                "version": 1,
+                "repo": repo,
+                "issue": number,
+                "donor": donor,
+                "issue_hash": GitHub.Fingerprint(issue),
+                "policy_hash": policy.Digest,
+                "template_hash": Data.Hash(template),
+                "base": revision,
+                "base_branch": branch,
+                "decree": decree,
+                "authority_branch": authority,
+                "nonce": Guid.NewGuid().ToString("N")
+            }
             if continuing {
                 let prior = J.Get(predecessor, "approval")
                 for key in[]string{
@@ -161,7 +146,7 @@ internal class OwnerApproval {
                     approval["repo_id"] = RepositoryIdentity.PositiveId(J.Get(info, "id"))
                 }
                 CoordinationState.Approve(repo, number, approval)
-                GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
+                GitHub.Api(issuePath + "/labels", map[string, Object?]{"labels": []string{"tokate:approved"}})
                 Terminal.Message(
                     "Version-2 approval recorded. Read coordination state before requesting a reservation."
                 )
@@ -177,23 +162,17 @@ internal class OwnerApproval {
             }
             let tree = GitHub.Api(
                 "repos/" + repo + "/git/trees",
-                J.Map(
-                    "base_tree",
-                    J.Text(J.Get(commit, "tree"), "sha"),
-                    "tree",
-                    []Object{
-                        J.Map(
-                            "path",
-                            ".github/tokate-approval.json",
-                            "mode",
-                            "100644",
-                            "type",
-                            "blob",
-                            "content",
-                            J.Write(approval)
-                        )
+                map[string, Object?]{
+                    "base_tree": J.Text(J.Get(commit, "tree"), "sha"),
+                    "tree": []Object{
+                        map[string, Object?]{
+                            "path": ".github/tokate-approval.json",
+                            "mode": "100644",
+                            "type": "blob",
+                            "content": J.Write(approval)
+                        }
                     }
-                )
+                }
             )
             let record = GitHub.Api(
                 "repos/" + repo + "/git/commits",
@@ -212,17 +191,17 @@ internal class OwnerApproval {
             if old.ValueKind == JsonValueKind.Undefined {
                 GitHub.Api(
                     "repos/" + repo + "/git/refs",
-                    J.Map("ref", "refs/heads/" + ApprovalRef(number), "sha", J.Text(record, "sha"))
+                    map[string, Object?]{"ref": "refs/heads/" + ApprovalRef(number), "sha": J.Text(record, "sha")}
                 )
             } else {
                 GitHub.Api(
                     "repos/" + repo + "/git/refs/heads/" + ApprovalRef(number),
-                    J.Map("sha", J.Text(record, "sha"), "force", false),
+                    map[string, Object?]{"sha": J.Text(record, "sha"), "force": false},
                     "PATCH"
                 )
             }
             if !continuing {
-                GitHub.Api(issuePath + "/labels", J.Map("labels", []string{"tokate:approved"}))
+                GitHub.Api(issuePath + "/labels", map[string, Object?]{"labels": []string{"tokate:approved"}})
             }
             Terminal.Message("Approved https://github.com/" + repo + "/issues/" + number.ToString() + " for @" + donor)
         }
@@ -264,7 +243,7 @@ internal class OwnerApproval {
             )
         }
 
-        internal func Approved(repo string, number int32, donor string) JsonElement {
+        internal func Approved(repo string, number int32, donor string, quiet bool = false) JsonElement {
             let issue = GitHub.Issue(repo, number)
             if !GitHub.HasLabel(issue) || !GitHub.Assigned(issue, donor) {
                 throw CliFailure(
@@ -288,21 +267,16 @@ internal class OwnerApproval {
             if J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
                 throw CliFailure("stale_approval", failure)
             }
-            let configuration = ApprovalBase.Check(repo, approval, 1)
+            let configuration = ApprovalBase.Check(repo, approval, 1, quiet)
             return J.Parse(
                 J.Write(
-                    J.Map(
-                        "approval",
-                        approval,
-                        "sha",
-                        sha,
-                        "issue",
-                        issue,
-                        "policy",
-                        configuration.Item1.Value,
-                        "template",
-                        configuration.Item2
-                    )
+                    map[string, Object?]{
+                        "approval": approval,
+                        "sha": sha,
+                        "issue": issue,
+                        "policy": configuration.Item1.Value,
+                        "template": configuration.Item2
+                    }
                 )
             )
         }
