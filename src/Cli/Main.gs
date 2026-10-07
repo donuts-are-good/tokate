@@ -18,6 +18,10 @@ func Main(args[]string) int32 {
     var message string = ""
     var exitCode int32
     try {
+        if args.Length == 0 && Interactive.Available() {
+            validated = true
+            return Interactive.Run()
+        }
         options = Args(args)
         traffic = options.Get("traffic") == "true"
         Cli.Validate(options)

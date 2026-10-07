@@ -16,11 +16,13 @@ internal class PublicOutput {
         internal var Truncated bool
         internal let Actions List[[]string] = List[[]string]()
 
-        internal func Prose(value string) string {
+        internal func Prose(value string) string -> Prose(value, ref Truncated)
+
+        internal func Prose(value string, ref truncated bool) string {
             if value.Length <= 2048 {
                 return value
             }
-            Truncated = true
+            truncated = true
             return value.Substring(0, Char.IsHighSurrogate(value[2047]) ? 2047: 2048)
         }
 

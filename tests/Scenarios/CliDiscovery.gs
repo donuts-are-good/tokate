@@ -745,6 +745,10 @@ internal class CliDiscovery {
                 let help = Call(binary, argv, temp)
                 Check.Contains(help.Output, "toh-KAH-teh")
                 Check.That(help.Error == "", "Help wrote warnings")
+                Check.That(
+                    !help.Output.Contains("repo> ") && !help.Output.Contains("tokate> "),
+                    "Redirected entry or explicit help started an interactive view"
+                )
             }
             for command in Commands {
                 if command == "help" {

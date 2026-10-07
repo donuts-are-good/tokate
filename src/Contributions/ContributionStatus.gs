@@ -6,11 +6,12 @@ import System.Globalization
 import System.Text.Json
 
 internal class ContributionStatus {
-    private var Failure Exception? = nil
+    internal var Failure Exception? = nil
+    internal var Truncated bool
     private var Viewer JsonElement
     private var Info JsonElement
     private var Access AccessState? = nil
-    private let Result Dictionary[string, Object?] = map[string, Object?]{}
+    internal let Result Dictionary[string, Object?] = map[string, Object?]{}
     private let Work List[Object] = List[Object]()
     private let Requests List[JsonElement] = List[JsonElement]()
 
@@ -78,7 +79,7 @@ internal class ContributionStatus {
         }
         let row = map[string, Object?]{
             "issue": issue,
-            "title": PublicOutput.Prose(J.Text(task, "title")),
+            "title": PublicOutput.Prose(J.Text(task, "title"), ref Truncated),
             "url": "https://github.com/" + repo + "/issues/" + issue.ToString(),
             "approval_status": "unknown",
             "eligibility_status": "unknown",
@@ -260,7 +261,7 @@ internal class ContributionStatus {
                         }
                         if pulls.GetArrayLength() == 5 {
                             row["drafts_truncated"] = true
-                            PublicOutput.Truncated = true
+                            Truncated = true
                         }
                         for pull in J.Items(pulls) {
                             Draft(repo, issue, pull, state, approval, policy, drafts, approvalSha)
@@ -475,7 +476,12 @@ internal class ContributionStatus {
             }
             failed = failed || status == "failed"
             pending = pending || status == "pending" || status == "missing"
-            required.Add(map[string, Object?]{"name": PublicOutput.Prose(name.GetString() ?? ""), "status": status})
+            required.Add(
+                map[string, Object?]{
+                    "name": PublicOutput.Prose(name.GetString() ?? "", ref Truncated),
+                    "status": status
+                }
+            )
         }
         draft["checks_status"] = failed ? "failed": (
             Text(draft, "owner_inspection_required") == "True" ? "blocked": (pending ? "pending": "passed")
@@ -485,12 +491,12 @@ internal class ContributionStatus {
         for check in J.Items(checks) {
             if displayed.Count == 16 {
                 draft["checks_truncated"] = true
-                PublicOutput.Truncated = true
+                Truncated = true
                 break
             }
             displayed.Add(
                 map[string, Object?]{
-                    "name": PublicOutput.Prose(J.Text(check, "name")),
+                    "name": PublicOutput.Prose(J.Text(check, "name"), ref Truncated),
                     "state": J.Text(check, "state"),
                     "bucket": J.Text(check, "state") == "ACTION_REQUIRED" ? "blocked": J.Text(check, "bucket"),
                     "link": J.Text(check, "link")
@@ -533,7 +539,7 @@ internal class ContributionStatus {
         draft["review_evidence"] = "GitHub reviews on the observed head; owner acceptance is not verified"
         if reviews.GetArrayLength() == 30 {
             draft["reviews_truncated"] = true
-            PublicOutput.Truncated = true
+            Truncated = true
         }
     }
 
@@ -800,7 +806,7 @@ internal class ContributionStatus {
         Result["pending_requests"] = displayed
         Result["pending_requests_observed"] = pending.Count
         if Text(Result, "requests_truncated") == "True" {
-            PublicOutput.Truncated = true
+            Truncated = true
         }
         Observe(
             Result,
@@ -818,7 +824,7 @@ internal class ContributionStatus {
                         throw Exception("Cannot read bounded approved-work issues")
                     }
                     Result["discovery_truncated"] = issues.GetArrayLength() == 20
-                    PublicOutput.Truncated = PublicOutput.Truncated || issues.GetArrayLength() == 20
+                    Truncated = Truncated || issues.GetArrayLength() == 20
                     for task in J.Items(issues) {
                         if J.Get(task, "pull_request").ValueKind != JsonValueKind.Undefined || J.Text(
                             task,
@@ -865,7 +871,7 @@ internal class ContributionStatus {
             stale = stale || Text(row, "remote_status") == "stale" || Text(row, "state") == "stale_remote_data"
         }
         Result["remote_status"] = Failure != nil ? "unavailable": (stale ? "stale": "observed")
-        Result["truncated"] = PublicOutput.Truncated
+        Result["truncated"] = Truncated
         Result["next"] = displayed.Count > 0 ? (displayed[0] as Dictionary[string, Object?])?["next"]: (
             Work.Count > 0 ? (Work[0] as Dictionary[string, Object?])?["next"]: Next(
                 "owner",
@@ -885,7 +891,7 @@ internal class ContributionStatus {
                         draft["checks_observed"] = checks.Count
                         checks.RemoveRange(16, checks.Count - 16)
                         draft["checks_truncated"] = true
-                        PublicOutput.Truncated = true
+                        Truncated = true
                     }
                 }
             }
@@ -893,7 +899,7 @@ internal class ContributionStatus {
         while System.Text.Encoding.UTF8.GetByteCount(J.Write(Result)) > 56000 && Work.Count > 0 {
             Work.RemoveAt(Work.Count - 1)
             Result["presentation_truncated"] = true
-            PublicOutput.Truncated = true
+            Truncated = true
         }
     }
 
@@ -902,33 +908,41 @@ internal class ContributionStatus {
     ]?.ToString() ?? "": ""
 
     shared {
-        internal func Run(args Args) {
+        internal func Snapshot(args Args) ContributionStatus {
             let status = ContributionStatus()
             try {
                 status.Read(args)
-                if status.Failure != nil {
-                    throw status.Failure ?? Exception("Remote status unavailable")
-                }
-            } finally {
-                if status.Failure != nil {
-                    status.Result["remote_status"] = "unavailable"
-                    status.Result["next"] = status.Next(
-                        "owner",
-                        "Inspect unavailable required remote records before proceeding."
-                    )
-                }
-                status.BoundOutput()
-                PublicOutput.ResultData = status.Result
-                if status.Result.ContainsKey("next") &&
-                    status.Result["next"] is Dictionary[string, Object?]next &&
-                    next["command"] is []string command &&
-                    command.Length > 0 {
-                    PublicOutput.Actions.Add(command)
-                }
-                status.Result["truncated"] = PublicOutput.Truncated
-                if !PublicOutput.Enabled {
-                    Terminal.Json(J.Parse(J.Write(status.Result)), "Contribution status")
-                }
+            } catch (error Exception) {
+                status.Failure = status.Failure ?? error
+            }
+            if status.Failure != nil {
+                status.Result["remote_status"] = "unavailable"
+                status.Result["next"] = status.Next(
+                    "owner",
+                    "Inspect unavailable required remote records before proceeding."
+                )
+            }
+            status.BoundOutput()
+            status.Result["truncated"] = status.Truncated
+            return status
+        }
+
+        internal func Run(args Args) {
+            let status = Snapshot(args)
+            PublicOutput.ResultData = status.Result
+            PublicOutput.Truncated = status.Truncated
+            PublicOutput.Actions.Clear()
+            if status.Result.ContainsKey("next") &&
+                status.Result["next"] is Dictionary[string, Object?]next &&
+                next["command"] is []string command &&
+                command.Length > 0 {
+                PublicOutput.Actions.Add(command)
+            }
+            if !PublicOutput.Enabled {
+                Terminal.ContributionStatus(J.Parse(J.Write(status.Result)))
+            }
+            if let failure = status.Failure {
+                throw failure
             }
         }
     }

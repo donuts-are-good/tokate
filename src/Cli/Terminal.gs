@@ -351,6 +351,78 @@ internal class Terminal {
             Message(Cli.Help(command, Width()), "default")
         }
 
+        internal func InteractiveHeading() {
+            if Rich() && Width() >= 40 {
+                Message("--< tokate", "green")
+            } else {
+                Message("tokate", "default")
+            }
+        }
+
+        private func StatusAction(next JsonElement) {
+            Message("Next action: " + J.Text(next, "action"), "default")
+            Row("Role", J.Text(next, "role"))
+            let command = Command(J.Get(next, "command"))
+            if command != "" {
+                Row("Command", command)
+            }
+        }
+
+        internal func ContributionStatus(value JsonElement) {
+            if PublicOutput.Enabled {
+                return
+            }
+            if Console.IsOutputRedirected && !Plain && !Ascii {
+                Console.WriteLine(J.Write(value))
+                return
+            }
+            let remote = J.Text(value, "remote_status")
+            if remote != "observed" {
+                Row("Status", remote == "unavailable" ? "unavailable; partial facts only": remote, "yellow")
+            }
+            if J.Bool(value, "truncated") {
+                Message("Bounded snapshot: some data was omitted.", "yellow")
+            }
+            let work = J.Items(J.Get(value, "work"))
+            let pending = J.Items(J.Get(value, "pending_requests")).Count
+            if remote != "observed" || work.Count == 0 || pending > 0 {
+                StatusAction(J.Get(value, "next"))
+            }
+            Row("Repository", J.Text(value, "repo"))
+            if pending > 0 {
+                Row("Pending access requests", pending.ToString(), "yellow")
+            }
+            if work.Count == 0 {
+                Row("Issue", "none observed")
+                if remote == "observed" {
+                    Row(
+                        "State",
+                        pending > 0 ?
+                        "access review needed": "no approved work observed"
+                    )
+                }
+            }
+            for task in work {
+                if remote == "observed" {
+                    StatusAction(J.Get(task, "next"))
+                }
+                let title = Clean(J.Text(task, "title")).Replace('\n', ' ').Trim()
+                let prefix = "Issue: #" + J.Number(task, "issue").ToString() + " "
+                let limit = Math.Max(4, Math.Min(80, Width() - prefix.Length))
+                var length = Math.Min(limit - 3, title.Length)
+                if length > 0 && Char.IsHighSurrogate(title[length - 1]) {
+                    length--
+                }
+                Message(prefix + (title.Length > limit ? title.Substring(0, length) + "...": title), "default")
+                Message("State: " + J.Text(task, "state").Replace('_', ' '), "yellow")
+                Row("Issue URL", J.Text(task, "url"))
+                for draft in J.Items(J.Get(task, "drafts")) {
+                    Row("PR", J.Text(draft, "url"))
+                    Row("Receipt", J.Text(draft, "receipt"))
+                }
+            }
+        }
+
         internal func Row(label string, value string, color string = "default", error bool = false) {
             let name = Clean(label)
             let text = Clean(value)
