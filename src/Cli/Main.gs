@@ -113,6 +113,20 @@ func Dispatch(options Args) int32 {
         }
         return Installation.Run(options.Command)
     }
+    if options.Command == "claude-capabilities" {
+        var value System.Text.Json.JsonElement
+        try {
+            value = ClaudeCode.Gate(options)
+        } catch (error Exception) {
+            throw CliFailure("verification_failed", error.Message, summary: error.Message)
+        }
+        if PublicOutput.Enabled {
+            PublicOutput.ResultData = value
+        } else {
+            Terminal.Json(value, "Claude capabilities; managed execution disabled")
+        }
+        return 0
+    }
     if options.Command != "doctor" && options.Command != "defaults" {
         DonorSelection.ApplyDefaults(options)
         Startup.Check(options)

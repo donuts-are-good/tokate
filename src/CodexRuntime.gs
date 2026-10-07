@@ -49,7 +49,7 @@ internal class CodexRuntime {
             return RequestData.Parse(Encoding.UTF8.GetString(bytes), 65536)
         }
 
-        private func Native(path string) bool {
+        internal func Native(path string) bool {
             FileKind(path, 32768)
             using let file = File.OpenRead(path)
             let header = [20]byte

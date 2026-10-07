@@ -24,63 +24,15 @@ internal class PiBoundary {
         }
 
         internal func Boundary(checkout string, root string, node string, control string, network bool) List[string] {
-            Verification.Validate(checkout)
             for path in[]string{root, node, control} {
                 if path == checkout || path.StartsWith(checkout + "/") {
                     throw Exception("Pi runtime and control files must be outside the writable checkout")
                 }
             }
-            let args = List[string]{
-                "--die-with-parent",
-                "--new-session",
-                "--unshare-user",
-                "--unshare-pid",
-                "--unshare-ipc",
-                "--unshare-uts",
-                "--cap-drop",
-                "ALL",
-                "--clearenv",
-                "--setenv",
-                "PATH",
-                "/usr/bin:/bin",
-                "--setenv",
-                "HOME",
-                "/tmp/tokate-agent",
-                "--setenv",
-                "TMPDIR",
-                "/tmp/tokate-tools",
-                "--setenv",
-                "LANG",
-                "C.UTF-8",
-                "--setenv",
-                "PI_OFFLINE",
-                "1"
-            }
-            if !network {
-                args.Add("--unshare-net")
-            }
-            for path in[]string{"/usr/bin", "/usr/lib", "/usr/share", "/bin", "/lib", "/lib64"} {
-                if Directory.Exists(path) {
-                    args.AddRange([]string{"--ro-bind", path, path})
-                }
-            }
-            for path in[]string{"/etc/ld.so.cache", "/etc/nsswitch.conf", "/etc/hosts", "/etc/resolv.conf"} {
-                if File.Exists(path) {
-                    args.AddRange([]string{"--ro-bind", path, path})
-                }
-            }
+            let args = NativeBoundary.Start(network, "/tmp/tokate-agent", "/tmp/tokate-tools")
+            args.AddRange([]string{"--setenv", "PI_OFFLINE", "1"})
             args.AddRange(
                 []string{
-                    "--proc",
-                    "/proc",
-                    "--dev",
-                    "/dev",
-                    "--tmpfs",
-                    "/tmp",
-                    "--dir",
-                    "/tmp/tokate-agent",
-                    "--dir",
-                    "/tmp/tokate-tools",
                     "--ro-bind",
                     root,
                     "/tokate-runtime/node_modules",
@@ -90,19 +42,10 @@ internal class PiBoundary {
                     "--ro-bind",
                     control,
                     "/tokate-control",
-                    "--bind",
-                    checkout,
-                    checkout,
-                    "--tmpfs",
-                    Path.Combine(checkout, ".git"),
-                    "--chmod",
-                    "000",
-                    Path.Combine(checkout, ".git"),
-                    "--chdir",
-                    checkout,
-                    "--"
                 }
             )
+            NativeBoundary.Repository(args, checkout)
+            args.Add("--")
             return args
         }
 

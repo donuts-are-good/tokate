@@ -23,6 +23,8 @@ Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved w
 
 Requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. Tested observations cover Ubuntu 24.04 CI and a CachyOS rolling host; other distributions are not established. ARM64, musl, Windows and macOS are unsupported. Managed execution supports native Codex with a ChatGPT login, or [Pi local execution](docs/pi.md) with a pinned SDK/runtime and an existing no-auth loopback endpoint. See [prerequisites and support limits](docs/reference.md#install-and-check-support).
 
+[Native Claude capability checks](docs/claude-proof.md) use ordinary local fixtures without inference. Managed Claude execution remains disabled.
+
 ## For Owners:
 
 1. Follow the [owner guide](AGENTS.md#guide-a-repository-owner): check tools with `tokate doctor --owner --auth`, then run `tokate init --repo OWNER/REPO` in your repository.

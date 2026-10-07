@@ -13,6 +13,9 @@ func Main(args[]string) int32 {
             return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
+        if name == "claude" {
+            return ClaudeTool.Run(args)
+        }
         if name == "id" || name == "getent" {
             return ReleaseTools.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
@@ -27,6 +30,10 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if args.Length == 1 && args[0] == "--claude" {
+            ClaudeChecks.All(binary)
+            return 0
+        }
         if args.Length == 6 && args[0] == "--pi-proof" {
             PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
             return 0

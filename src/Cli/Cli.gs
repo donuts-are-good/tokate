@@ -92,6 +92,13 @@ internal class CliCommand {
 internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
+            CliOption(
+                "claude",
+                "FILE",
+                "Installed unmodified native Claude Code executable; never installed implicitly"
+            ),
+            CliOption("claude-profile", "DIR", "Private clean native-login profile; metadata and native status only"),
+            CliOption("sole-use", "", "Attest this native-login profile is solely used for Claude capability checks"),
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
             CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
             CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
@@ -213,6 +220,15 @@ internal class Cli {
             CliOption("ascii", "", "Use ASCII ornaments; preserve names and URLs verbatim"),
         }
         internal let Commands[]CliCommand = []CliCommand{
+            CliCommand(
+                "claude-capabilities",
+                "claude,claude-profile,sole-use,model,effort,allow-network,file,path",
+                "claude,claude-profile,model,effort",
+                "Check installed native Claude interfaces and personal login status without inference; managed execution stays disabled.",
+                "--claude FILE --claude-profile DIR --sole-use --model claude-opus-4-6 --effort high [--file REPORT]",
+                "claude-capabilities --claude /usr/local/bin/claude --claude-profile /private/native-login --sole-use --model claude-opus-4-6 --effort high",
+                effects: "local_read local_write"
+            ),
             CliCommand(
                 "doctor",
                 "owner,managed,external,auth,non-interactive",

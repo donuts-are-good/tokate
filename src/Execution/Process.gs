@@ -280,6 +280,7 @@ internal class Commands {
             pidNamespace bool = false
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
+            info.ArgumentList.Add("--wait")
             if !pidNamespace {
                 if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/unshare") || !File.Exists("/usr/bin/env") {
                     throw CliFailure(
