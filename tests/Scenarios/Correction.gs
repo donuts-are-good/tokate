@@ -780,15 +780,18 @@ internal class CorrectionChecks {
         }
 
         private func AuthorityChanges(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("staged_whitespace")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let original = Prepared(flow, run)
+            let commit = Correct(flow, run)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
-                using let flow = NativeFixture(binary)
-                flow.Initialize()
-                flow.Approve()
-                let run = flow.Claim()
-                flow.Mode("staged_whitespace")
-                flow.Call([]string{"work", "--run", run}, 1)
-                let original = Prepared(flow, run)
-                let commit = Correct(flow, run)
+                baseline.Restore()
+                flow.Reload()
                 switch change {
                     case "approval" {
                         flow.Approve()
