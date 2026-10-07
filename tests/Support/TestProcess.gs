@@ -9,6 +9,26 @@ import System.Text
 
 internal class TestProcess {
     shared {
+        private func NodeExecutable(path string) bool -> File.Exists(path) &&
+            (
+            File.GetUnixFileMode(path) & (
+                UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
+            )
+        ) != 0
+
+        internal func Node() string {
+            let bundled = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "node")
+            if NodeExecutable(bundled) {
+                return bundled
+            }
+            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
+                if Path.IsPathFullyQualified(entry) && NodeExecutable(Path.Combine(entry, "node")) {
+                    return Path.Combine(entry, "node")
+                }
+            }
+            throw Exception("Pi continuation requires installed Node on PATH")
+        }
+
         internal func ChildIdentity(child Process) string {
             let name = FileInfo("/proc/self/ns/pid").LinkTarget ?? throw Exception("Missing child PID namespace")
             return name + " " + child.Id.ToString()

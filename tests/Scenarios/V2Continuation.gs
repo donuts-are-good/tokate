@@ -78,7 +78,7 @@ internal class V2ContinuationChecks {
                         "--pi-root",
                         Path.Combine(test.Flow.Temp.Root, "runtime/node_modules"),
                         "--node",
-                        "/usr/bin/node",
+                        TestProcess.Node(),
                         "--endpoint",
                         endpoint
                     }
