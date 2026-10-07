@@ -163,7 +163,7 @@ internal class PiBoundary {
             )
         }
 
-        internal func Probe(root string, node string, budget RuntimeBudget? = nil) {
+        internal func Probe(root string, node string, budget RuntimeBudget? = nil) JsonElement {
             let storage = Directory.CreateDirectory(
                 Path.Combine("/tmp", "tokate-pi-probe-" + Guid.NewGuid().ToString("N")),
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -196,16 +196,19 @@ internal class PiBoundary {
                     budget: budget,
                     pidNamespace: true
                 )
-                if result.Code != 0 ||
-                    result.Truncated ||
-                    result.ReadFailed ||
-                    result
-                    .Output
-                    .Trim() != "{\"type\":\"pi.probe\",\"version\":\"1.0.0\",\"node\":\"v26.10.0\"}" {
+                if result.Code != 0 || result.Truncated || result.ReadFailed {
                     throw Exception(
-                        "Pi SDK or outer/nested isolation probe failed; requires pi 1.0.0 and tested Node 26.10.0. No inference started"
+                        "Pi SDK or outer/nested isolation probe failed. Update pi and Node, then retry the probe. No inference started"
                     )
                 }
+                let runtime = RequestData.Parse(result.Output.Trim(), 4096)
+                if J.Text(runtime, "type") != "pi.probe" || J.Text(runtime, "version") == "" || !J.Text(runtime, "node")
+                    .StartsWith("v") {
+                    throw Exception(
+                        "Pi SDK probe did not report its actual package and Node versions. No inference started"
+                    )
+                }
+                return runtime
             } finally {
                 Directory.Delete(storage.FullName, true)
             }

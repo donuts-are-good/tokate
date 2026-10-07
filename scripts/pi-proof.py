@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 
-parser = argparse.ArgumentParser(description='Release gate: real installed pi 1.0.0 against a synthetic server; no inference')
+parser = argparse.ArgumentParser(description='Real installed pi against a synthetic server; no inference')
 parser.add_argument('--pi-root', required=True, type=Path)
 parser.add_argument('--node', default='/usr/bin/node')
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
@@ -22,8 +22,10 @@ package = args.pi_root / '@earendil-works/pi-coding-agent/package.json'
 if not package.is_file():
     parser.error('Real pi installation is required; this probe never installs packages')
 metadata = json.loads(package.read_text())
-if metadata.get('name') != '@earendil-works/pi-coding-agent' or metadata.get('version') != '1.0.0':
-    parser.error('The real pi 1.0.0 package is required')
+if metadata.get('name') != '@earendil-works/pi-coding-agent' or not metadata.get('version'):
+    parser.error('The real pi SDK package is required')
+node_version = subprocess.check_output([args.node, '--version'], env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, text=True, timeout=10).strip()
+print('Pi proof versions: ' + metadata['version'] + ', Node ' + node_version, flush=True)
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
@@ -97,7 +99,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.racer = threading.Thread(target=self.server.race_paths, args=(Path(fixture['checkout']),))
             self.server.racer.start()
         private, outside = fixture['private'], fixture['outside']
-        code = f"from pathlib import Path; import socket; assert not Path({private!r}).exists(); assert not Path('.git/config').exists(); assert not Path('/tokate-control/models.json').exists(); denied=False\ntry: Path({outside!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{self.server.server_address[1]})); connected=True\nexcept OSError: pass\nassert connected == {self.server.case == 'on'}\nPath('result.txt').write_text('final')"
+        code = f"""from pathlib import Path
+import socket
+for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
+    try:
+        Path(path).read_bytes()
+    except (FileNotFoundError, PermissionError):
+        pass
+    else:
+        raise AssertionError('Private file is readable')
+"""
+        code += f"denied=False\ntry: Path({outside!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{self.server.server_address[1]})); connected=True\nexcept OSError: pass\nassert connected == {self.server.case == 'on'}\nPath('result.txt').write_text('final')"
         planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}),
                    ('edit', {'path': 'result.txt', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
                    ('read', {'path': private}), ('write', {'path': outside, 'content': 'escaped'}),
@@ -124,7 +136,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 assert self.server.race_cycles > 0 and self.server.race_error is None, 'Synthetic path race failed'
             for message in body['messages']:
                 if message['role'] == 'tool' and 'BOUNDARY_FAILURE' in str(message.get('content', '')):
-                    raise AssertionError('Execution boundary failed')
+                    raise AssertionError('Execution boundary failed: ' + str(message.get('content', ''))[:2000])
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Changes: synthetic edits. Verification: constrained tools. Limitations: no inference.'}, 'finish_reason': 'stop'}]}
         chunk.update(id=f'completion-{turn}', object='chat.completion.chunk', created=1, model='synthetic/model:exact', usage={'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15})
         self.wfile.write(('data: ' + json.dumps(chunk) + '\n\ndata: [DONE]\n\n').encode())
@@ -181,6 +193,9 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
                 assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', {key: saved.get(key) for key in ['state', 'failure_stage', 'failure_reason', 'error']}
                 assert 'turn_completed' not in saved
+                assert saved['pi_version'] == metadata['version'], 'Pi version evidence does not match the installed package'
+                assert saved['observed_invocation']['sdk_version'] == metadata['version'], 'SDK version evidence is incorrect'
+                assert saved['observed_invocation']['node_version'] == node_version, 'Node version evidence is incorrect'
             else:
                 try:
                     result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)

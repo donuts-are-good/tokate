@@ -15,6 +15,8 @@ internal class LocalCodex {
             flow.Initialize()
             let node = Environment.GetEnvironmentVariable("TOKATE_PROOF_NODE") ??
                 throw Exception("Missing donor-local Node for installation proof")
+            let version = Environment.GetEnvironmentVariable("TOKATE_PROOF_VERSION") ??
+                throw Exception("Missing installed Codex version for installation proof")
             Check.Success(
                 TestProcess.Run(
                     "/bin/sh",
@@ -28,10 +30,7 @@ internal class LocalCodex {
                 )
             )
             File.CreateSymbolicLink(Path.Combine(flow.Bin, "node"), node)
-            Check.Contains(
-                Check.Success(TestProcess.Run(launcher, []string{"--version"}, flow.Temp.Env)),
-                "codex-cli 0.160.0"
-            )
+            Check.Contains(Check.Success(TestProcess.Run(launcher, []string{"--version"}, flow.Temp.Env)), version)
             let secrets = List[string]()
             for relative in[]string{
                 ".netrc",
@@ -116,10 +115,7 @@ internal class LocalCodex {
                 }
                 args.AddRange(secrets)
                 args.Add(runtime == native ? standalone: native)
-                Check.Contains(
-                    Check.Success(TestProcess.Run(runtime, args.ToArray(), flow.Temp.Env)),
-                    "codex-cli 0.160.0"
-                )
+                Check.Contains(Check.Success(TestProcess.Run(runtime, args.ToArray(), flow.Temp.Env)), version)
                 Check.That(
                     Convert.ToHexString(digest) == Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(runtime))),
                     "Installed runtime changed"

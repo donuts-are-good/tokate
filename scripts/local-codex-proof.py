@@ -19,8 +19,9 @@ def main():
         "lib/node_modules/@openai/codex" if options.layout == "nested" else "node_modules/@openai/codex"
     )
     metadata = json.loads((package / "package.json").read_text())
-    if metadata["name"] != "@openai/codex" or metadata["version"] != "0.160.0":
-        raise RuntimeError("Proof requires an isolated, unmodified @openai/codex@0.160.0 npm user prefix")
+    if metadata["name"] != "@openai/codex" or not metadata.get("version"):
+        raise RuntimeError("Proof requires an isolated, unmodified @openai/codex npm user prefix")
+    print("Testing @openai/codex " + metadata["version"], flush=True)
     platform = (
         package / "node_modules/@openai/codex-linux-x64"
         if options.layout == "nested" else package.parent / "codex-linux-x64"
@@ -48,6 +49,7 @@ def main():
             "TOKATE_BINARY": str(options.tokate.resolve()),
             "TOKATE_TEST_ROOT": str(runs),
             "TOKATE_PROOF_NODE": str(node),
+            "TOKATE_PROOF_VERSION": "codex-cli " + metadata["version"],
         }
         command = [
             "/usr/bin/bwrap", "--die-with-parent", "--bind", "/", "/",
