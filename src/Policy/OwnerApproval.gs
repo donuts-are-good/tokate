@@ -264,7 +264,7 @@ internal class OwnerApproval {
             )
         }
 
-        internal func Approved(repo string, number int32, donor string) JsonElement {
+        internal func Approved(repo string, number int32, donor string, quiet bool = false) JsonElement {
             let issue = GitHub.Issue(repo, number)
             if !GitHub.HasLabel(issue) || !GitHub.Assigned(issue, donor) {
                 throw CliFailure(
@@ -288,7 +288,7 @@ internal class OwnerApproval {
             if J.Text(approval, "issue_hash") != GitHub.Fingerprint(issue) {
                 throw CliFailure("stale_approval", failure)
             }
-            let configuration = ApprovalBase.Check(repo, approval, 1)
+            let configuration = ApprovalBase.Check(repo, approval, 1, quiet)
             return J.Parse(
                 J.Write(
                     J.Map(

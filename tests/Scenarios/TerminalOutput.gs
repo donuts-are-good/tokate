@@ -7,7 +7,7 @@ import System.Text.RegularExpressions
 
 internal class TerminalOutput {
     shared {
-        private func Pty(binary string, args[]string, temp Temp, width int32) Result {
+        internal func Pty(binary string, args[]string, temp Temp, width int32) Result {
             var command = "stty cols " + width.ToString() + " rows 24; '" + binary.Replace("'", "'\"'\"'") + "'"
             for arg in args {
                 command += " '" + arg.Replace("'", "'\"'\"'") + "'"

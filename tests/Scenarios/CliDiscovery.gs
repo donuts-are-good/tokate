@@ -356,6 +356,8 @@ internal class CliDiscovery {
                 []string{"checks", "--run", "saved", "--repo", "owner/project", "--json"},
                 []string{"doctor", "--json=true"},
                 []string{"status", "--run", "saved", "--json", "--json"},
+                []string{"status", "--run", "saved", "--repo", "owner/project", "--json"},
+                []string{"status", "--run", "saved", "--issue", "1", "--json"},
                 []string{"amend", "--run", "saved", "--commit", String('a', 40) + "\n", "--seconds", "30", "--json"},
                 []string{"revoke-sync", "--repo", "owner/project", "--grant", "invalid", "--json"},
                 []string{"revoke-sync", "--repo", "owner/project", "--grant", String('a', 40) + "\n", "--json"},
@@ -815,7 +817,7 @@ internal class CliDiscovery {
                 []string{"completion", "powershell"},
                 []string{"completion", "powershell", "--help"},
                 []string{"completion", "bash", "extra"},
-                []string{"status"}
+                []string{"status", "--run=x", "--repo=owner/project"}
             } {
                 Check.Contains(Call(binary, argv, temp, 1).Error, "Usage:")
             }

@@ -30,6 +30,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "EligibilityDeclarations",
                 "EligibilityModes",
                 "EligibilityPresentation",
+                "ContributionStatus",
                 "EligibilityRevocation",
                 "EligibilityAuthority",
                 "EligibilityTransport",
@@ -80,6 +81,10 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 }
                 if name.StartsWith("Admission", StringComparison.Ordinal) {
                     AdmissionChecks.All(binary, name)
+                    continue
+                }
+                if name == "ContributionStatus" {
+                    ContributionStatusChecks.All(binary)
                     continue
                 }
                 if name.StartsWith("Eligibility", StringComparison.Ordinal) {
