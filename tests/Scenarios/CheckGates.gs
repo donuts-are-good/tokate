@@ -290,7 +290,20 @@ internal class CheckGates {
 
         private func Movement(test PublishedContribution) {
             let flow = test.Coordination.Flow
-            for kind in[]string{"head", "approval", "retarget", "draft", "closed", "merged", "receipt", "target"} {
+            for kind in[]string{
+                "head",
+                "approval",
+                "retarget",
+                "draft",
+                "closed",
+                "merged",
+                "merged-issue",
+                "merged-branch",
+                "late-head",
+                "late-merged",
+                "receipt",
+                "target"
+            } {
                 test.Restore()
                 Passing(test)
                 if kind == "target" {
@@ -317,7 +330,7 @@ internal class CheckGates {
                     Check.Text(result["gates"]?["receipt"]?["observed_status"]) == "passed",
                     "Movement discarded prior receipt assessment"
                 )
-                if kind == "closed" || kind == "merged" {
+                if kind == "closed" || kind.StartsWith("merged") || kind == "late-merged" {
                     Check.That(
                         Check.Text(result["owner_review"]) == "historical" &&
                             result["required_owner_actions"]
@@ -361,7 +374,7 @@ internal class CheckGates {
                 } else {
                     let faults = JsonArray()
                     if kind == "freshness" {
-                        for n in 0 ... 3 {
+                        for n in 0 ... 1 {
                             faults.Add(Check.Map("passthrough", true))
                         }
                     }
@@ -411,6 +424,42 @@ internal class CheckGates {
             )
         }
 
+        private func WatchFailure(test PublishedContribution, v2 bool) {
+            let flow = test.Coordination.Flow
+            for deadline in[]bool{false, true} {
+                test.Restore()
+                flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pending\"}]")
+                flow.Save()
+                let faults = JsonArray(
+                    Check.Map("passthrough", true),
+                    Check.Map("passthrough", true),
+                    Check.Map("passthrough", true)
+                )
+                faults.Add(deadline ? Check.Map("status", 200, "pause_ms", 8000): Check.Map("status", 404))
+                flow.Faults("repos/owner/project/pulls/10", faults)
+                let result = Data(Read(test, deadline ? 8: 1, saved: !v2, timeout: true, seconds: "5"))
+                Gate(result, "lifecycle", "unavailable")
+                Check.That(Check.Text(result["machine_status"]) != "passed", "Watch failure became success")
+                let prior = result["previous_observation"] ?? throw Exception("Watch lost prior observation")
+                Check.That(Check.Text(prior["current"]) == "false", "Prior watch evidence remained current")
+                let known = prior["result"] ?? throw Exception("Watch lost prior result")
+                Gate(known, "receipt", "passed")
+                Gate(known, "checks", "pending")
+                Check.That(
+                    Check.Text(known["check_count"]) == "1" && Check.Text(known["checks"]?[0]?["name"]) == "verify" &&
+                        Check.Text(known["binding"]?["commit"]) != "",
+                    "Watch discarded bound check facts"
+                )
+                if !v2 {
+                    let saved = Check.Json(File.ReadAllText(Path.Combine(test.Run, "checks.json")))
+                    Check.That(
+                        saved["result"]?["previous_observation"]?.ToJsonString() == prior.ToJsonString(),
+                        "Saved watch result lost prior evidence"
+                    )
+                }
+            }
+        }
+
         private func PublicationAuthority(test PublishedContribution) {
             test.Restore()
             let coordination = test.Coordination
@@ -452,6 +501,7 @@ internal class CheckGates {
                 Dependencies(test)
                 Movement(test)
                 Deadline(test)
+                WatchFailure(test, v2)
                 if v2 {
                     PublicationAuthority(test)
                 }

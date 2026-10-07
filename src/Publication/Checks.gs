@@ -21,6 +21,17 @@ internal class Checks {
             return J.Write(result)
         }
 
+        private func ObserveAfter(pull JsonElement, facts Dictionary[string, Object?]) {
+            facts["observed_head_after"] = J.Text(J.Get(pull, "head"), "sha")
+            facts["target_branch_after"] = J.Text(J.Get(pull, "base"), "ref")
+            facts["pr_observation_after"] = PublicOutput.Select(pull, "state,draft,merged,merged_at,closed_at")
+            if J.Text(pull, "state") == "closed" || J.Bool(pull, "merged") || J.Get(pull, "merged_at")
+                .ValueKind == JsonValueKind.String {
+                facts["owner_review"] = "historical"
+                facts["required_owner_actions"] = []string{}
+            }
+        }
+
         private func Invalidate(gates Dictionary[string, Object?], facts Dictionary[string, Object?]) {
             for name in[]string{"receipt", "checks", "dependencies", "lifecycle"} {
                 let gate = gates[name] as Dictionary[string, Object?] ?? throw Exception("Invalid check gate")
@@ -166,7 +177,7 @@ internal class Checks {
                         throw CliFailure("stale_approval", "PR target revision changed while reading checks")
                     }
                     stage = "receipt"
-                    let verified = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
+                    let verified = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"), pull)
                     if run.Text("commit") != "" && verified.Text("commit") != run.Text("commit") {
                         throw CliFailure("stale_approval", "Saved commit differs from PR receipt")
                     }
@@ -256,27 +267,16 @@ internal class Checks {
                         Overlaps.RequireDependencies(run.Text("repo"), run.Number("issue"), dependencies)
                     }
                     stage = "freshness"
-                    let live = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
+                    let livePull = GitHub.Api(pullPath)
+                    ObserveAfter(livePull, facts)
+                    let live = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"), livePull)
                     facts["binding_after"] = PublicOutput.Select(live.Element(), BindingFields)
                     if J.Write(PublicOutput.Select(live.Element(), BindingFields)) != binding {
                         throw CliFailure("stale_approval", "PR authority changed while reading checks")
                     }
-                    let livePull = GitHub.Api(pullPath)
-                    facts["observed_head_after"] = J.Text(J.Get(livePull, "head"), "sha")
-                    facts["target_branch_after"] = J.Text(J.Get(livePull, "base"), "ref")
-                    facts["pr_observation_after"] = PublicOutput.Select(
-                        livePull,
-                        "state,draft,merged,merged_at,closed_at"
-                    )
-                    if J.Text(livePull, "state") == "closed" || J.Bool(livePull, "merged") || J.Get(
-                        livePull,
-                        "merged_at"
-                    )
-                        .ValueKind == JsonValueKind.String {
-                        facts["owner_review"] = "historical"
-                        facts["required_owner_actions"] = []string{}
-                    }
-                    if Identity(livePull) != identity {
+                    let finalPull = GitHub.Api(pullPath)
+                    ObserveAfter(finalPull, facts)
+                    if Identity(livePull) != identity || Identity(finalPull) != identity {
                         throw CliFailure(
                             "stale_approval",
                             "PR head, target, receipt or lifecycle changed while reading checks"
@@ -301,6 +301,12 @@ internal class Checks {
                         return 8
                     }
                 } catch (error Exception) {
+                    if previous != "" {
+                        facts["previous_observation"] = map[string, Object?]{
+                            "current": false,
+                            "result": J.Get(J.Parse(previous), "result")
+                        }
+                    }
                     let timedOut = error is ApiDeadlineException deadline
                     let unavailable = timedOut ||
                         error is CliFailure transport &&

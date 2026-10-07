@@ -5,8 +5,15 @@ import System.Text.Json
 
 internal class ReceiptVerification {
     shared {
-        internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data {
-            let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
+        internal func Verify(repo string, number int32, ready bool = true, paths bool = true) Data -> Verify(
+            repo,
+            number,
+            GitHub.Api("repos/" + repo + "/pulls/" + number.ToString()),
+            ready,
+            paths
+        )
+
+        internal func Verify(repo string, number int32, pull JsonElement, ready bool = true, paths bool = true) Data {
             let body = J.Text(pull, "body")
             let receipt = RequestData.Parse(
                 PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"),

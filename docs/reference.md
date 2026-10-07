@@ -517,6 +517,8 @@ and `checks_observed_status` retains its earlier assessment after invalidation.
 `required_checks` and `required_check_count` summarize required-name evidence;
 `dependency_evidence` preserves the bounded native dependency observations.
 Later blocking gates retain earlier observations without granting machine success.
+After a later watch poll fails, `previous_observation.result` retains the last
+completed poll's bounded evidence with `current: false`.
 `binding`, `observed_head`, `pr_observation`, `target_branch` and `target_revision`
 bind the result to the observed PR, receipt, approval/lineage and current authority.
 Corresponding `_after` fields retain rechecked observations separately.
