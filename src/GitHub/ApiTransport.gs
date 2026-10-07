@@ -303,6 +303,7 @@ internal class ApiTransport {
                     }
                 }
                 if remaining <= 0 {
+                    CheckDeadline()
                     throw Failure(0, read, 0.0)
                 }
                 let args = List[string]{"api", "--include", "--hostname", "github.com", "--method", verb, path}

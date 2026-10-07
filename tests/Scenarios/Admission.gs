@@ -145,7 +145,7 @@ internal class AdmissionChecks {
         private func Authority(binary string) {
             for mode in[]string{"open", "trusted", "manual"} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, mode)
                 Pull(test, login: "owner", actor: 1)
                 Admit(test, "open")
@@ -205,7 +205,7 @@ internal class AdmissionChecks {
 
         private func Coordinator(binary string) {
             using let test = CoordinationFixture(binary)
-            test.Initialize()
+            test.Initialize(approve: false)
             Setup(test, "manual")
             Access(test, "grant", "1")
             let request = test.ClaimRequest()
@@ -344,7 +344,7 @@ internal class AdmissionChecks {
                 "event"
             } {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 var message string? = nil
                 if fault == "silent" {
                     message = ""

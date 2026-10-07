@@ -780,15 +780,18 @@ internal class CorrectionChecks {
         }
 
         private func AuthorityChanges(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            flow.Approve()
+            let run = flow.Claim()
+            flow.Mode("staged_whitespace")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let original = Prepared(flow, run)
+            let commit = Correct(flow, run)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
-                using let flow = NativeFixture(binary)
-                flow.Initialize()
-                flow.Approve()
-                let run = flow.Claim()
-                flow.Mode("staged_whitespace")
-                flow.Call([]string{"work", "--run", run}, 1)
-                let original = Prepared(flow, run)
-                let commit = Correct(flow, run)
+                baseline.Restore()
+                flow.Reload()
                 switch change {
                     case "approval" {
                         flow.Approve()
@@ -976,15 +979,18 @@ internal class CorrectionChecks {
         private func PublicationResponses(binary string) {
             for corrected in[]bool{false, true} {
                 let faults = corrected ? []string{"issue", "repo", "author", "body", "id"}: []string{"body"}
+                using let flow = CoordinationFixture(binary)
+                flow.Initialize()
+                let run = ManagedRun(flow, corrected ? "staged_whitespace": "")
+                if corrected {
+                    Prepared(flow.Flow, run)
+                    Recover(flow.Flow, run, Correct(flow.Flow, run))
+                }
+                flow.Flow.Mode("")
+                using let baseline = FixtureSnapshot(flow.Flow.Temp.Root)
                 for fault in faults {
-                    using let flow = CoordinationFixture(binary)
-                    flow.Initialize()
-                    let run = ManagedRun(flow, corrected ? "staged_whitespace": "")
-                    if corrected {
-                        Prepared(flow.Flow, run)
-                        Recover(flow.Flow, run, Correct(flow.Flow, run))
-                    }
-                    flow.Flow.Mode("")
+                    baseline.Restore()
+                    flow.Flow.Reload()
                     let results = Check.Text(Read(run)["verification"])
                     let before = File.ReadAllText(Path.Combine(run, "run.json"))
                     flow.Flow.Reload()
@@ -1034,16 +1040,19 @@ internal class CorrectionChecks {
         }
 
         private func PublicationOutcomes(binary string) {
+            using let flow = CoordinationFixture(binary)
+            flow.Initialize()
+            let run = ManagedRun(flow, "staged_whitespace")
+            Prepared(flow.Flow, run)
+            Recover(flow.Flow, run, Correct(flow.Flow, run))
+            flow.Flow.Mode("")
+            flow.Flow.Call([]string{"submit", "--run", run})
+            flow.Flow.Reload()
+            flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
+            using let baseline = FixtureSnapshot(flow.Flow.Temp.Root)
             for fault in[]string{"duplicate", "binding", "outcome"} {
-                using let flow = CoordinationFixture(binary)
-                flow.Initialize()
-                let run = ManagedRun(flow, "staged_whitespace")
-                Prepared(flow.Flow, run)
-                Recover(flow.Flow, run, Correct(flow.Flow, run))
-                flow.Flow.Mode("")
-                flow.Flow.Call([]string{"submit", "--run", run})
+                baseline.Restore()
                 flow.Flow.Reload()
-                flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
                 let state = flow.State()["state"] ?? throw Exception("Missing published state")
                 let outcomes = state["outcomes"]?.AsArray() ?? throw Exception("Missing outcomes")
                 let uuid = Check.Text(Read(run, "correction.json")["publication_uuid"])

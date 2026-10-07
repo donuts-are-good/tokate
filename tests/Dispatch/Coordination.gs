@@ -86,8 +86,50 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     EligibilityChecks.All(binary, name)
                     continue
                 }
+                switch name {
+                    case "ProtectedCoordinator" {
+                        ProtectedCoordinator(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "CoordinatorPermissions" {
+                        CoordinatorPermissions(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "ModelPolicyModes" {
+                        ModelPolicyModes(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "EffortDeclarations" {
+                        EffortDeclarations(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "ManagedModelPolicy" {
+                        ManagedModelPolicy(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "ModelPolicyAuthority" {
+                        ModelPolicyAuthority(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                    case "Compatibility" {
+                        Compatibility(binary)
+                        Console.WriteLine("PASS V2 " + name)
+                        continue
+                    }
+                }
                 using let test = CoordinationFlow(binary)
-                test.Initialize()
+                test.Initialize(
+                    approve: name != "ProtectedExternal" &&
+                        name != "ProtectedManaged" &&
+                        name != "ReceiptEvidence" &&
+                        name != "InterruptedVerification"
+                )
                 switch name {
                     case "LeaseStalePublication" {
                         test.LeaseStalePublication()
@@ -134,9 +176,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     case "ProtectedExternal" {
                         test.ProtectedExternal()
                     }
-                    case "ProtectedCoordinator" {
-                        test.ProtectedCoordinator()
-                    }
                     case "ProtectedManaged" {
                         test.ProtectedManaged()
                     }
@@ -154,9 +193,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     }
                     case "InvalidEvents" {
                         test.InvalidEvents()
-                    }
-                    case "CoordinatorPermissions" {
-                        test.CoordinatorPermissions()
                     }
                     case "InterruptedWrite" {
                         test.InterruptedWrite()
@@ -178,21 +214,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     }
                     case "DeclarationRestrictions" {
                         test.DeclarationRestrictions()
-                    }
-                    case "ModelPolicyModes" {
-                        test.ModelPolicyModes()
-                    }
-                    case "EffortDeclarations" {
-                        test.EffortDeclarations()
-                    }
-                    case "ManagedModelPolicy" {
-                        test.ManagedModelPolicy()
-                    }
-                    case "ModelPolicyAuthority" {
-                        test.ModelPolicyAuthority()
-                    }
-                    case "Compatibility" {
-                        test.Compatibility()
                     }
                 }
                 test.Flow.AutomationAttribution()

@@ -24,7 +24,7 @@ internal class DecreeFlow : IDisposable {
 
     internal func Initialize() {
         if let coordination = V2 {
-            coordination.Initialize()
+            coordination.Initialize(approve: false)
         } else {
             Flow.Initialize()
         }
@@ -455,10 +455,16 @@ internal class DecreeFlow : IDisposable {
         }
 
         internal func InvalidSnapshot(binary string, version int32) {
+            using let test = Create(binary, version)
+            test.Text(Exact)
+            test.Flow.Approve()
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
             for kind in[]string{"hash", "text", "null", "absent", "uppercase"} {
-                using let test = Create(binary, version)
-                test.Text(Exact)
-                test.Flow.Approve()
+                baseline.Restore()
+                test.Flow.Reload()
+                if let coordination = test.V2 {
+                    coordination.Comment = 10
+                }
                 let approval = test.Approval()
                 let snapshot = approval["decree"] ?? throw Exception("Missing snapshot")
                 if kind == "null" {

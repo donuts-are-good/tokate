@@ -129,7 +129,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -156,7 +156,7 @@ jobs:
           name: tokate-binaries
           path: ${{ runner.temp }}
       - run: mkdir -p artifacts && tar -xzf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts
-      - run: TOKATE_CI_SHARD="${{ matrix.shard }}/16" artifacts/tests/tokate-tests
+      - run: TOKATE_CI_SHARD="${{ matrix.shard }}/8" artifacts/tests/tokate-tests
   verify:
     if: ${{ always() }}
     needs: [build, suite, harness-installation]

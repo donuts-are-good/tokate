@@ -10,6 +10,35 @@ internal class SuiteCatalog {
     shared {
         internal func Select(binary string, name string) {
             switch name {
+                case "Environment" {
+                    if CiShard.Include("Process") {
+                        ProcessChecks.All(binary)
+                    }
+                    if CiShard.Include("ProtectedPaths") {
+                        ProtectedPathChecks.All(binary)
+                    }
+                    if CiShard.Include("CliDiscovery") {
+                        CliDiscovery.All(binary)
+                        CliDiscovery.Setup(binary)
+                    }
+                    if CiShard.Include("Diagnostics") {
+                        Diagnostics.All(binary)
+                    }
+                    if CiShard.Include("DonorSelection") {
+                        DonorSelectionChecks.All(binary)
+                    }
+                    if CiShard.Include("Verification") {
+                        VerificationChecks.All(binary)
+                    }
+                    if CiShard.Include("PublicDescriptions") {
+                        PublicDescriptions.All(binary)
+                    }
+                    for name in NativeFlow.SerialGroups {
+                        if CiShard.Include("Native/" + name) {
+                            NativeFlow.All(binary, name)
+                        }
+                    }
+                }
                 case "SynchronizationV2" {
                     SynchronizationChecks.All(binary, "v2")
                 }
@@ -73,38 +102,6 @@ internal class SuiteCatalog {
             let clock = Stopwatch.StartNew()
             let report = SuiteReport()
             try {
-                let serial = report.Serial()
-                try {
-                    if CiShard.Include("Process") {
-                        ProcessChecks.All(binary)
-                    }
-                    if CiShard.Include("ProtectedPaths") {
-                        ProtectedPathChecks.All(binary)
-                    }
-                    if CiShard.Include("CliDiscovery") {
-                        CliDiscovery.All(binary)
-                        CliDiscovery.Setup(binary)
-                    }
-                    if CiShard.Include("Diagnostics") {
-                        Diagnostics.All(binary)
-                    }
-                    if CiShard.Include("DonorSelection") {
-                        DonorSelectionChecks.All(binary)
-                    }
-                    if CiShard.Include("Verification") {
-                        VerificationChecks.All(binary)
-                    }
-                    if CiShard.Include("PublicDescriptions") {
-                        PublicDescriptions.All(binary)
-                    }
-                    for name in NativeFlow.SerialGroups {
-                        if CiShard.Include("Native/" + name) {
-                            NativeFlow.All(binary, name)
-                        }
-                    }
-                } finally {
-                    report.Finish(serial)
-                }
                 using let data = Temp()
                 let published = Path.Combine(data.Root, ".git/data")
                 Directory.CreateDirectory(Path.Combine(published, "artifacts/linux-x64"))
@@ -116,6 +113,7 @@ internal class SuiteCatalog {
                 )
                 File.Copy(Path.Combine(project, "global.json"), Path.Combine(published, "global.json"))
                 let jobs = []SuiteJob{
+                    Job("Environment"),
                     Job("SynchronizationV2First"),
                     Job("SynchronizationV1"),
                     Job("SynchronizationV2Second"),

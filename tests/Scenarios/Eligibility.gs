@@ -65,7 +65,7 @@ internal class EligibilityChecks {
         private func Modes(binary string) {
             for mode in[]string{"open", "trusted", "manual"} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, mode)
                 Access(test, "check", issue: "1", code: mode == "open" ? 0: 1, owner: false)
                 if mode != "open" {
@@ -118,7 +118,7 @@ internal class EligibilityChecks {
         private func Revocation(binary string) {
             for operation in[]string{"remove", "untrust", "deny"} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, operation == "untrust" ? "trusted": "manual")
                 Access(test, operation == "untrust" ? "trust": "grant", issue: operation == "untrust" ? "": "1")
                 let claim = Claim(test)
@@ -138,7 +138,7 @@ internal class EligibilityChecks {
                 test.Flow.NoPr()
             }
             using let publication = CoordinationFixture(binary)
-            publication.Initialize()
+            publication.Initialize(approve: false)
             Setup(publication, "manual")
             Access(publication, "grant", issue: "1")
             let request = Claim(publication)
@@ -154,13 +154,16 @@ internal class EligibilityChecks {
         }
 
         private func Authority(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize(approve: false)
+            Setup(test, "open")
+            Claim(test)
+            let run = test.Prepare("tokate")
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
             for fault in[]string{"missing", "unavailable", "repo", "actor", "malformed", "task", "policy"} {
-                using let test = CoordinationFixture(binary)
-                test.Initialize()
-                Setup(test, "open")
-                Claim(test)
-                let run = test.Prepare("tokate")
-                let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+                baseline.Restore()
+                test.Flow.Reload()
                 if fault == "missing" {
                     test.Flow.Git("-C", test.Flow.Upstream, "update-ref", "-d", "refs/heads/tokate/access")
                 } else if fault == "malformed" {
@@ -197,7 +200,7 @@ internal class EligibilityChecks {
 
         private func Transport(binary string) {
             using let test = CoordinationFixture(binary)
-            test.Initialize()
+            test.Initialize(approve: false)
             Setup(test, "open")
             Access(test, "trust", code: 1, owner: false)
             test.Flow.Mode("lost_access_response")
@@ -257,7 +260,7 @@ internal class EligibilityChecks {
 
         private func Traffic(binary string) {
             using let test = CoordinationFixture(binary)
-            test.Initialize()
+            test.Initialize(approve: false)
             Setup(test, "trusted")
             test.Flow.ResetTraffic()
             let trusted = Access(test, "trust", traffic: true)
@@ -283,7 +286,7 @@ internal class EligibilityChecks {
         private func LatePublication(binary string) {
             for amend in[]bool{true, false} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, "open")
                 let claim = Claim(test)
                 let previous = test.Candidate(claim)
@@ -398,7 +401,7 @@ internal class EligibilityChecks {
         private func Races(binary string) {
             for read in[]int32{2, 3} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, "open")
                 RevokeAt(test, read)
                 Claim(test, 1)
@@ -407,7 +410,7 @@ internal class EligibilityChecks {
                 test.Flow.NoPr()
             }
             using let execution = CoordinationFixture(binary)
-            execution.Initialize()
+            execution.Initialize(approve: false)
             Setup(execution, "open")
             Claim(execution)
             let run = execution.Prepare("tokate")
@@ -417,7 +420,7 @@ internal class EligibilityChecks {
             execution.Flow.NoPr()
             for read in[]int32{2, 4} {
                 using let test = CoordinationFixture(binary)
-                test.Initialize()
+                test.Initialize(approve: false)
                 Setup(test, "open")
                 let claim = Claim(test)
                 let saved = test.Prepare()
@@ -441,7 +444,7 @@ internal class EligibilityChecks {
                 test.Flow.NoInference()
             }
             using let conflict = CoordinationFixture(binary)
-            conflict.Initialize()
+            conflict.Initialize(approve: false)
             Setup(conflict, "trusted")
             conflict.Flow.Mode("access_conflict")
             conflict.Flow.ResetTraffic()
@@ -507,7 +510,7 @@ internal class EligibilityChecks {
 
         private func Presentation(binary string) {
             using let test = CoordinationFixture(binary)
-            test.Initialize()
+            test.Initialize(approve: false)
             Setup(test, "trusted")
             let args = []string{
                 "access",
@@ -702,7 +705,7 @@ internal class EligibilityChecks {
                 }
                 case "EligibilityConcurrency" {
                     using let test = CoordinationFlow(binary)
-                    test.Initialize()
+                    test.Initialize(approve: false)
                     Setup(test, "open")
                     test.Flow.ResetTraffic()
                     test.SimultaneousClaims()
