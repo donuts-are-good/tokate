@@ -33,6 +33,16 @@ internal class PiChecks {
             flow.Flow.Commit("Pi policy and untrusted customization fixture")
             flow.Flow.Approve()
             flow.Claim()
+            let agentDir = Path.Combine(flow.Flow.Temp.Root, "pi-agent")
+            Directory.CreateDirectory(agentDir)
+            flow.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = agentDir
+            let models = Check.Json(
+                "{\"providers\":{\"synthetic\":{\"api\":\"openai-completions\",\"authHeader\":false,\"apiKey\":\"PRIVATE_CREDENTIAL_SENTINEL\",\"models\":[{\"id\":\"synthetic/model:exact\",\"name\":\"Synthetic\",\"contextWindow\":65536,\"maxTokens\":4096,\"reasoning\":false,\"input\":[\"text\"]}]}}}"
+            )
+            let provider = models["providers"]?["synthetic"] ?? throw Exception("Missing synthetic provider")
+            provider["baseUrl"] = JsonValue.Create(endpoint)
+            let modelsPath = Path.Combine(agentDir, "models.json")
+            File.WriteAllText(modelsPath, models.ToJsonString())
             File.CreateSymbolicLink(
                 Path.Combine(flow.Flow.Bin, "pi"),
                 Path.Combine(root, "@earendil-works/pi-coding-agent/dist/bundle/cli.js")
@@ -80,9 +90,24 @@ internal class PiChecks {
                     flow.Flow.Call(rejected, 1)
                 }
             }
+            if mode == "off" {
+                provider["baseUrl"] = JsonValue.Create("http://127.0.0.1:1/v1")
+                File.WriteAllText(modelsPath, models.ToJsonString())
+                flow.Flow.Call(args.ToArray(), 1)
+                provider["baseUrl"] = JsonValue.Create(endpoint)
+                let providers = models["providers"] ?? throw Exception("Missing providers")
+                providers["duplicate"] = provider.DeepClone()
+                File.WriteAllText(modelsPath, models.ToJsonString())
+                flow.Flow.Call(args.ToArray(), 1)
+                providers.AsObject().Remove("duplicate")
+                File.WriteAllText(modelsPath, models.ToJsonString())
+            }
             File.Delete(Path.Combine(flow.Flow.Bin, "codex"))
             File.Delete(Path.Combine(flow.Flow.Bin, "codex-impl"))
             let prepared = flow.Flow.Call(args.ToArray())
+            let selected = provider["models"]?[0] ?? throw Exception("Missing model")
+            selected["maxTokens"] = JsonValue.Create(8192)
+            File.WriteAllText(modelsPath, models.ToJsonString())
             let index = prepared.Output.LastIndexOf("Run: ")
             Check.That(index >= 0, "Pi preparation did not return a run")
             let run = prepared.Output.Substring(index + 5).Trim()
@@ -105,9 +130,19 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "off" || mode == "on"
+            let success = mode == "off" || mode == "on" || mode == "compact"
             flow.Flow.Call([]string{"work", "--run", run, "--yes", "--non-interactive"}, success ? 0: 1)
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            File.WriteAllText(
+                Path.Combine(directory, "result.json"),
+                Check.Map("usage", saved["usage"], "error", Check.Text(saved["error"])).ToJsonString()
+            )
+            Check.That(
+                Check.Text(saved["observed_invocation"]?["context_window"]) == "65536" && Check.Text(
+                    saved["observed_invocation"]?["max_tokens"]
+                ) == "8192",
+                "Pi ignored configured model limits"
+            )
             Check.That(
                 Check.Text(saved["state"]) == (success ? "generated": "failed"),
                 "Pi run reported the wrong final state"

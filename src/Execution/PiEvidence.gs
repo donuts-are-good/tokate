@@ -7,6 +7,22 @@ import System.Text.Json
 
 internal class PiEvidence {
     shared {
+        internal func Failure(output string) string {
+            try {
+                let lines = output.Trim().Split('\n')
+                let item = RequestData.Parse(lines[lines.Length - 1], 1024)
+                if J.Text(item, "type") == "pi.failed" {
+                    if J.Text(item, "reason") == "length" {
+                        return "Pi response reached its length limit; inspect the model settings in Pi and the private evidence. No retry or fallback"
+                    }
+                    if J.Text(item, "reason") == "compaction" {
+                        return "Pi context compaction failed; inspect private captured evidence. No retry or fallback"
+                    }
+                }
+            } catch (error Exception) { }
+            return "Pi did not complete; inspect private captured evidence. No retry or fallback"
+        }
+
         internal func Completed(directory string, output string, model string) Dictionary[string, Object?] {
             var completed int32
             var started int32

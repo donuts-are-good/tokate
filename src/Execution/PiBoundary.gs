@@ -106,7 +106,64 @@ internal class PiBoundary {
             return args
         }
 
-        internal func Control(control string, model string, endpoint string) {
+        internal func ModelLimits(
+            root string,
+            node string,
+            model string,
+            endpoint string,
+            budget RuntimeBudget? = nil
+        ) JsonElement {
+            let storage = Directory.CreateDirectory(
+                Path.Combine("/tmp", "tokate-pi-model-" + Guid.NewGuid().ToString("N")),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            try {
+                let script = Path.Combine(storage.FullName, "model.mjs")
+                File.WriteAllText(script, ApplicationInfo.Resource("pi-model.mjs"))
+                let args = List[string]{
+                    "--map-current-user",
+                    "--net",
+                    "--",
+                    "/usr/bin/env",
+                    "-i",
+                    "PATH=/usr/bin:/bin",
+                    "LANG=C.UTF-8",
+                    "PI_OFFLINE=1"
+                }
+                for key in[]string{"HOME", "PI_CODING_AGENT_DIR"} {
+                    if let value = Environment.GetEnvironmentVariable(key) {
+                        args.Add(key + "=" + value)
+                    }
+                }
+                args.AddRange([]string{node, script, root, model})
+                let result = Commands.Run(
+                    "/usr/bin/unshare",
+                    args.ToArray(),
+                    storage.FullName,
+                    input: endpoint,
+                    seconds: 30,
+                    isolated: true,
+                    budget: budget
+                )
+                if result.Code != 0 || result.Truncated || result.ReadFailed {
+                    throw Exception(
+                        "Pi requires one configured local model at the selected endpoint; no inference started"
+                    )
+                }
+                let limits = RequestData.Parse(result.Output.Trim(), 1024)
+                RequestData.Keys(limits, "contextWindow,maxTokens")
+                let contextWindow = J.Number(limits, "contextWindow")
+                let maxTokens = J.Number(limits, "maxTokens")
+                if contextWindow < 1 || maxTokens < 1 || maxTokens > contextWindow {
+                    throw Exception("Pi configured model limits are invalid; no inference started")
+                }
+                return limits
+            } finally {
+                Directory.Delete(storage.FullName, true)
+            }
+        }
+
+        internal func Control(control string, model string, endpoint string, contextWindow int32, maxTokens int32) {
             Directory.CreateDirectory(
                 control,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -140,9 +197,9 @@ internal class PiBoundary {
                                         "input",
                                         []string{"text"},
                                         "contextWindow",
-                                        32768,
+                                        contextWindow,
                                         "maxTokens",
-                                        4096,
+                                        maxTokens,
                                         "cost",
                                         J.Map("input", 0, "output", 0, "cacheRead", 0, "cacheWrite", 0),
                                         "compat",
@@ -174,7 +231,7 @@ internal class PiBoundary {
                 File.WriteAllText(Path.Combine(checkout, ".git/config"), "synthetic-private")
                 File.WriteAllText(Path.Combine(storage.FullName, "credential-sentinel"), "synthetic-private")
                 let control = Path.Combine(storage.FullName, "control")
-                Control(control, "tokate-probe", "http://127.0.0.1:1/v1")
+                Control(control, "tokate-probe", "http://127.0.0.1:1/v1", 32768, 4096)
                 let args = Boundary(checkout, root, node, control, false)
                 args.AddRange(
                     []string{

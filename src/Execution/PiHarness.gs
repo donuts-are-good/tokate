@@ -61,12 +61,13 @@ internal class PiHarness {
             let model = RequestData.ModelIdentifier(args.Need("model"))
             let effort = args.Need("effort")
             policy.ValidatePi(model, effort, 1, false)
-            PiBoundary.Endpoint(args.Need("endpoint"))
+            let endpoint = PiBoundary.Endpoint(args.Need("endpoint"))
             if args.Get("availability") == "unavailable" {
                 throw Exception("Selected model is donor-reported unavailable; no retry or fallback")
             }
             Runtime(args)
             PiBoundary.Probe(args.Need("pi-root"), args.Need("node"))
+            let limits = PiBoundary.ModelLimits(args.Need("pi-root"), args.Need("node"), model, endpoint)
             return J.Parse(
                 J.Write(
                     J.Map(
@@ -89,7 +90,11 @@ internal class PiHarness {
                         "availability",
                         "unknown",
                         "availability_evidence",
-                        "Exact donor-selected model; no endpoint or inference probe"
+                        "Exact donor-selected model; no endpoint or inference probe",
+                        "context_window",
+                        J.Number(limits, "contextWindow"),
+                        "max_tokens",
+                        J.Number(limits, "maxTokens")
                     )
                 )
             )
@@ -115,10 +120,24 @@ internal class PiHarness {
             let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
             Preparation.Ready(directory, run)
             let runtime = PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
+            let endpoint = PiBoundary.Endpoint(run.Text("pi_endpoint"))
+            let limits = PiBoundary.ModelLimits(
+                run.Text("pi_root"),
+                run.Text("pi_node"),
+                run.Text("model"),
+                endpoint,
+                coding
+            )
             let checkout = Path.Combine(directory, "checkout")
             let control = Path.Combine(directory, "pi-control-" + Guid.NewGuid().ToString("N"))
             try {
-                PiBoundary.Control(control, run.Text("model"), PiBoundary.Endpoint(run.Text("pi_endpoint")))
+                PiBoundary.Control(
+                    control,
+                    run.Text("model"),
+                    endpoint,
+                    J.Number(limits, "contextWindow"),
+                    J.Number(limits, "maxTokens")
+                )
                 let args = PiBoundary.Boundary(checkout, run.Text("pi_root"), run.Text("pi_node"), control, true)
                 args.AddRange(
                     []string{
@@ -148,7 +167,11 @@ internal class PiHarness {
                     "model",
                     run.Text("model"),
                     "effort",
-                    "absent"
+                    "absent",
+                    "context_window",
+                    J.Number(limits, "contextWindow"),
+                    "max_tokens",
+                    J.Number(limits, "maxTokens")
                 )
                 run.Save(directory)
                 try {
@@ -179,7 +202,7 @@ internal class PiHarness {
                     run.Fields["error_truncated"] = result.ErrorTruncated
                     run.Fields["inference_exit_code"] = result.Code
                     if result.Code != 0 || result.Truncated || result.ReadFailed {
-                        throw Exception("Pi did not complete; inspect private captured evidence. No retry or fallback")
+                        throw Exception(PiEvidence.Failure(result.Output))
                     }
                     let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"))
                     run.Fields["turn_completed"] = true

@@ -42,6 +42,11 @@ const withFile = (path, flags, operation) => withParent(path, async target => {
     const file = await open(target, flags | constants.O_NOFOLLOW);
     try { return await operation(file); } finally { await file.close(); }
 });
+const validCount = value => Number.isSafeInteger(value) && value >= 0;
+const usageView = usage => {
+    if (!usage || !validCount(usage.input) || !validCount(usage.output) || !validCount(usage.cacheRead)) return undefined;
+    return { input_tokens: usage.input, cached_input_tokens: usage.cacheRead, output_tokens: usage.output };
+};
 const files = {
     readFile: path => withFile(path, constants.O_RDONLY, file => file.readFile()),
     writeFile: (path, content) => withFile(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, file => file.writeFile(content, 'utf8')),
@@ -108,11 +113,12 @@ const customTools = [sdk.createReadToolDefinition(cwd, { operations: files, auto
 const { session, modelFallbackMessage } = await sdk.createAgentSession({ cwd, agentDir: '/tmp/tokate-agent', model, thinkingLevel: 'off',
     scopedModels: [{ model, thinkingLevel: 'off' }], modelRuntime: runtime, resourceLoader: resources, tools: ['read', 'edit', 'write', 'bash'], customTools,
     sessionManager: sdk.SessionManager.inMemory(cwd), settingsManager: sdk.SettingsManager.inMemory({
-        compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
+        retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
         blockImages: true, cacheWarming: "off", defaultTools: ['read', 'edit', 'write', 'bash'],
     }) });
 try {
     if (typeof session.getToolDefinition !== 'function' || typeof session.getActiveToolNames !== 'function' ||
+        typeof session.getSessionStats !== 'function' || typeof session.setAutoCompactionEnabled !== 'function' ||
         session.getActiveToolNames().sort().join(',') !== 'bash,edit,read,write' ||
         customTools.some(tool => session.getToolDefinition(tool.name) !== tool)) throw new Error('Unconstrained execution surface');
     if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local') throw new Error('Pi substituted selection');
@@ -142,30 +148,53 @@ try {
         }
         emit({ type: 'pi.started', model: modelId, provider: 'local-chat-completions', effort: 'absent' });
         let ended = 0;
-        let failed = false;
+        let failureReason;
         let report = '';
-        const usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 };
+        const fail = reason => {
+            failureReason ??= reason;
+            session.setAutoCompactionEnabled(false);
+        };
         session.subscribe(event => {
             if (event.type === 'tool_execution_start' || event.type === 'tool_execution_end') {
                 emit({ type: 'pi.event', event: event.type, tool: event.toolName, args: event.args, result: event.result, is_error: event.isError });
             }
             if (event.type === 'message_end' && event.message?.role === 'assistant') {
                 const message = event.message;
-                if (message.model !== modelId || message.provider !== 'tokate-local') failed = true;
-                if (!['stop', 'toolUse'].includes(message.stopReason)) failed = true;
-                if (message.stopReason === 'stop') report = message.content.filter(x => x.type === 'text').map(x => x.text).join('\n');
-                for (const [target, source] of [['input_tokens', 'input'], ['cached_input_tokens', 'cacheRead'], ['output_tokens', 'output']]) {
-                    const count = message.usage?.[source];
-                    if (!Number.isSafeInteger(count) || count < 0) failed = true;
-                    else usage[target] += count;
+                if (message.model !== modelId || message.provider !== 'tokate-local') fail('identity');
+                else if (!['stop', 'toolUse'].includes(message.stopReason)) {
+                    fail(['length', 'error', 'aborted'].includes(message.stopReason) ? message.stopReason : 'incomplete');
+                }
+                if (!usageView(message.usage)) fail('usage');
+                if (message.stopReason === 'stop' && message.model === modelId && message.provider === 'tokate-local') {
+                    report = message.content.filter(x => x.type === 'text').map(x => x.text).join('\n');
+                    if (!report.trim()) fail('incomplete');
                 }
                 emit({ type: 'pi.event', event: 'assistant_end', stop_reason: message.stopReason, model: message.model, response_model: message.responseModel ?? null, usage: message.usage });
             }
-            if (event.type === 'agent_end') ended++;
+            if (event.type === 'compaction_end') {
+                const reason = ['threshold', 'overflow', 'manual'].includes(event.reason) ? event.reason : 'unknown';
+                const usage = usageView(event.result?.usage);
+                if (event.aborted) fail('aborted');
+                else if (!event.result || reason === 'unknown') fail('compaction');
+                else if (!usage) fail('usage');
+                emit({ type: 'pi.event', event: 'compaction_end', reason, aborted: event.aborted === true,
+                    willRetry: event.willRetry === true, ...(usage ? { usage } : {}) });
+            }
+            if (event.type === 'agent_end') {
+                ended++;
+                if (event.willRetry === true) fail('incomplete');
+            }
         });
         await session.prompt(Buffer.concat(chunks).toString('utf8'));
-        if (ended !== 1 || failed || !report.trim() || session.model?.id !== modelId) throw new Error('Failed or incomplete pi turn');
-        emit({ type: 'pi.completed', model: modelId, stop_reason: 'stop', report, usage });
+        if (ended !== 1) fail('incomplete');
+        if (session.model?.id !== modelId || session.model?.provider !== 'tokate-local') fail('identity');
+        if (!report.trim()) fail('incomplete');
+        const usage = usageView(session.getSessionStats().tokens);
+        if (!usage) fail('usage');
+        if (failureReason) {
+            emit({ type: 'pi.failed', reason: failureReason });
+            process.exitCode = 1;
+        } else emit({ type: 'pi.completed', model: modelId, stop_reason: 'stop', report, usage });
     } else throw new Error('Unsupported bridge operation');
 } finally {
     session.dispose();

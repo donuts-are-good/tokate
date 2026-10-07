@@ -71,7 +71,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         assert self.path == '/v1/chat/completions'
         assert body['model'] == 'synthetic/model:exact'
         assert 'reasoning_effort' not in body
-        assert sorted(t['function']['name'] for t in body['tools']) == ['bash', 'edit', 'read', 'write']
+        compacting = not body.get('tools')
+        if compacting:
+            assert self.server.case in ['compact', 'compact-failed']
+            self.server.compactions += 1
+        else:
+            assert sorted(t['function']['name'] for t in body['tools']) == ['bash', 'edit', 'read', 'write']
+            assert body['max_tokens'] == 8192, 'Configured output limit was ignored'
+        assert self.headers.get('Authorization') in [None, 'Bearer tokate-no-auth'], 'Configured credentials escaped'
         text = json.dumps(body)
         assert 'PRIVATE_CREDENTIAL_SENTINEL' not in text
         assert 'HOSTILE_CONTEXT_SENTINEL' not in text
@@ -79,7 +86,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for message in body['messages']:
             if message['role'] == 'tool':
                 assert 'tokate-no-auth' not in str(message.get('content', '')), 'File tool exposed private model settings'
-        if self.server.case == 'failed':
+        if self.server.case == 'failed' or (compacting and self.server.case == 'compact-failed'):
             self.send_response(503)
             self.end_headers()
             return
@@ -121,7 +128,12 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
         elif self.server.case == 'off':
             planned += [('read', {'path': path}) for path in ['race-leaf', 'race-dir/models.json'] * 4]
             planned += [('write', {'path': 'race-leaf', 'content': 'synthetic-safe-update'})]
-        if self.server.case == 'incomplete':
+        if self.server.case in ['compact', 'compact-failed']:
+            planned[0][1]['content'] = 'synthetic padding ' * 6000 + 'before'
+        final = not compacting and turn >= len(planned)
+        if compacting:
+            chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Synthetic compacted task state.'}, 'finish_reason': 'stop'}]}
+        elif self.server.case == 'incomplete':
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Incomplete'}, 'finish_reason': 'length'}]}
         elif self.server.case == 'empty':
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': ''}, 'finish_reason': 'stop'}]}
@@ -138,18 +150,24 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
                 if message['role'] == 'tool' and 'BOUNDARY_FAILURE' in str(message.get('content', '')):
                     raise AssertionError('Execution boundary failed: ' + str(message.get('content', ''))[:2000])
             chunk = {'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'Changes: synthetic edits. Verification: constrained tools. Limitations: no inference.'}, 'finish_reason': 'stop'}]}
-        chunk.update(id=f'completion-{turn}', object='chat.completion.chunk', created=1, model='synthetic/model:exact', usage={'prompt_tokens': 10, 'completion_tokens': 5, 'total_tokens': 15})
+        tokens = 60000 if final and self.server.case in ['compact', 'compact-failed'] else 10
+        self.server.input_tokens += tokens
+        self.server.output_tokens += 5
+        chunk.update(id=f'completion-{turn}', object='chat.completion.chunk', created=1, model='synthetic/model:exact', usage={'prompt_tokens': tokens, 'completion_tokens': 5, 'total_tokens': tokens + 5})
         self.wfile.write(('data: ' + json.dumps(chunk) + '\n\ndata: [DONE]\n\n').encode())
         self.close_connection = True
 
 with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    for case in ['off', 'on', 'failed', 'malformed', 'incomplete', 'empty', 'cancel']:
+    for case in ['off', 'on', 'compact', 'compact-failed', 'failed', 'malformed', 'incomplete', 'empty', 'cancel']:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
             server.root = root
             server.calls = 0
+            server.compactions = 0
+            server.input_tokens = 0
+            server.output_tokens = 0
             server.case = case
             server.stop_race = threading.Event()
             server.racer = None
@@ -204,7 +222,15 @@ with Server(('127.0.0.1', 0), Handler) as server:
                     if server.racer:
                         server.racer.join(timeout=5)
                 assert result.returncode == 0, f'{case}: {result.stdout}\n{result.stderr}'
-                if case not in ['off', 'on']:
+                if case in ['compact', 'compact-failed']:
+                    assert server.compactions > 0, 'Pi did not compact its configured context'
+                elif case not in ['off', 'on']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
+                saved = json.loads((root / 'result.json').read_text())
+                if case in ['off', 'on', 'compact']:
+                    assert saved['usage']['input_tokens'] == server.input_tokens, 'Usage omitted context compaction'
+                    assert saved['usage']['output_tokens'] == server.output_tokens, 'Usage omitted context compaction'
+                if case == 'incomplete':
+                    assert 'length limit' in saved['error'], 'Truncation reason was not surfaced'
             print('PASS native Pi workflow ' + case, flush=True)
     server.shutdown()
