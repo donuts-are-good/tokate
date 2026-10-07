@@ -599,13 +599,31 @@ internal partial class CoordinationFlow : CoordinationFixture {
     internal func InterruptedVerification() {
         Flow.VerificationPolicy(
             "mkdir build-output; printf generated > build-output/data; printf synthetic-prior-check",
-            second: "test -s build-output/data; printf 'synthetic-%s-prefix' external; printf 'synthetic-%s-error' external >&2; sleep 3"
+            second: "test -s build-output/data; printf 'synthetic-%s-prefix' external; printf 'synthetic-%s-error' external >&2; if test \"$$(cat result.txt)\" = failed; then exit 7; fi; sleep 3"
         )
         Flow.Approve()
         let claim = Claim()
         let run = Prepare(seconds: "1")
         let commit = Candidate(claim)
-        let failure = Flow.Call([]string{"external", "--run", run, "--commit", commit, "--json"}, 1)
+        let summary = Path.Combine(Flow.Temp.Root, "summary.json")
+        File.WriteAllText(
+            summary,
+            Check.Map(
+                "head",
+                commit,
+                "changes",
+                Check.Json("[\"Add an external result.\"]"),
+                "verification",
+                Check.Json("[]"),
+                "limitations",
+                Check.Json("[]")
+            )
+                .ToJsonString()
+        )
+        let failure = Flow.Call(
+            []string{"external", "--run", run, "--commit", commit, "--summary", summary, "--json"},
+            1
+        )
         Check.That(!(failure.Output + failure.Error).Contains("synthetic-external"), "Raw external output escaped")
         Check.That(
             Check.Text(Check.Json(failure.Output)["error"]?["code"]) == "verification_failed",
@@ -633,6 +651,195 @@ internal partial class CoordinationFlow : CoordinationFixture {
             "Interrupted external build output retained"
         )
         Flow.NoPr()
+        Flow.NoInference()
+        let work = Path.Combine(Flow.Temp.Root, "donor-work")
+        File.WriteAllText(Path.Combine(work, "result.txt"), "failed\n")
+        Flow.Git("-C", work, "add", "result.txt")
+        Flow.Git(
+            "-C",
+            work,
+            "-c",
+            "user.name=Donor",
+            "-c",
+            "user.email=donor@example.test",
+            "commit",
+            "-m",
+            "External correction"
+        )
+        let second = Flow.Git("-C", work, "rev-parse", "HEAD")
+        let branch = "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
+        Flow.Git("-C", work, "push", Path.Combine(Flow.Bin, "fork"), branch)
+        let tools = Check.Json(File.ReadAllText(Tools)).AsArray()
+        tools.Add(
+            Check.Json(
+                "{\"provider\":\"openai\",\"harness\":\"codex\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"usage\":null,\"coding_seconds\":null}"
+            )
+        )
+        File.WriteAllText(Tools, tools.ToJsonString())
+        let retry = []string{"external", "--run", run, "--commit", second, "--seconds", "30", "--tools", Tools}
+        let verificationPath = Path.Combine(run, "verification.json")
+        let recorded = File.ReadAllText(verificationPath)
+        let history = Path.Combine(run, "external-history", commit)
+        using let baseline = FixtureSnapshot(Flow.Temp.Root)
+        for mutation in[]string{"all-pass", "command", "mismatch"} {
+            baseline.Restore()
+            let changed = Check.Json(evidence)
+            let check = changed["verification"]?[1] ?? throw Exception("Missing failed check")
+            switch mutation {
+                case "all-pass" {
+                    check["state"] = JsonValue.Create("completed")
+                    check["exit_code"] = JsonValue.Create(0)
+                }
+                case "command" {
+                    check["command"] = Check.Json("[\"/bin/true\"]")
+                }
+                case "mismatch" {
+                    check["failure"] = JsonValue.Create("different")
+                }
+            }
+            File.WriteAllText(savedPath, changed.ToJsonString())
+            if mutation != "mismatch" {
+                File.WriteAllText(verificationPath, changed["verification"]?.ToJsonString())
+            }
+            let before = File.ReadAllText(savedPath)
+            Flow.Call(retry, 1)
+            Check.That(
+                File.ReadAllText(savedPath) == before && !Directory.Exists(history),
+                "Invalid failure started correction"
+            )
+        }
+        baseline.Restore()
+        let journal = Path.Combine(run, "request.json.posting.json")
+        File.CreateSymbolicLink(journal, summary)
+        Flow.Call(retry, 1)
+        Check.That(File.ReadAllText(savedPath) == evidence, "Publication journal replaced failed evidence")
+        File.Delete(journal)
+        File.Delete(verificationPath)
+        File.CreateSymbolicLink(verificationPath, summary)
+        Flow.Call(retry, 1)
+        Check.That(!Directory.Exists(history), "Linked verification record started correction")
+        baseline.Restore()
+        for missing in[]string{"seconds", "tools"} {
+            let args = List[string]{"external", "--run", run, "--commit", second}
+            args.AddRange(missing == "seconds" ? []string{"--tools", Tools}: []string{"--seconds", "30"})
+            Flow.Call(args.ToArray(), 1)
+        }
+        File.WriteAllText(Tools, "[]")
+        Flow.Call(retry, 1)
+        Check.That(File.ReadAllText(savedPath) == evidence, "Missing declarations or budget replaced failed evidence")
+        baseline.Restore()
+        Directory.CreateDirectory(history + ".tmp")
+        Flow.Call(retry, 1)
+        Check.That(File.ReadAllText(savedPath) == evidence, "Partial capture was silently repaired")
+        baseline.Restore()
+        let between = Check.Json(evidence)
+        between["verification"]?.AsArray().RemoveAt(1)
+        between["error"] = JsonValue.Create("Verification budget exhausted")
+        File.WriteAllText(savedPath, between.ToJsonString())
+        File.WriteAllText(verificationPath, between["verification"]?.ToJsonString())
+        Flow.Call(retry, 1)
+        Check.That(Directory.Exists(history), "Between-command deadline could not be corrected")
+        baseline.Restore()
+        Flow.Call(retry, 1)
+        let archived = Path.Combine(history, "original-evidence")
+        Check.That(File.ReadAllText(Path.Combine(archived, "run.json")) == evidence, "Original failed run changed")
+        Check.That(File.ReadAllText(Path.Combine(archived, "verification.json")) == recorded, "Original checks changed")
+        for check in saved["verification"]?.AsArray() ?? throw Exception("Missing original checks") {
+            for field in[]string{"output_file", "error_file"} {
+                let path = Check.Text(check[field])
+                Check.That(
+                    File.ReadAllText(Path.Combine(archived, path)) == File.ReadAllText(Path.Combine(run, path)),
+                    "Original output changed"
+                )
+            }
+        }
+        Check.That(
+            Flow.Git("-C", Path.Combine(history, "checkout"), "rev-parse", "HEAD") == commit,
+            "Original checkout lost"
+        )
+        let failedAgain = Check.Json(File.ReadAllText(savedPath))
+        Check.That(
+            Check.Text(failedAgain["verification"]?[1]?["exit_code"]) == "7",
+            "New failure lost actual exit code"
+        )
+        Check.That(
+            Check.Text(failedAgain["seconds"]) == "1" && Check.Text(failedAgain["verification_seconds"]) == "30",
+            "Correction overwrote original budget"
+        )
+        Check.That(
+            failedAgain["public_summary"] == nil && failedAgain["verification_provenance"] == nil,
+            "Correction reused old provenance"
+        )
+        Check.That(
+            failedAgain["tools"]?.ToJsonString() == tools.ToJsonString(),
+            "Correction lost cumulative tool declarations"
+        )
+        File.WriteAllText(Path.Combine(work, "result.txt"), "corrected\n")
+        Flow.Git("-C", work, "add", "result.txt")
+        Flow.Git(
+            "-C",
+            work,
+            "-c",
+            "user.name=Donor",
+            "-c",
+            "user.email=donor@example.test",
+            "commit",
+            "-m",
+            "Correct external result"
+        )
+        let final = Flow.Git("-C", work, "rev-parse", "HEAD")
+        Flow.Git("-C", work, "push", Path.Combine(Flow.Bin, "fork"), branch)
+        let finalArgs = []string{"external", "--run", run, "--commit", final, "--seconds", "30", "--tools", Tools}
+        let unchanged = File.ReadAllText(savedPath)
+        Check.Contains(Flow.Call(finalArgs, 1).Error, "must append at least one tool declaration")
+        Check.That(File.ReadAllText(savedPath) == unchanged, "Equal tool count replaced failed evidence")
+        tools.Add(tools[2]?.DeepClone())
+        File.WriteAllText(Tools, tools.ToJsonString())
+        for head in[]string{commit, second} {
+            Flow.Call([]string{"external", "--run", run, "--commit", head, "--seconds", "30", "--tools", Tools}, 1)
+        }
+        using let failedBaseline = FixtureSnapshot(Flow.Temp.Root)
+        for missing in[]bool{false, true} {
+            failedBaseline.Restore()
+            if missing {
+                Directory.Delete(history, true)
+            } else {
+                File.AppendAllText(Path.Combine(archived, "run.json"), " ")
+            }
+            let before = File.ReadAllText(savedPath)
+            Flow.Call(finalArgs, 1)
+            Flow.Call([]string{"submit", "--run", run}, 1)
+            Check.That(File.ReadAllText(savedPath) == before, "Damaged history was silently repaired")
+            Flow.NoPr()
+        }
+        failedBaseline.Restore()
+        Flow.Call(finalArgs)
+        let completed = Check.Json(File.ReadAllText(savedPath))
+        Check.That(
+            Check.Text(completed["state"]) == "generated" && Check.Text(completed["commit"]) == final,
+            "New external head did not verify"
+        )
+        Check.That(
+            completed["public_summary"] == nil && completed["failure_stage"] == nil,
+            "Successful correction kept stale evidence"
+        )
+        Check.That(
+            Check.Text(completed["tools"]?[0]?["effort"]) == "unknown" &&
+                completed["tools"]?[0]?["usage"] == nil &&
+                completed["tools"]?[0]?["coding_seconds"] == nil,
+            "Unknown original attribution changed"
+        )
+        Flow.NoPr()
+        Flow.Call([]string{"submit", "--run", run})
+        Flow.Reload()
+        let request = Check.PostedRequest(Flow.State)
+        Check.That(Check.Text(request["metadata"]?["head"]) == final, "Submission reused failed head")
+        Check.That(
+            Check.Text(request["metadata"]?["source"]) == "external" && request["metadata"]?["correction"] == nil,
+            "External correction changed publication protocol"
+        )
+        Coordinate(Event(request))
+        Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.NoInference()
     }
 
