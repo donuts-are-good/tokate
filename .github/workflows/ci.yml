@@ -47,7 +47,7 @@ jobs:
           prefix="$RUNNER_TEMP/tokate-harnesses"
           mkdir -p "$prefix/home"
           env -i HOME="$prefix/home" PATH="$PATH" LANG=C.UTF-8 npm install --global --prefix "$prefix" @openai/codex@latest @earendil-works/pi-coding-agent@latest
-          native=$(rg --files --hidden --no-ignore "$prefix/lib/node_modules/@openai/codex" | rg '/vendor/x86_64-unknown-linux-musl/bin/codex$')
+          native=$(find "$prefix/lib/node_modules/@openai/codex" -type f -path '*/vendor/x86_64-unknown-linux-musl/bin/codex')
           test -f "$native"
           node_path=$(command -v node)
           node_version=$("$node_path" --version)
