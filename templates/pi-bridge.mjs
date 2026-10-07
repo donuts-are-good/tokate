@@ -146,6 +146,8 @@ const { session, modelFallbackMessage } = await sdk.createAgentSession({ cwd, ag
 try {
     if (typeof session.getToolDefinition !== 'function' || typeof session.getActiveToolNames !== 'function' ||
         typeof session.getSessionStats !== 'function' || typeof session.setAutoCompactionEnabled !== 'function' ||
+        typeof session.steer !== 'function' || typeof session.agent?.finishTurn !== 'function' ||
+        typeof session.agent?.prepareRequest !== 'function' ||
         session.getActiveToolNames().sort().join(',') !== 'bash,edit,read,write' ||
         customTools.some(tool => session.getToolDefinition(tool.name) !== tool)) throw new Error('Unconstrained execution surface');
     if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local') throw new Error('Pi substituted selection');
@@ -166,9 +168,8 @@ try {
         if (result.exitCode !== 0) throw new Error('Nested shell isolation failed');
         emit({ type: 'pi.probe', version: sdk.VERSION, node: process.version });
     } else if (mode === 'run') {
-        if (!['true', 'false'].includes(continueTruncated) || typeof session.steer !== 'function' ||
-            typeof session.agent?.finishTurn !== 'function' || typeof session.agent?.prepareRequest !== 'function') {
-            throw new Error('Unsupported bounded continuation interface');
+        if (!['true', 'false'].includes(continueTruncated)) {
+            throw new Error('Invalid continuation allowance');
         }
         const lengthContinuationLimit = continueTruncated === 'true' ? 1 : 0;
         let bytes = 0;
