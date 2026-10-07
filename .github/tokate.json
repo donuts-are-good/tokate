@@ -5,6 +5,9 @@
       "high",
       "xhigh"
     ],
+    "gpt-6-astra": [
+      "xhigh"
+    ],
     "glm-5.3-flash": [
       "absent"
     ]
