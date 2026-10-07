@@ -19,21 +19,35 @@ internal class ApprovalBase {
             return RepositoryIdentity.Branch(fallback)
         }
 
-        internal func Check(repo string, approval JsonElement, version int32, quiet bool = false) ValueTuple[
-            Policy,
-            string
-        ] {
-            let branch = J.Text(GitHub.Api("repos/" + repo), "default_branch")
+        internal func Check(
+            repo string,
+            approval JsonElement,
+            version int32,
+            quiet bool = false,
+            snapshot ValueTuple[string, string, Policy]? = nil
+        ) ValueTuple[Policy, string] {
+            let branch = if let saved = snapshot {
+                saved.Item1
+            } else {
+                J.Text(GitHub.Api("repos/" + repo), "default_branch")
+            }
             let selected = J.Get(approval, "authority_branch").ValueKind != JsonValueKind.Undefined
             let authority = selected ? J.Text(approval, "authority_branch"): J.Text(approval, "base_branch")
             if branch != authority {
                 throw CliFailure("stale_approval", "Repository authority branch changed. The owner must approve again.")
             }
-            let current = selected ? GitHub.Branch(repo, branch): J.Text(
-                GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(branch)),
-                "sha"
-            )
-            let policy = Policy.Load(repo, current)
+            let current = if let saved = snapshot {
+                saved.Item2
+            } else if selected {
+                GitHub.Branch(repo, branch)
+            } else {
+                J.Text(GitHub.Api("repos/" + repo + "/commits/" + Uri.EscapeDataString(branch)), "sha")
+            }
+            let policy = if let saved = snapshot {
+                saved.Item3
+            } else {
+                Policy.Load(repo, current)
+            }
             let template = PrBody.Template(repo, current, policy)
             if (version == 2 && J.Number(policy.Value, "version") != 2) || policy.Digest != J.Text(
                 approval,
