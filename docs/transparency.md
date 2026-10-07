@@ -8,7 +8,7 @@ with links to the source.
 ## Current harness discovery and settings
 
 Managed execution supports native Codex with a ChatGPT login and version-2
-[Pi local execution](pi.md) with a pinned SDK/runtime and an existing no-auth
+[Pi local execution](pi.md) with a compatible installed SDK/runtime and an existing no-auth
 loopback endpoint. Donors select exact tools and models; Codex also supports
 explicitly saved Tokate-owned defaults. Pi requires explicit selection and
 `absent` effort. Its guide covers runtime discovery, isolation and evidence limits.
@@ -22,7 +22,7 @@ explicitly saved Tokate-owned defaults. Pi requires explicit selection and
   `PATH` directories (or at the independent verifier's pinned system location),
   and executes version checks before actions. Help, completion, version, local
   status, defaults and init do not probe unrelated tools or authentication.
-  Tokate does not recursively search homes or open harness configuration files.
+  Tokate does not recursively search homes or collect harness configuration files.
 - `tokate doctor --owner|--managed|--external` checks only the selected role's
   tools; managed diagnostics cover Codex, not Pi readiness. No flags retains
   the local Codex probe without login. Managed and
@@ -84,9 +84,9 @@ Source: [install.sh](../site/install.sh), [Installation.gs](../src/Cli/Installat
 
 GitHub operations use the donor's or owner's installed GitHub CLI. Git publishing
 delegates authentication to `gh auth git-credential`. Codex authenticates its own
-inference requests. Managed Pi imports no user authentication or settings; see its
-[SDK boundary](pi.md). Tokate does not copy credentials into task prompts,
-receipts or a shared account.
+inference requests. Pi supplies configured model limits through its SDK without
+loading authentication; see its [SDK boundary](pi.md). Tokate does not copy credentials
+into task prompts, receipts or a shared account.
 
 Automated version-1 approval/reassignment and all version-2 coordination-state
 commits explicitly set both author and committer to `Tokate` with
