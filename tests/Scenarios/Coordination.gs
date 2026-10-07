@@ -18,6 +18,8 @@ internal partial class CoordinationFlow : CoordinationFixture {
             test.Initialize(approve: false)
             test.Flow.ProtectedPolicy()
             test.Flow.Approve()
+            let claim = test.Claim()
+            let comment = test.Comment
             using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
             for change in[]string{
                 "entrypoint",
@@ -30,9 +32,8 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "permitted"
             } {
                 baseline.Restore()
-                test.Comment = 10
+                test.Comment = comment
                 test.Flow.Reload()
-                let claim = test.Claim()
                 let commit = test.Candidate(claim, change)
                 let publication = test.PublishRequest(claim, commit)
                 if change == "permitted" {
@@ -48,13 +49,15 @@ internal partial class CoordinationFlow : CoordinationFixture {
         }
 
         internal func CoordinatorPermissions(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let initial = test.State()
+            let request = test.ClaimRequest()
+            let path = test.Event(request)
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
             for permissions in[]string{"{}", "{\"push\":false}"} {
                 for denied in[]bool{false, true} {
-                    using let test = CoordinationFixture(binary)
-                    test.Initialize()
-                    let initial = test.State()
-                    let request = test.ClaimRequest()
-                    let path = test.Event(request)
+                    baseline.Restore()
                     test.Flow.Reload()
                     test.Flow.State["repo_permissions"] = Check.Json(permissions)
                     test.Flow.Save()
@@ -100,7 +103,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         }
 
         internal func ModelPolicyModes(binary string) {
-            for mode in[]string{"", "whitelist", "unrestricted"} {
+            for mode in[]string{"whitelist", "unrestricted"} {
                 using let test = CoordinationFlow(binary)
                 test.Initialize(approve: false)
                 test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")

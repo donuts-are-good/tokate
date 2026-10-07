@@ -154,13 +154,16 @@ internal class EligibilityChecks {
         }
 
         private func Authority(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize(approve: false)
+            Setup(test, "open")
+            Claim(test)
+            let run = test.Prepare("tokate")
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
             for fault in[]string{"missing", "unavailable", "repo", "actor", "malformed", "task", "policy"} {
-                using let test = CoordinationFixture(binary)
-                test.Initialize(approve: false)
-                Setup(test, "open")
-                Claim(test)
-                let run = test.Prepare("tokate")
-                let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+                baseline.Restore()
+                test.Flow.Reload()
                 if fault == "missing" {
                     test.Flow.Git("-C", test.Flow.Upstream, "update-ref", "-d", "refs/heads/tokate/access")
                 } else if fault == "malformed" {
