@@ -403,22 +403,11 @@ internal class OverlapChecks {
         }
 
         private func Files(binary string, version int32) {
-            for layout in[]string{"overlap", "disjoint", "rename", "targets", "synchronized"} {
-                let synchronized = layout == "synchronized"
-                var candidateLayout = layout
-                if synchronized {
-                    candidateLayout = version == 1 ? "disjoint": "overlap"
-                }
-                using let test = OverlapFlow.Create(binary, version, candidateLayout)
-                let upstream = synchronized ? test.Synchronize(): ""
-                if synchronized {
-                    File.WriteAllText(Path.Combine(test.Flow.Upstream, "later.txt"), "Later target change\n")
-                    test.Flow.Commit("Target advanced after synchronization")
-                }
-                let target = test.Flow.Git("-C", test.Flow.Upstream, "rev-parse", "HEAD")
+            for layout in[]string{"overlap", "disjoint", "rename", "targets"} {
+                using let test = OverlapFlow.Create(binary, version, layout)
                 let data = test.Report()["data"] ?? throw Exception("Missing report")
                 let pair = data["pairs"]?[0]
-                let expected = candidateLayout == "disjoint" ? "no_filename_overlap": (
+                let expected = layout == "disjoint" ? "no_filename_overlap": (
                     layout == "targets" ? "different_targets": "overlap"
                 )
                 Check.That(
@@ -435,13 +424,6 @@ internal class OverlapChecks {
                         "Rename endpoints lost"
                     )
                 }
-                if synchronized {
-                    Check.That(
-                        Check.Text(pair?["overlap_count"]) == (candidateLayout == "disjoint" ? "0": "1") &&
-                            (candidateLayout == "disjoint" || Check.Text(pair?["paths"]?[0]) == "result.txt"),
-                        "Synchronized upstream paths polluted donor overlap"
-                    )
-                }
                 for i in 0 ... 2 {
                     let item = data["contributions"]?[i]
                     Check.That(
@@ -453,9 +435,31 @@ internal class OverlapChecks {
                             Check.Text(item?["checks_head"]) == test.Heads[i],
                         "Revision binding lost"
                     )
-                    if synchronized {
+                }
+                if (version == 1 && layout == "disjoint") || (version == 2 && layout == "overlap") {
+                    let upstream = test.Synchronize()
+                    File.WriteAllText(Path.Combine(test.Flow.Upstream, "later.txt"), "Later target change\n")
+                    test.Flow.Commit("Target advanced after synchronization")
+                    let target = test.Flow.Git("-C", test.Flow.Upstream, "rev-parse", "HEAD")
+                    let synchronized = test.Report()["data"] ?? throw Exception("Missing synchronized report")
+                    let synchronizedPair = synchronized["pairs"]?[0]
+                    Check.That(
+                        Check.Text(synchronizedPair?["status"]) == expected && Check.Text(
+                            synchronizedPair?["overlap_count"]
+                        ) == (version == 1 ? "0": "1") &&
+                            (version == 1 || Check.Text(synchronizedPair?["paths"]?[0]) == "result.txt"),
+                        "Synchronized upstream paths polluted donor overlap"
+                    )
+                    for i in 0 ... 2 {
+                        let item = synchronized["contributions"]?[i]
                         Check.That(
-                            Check.Text(item?["diff_base"]) == upstream && Check.Text(
+                            Check.Text(item?["binding_status"]) == "validated" && Check.Text(
+                                item?["head"]
+                            ) == test.Heads[i] &&
+                                Check.Text(item?["checks_head"]) == test.Heads[i] && Check.Text(
+                                item?["binding"]?["base"]
+                            ) == test.Bases[i] &&
+                                Check.Text(item?["diff_base"]) == upstream && Check.Text(
                                 item?["target_revision"]
                             ) == target &&
                                 upstream != test.Bases[i] &&
@@ -463,6 +467,7 @@ internal class OverlapChecks {
                             "Synchronization confused approved, authorized and current target revisions"
                         )
                     }
+                    Console.WriteLine("PASS V" + version.ToString() + " synchronized overlap files: " + layout)
                 }
                 if layout == "overlap" {
                     let readable = test.Flow.Call([]string{"overlaps", "--repo", "owner/project", "--prs", "10,11"})
