@@ -390,6 +390,7 @@ internal class CommandTrafficChecks {
                 "initial-authority",
                 "approval-read",
                 "check-read",
+                "dependency-read",
                 "rate-limit",
                 "rate-reset",
                 "poll-delay"
@@ -397,11 +398,15 @@ internal class CommandTrafficChecks {
                 baseline.Restore()
                 flow.Reload()
                 let commit = Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"])
-                let path = kind == "initial-authority" ? "repos/owner/project/pulls/10":
-                (
-                    kind == "approval-read" ? "repos/owner/project/issues/1":
-                    "repos/owner/project/commits/" + commit + "/check-runs?per_page=100&page=1"
-                )
+                let path = switch kind {
+                    case "initial-authority": "repos/owner/project/pulls/10"
+                    case "approval-read": "repos/owner/project/issues/1"
+                    case "dependency-read": "repos/owner/project/issues/1/dependencies/blocked_by?per_page=100&page=1"
+                    default: "repos/owner/project/commits/" + commit + "/check-runs?per_page=100&page=1"
+                }
+                if kind == "dependency-read" {
+                    flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+                }
                 if kind == "poll-delay" {
                     flow.State["poll_interval"] = JsonValue.Create("10")
                 } else {
@@ -493,14 +498,49 @@ internal class CommandTrafficChecks {
                 ) == "pass",
                 "REST checks did not use the shared public projection"
             )
+            for kind in[]string{"open", "not_planned", "unavailable", "completed"} {
+                flow.Reload()
+                flow.State["dependency_pages"] = Check.Map(
+                    "1",
+                    JsonArray(
+                        JsonArray(
+                            Check.Map(
+                                "number",
+                                7,
+                                "url",
+                                "https://api.github.com/repos/other/project/issues/7",
+                                "state",
+                                kind == "open" ? "open": "closed",
+                                "state_reason",
+                                kind
+                            )
+                        )
+                    )
+                )
+                flow.Save()
+                flow.Faults(
+                    kind == "unavailable" ? "repos/owner/project/issues/1/dependencies/blocked_by?per_page=100&page=1": "",
+                    Check.Json("[{\"status\":404}]")
+                )
+                Check.Envelope(
+                    flow.Call(
+                        kind == "open" || kind == "not_planned" ?
+                        []string{"checks", "--repo", "owner/project", "--pr", "10", "--json"}:
+                        []string{"checks", "--run", run, "--json"},
+                        kind == "completed" ? 0: 1
+                    ),
+                    "checks",
+                    kind == "completed" ? "ok": "error",
+                    kind == "completed" ? "": "invalid_state"
+                )
+            }
+            flow.Reload()
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"fail\"}]")
             flow.Save()
-            Check.Envelope(
-                flow.Call([]string{"checks", "--run", run, "--json"}, 1),
-                "checks",
-                "error",
-                "verification_failed"
-            )
+            flow.ResetTraffic()
+            let failed = flow.Call([]string{"checks", "--run", run, "--json"}, 1, traffic: true)
+            Check.Envelope(failed, "checks", "error", "verification_failed")
+            Budgets(flow, failed, 21, 0, 0, 10)
         }
 
         private func WatchTraffic(binary string) {
@@ -520,7 +560,7 @@ internal class CommandTrafficChecks {
             flow.Save()
             flow.ResetTraffic()
             let result = Watch(flow, run, "10", 0)
-            Budgets(flow, result, 63, 0, 0, 51)
+            Budgets(flow, result, 64, 0, 0, 51)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
             let observations = flow.State["check_state_times"]
@@ -534,7 +574,7 @@ internal class CommandTrafficChecks {
             flow.State["check_polls"] = JsonValue.Create(0)
             flow.Save()
             flow.ResetTraffic()
-            Budgets(flow, Watch(flow, run, "10", 0, true), 63, 0, 0, 51)
+            Budgets(flow, Watch(flow, run, "10", 0, true), 64, 0, 0, 51)
         }
 
         private func WatchChanges(binary string) {
@@ -551,7 +591,7 @@ internal class CommandTrafficChecks {
                     flow.ResetTraffic()
                     let result = Watch(flow, run, "5", 1, direct)
                     Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                    Budgets(flow, result, kind == "head" ? 13: 14, 0, 0, kind == "head" ? 1: 2)
+                    Budgets(flow, result, kind == "head" ? 14: 15, 0, 0, kind == "head" ? 1: 2)
                 }
             }
         }

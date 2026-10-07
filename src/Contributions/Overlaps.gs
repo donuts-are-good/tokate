@@ -166,6 +166,7 @@ internal class Overlaps {
         internal func RequireDependencies(repo string, issue int32) {
             let facts = Dictionary[string, Object?]()
             Dependencies(repo, issue, facts)
+            ApiTransport.CheckDeadline()
             if facts["dependencies_status"]?.ToString() != "complete" ||
                 facts["dependency_gate"]?.ToString() != "no_open_dependencies" {
                 throw CliFailure("invalid_state", "Dependency evidence is blocked, incomplete or requires owner review")

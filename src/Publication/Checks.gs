@@ -63,6 +63,9 @@ internal class Checks {
                         pending = true
                     }
                 }
+                if !failed && !pending {
+                    Overlaps.RequireDependencies(verified.Text("repo"), verified.Number("issue"))
+                }
                 let live = ReceiptVerification.Verify(run.Text("repo"), run.Number("pr"))
                 if live.Text("commit") != run.Text("commit") {
                     throw Exception("PR authority changed while reading checks")
