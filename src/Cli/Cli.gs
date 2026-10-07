@@ -238,9 +238,9 @@ internal class Cli {
                 "defaults",
                 "profile,harness,provider,model,effort,endpoint,pi-root,node",
                 "",
-                "Set, read, list or remove local nonsecret donor choices; no discovery or inference.",
-                "set [--profile NAME] --harness HARNESS --provider PROVIDER --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
-                "defaults set --harness codex --provider openai --model gpt-6.1-sol --effort high",
+                "Local nonsecret donor choices; set infers known harness/provider pairs, default codex/openai; no discovery or inference.",
+                "set [--profile NAME] --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
+                "defaults set --model gpt-6.1-sol --effort high",
                 effects: "local_read local_write"
             ),
             CliCommand(
@@ -593,12 +593,7 @@ internal class Cli {
                         modes.Add(
                             map[string, Object?]{
                                 "name": mode,
-                                "required_inputs": mode == "set" ? []string{
-                                    "harness",
-                                    "provider",
-                                    "model",
-                                    "effort"
-                                }: []string{},
+                                "required_inputs": mode == "set" ? []string{"model", "effort"}: []string{},
                                 "effects": map[string, Object?]{
                                     "local_read": true,
                                     "local_write": mode == "set" || mode == "remove",
@@ -891,6 +886,9 @@ internal class Cli {
                 }
                 if args.Subject == "list" && args.Get("profile") != "" {
                     throw Exception("defaults list does not take --profile")
+                }
+                if args.Subject == "set" {
+                    DonorDefaults.NormalizePair(args)
                 }
                 for key in[]string{"harness", "provider", "model", "effort", "endpoint", "pi-root", "node"} {
                     if args.Subject == "set" {

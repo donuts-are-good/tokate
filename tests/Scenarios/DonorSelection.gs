@@ -529,25 +529,85 @@ internal class DonorSelectionChecks {
             let missing = Check.Envelope(flow.Call([]string{"defaults", "read", "--json"}), "defaults", "ok")
             Check.That(missing["data"]?["default"] == nil, "Missing JSON defaults fabricated")
             let saved = Check.Envelope(
+                flow.Call([]string{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high", "--json"}),
+                "defaults",
+                "ok"
+            )
+            Check.That(
+                Check.Text(saved["data"]?["default"]?["harness"]) == "codex" && Check.Text(
+                    saved["data"]?["default"]?["provider"]
+                ) == "openai" &&
+                    Check.Text(saved["data"]?["default"]?["model"]) == "gpt-6.1-sol" && Check.Text(
+                    saved["data"]?["default"]?["effort"]
+                ) == "high",
+                "Shorthand JSON defaults dropped the Codex tuple"
+            )
+            for pair in[][]string{
+                []string{"--harness=codex", "codex", "openai"},
+                []string{"--provider=openai", "codex", "openai"},
+                []string{"--harness=pi", "pi", "local-chat-completions"},
+                []string{"--provider=local-chat-completions", "pi", "local-chat-completions"}
+            } {
+                let args = List[string]{
+                    "defaults",
+                    "set",
+                    "--profile=inferred",
+                    pair[0],
+                    "--model=gpt-6.1-sol",
+                    pair[1] == "pi" ? "--effort=absent": "--effort=high",
+                    "--json"
+                }
+                if pair[1] == "pi" {
+                    args.Add("--endpoint=http://127.0.0.1:12345/v1")
+                }
+                let inferred = flow.Call(args.ToArray())
+                let choice = Check.Envelope(inferred, "defaults", "ok")["data"]?["default"]
+                Check.That(
+                    Check.Text(choice?["harness"]) == pair[1] && Check.Text(choice?["provider"]) == pair[2],
+                    "Defaults did not infer the missing known counterpart"
+                )
+                Check.That(!inferred.Output.Contains("127.0.0.1"), "Inferred Pi defaults exposed the endpoint")
+            }
+            let explicitPair = Check
+                .Envelope(
                 flow.Call(
                     []string{
                         "defaults",
                         "set",
-                        "--harness",
-                        "codex",
-                        "--provider",
-                        "openai",
-                        "--model",
-                        "gpt-6.1-sol",
-                        "--effort",
-                        "high",
+                        "--profile=explicit",
+                        "--harness=codex",
+                        "--provider=local-chat-completions",
+                        "--model=gpt-6.1-sol",
+                        "--effort=high",
                         "--json"
                     }
                 ),
                 "defaults",
                 "ok"
+            )["data"]?["default"]
+            Check.That(
+                Check.Text(explicitPair?["harness"]) == "codex" && Check.Text(
+                    explicitPair?["provider"]
+                ) == "local-chat-completions",
+                "Defaults replaced an explicit harness/provider pair"
             )
-            Check.That(Check.Text(saved["data"]?["default"]?["model"]) == "gpt-6.1-sol", "JSON defaults dropped tuple")
+            let original = File.ReadAllText(Settings(flow))
+            for rejected in[][]string{
+                []string{"--harness=claude", "--model=gpt-6.1-sol", "--effort=high"},
+                []string{"--provider=anthropic", "--model=gpt-6.1-sol", "--effort=high"},
+                []string{"--harness=pi", "--model=gpt-6.1-sol", "--effort=absent"},
+                []string{
+                    "--provider=local-chat-completions",
+                    "--model=gpt-6.1-sol",
+                    "--effort=high",
+                    "--endpoint=http://127.0.0.1:12345/v1"
+                }
+            } {
+                let args = List[string]{"defaults", "set", "--json"}
+                args.AddRange(rejected)
+                flow.Call(args.ToArray(), 1)
+                Check.That(File.ReadAllText(Settings(flow)) == original, "Rejected defaults changed saved preferences")
+            }
             flow.Temp.Env["PATH"] = path
             flow.Initialize()
             ExpandPolicy(flow)
