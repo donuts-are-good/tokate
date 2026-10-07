@@ -24,7 +24,7 @@ internal class DecreeFlow : IDisposable {
 
     internal func Initialize() {
         if let coordination = V2 {
-            coordination.Initialize()
+            coordination.Initialize(approve: false)
         } else {
             Flow.Initialize()
         }

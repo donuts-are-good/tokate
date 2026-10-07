@@ -82,9 +82,12 @@ internal class CommandTrafficChecks {
         }
 
         private func JournalSafety(binary string) {
+            using let flow = CoordinationFixture(binary)
+            flow.Initialize()
+            using let baseline = FixtureSnapshot(flow.Flow.Temp.Root)
             for kind in[]string{"link", "dangling", "existing", "partial", "race", "race-link"} {
-                using let flow = CoordinationFixture(binary)
-                flow.Initialize()
+                baseline.Restore()
+                flow.Flow.Reload()
                 let request = flow.ClaimRequest()
                 let path = Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")
                 let target = Path.Combine(flow.Flow.Temp.Root, "synthetic-journal-target")
@@ -190,6 +193,9 @@ internal class CommandTrafficChecks {
         }
 
         private func LostRequest(binary string) {
+            using let flow = CoordinationFixture(binary)
+            flow.Initialize()
+            using let baseline = FixtureSnapshot(flow.Flow.Temp.Root)
             for mode in[]string{
                 "lost_request_response",
                 "request_fail_after_write",
@@ -197,8 +203,8 @@ internal class CommandTrafficChecks {
                 "request_fail_before_write",
                 "request_ambiguous_after_write"
             } {
-                using let flow = CoordinationFixture(binary)
-                flow.Initialize()
+                baseline.Restore()
+                flow.Flow.Reload()
                 let request = flow.ClaimRequest()
                 flow.Flow.Mode(mode)
                 flow.Flow.ResetTraffic()

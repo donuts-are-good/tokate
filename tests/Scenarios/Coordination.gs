@@ -12,6 +12,324 @@ internal partial class CoordinationFlow : CoordinationFixture {
         internal func Concurrent(binary string, path string, env Dictionary[string, string], output Chan[Result]) {
             output <- TestProcess.Run(binary, []string{"coordinate", "--repo", "owner/project", "--event", path}, env)
         }
+
+        internal func ProtectedCoordinator(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize(approve: false)
+            test.Flow.ProtectedPolicy()
+            test.Flow.Approve()
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
+            for change in[]string{
+                "entrypoint",
+                "rename-out",
+                "rename-in",
+                "directory-node",
+                "mode",
+                "type",
+                "newline",
+                "permitted"
+            } {
+                baseline.Restore()
+                test.Comment = 10
+                test.Flow.Reload()
+                let claim = test.Claim()
+                let commit = test.Candidate(claim, change)
+                let publication = test.PublishRequest(claim, commit)
+                if change == "permitted" {
+                    test.Coordinate(test.Event(publication))
+                    test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                } else {
+                    Check.Contains(test.Coordinate(test.Event(publication), 1).Error, "protected owner path")
+                    test.Flow.NoPr()
+                    Check.That(test.State()["state"]?["contribution"] == nil, "Protected contribution gained authority")
+                }
+                test.Flow.NoInference()
+            }
+        }
+
+        internal func CoordinatorPermissions(binary string) {
+            for permissions in[]string{"{}", "{\"push\":false}"} {
+                for denied in[]bool{false, true} {
+                    using let test = CoordinationFixture(binary)
+                    test.Initialize()
+                    let initial = test.State()
+                    let request = test.ClaimRequest()
+                    let path = test.Event(request)
+                    test.Flow.Reload()
+                    test.Flow.State["repo_permissions"] = Check.Json(permissions)
+                    test.Flow.Save()
+                    Check.Contains(
+                        test
+                            .Flow
+                            .Call(
+                            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+                            1,
+                            owner: true
+                        )
+                            .Error,
+                        "Repository write permission is required"
+                    )
+                    if denied {
+                        test.Flow.Faults(
+                            "repos/owner/project/git/refs/heads/tokate/contributions/1",
+                            Check.Json("[{\"status\":403}]")
+                        )
+                        Check.Contains(test.Coordinate(path, 1).Error, "No automatic retry was made")
+                        let state = test.State()
+                        Check.That(
+                            Check.Text(state["sha"]) == Check.Text(initial["sha"]) && state["state"]?.ToJsonString() ==
+                            initial["state"]?.ToJsonString(),
+                            "Denied state write changed authority or acquired a reservation"
+                        )
+                        test.Flow.Reload()
+                        Check.That(Check.Text(test.Flow.State["fault_index"]) == "1", "Denied state write was retried")
+                    } else {
+                        test.Coordinate(path)
+                        let state = test.State()
+                        Check.That(
+                            Check.Text(state["sha"]) != Check.Text(initial["sha"]) && Check.Text(
+                                state["state"]?["reservation"]?["reservation"]
+                            ) == Check.Text(request["uuid"]) && state["state"]?["outcomes"]?.AsArray().Count == 1,
+                            "Claim did not record a reservation without push permission metadata"
+                        )
+                    }
+                    test.Flow.NoInference()
+                    test.Flow.NoPr()
+                }
+            }
+        }
+
+        internal func ModelPolicyModes(binary string) {
+            for mode in[]string{"", "whitelist", "unrestricted"} {
+                using let test = CoordinationFlow(binary)
+                test.Initialize(approve: false)
+                test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")
+                test.Flow.Approve()
+                test.Claim()
+                let original = Check.Json(File.ReadAllText(test.Tools))
+                for index in 0 ... original.AsArray().Count {
+                    let changed = original.DeepClone()
+                    let tool = changed[index] ?? throw Exception("Missing declared tool")
+                    for field in[]string{"model", "effort", "harness", "provider"} {
+                        let value = tool[field]?.DeepClone()
+                        tool[field] = JsonValue.Create(field == "effort" ? "invalid": "unlisted-value")
+                        File.WriteAllText(test.Tools, changed.ToJsonString())
+                        if mode == "unrestricted" && field == "model" {
+                            continue
+                        }
+                        test.Prepare(code: 1)
+                        tool[field] = value
+                    }
+                }
+                File.WriteAllText(test.Tools, original.ToJsonString())
+                let fork = Path.Combine(test.Flow.Bin, "fork")
+                let branches = test.Flow.Git("-C", fork, "show-ref", "--heads")
+                for network in[]bool{false, true} {
+                    test.Prepare(code: 1, seconds: network ? "30": "3601", network: network)
+                    Check.That(
+                        !Directory.Exists(Path.Combine(test.Flow.Temp.Root, "runs")),
+                        "Forbidden budget or network access created a saved run"
+                    )
+                    test.Flow.Reload()
+                    Check.That(
+                        test.Flow.State["fork_creations"] == nil && test.Flow.Git(
+                            "-C",
+                            fork,
+                            "show-ref",
+                            "--heads"
+                        ) == branches,
+                        "Forbidden budget or network access created a fork or changed a branch"
+                    )
+                }
+                test.Prepare("tokate", 1)
+                if mode == "unrestricted" {
+                    let first = original[0] ?? throw Exception("Missing first tool")
+                    let second = original[1] ?? throw Exception("Missing second tool")
+                    first["model"] = JsonValue.Create("unlisted-claude-model")
+                    second["model"] = JsonValue.Create("unlisted-codex-model")
+                    File.WriteAllText(test.Tools, original.ToJsonString())
+                }
+                test.ExternalPublicationAfterClaim()
+            }
+        }
+
+        internal func EffortDeclarations(binary string) {
+            for mode in[]string{"", "whitelist", "unrestricted"} {
+                using let test = CoordinationFlow(binary)
+                test.Initialize(approve: false)
+                test.Flow.SetModelPolicy(
+                    mode,
+                    mode == "unrestricted" ? "{}":
+                    "{\"gpt-6.1-sol\":[\"high\",\"unknown\"],\"claude-sonnet-4-6\":[\"unknown\"]}"
+                )
+                test.Flow.Approve()
+                test.Claim()
+                let tool = Check.Json(
+                    "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"unknown\"}]"
+                )
+                let declaration = tool[0] ?? throw Exception("Missing tool")
+                File.WriteAllText(test.Tools, tool.ToJsonString())
+                test.Prepare("tokate", 1)
+                let run = test.Prepare()
+                let savedPath = Path.Combine(run, "run.json")
+                let saved = File.ReadAllText(savedPath)
+                Check.That(
+                    Check.Text(Check.Json(saved)["tools"]?[0]?["effort"]) == "unknown",
+                    "Legacy unknown was reinterpreted"
+                )
+                let changed = Check.Json(saved)
+                changed["source"] = JsonValue.Create("tokate")
+                changed["model"] = JsonValue.Create("gpt-6.1-sol")
+                changed["effort"] = JsonValue.Create("unknown")
+                File.WriteAllText(savedPath, changed.ToJsonString())
+                test.Flow.Call([]string{"work", "--run", run}, 1)
+                File.WriteAllText(savedPath, saved)
+                for effort in[]string{"absent", "", "null", "invalid", "high,xhigh"} {
+                    declaration["effort"] = effort == "null" ? nil: JsonValue.Create(effort)
+                    if effort == "" {
+                        declaration.AsObject().Remove("effort")
+                    }
+                    File.WriteAllText(test.Tools, tool.ToJsonString())
+                    test.Prepare("tokate", 1)
+                    if mode != "unrestricted" || effort != "absent" {
+                        test.Prepare(code: 1)
+                    }
+                }
+                test.Flow.NoInference()
+                Check.That(File.ReadAllText(savedPath) == saved, "Rejected effort changed legacy saved work")
+            }
+            for mode in[]string{"whitelist", "unrestricted"} {
+                using let test = CoordinationFlow(binary)
+                test.Initialize(approve: false)
+                test.Flow.SetModelPolicy(
+                    mode,
+                    mode == "unrestricted" ? "omit":
+                    "{\"gpt-6.1-sol\":[\"absent\"],\"claude-sonnet-4-6\":[\"unknown\",\"absent\"]}"
+                )
+                test.Flow.Approve()
+                test.Claim()
+                let tools = Check.Json(File.ReadAllText(test.Tools))
+                let declaration = tools[1] ?? throw Exception("Missing tool")
+                declaration["effort"] = JsonValue.Create("absent")
+                File.WriteAllText(test.Tools, tools.ToJsonString())
+                test.ExternalPublicationAfterClaim()
+            }
+        }
+
+        internal func ManagedModelPolicy(binary string) {
+            for mode in[]string{"whitelist", "unrestricted"} {
+                using let test = CoordinationFlow(binary)
+                test.Initialize(approve: false)
+                test.Flow.SetModelPolicy(
+                    mode,
+                    mode == "unrestricted" ? "{}":
+                    "{\"gpt-6-sol\":[\"high\",\"unknown\",\"absent\"]}"
+                )
+                test.Flow.Approve()
+                test.Claim()
+                let tools = Check.Json(
+                    "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6-sol\",\"effort\":\"absent\"}]"
+                )
+                let declaration = tools[0] ?? throw Exception("Missing tool")
+                File.WriteAllText(test.Tools, tools.ToJsonString())
+                test.Prepare("tokate", 1)
+                declaration["effort"] = JsonValue.Create("unknown")
+                File.WriteAllText(test.Tools, tools.ToJsonString())
+                test.Prepare("tokate", 1)
+                declaration["effort"] = JsonValue.Create("high")
+                File.WriteAllText(test.Tools, tools.ToJsonString())
+                let run = test.Prepare("tokate")
+                let path = Path.Combine(run, "run.json")
+                let original = File.ReadAllText(path)
+                let changed = Check.Json(original)
+                changed["effort"] = JsonValue.Create("absent")
+                let savedTool = changed["tools"]?[0] ?? throw Exception("Missing saved tool")
+                savedTool["effort"] = JsonValue.Create("absent")
+                File.WriteAllText(path, changed.ToJsonString())
+                test.Flow.Call([]string{"work", "--run", run}, 1)
+                test.Flow.NoInference()
+                File.WriteAllText(path, original)
+                test.Flow.Call([]string{"work", "--run", run})
+                test.Flow.Call([]string{"submit", "--run", run})
+                let request = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
+                let requestedTool = request["metadata"]?["tools"]?[0] ?? throw Exception("Missing requested tool")
+                requestedTool["effort"] = JsonValue.Create("absent")
+                test.Coordinate(test.Event(request), 1)
+                test.Flow.NoPr()
+                requestedTool["effort"] = JsonValue.Create("high")
+                test.Coordinate(test.Event(request))
+                test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                test.ReceiptRefusal(0, "effort", "absent")
+                test.Flow.Reload()
+                Check.That(
+                    Check.Text(test.Flow.State["requested_model"]) == "gpt-6-sol" && Check.Text(
+                        test.Flow.State["requested_effort"]
+                    ) == "model_reasoning_effort=\"high\"",
+                    "Managed declaration silently changed"
+                )
+            }
+        }
+
+        internal func ModelPolicyAuthority(binary string) {
+            for mode in[]string{"whitelist", "unrestricted"} {
+                using let test = CoordinationFixture(binary)
+                test.Initialize()
+                test.Claim()
+                let run = test.Prepare()
+                let path = Path.Combine(run, "run.json")
+                let saved = File.ReadAllText(path)
+                let original = test.State()
+                test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")
+                Check.Contains(
+                    test.Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1).Error,
+                    "Repository policy or template changed. The owner must approve again."
+                )
+                Check.That(
+                    Check.Text(test.State()["sha"]) == Check.Text(original["sha"]),
+                    "Mode change rewrote existing approval or reservation"
+                )
+                test.Flow.Approve()
+                Check.That(File.ReadAllText(path) == saved, "Fresh approval converted saved work")
+                test.Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1)
+                test.Flow.NoInference()
+                test.Flow.NoPr()
+            }
+        }
+
+        internal func Compatibility(binary string) {
+            using let old = NativeFixture(binary)
+            old.Initialize()
+            old.Approve()
+            let run = old.Claim()
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            let approval = old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
+            let policyPath = Path.Combine(old.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            let models = policy["models"]?.ToJsonString() ?? ""
+            policy["version"] = JsonValue.Create(2)
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            old.Commit("Owner opts in to version 2")
+            old.Call([]string{"work", "--run", run}, 1)
+            old.Approve()
+            Check.That(
+                Check.Json(File.ReadAllText(policyPath))["models"]?.ToJsonString() == models &&
+                    Check.Json(File.ReadAllText(policyPath))["model_policy"] == nil,
+                "Version upgrade changed legacy whitelist restrictions"
+            )
+            Check.That(
+                old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1") == approval,
+                "Version-2 opt-in rewrote version-1 approval"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == saved,
+                "Opt-in reinterpreted or changed old saved work"
+            )
+            let state = Check.Json(old.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1"}).Output)
+            Check.That(state["state"]?["reservation"] == nil, "Old claim acquired implicit version-2 reservation")
+            old.Call([]string{"work", "--run", run}, 1)
+            old.NoInference()
+        }
     }
 
     internal init(binary string) : base(binary) { }
@@ -185,36 +503,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.Call([]string{"submit", "--run", run}, 1)
         Flow.NoPr()
         Flow.NoInference()
-    }
-
-    internal func ProtectedCoordinator() {
-        for change in[]string{
-            "entrypoint",
-            "rename-out",
-            "rename-in",
-            "directory-node",
-            "mode",
-            "type",
-            "newline",
-            "permitted"
-        } {
-            using let test = CoordinationFixture(Flow.Binary)
-            test.Initialize()
-            test.Flow.ProtectedPolicy()
-            test.Flow.Approve()
-            let claim = test.Claim()
-            let commit = test.Candidate(claim, change)
-            let publication = test.PublishRequest(claim, commit)
-            if change == "permitted" {
-                test.Coordinate(test.Event(publication))
-                test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-            } else {
-                Check.Contains(test.Coordinate(test.Event(publication), 1).Error, "protected owner path")
-                test.Flow.NoPr()
-                Check.That(test.State()["state"]?["contribution"] == nil, "Protected contribution gained authority")
-            }
-            test.Flow.NoInference()
-        }
     }
 
     internal func ProtectedManaged() {
@@ -532,58 +820,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.NoInference()
     }
 
-    internal func CoordinatorPermissions() {
-        for permissions in[]string{"{}", "{\"push\":false}"} {
-            for denied in[]bool{false, true} {
-                using let test = CoordinationFixture(Flow.Binary)
-                test.Initialize()
-                let initial = test.State()
-                let request = test.ClaimRequest()
-                let path = test.Event(request)
-                test.Flow.Reload()
-                test.Flow.State["repo_permissions"] = Check.Json(permissions)
-                test.Flow.Save()
-                Check.Contains(
-                    test
-                        .Flow
-                        .Call(
-                        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-                        1,
-                        owner: true
-                    )
-                        .Error,
-                    "Repository write permission is required"
-                )
-                if denied {
-                    test.Flow.Faults(
-                        "repos/owner/project/git/refs/heads/tokate/contributions/1",
-                        Check.Json("[{\"status\":403}]")
-                    )
-                    Check.Contains(test.Coordinate(path, 1).Error, "No automatic retry was made")
-                    let state = test.State()
-                    Check.That(
-                        Check.Text(state["sha"]) == Check.Text(initial["sha"]) && state["state"]?.ToJsonString() ==
-                        initial["state"]?.ToJsonString(),
-                        "Denied state write changed authority or acquired a reservation"
-                    )
-                    test.Flow.Reload()
-                    Check.That(Check.Text(test.Flow.State["fault_index"]) == "1", "Denied state write was retried")
-                } else {
-                    test.Coordinate(path)
-                    let state = test.State()
-                    Check.That(
-                        Check.Text(state["sha"]) != Check.Text(initial["sha"]) && Check.Text(
-                            state["state"]?["reservation"]?["reservation"]
-                        ) == Check.Text(request["uuid"]) && state["state"]?["outcomes"]?.AsArray().Count == 1,
-                        "Claim did not record a reservation without push permission metadata"
-                    )
-                }
-                test.Flow.NoInference()
-                test.Flow.NoPr()
-            }
-        }
-    }
-
     internal func InterruptedWrite() {
         let request = ClaimRequest()
         let path = Event(request)
@@ -736,60 +972,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.NoInference()
     }
 
-    internal func ModelPolicyModes() {
-        for mode in[]string{"", "whitelist", "unrestricted"} {
-            using let test = CoordinationFlow(Flow.Binary)
-            test.Initialize()
-            test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")
-            test.Flow.Approve()
-            test.Claim()
-            let original = Check.Json(File.ReadAllText(test.Tools))
-            for index in 0 ... original.AsArray().Count {
-                let changed = original.DeepClone()
-                let tool = changed[index] ?? throw Exception("Missing declared tool")
-                for field in[]string{"model", "effort", "harness", "provider"} {
-                    let value = tool[field]?.DeepClone()
-                    tool[field] = JsonValue.Create(field == "effort" ? "invalid": "unlisted-value")
-                    File.WriteAllText(test.Tools, changed.ToJsonString())
-                    if mode == "unrestricted" && field == "model" {
-                        continue
-                    }
-                    test.Prepare(code: 1)
-                    tool[field] = value
-                }
-            }
-            File.WriteAllText(test.Tools, original.ToJsonString())
-            let fork = Path.Combine(test.Flow.Bin, "fork")
-            let branches = test.Flow.Git("-C", fork, "show-ref", "--heads")
-            for network in[]bool{false, true} {
-                test.Prepare(code: 1, seconds: network ? "30": "3601", network: network)
-                Check.That(
-                    !Directory.Exists(Path.Combine(test.Flow.Temp.Root, "runs")),
-                    "Forbidden budget or network access created a saved run"
-                )
-                test.Flow.Reload()
-                Check.That(
-                    test.Flow.State["fork_creations"] == nil && test.Flow.Git(
-                        "-C",
-                        fork,
-                        "show-ref",
-                        "--heads"
-                    ) == branches,
-                    "Forbidden budget or network access created a fork or changed a branch"
-                )
-            }
-            test.Prepare("tokate", 1)
-            if mode == "unrestricted" {
-                let first = original[0] ?? throw Exception("Missing first tool")
-                let second = original[1] ?? throw Exception("Missing second tool")
-                first["model"] = JsonValue.Create("unlisted-claude-model")
-                second["model"] = JsonValue.Create("unlisted-codex-model")
-                File.WriteAllText(test.Tools, original.ToJsonString())
-            }
-            test.ExternalPublicationAfterClaim()
-        }
-    }
-
     internal func ExternalPublicationAfterClaim() {
         let state = State()
         let reservation = Check.Text(state["state"]?["reservation"]?["reservation"])
@@ -884,183 +1066,5 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let restored = Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
         restored["body"] = JsonValue.Create(body)
         Flow.Save()
-    }
-
-    internal func EffortDeclarations() {
-        for mode in[]string{"", "whitelist", "unrestricted"} {
-            using let test = CoordinationFlow(Flow.Binary)
-            test.Initialize()
-            test.Flow.SetModelPolicy(
-                mode,
-                mode == "unrestricted" ? "{}":
-                "{\"gpt-6.1-sol\":[\"high\",\"unknown\"],\"claude-sonnet-4-6\":[\"unknown\"]}"
-            )
-            test.Flow.Approve()
-            test.Claim()
-            let tool = Check.Json(
-                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"unknown\"}]"
-            )
-            let declaration = tool[0] ?? throw Exception("Missing tool")
-            File.WriteAllText(test.Tools, tool.ToJsonString())
-            test.Prepare("tokate", 1)
-            let run = test.Prepare()
-            let savedPath = Path.Combine(run, "run.json")
-            let saved = File.ReadAllText(savedPath)
-            Check.That(
-                Check.Text(Check.Json(saved)["tools"]?[0]?["effort"]) == "unknown",
-                "Legacy unknown was reinterpreted"
-            )
-            let changed = Check.Json(saved)
-            changed["source"] = JsonValue.Create("tokate")
-            changed["model"] = JsonValue.Create("gpt-6.1-sol")
-            changed["effort"] = JsonValue.Create("unknown")
-            File.WriteAllText(savedPath, changed.ToJsonString())
-            test.Flow.Call([]string{"work", "--run", run}, 1)
-            File.WriteAllText(savedPath, saved)
-            for effort in[]string{"absent", "", "null", "invalid", "high,xhigh"} {
-                declaration["effort"] = effort == "null" ? nil: JsonValue.Create(effort)
-                if effort == "" {
-                    declaration.AsObject().Remove("effort")
-                }
-                File.WriteAllText(test.Tools, tool.ToJsonString())
-                test.Prepare("tokate", 1)
-                if mode != "unrestricted" || effort != "absent" {
-                    test.Prepare(code: 1)
-                }
-            }
-            test.Flow.NoInference()
-            Check.That(File.ReadAllText(savedPath) == saved, "Rejected effort changed legacy saved work")
-        }
-        for mode in[]string{"whitelist", "unrestricted"} {
-            using let test = CoordinationFlow(Flow.Binary)
-            test.Initialize()
-            test.Flow.SetModelPolicy(
-                mode,
-                mode == "unrestricted" ? "omit":
-                "{\"gpt-6.1-sol\":[\"absent\"],\"claude-sonnet-4-6\":[\"unknown\",\"absent\"]}"
-            )
-            test.Flow.Approve()
-            test.Claim()
-            let tools = Check.Json(File.ReadAllText(test.Tools))
-            let declaration = tools[1] ?? throw Exception("Missing tool")
-            declaration["effort"] = JsonValue.Create("absent")
-            File.WriteAllText(test.Tools, tools.ToJsonString())
-            test.ExternalPublicationAfterClaim()
-        }
-    }
-
-    internal func ManagedModelPolicy() {
-        for mode in[]string{"whitelist", "unrestricted"} {
-            using let test = CoordinationFlow(Flow.Binary)
-            test.Initialize()
-            test.Flow.SetModelPolicy(
-                mode,
-                mode == "unrestricted" ? "{}":
-                "{\"gpt-6-sol\":[\"high\",\"unknown\",\"absent\"]}"
-            )
-            test.Flow.Approve()
-            test.Claim()
-            let tools = Check.Json(
-                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6-sol\",\"effort\":\"absent\"}]"
-            )
-            let declaration = tools[0] ?? throw Exception("Missing tool")
-            File.WriteAllText(test.Tools, tools.ToJsonString())
-            test.Prepare("tokate", 1)
-            declaration["effort"] = JsonValue.Create("unknown")
-            File.WriteAllText(test.Tools, tools.ToJsonString())
-            test.Prepare("tokate", 1)
-            declaration["effort"] = JsonValue.Create("high")
-            File.WriteAllText(test.Tools, tools.ToJsonString())
-            let run = test.Prepare("tokate")
-            let path = Path.Combine(run, "run.json")
-            let original = File.ReadAllText(path)
-            let changed = Check.Json(original)
-            changed["effort"] = JsonValue.Create("absent")
-            let savedTool = changed["tools"]?[0] ?? throw Exception("Missing saved tool")
-            savedTool["effort"] = JsonValue.Create("absent")
-            File.WriteAllText(path, changed.ToJsonString())
-            test.Flow.Call([]string{"work", "--run", run}, 1)
-            test.Flow.NoInference()
-            File.WriteAllText(path, original)
-            test.Flow.Call([]string{"work", "--run", run})
-            test.Flow.Call([]string{"submit", "--run", run})
-            let request = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
-            let requestedTool = request["metadata"]?["tools"]?[0] ?? throw Exception("Missing requested tool")
-            requestedTool["effort"] = JsonValue.Create("absent")
-            test.Coordinate(test.Event(request), 1)
-            test.Flow.NoPr()
-            requestedTool["effort"] = JsonValue.Create("high")
-            test.Coordinate(test.Event(request))
-            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-            test.ReceiptRefusal(0, "effort", "absent")
-            test.Flow.Reload()
-            Check.That(
-                Check.Text(test.Flow.State["requested_model"]) == "gpt-6-sol" && Check.Text(
-                    test.Flow.State["requested_effort"]
-                ) == "model_reasoning_effort=\"high\"",
-                "Managed declaration silently changed"
-            )
-        }
-    }
-
-    internal func ModelPolicyAuthority() {
-        for mode in[]string{"whitelist", "unrestricted"} {
-            using let test = CoordinationFixture(Flow.Binary)
-            test.Initialize()
-            test.Claim()
-            let run = test.Prepare()
-            let path = Path.Combine(run, "run.json")
-            let saved = File.ReadAllText(path)
-            let original = test.State()
-            test.Flow.SetModelPolicy(mode, mode == "unrestricted" ? "omit": "")
-            Check.Contains(
-                test.Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1).Error,
-                "Repository policy or template changed. The owner must approve again."
-            )
-            Check.That(
-                Check.Text(test.State()["sha"]) == Check.Text(original["sha"]),
-                "Mode change rewrote existing approval or reservation"
-            )
-            test.Flow.Approve()
-            Check.That(File.ReadAllText(path) == saved, "Fresh approval converted saved work")
-            test.Flow.Call([]string{"external", "--run", run, "--commit", String('0', 40)}, 1)
-            test.Flow.NoInference()
-            test.Flow.NoPr()
-        }
-    }
-
-    internal func Compatibility() {
-        using let old = NativeFixture(Flow.Binary)
-        old.Initialize()
-        old.Approve()
-        let run = old.Claim()
-        let saved = File.ReadAllText(Path.Combine(run, "run.json"))
-        let approval = old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
-        let policyPath = Path.Combine(old.Upstream, ".github/tokate.json")
-        let policy = Check.Json(File.ReadAllText(policyPath))
-        let models = policy["models"]?.ToJsonString() ?? ""
-        policy["version"] = JsonValue.Create(2)
-        policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
-        File.WriteAllText(policyPath, policy.ToJsonString())
-        old.Commit("Owner opts in to version 2")
-        old.Call([]string{"work", "--run", run}, 1)
-        old.Approve()
-        Check.That(
-            Check.Json(File.ReadAllText(policyPath))["models"]?.ToJsonString() == models &&
-                Check.Json(File.ReadAllText(policyPath))["model_policy"] == nil,
-            "Version upgrade changed legacy whitelist restrictions"
-        )
-        Check.That(
-            old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1") == approval,
-            "Version-2 opt-in rewrote version-1 approval"
-        )
-        Check.That(
-            File.ReadAllText(Path.Combine(run, "run.json")) == saved,
-            "Opt-in reinterpreted or changed old saved work"
-        )
-        let state = Check.Json(old.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1"}).Output)
-        Check.That(state["state"]?["reservation"] == nil, "Old claim acquired implicit version-2 reservation")
-        old.Call([]string{"work", "--run", run}, 1)
-        old.NoInference()
     }
 }
