@@ -48,6 +48,15 @@ tokate help work
 Focused help gives complete syntax, defaults and effects; `-h` also works.
 Help and completion require no login, GitHub access or inference.
 
+Use `tokate status --repo OWNER/REPO` for a bounded list of open approved
+work, or add `--issue N` for contribution details and the responsible role's
+next action. Remote status includes access requests, authority, leases, drafts,
+exact-head checks and recorded reviews without a donor's local files. It reports
+truncation and unknown or stale data; a lease does not prove a process is running.
+Blocked work and failed CI exit 0 after a successful read; required API failures
+exit with an error and preserve observed facts. Add `--json` for the same facts.
+`tokate status --run DIR` remains offline and requires no GitHub or harness tools.
+
 Issue commands accept `--repo OWNER/REPO --issue 42` or a GitHub issue URL:
 
 ```sh

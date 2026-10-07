@@ -75,7 +75,8 @@ internal class CliCommand {
         (
         (Name == "work" && name != "yes" && name != "non-interactive") ||
             (Name == "checks" && name != "watch" && name != "timeout") ||
-            Name == "prepare"
+            Name == "prepare" ||
+            Name == "status"
     )
 }
 
@@ -467,13 +468,13 @@ internal class Cli {
             ),
             CliCommand(
                 "status",
-                "run",
-                "run",
-                "Read saved run locally; no inference or publication.",
-                "--run DIR",
-                "status --run /path/to/run"
+                "run,repo,issue",
+                "repo",
+                "Read contribution state and the responsible role remotely, or a saved run offline; no writes or inference.",
+                "--repo OWNER/REPO [--issue N]\n       tokate status --run DIR",
+                "status --repo owner/project --issue 42"
                 ,
-                effects: "local_read"
+                effects: "local_read github_read"
             ),
             CliCommand(
                 "verify-pr",
@@ -566,7 +567,10 @@ internal class Cli {
                     }
                 }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
-                if command.Name == "work" || command.Name == "checks" || command.Name == "prepare" {
+                if command.Name == "work" ||
+                    command.Name == "checks" ||
+                    command.Name == "prepare" ||
+                    command.Name == "status" {
                     inputs.Add([]string{"run"})
                 }
                 let effects = map[string, Object?]{}
@@ -590,6 +594,22 @@ internal class Cli {
                                     "local_read": true,
                                     "local_write": mode != "read",
                                     "github_read": false,
+                                    "github_write": false
+                                }
+                            }
+                        )
+                    }
+                }
+                if command.Name == "status" {
+                    for mode in[]string{"repository", "run"} {
+                        modes.Add(
+                            map[string, Object?]{
+                                "name": mode,
+                                "required_inputs": []string{mode == "run" ? "run": "repo"},
+                                "effects": map[string, Object?]{
+                                    "local_read": true,
+                                    "local_write": false,
+                                    "github_read": mode == "repository",
                                     "github_write": false
                                 }
                             }
@@ -699,8 +719,9 @@ internal class Cli {
                 if command.Has("issue") {
                     text.AppendLine("An issue URL can replace --repo and --issue.")
                 }
-                if name == "work" || name == "checks" || name == "prepare" {
+                if name == "work" || name == "checks" || name == "prepare" || name == "status" {
                     text.AppendLine(
+                        name == "status" ? "Use --run DIR alone for offline status without GitHub or harness tools. Repository status is bounded and may report truncation; blocked work and failed CI still exit 0 after a successful read.":
                         name == "prepare" ? "Use --run DIR only for recorded preparation before coding; it never resumes coding.":
                         name == "work" ? "For a saved claim, use --run DIR instead of required inputs.":
                         "Use --run DIR instead of --repo/--pr to check a saved run."
@@ -770,7 +791,12 @@ internal class Cli {
                 }
             }
             if args.Get("run") != "" &&
-                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
+                (
+                args.Command == "work" ||
+                    args.Command == "checks" ||
+                    args.Command == "prepare" ||
+                    args.Command == "status"
+            ) {
                 for key in args.Values.Keys {
                     if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
@@ -873,7 +899,12 @@ internal class Cli {
                 }
             }
             if args.Get("run") != "" &&
-                (args.Command == "work" || args.Command == "checks" || args.Command == "prepare") {
+                (
+                args.Command == "work" ||
+                    args.Command == "checks" ||
+                    args.Command == "prepare" ||
+                    args.Command == "status"
+            ) {
                 return
             }
             for option in Options {

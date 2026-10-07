@@ -305,6 +305,65 @@ internal class AccessState {
             )
         }
 
+        internal func Pending(
+            repo string,
+            access AccessState,
+            pending List[JsonElement],
+            issue int32 = 0,
+            actor int64 = 0,
+            bounded bool = false
+        ) bool {
+            let commentsPath = issue == 0 ? "/issues/comments?": "/issues/" + issue.ToString() + "/comments?"
+            let seen = HashSet[string]()
+            let limit = bounded ? 2: 10
+            for page in 1 ... limit + 1 {
+                let value = GitHub.Api("repos/" + repo + commentsPath + "per_page=100&page=" + page.ToString())
+                if value.ValueKind != JsonValueKind.Array || value.GetArrayLength() > 100 {
+                    throw Exception("Expected a bounded paginated GitHub request list")
+                }
+                for comment in J.Items(value) {
+                    let request = AccessRequest(repo, comment)
+                    if request.ValueKind == JsonValueKind.Undefined {
+                        continue
+                    }
+                    let id = RepositoryIdentity.PositiveId(J.Get(request, "actor"))
+                    if actor != 0 && id != actor {
+                        continue
+                    }
+                    var resolved bool
+                    for member in access.Members {
+                        if RepositoryIdentity.PositiveId(J.Get(member, "actor")) != id {
+                            continue
+                        }
+                        resolved = J.Bool(member, "denied") ||
+                            (J.Text(request, "scope") == "trust" && J.Bool(member, "trusted"))
+                        if J.Text(request, "scope") == "issue" {
+                            for number in J.Items(J.Get(member, "issues")) {
+                                resolved = resolved || RepositoryIdentity.PositiveId(number) == J.Number(
+                                    request,
+                                    "issue"
+                                )
+                            }
+                        }
+                    }
+                    let key = id.ToString() + ":" + J.Text(request, "scope") + ":" + J.Number(request, "issue")
+                        .ToString()
+                    if !resolved && seen.Add(key) {
+                        pending.Add(request)
+                    }
+                }
+                if value.GetArrayLength() < 100 {
+                    return false
+                }
+            }
+            if bounded {
+                return true
+            }
+            throw Exception(
+                "Access presentation exceeded 1000 records; inspect GitHub directly or restrict requests to one issue"
+            )
+        }
+
         private func Present(repo string, args Args) {
             let info = GitHub.Api("repos/" + repo)
             let access = Load(repo, RepositoryIdentity.PositiveId(J.Get(info, "id")))
@@ -373,40 +432,7 @@ internal class AccessState {
             }
             let pending = List[JsonElement]()
             if args.Get("operation") == "list" {
-                let commentsPath = args.Get("issue") == "" ? "/issues/comments?": "/issues/" + args.Number("issue")
-                    .ToString() + "/comments?"
-                let seen = HashSet[string]()
-                for comment in Pages("repos/" + repo + commentsPath) {
-                    let request = AccessRequest(repo, comment)
-                    if request.ValueKind == JsonValueKind.Undefined {
-                        continue
-                    }
-                    let id = RepositoryIdentity.PositiveId(J.Get(request, "actor"))
-                    if actor != 0 && id != actor {
-                        continue
-                    }
-                    var resolved bool
-                    for member in access.Members {
-                        if RepositoryIdentity.PositiveId(J.Get(member, "actor")) != id {
-                            continue
-                        }
-                        resolved = J.Bool(member, "denied") ||
-                            (J.Text(request, "scope") == "trust" && J.Bool(member, "trusted"))
-                        if J.Text(request, "scope") == "issue" {
-                            for number in J.Items(J.Get(member, "issues")) {
-                                resolved = resolved || RepositoryIdentity.PositiveId(number) == J.Number(
-                                    request,
-                                    "issue"
-                                )
-                            }
-                        }
-                    }
-                    let key = id.ToString() + ":" + J.Text(request, "scope") + ":" + J.Number(request, "issue")
-                        .ToString()
-                    if !resolved && seen.Add(key) {
-                        pending.Add(request)
-                    }
-                }
+                Pending(repo, access, pending, args.Get("issue") == "" ? 0: args.Number("issue"), actor)
             }
             PublicOutput.ResultData = map[string, Object?]{
                 "repo": repo,

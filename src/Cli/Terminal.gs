@@ -395,9 +395,17 @@ internal class Terminal {
                 } else {
                     let text = field.Value.ValueKind == JsonValueKind.String ? field.Value.GetString() ?? "":
                     field.Value.GetRawText()
-                    let color = field.Name == "state" ||
-                        field.Name == "status" ? (
-                        text == "failed" ? "red": (text == "pending" ? "yellow": "green")
+                    let color = field.Name == "state" || field.Name == "status" || field.Name.EndsWith(
+                        "_status",
+                        StringComparison.Ordinal
+                    ) ? (
+                        text == "failed" || text == "ci_failed" ? "red":
+                        (
+                            text == "passed" ||
+                                text == "pass" ||
+                                text == "current" ||
+                                text == "eligible" ? "green": "yellow"
+                        )
                     ): "default"
                     Row(label, text, color)
                 }

@@ -6,8 +6,8 @@ import System.Text.Json
 
 internal class CommitChecks {
     shared {
-        internal func Read(repo string, head string) JsonElement {
-            let rows = List[Object]()
+        internal func Read(repo string, head string, observed List[Object]? = nil) JsonElement {
+            let rows = observed ?? List[Object]()
             let prefix = "repos/" + repo + "/commits/" + head
             for kind in[]string{"check-runs", "status"} {
                 var page int32 = 1
