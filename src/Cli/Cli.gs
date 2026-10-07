@@ -176,7 +176,7 @@ internal class Cli {
             CliOption(
                 "continue-from",
                 "DIR",
-                "Explicitly import unpublished interrupted same-donor v1 work into a fresh approved attempt"
+                "Import stopped unpublished same-donor managed work; v2 prepare requires a fresh active attempt"
             ),
             CliOption(
                 "continue-approval",
@@ -309,10 +309,10 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs,continue-from,yes",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
-                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       tokate prepare --run DIR",
+                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       [--continue-from DIR --seconds N --verification-reserve N --yes]\n       tokate prepare --run DIR",
                 "prepare --issue 42 --state SHA --source external --tools tools.json"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -769,6 +769,9 @@ internal class Cli {
             if args.Get("continue-from") != "" && !args.Help {
                 args.Need("seconds")
                 args.Need("verification-reserve")
+                if args.Command == "prepare" && args.Get("source") != "tokate" {
+                    throw Exception("--continue-from requires --source tokate")
+                }
             }
             if args.Command == "doctor" {
                 var scopes int32

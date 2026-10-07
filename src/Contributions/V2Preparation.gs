@@ -25,15 +25,27 @@ internal class V2Preparation {
             Overlaps.RequireDependencies(repo, issue)
             let run = Plan(args, repo, issue, viewer, state, record, args.Need("source"))
             Bind(run, state)
-            let directory = Preparation.RunDirectory(
+            let directory = args.Get("continue-from") != "" ? V2Continuation.RunDirectory(
                 args,
-                run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt")
-            )
+                run.Text("attempt")
+            ): Preparation.RunDirectory(args, run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
             Preparation.Select(run, args.Get("fork"))
+            if args.Get("continue-from") != "" {
+                if run.Text("source") != "tokate" || run.Text("attempt") == "" {
+                    throw Exception("Continuation requires a managed v2 fresh active attempt")
+                }
+                let sourceDirectory = LocalPaths.DirectoryPath(args.Need("continue-from"))
+                using let sourceLease = V1Continuation.SourceLease(sourceDirectory)
+                let source = V2Continuation.Source(sourceDirectory, run, record)
+                run.Fields["continuation_source"] = sourceDirectory
+                run.Fields["continuation"] = V2Continuation.Provenance(source)
+                run.Fields["continuation_source_metadata_sha256"] = Data.Hash(V1Continuation.Metadata(sourceDirectory))
+                V1Continuation.Confirm(args, J.Get(run.Element(), "selection"))
+            }
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -165,7 +177,9 @@ internal class V2Preparation {
                 return ContributionClaim.Claim(args, ValueTuple[string, string, Policy](branch, revision, policy))
             }
             if args.Get("continue-from") != "" {
-                throw Exception("Version-2 claims cannot import version-1 work")
+                throw Exception(
+                    "For stopped v2 work, explicitly acquire a fresh attempt then use prepare --continue-from with its current --state; no claim was posted"
+                )
             }
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")

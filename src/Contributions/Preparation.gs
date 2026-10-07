@@ -49,15 +49,22 @@ internal class Preparation {
             return identity == BoundIdentity(run) || identity == BoundIdentity(run, false)
         }
 
+        internal func CheckIdentity(run Data) {
+            if run.Number("preparation_version") == 1 && !Identified(run) {
+                throw Exception("Saved preparation identity changed; import provenance cannot be removed or rebound")
+            }
+        }
+
         private func BoundIdentity(run Data, normalized bool = true) string {
-            let identity = Identity(run, normalized)
+            var identity = Identity(run, normalized)
             if run.Text("attempt") != "" {
-                return Data.Hash(identity + ":" + run.Text("attempt"))
+                identity = Data.Hash(identity + ":" + run.Text("attempt"))
             }
             return V1Continuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
-                )
+                ) +
+                    (run.Number("version") == 2 ? ":" + run.Text("continuation_source_metadata_sha256"): "")
             ): identity
         }
 
@@ -169,6 +176,7 @@ internal class Preparation {
         }
 
         internal func Complete(directory string, run Data) {
+            V2Continuation.Location(directory, run)
             let savedState = run.Text("state")
             let fields = run.Fields
             let failure = "prepare --run requires recorded pre-inference preparation for this contribution; old runs and coding cannot be adopted"
@@ -222,6 +230,7 @@ internal class Preparation {
         }
 
         internal func Ready(directory string, run Data) {
+            V2Continuation.Location(directory, run)
             if !run.Flag("preparation_complete") || !Identified(run) {
                 throw Exception("Preparation is incomplete; use prepare --run " + directory + " before work")
             }

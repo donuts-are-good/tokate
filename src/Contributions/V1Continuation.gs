@@ -129,6 +129,9 @@ internal class V1Continuation {
         }
 
         internal func Source(directory string, run Data, record JsonElement) Data {
+            if run.Number("version") == 2 {
+                return V2Continuation.Source(directory, run, record)
+            }
             let source = Data()
             for field in J.Parse(Metadata(directory)).EnumerateObject() {
                 source.Fields[field.Name] = field.Value.Clone()
@@ -202,7 +205,10 @@ internal class V1Continuation {
             return source
         }
 
-        internal func Provenance(source Data) JsonElement -> J.Parse(
+        internal func Provenance(source Data) JsonElement -> source.Number("version") == 2 ? V2Continuation.Provenance(
+            source
+        ): J
+            .Parse(
             J.Write(
                 map[string, Object?]{
                     "id": source.Text("id"),
@@ -623,7 +629,6 @@ internal class V1Continuation {
                 if Excluded(path) {
                     throw Exception("Tracked generated or credential path changes cannot be imported: " + path)
                 }
-                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 var mode = "deleted"
                 var content = ""
                 var blob = ""
@@ -652,6 +657,7 @@ internal class V1Continuation {
                 if hasOriginal && original == current {
                     continue
                 }
+                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 entries.Add(map[string, Object?]{"path": path, "mode": mode, "blob": blob, "content": content})
             }
             return J.Parse(J.Write(entries))
@@ -693,7 +699,7 @@ internal class V1Continuation {
             }
             let evidence = Evidence(sourceDirectory)
             let entries = Scan(Path.Combine(sourceDirectory, "checkout"), source, record, true)
-            if entries.GetArrayLength() == 0 {
+            if entries.GetArrayLength() == 0 && run.Number("version") != 2 {
                 throw Exception("No supported preserved changes to import")
             }
             if !RequestData.Same(evidence, Evidence(sourceDirectory)) || !RequestData.Same(
@@ -773,7 +779,11 @@ internal class V1Continuation {
 
         internal func Check(directory string, run Data, record JsonElement, allowPartial bool = false) {
             let manifest = Manifest(directory, run)
-            Grant(record, J.Text(J.Get(manifest, "predecessor"), "approval"), J.Get(run.Element(), "donor_id"))
+            if run.Number("version") == 2 {
+                CheckSource(run, record, manifest)
+            } else {
+                Grant(record, J.Text(J.Get(manifest, "predecessor"), "approval"), J.Get(run.Element(), "donor_id"))
+            }
             let checkout = Path.Combine(directory, "checkout")
             let staged = Commands.GitResult(checkout, []string{"diff", "--cached", "--quiet", run.Text("base"), "--"})
             if staged.Code != 0 || staged.Truncated || staged.ReadFailed {
@@ -838,6 +848,31 @@ internal class V1Continuation {
             Check(directory, run, record)
             run.Fields["continuation_phase"] = "imported"
             run.Save(directory)
+        }
+
+        private func CheckSource(run Data, record JsonElement, manifest JsonElement) {
+            let directory = run.Text("continuation_source")
+            using let lease = SourceLease(directory)
+            let source = Source(directory, run, record)
+            if Metadata(directory) != J.Text(manifest, "source_metadata") || Data.Hash(Metadata(directory)) != run.Text(
+                "continuation_source_metadata_sha256"
+            ) ||
+                !RequestData.Same(Provenance(source), J.Get(manifest, "predecessor")) || !RequestData.Same(
+                Evidence(directory),
+                J.Get(manifest, "evidence")
+            ) ||
+                !RequestData.Same(
+                Scan(Path.Combine(directory, "checkout"), source, record, true),
+                J.Get(manifest, "entries")
+            ) ||
+                !RequestData.Same(
+                Scan(Path.Combine(directory, "checkout"), source, record, true),
+                J.Get(manifest, "entries")
+            ) ||
+                !RequestData
+                .Same(Evidence(directory), J.Get(manifest, "evidence")) {
+                throw Exception("Source evidence changed since continuation capture; preserved import cannot resume")
+            }
         }
     }
 }

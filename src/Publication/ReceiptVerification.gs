@@ -198,7 +198,7 @@ internal class ReceiptVerification {
         ) Data {
             RequestData.Keys(
                 receipt,
-                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations"
+                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations,predecessor,import_manifest_sha256,attempt"
             )
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let value = state.Value()
@@ -309,6 +309,24 @@ internal class ReceiptVerification {
             }
             let policy = Policy(J.Write(J.Get(record, "policy")))
             policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
+            V2Continuation.Declaration(metadata)
+            for key in[]string{"predecessor", "import_manifest_sha256"} {
+                if !RequestData.Same(J.Get(receipt, key), J.Get(metadata, key)) {
+                    throw Exception("Continuation receipt differs from authoritative import provenance")
+                }
+            }
+            let prior = J.Get(metadata, "predecessor")
+            if prior.ValueKind != JsonValueKind.Undefined {
+                if J.Text(receipt, "attempt") != J.Text(metadata, "attempt") {
+                    throw Exception("Continuation receipt lost its destination attempt fence")
+                }
+                V2Continuation.Authority(authenticated, prior)
+                if !PrBody.ReportText(J.Text(pull, "body"), "").Contains(PrBody.ContinuationReport(prior).Trim()) {
+                    throw Exception("PR report omitted interrupted-origin provenance")
+                }
+            } else if J.Get(receipt, "attempt").ValueKind != JsonValueKind.Undefined {
+                throw Exception("Receipt claims continuation authority without predecessor evidence")
+            }
             let amendment = J.Get(receipt, "amendment")
             if current.GetRawText() != contribution.GetRawText() {
                 Amendment.ValidateReceipt(amendment, policy, exactHead)

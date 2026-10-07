@@ -86,6 +86,10 @@ internal class SuiteCatalog {
                 }
                 case "Continuation" {
                     ContinuationChecks.All(binary)
+                    V2ContinuationChecks.All(binary)
+                }
+                case "ContinuationV2" {
+                    V2ContinuationChecks.All(binary)
                 }
                 case "Targets" {
                     if CiShard.Include("Targets") {

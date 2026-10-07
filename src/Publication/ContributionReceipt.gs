@@ -59,6 +59,7 @@ internal class ContributionReceipt {
                 J.Text(J.Get(current, "outcome"), "head")
             )
             let correction = J.Get(J.Get(original, "metadata"), "correction")
+            V2Continuation.Keep(fields, J.Get(original, "metadata"))
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
             }

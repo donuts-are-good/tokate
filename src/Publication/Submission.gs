@@ -278,6 +278,9 @@ internal class Submission {
             if run.Text("attempt") != "" {
                 metadata["attempt"] = run.Text("attempt")
             }
+            if V1Continuation.Has(run) {
+                V2Continuation.Keep(metadata, V2Continuation.Metadata(run))
+            }
             if correction != nil {
                 metadata["correction"] = Correction.Provenance(correction)
             }

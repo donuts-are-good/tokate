@@ -174,6 +174,7 @@ internal class ContributionClaim {
         }
 
         internal func RecheckV2(run Data) JsonElement {
+            Preparation.CheckIdentity(run)
             let viewer = GitHub.Api("user")
             let repo = RepositoryIdentity.Repo(run.Text("repo"))
             let state = CoordinationState.Load(repo, run.Number("issue"))
@@ -226,6 +227,7 @@ internal class ContributionClaim {
                 RepositoryAccess.ValidateRun(run)
             }
             policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            V2Continuation.Recheck(run, state)
             return record
         }
     }

@@ -7,7 +7,7 @@ import System.Text.RegularExpressions
 
 internal class Synchronization {
     shared {
-        private func Ancestor(repo string, base string, fork string, head string) {
+        internal func Ancestor(repo string, base string, fork string, head string) {
             RepositoryIdentity.Repo(repo)
             RepositoryIdentity.Repo(fork)
             RepositoryIdentity.CommitSha(base)
