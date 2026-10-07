@@ -2,25 +2,18 @@ import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
-import { findPackageJSON } from 'node:module';
 
 const [mode, cwd, modelId, commandNetwork, sentinel] = process.argv.slice(2);
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 const sdkPath = '/tokate-runtime/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
-for (const name of ['pi-coding-agent', 'pi-ai', 'pi-agent-core']) {
-    const packagePath = findPackageJSON(`@earendil-works/${name}`, `file://${sdkPath}`);
-    if (!packagePath?.startsWith('/tokate-runtime/node_modules/')) throw new Error('Unsupported dependency layout');
-    const metadata = JSON.parse(await readFile(packagePath, 'utf8'));
-    if (metadata.name !== `@earendil-works/${name}` || metadata.version !== '1.0.0') throw new Error('Untested pi dependency version');
-}
 const sdk = await import(sdkPath);
+if (typeof sdk.VERSION !== 'string' || !sdk.VERSION) throw new Error('Missing pi SDK version');
 for (const name of ['createAgentSession', 'createExtensionRuntime', 'createReadToolDefinition', 'createEditToolDefinition', 'createWriteToolDefinition', 'createBashToolDefinition']) {
     if (typeof sdk[name] !== 'function') throw new Error('Unsupported pi SDK interface');
 }
 for (const [name, member] of [['ModelRuntime', 'create'], ['SessionManager', 'inMemory'], ['SettingsManager', 'inMemory']]) {
     if (typeof sdk[name]?.[member] !== 'function') throw new Error('Unsupported nested pi SDK interface');
 }
-if (process.version !== 'v26.10.0') throw new Error('Untested Node runtime');
 
 const withParent = async (path, operation, recursive = false) => {
     const absolute = resolve(path);
@@ -138,7 +131,7 @@ try {
         const result = await shell.exec('test ! -r .git/config && test ! -r /tokate-control/models.json && ! touch /usr/bin/tokate-pi-probe && touch probe-shell.txt', cwd,
             { onData: () => {}, timeout: 5 });
         if (result.exitCode !== 0) throw new Error('Nested shell isolation failed');
-        emit({ type: 'pi.probe', version: '1.0.0', node: process.version });
+        emit({ type: 'pi.probe', version: sdk.VERSION, node: process.version });
     } else if (mode === 'run') {
         let bytes = 0;
         const chunks = [];

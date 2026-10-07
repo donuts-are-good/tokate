@@ -208,7 +208,7 @@ internal class Worker {
                 )
             }
             let version = Commands.Checked(CodexPath(), []string{"--version"}, harness: true)
-            if !version.StartsWith("codex-cli 0.") {
+            if !version.StartsWith("codex-cli ") {
                 throw Exception("A supported Codex CLI is required")
             }
             let checkout = Path.Combine(directory, "checkout")

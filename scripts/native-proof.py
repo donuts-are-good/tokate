@@ -21,7 +21,6 @@ import threading
 import time
 
 
-VERSION = "codex-cli 0.160.0"
 MODEL = "gpt-6.1-sol"
 LOCAL_MODEL = "synthetic-local-exact"
 KEY = "sk-synthetic-native-proof-never-valid"
@@ -145,6 +144,7 @@ class Fixture(http.server.ThreadingHTTPServer):
         self.metadata_requests = []
         self.failures = []
         self.mode = "complete"
+        self.version = ""
         self.actions = []
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
         self.thread.start()
@@ -172,7 +172,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if self.path in ("/v1/models?client_version=0.160.0", "/v1/api/codex/accounts/check"):
+        if self.path in (f"/v1/models?client_version={self.server.version}", "/v1/api/codex/accounts/check"):
             self.server.metadata_requests.append(self.path)
             self.send_response(404)
             self.send_header("Content-Length", "0")
@@ -393,7 +393,10 @@ class Proof:
     def readiness(self):
         root = self.home()
         code, out, _ = self.run(root, ["--version"])
-        require(code == 0 and out.strip() == VERSION, "Unsupported native version; expected " + VERSION)
+        version = out.strip()
+        require(code == 0 and version.startswith("codex-cli ") and len(version.split()) == 2,
+                "Cannot identify the installed native Codex version")
+        self.fixture.version = version.split()[1]
         interfaces = {"exec": ["--strict-config", "--ignore-user-config", "--ignore-rules", "--model", "--profile"],
                       "app-server": ["--strict-config", "--stdio"],
                       "sandbox": ["--permission-profile", "--include-managed-config"]}
@@ -407,7 +410,7 @@ class Proof:
         require(len(selected) == 1, "Requested synthetic API model is not in native API catalogue")
         self.efforts = [x["effort"] for x in selected[0]["supported_reasoning_levels"]]
         require("high" in self.efforts, "Native API effort high is unavailable")
-        self.record("native readiness", version=VERSION, sha256=hashlib.sha256(self.binary.read_bytes()).hexdigest(),
+        self.record("native readiness", version=version, sha256=hashlib.sha256(self.binary.read_bytes()).hexdigest(),
                     interfaces=list(interfaces) + ["debug models --bundled"], requested_model=MODEL,
                     native_api_efforts=self.efforts)
 

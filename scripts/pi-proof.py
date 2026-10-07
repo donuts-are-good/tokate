@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 
-parser = argparse.ArgumentParser(description='Release gate: real installed pi 1.0.0 against a synthetic server; no inference')
+parser = argparse.ArgumentParser(description='Real installed pi against a synthetic server; no inference')
 parser.add_argument('--pi-root', required=True, type=Path)
 parser.add_argument('--node', default='/usr/bin/node')
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
@@ -22,8 +22,10 @@ package = args.pi_root / '@earendil-works/pi-coding-agent/package.json'
 if not package.is_file():
     parser.error('Real pi installation is required; this probe never installs packages')
 metadata = json.loads(package.read_text())
-if metadata.get('name') != '@earendil-works/pi-coding-agent' or metadata.get('version') != '1.0.0':
-    parser.error('The real pi 1.0.0 package is required')
+if metadata.get('name') != '@earendil-works/pi-coding-agent' or not metadata.get('version'):
+    parser.error('The real pi SDK package is required')
+node_version = subprocess.check_output([args.node, '--version'], env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, text=True, timeout=10).strip()
+print('Pi proof versions: ' + metadata['version'] + ', Node ' + node_version, flush=True)
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
@@ -181,6 +183,9 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
                 assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', {key: saved.get(key) for key in ['state', 'failure_stage', 'failure_reason', 'error']}
                 assert 'turn_completed' not in saved
+                assert saved['pi_version'] == metadata['version'], 'Pi version evidence does not match the installed package'
+                assert saved['observed_invocation']['sdk_version'] == metadata['version'], 'SDK version evidence is incorrect'
+                assert saved['observed_invocation']['node_version'] == node_version, 'Node version evidence is incorrect'
             else:
                 try:
                     result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)

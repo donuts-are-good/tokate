@@ -20,9 +20,7 @@ internal class PiHarness {
             if root == "" {
                 let executable = Startup.Find("pi")
                 if executable == "" {
-                    throw Exception(
-                        "Install pi 1.0.0 yourself or supply --pi-root pointing to its existing node_modules directory"
-                    )
+                    throw Exception("Install pi or supply --pi-root pointing to its existing node_modules directory")
                 }
                 let cli = LocalPaths.CanonicalPath(executable)
                 let installedPackage = Directory.GetParent(cli)?.Parent?.Parent?.FullName ?? ""
@@ -43,13 +41,10 @@ internal class PiHarness {
             let packagePath = Path.Combine(root, "@earendil-works/pi-coding-agent")
             LocalPaths.DirectoryPath(packagePath)
             let metadata = RequestData.FileData(Path.Combine(packagePath, "package.json"), 128 * 1024)
-            if J.Text(metadata, "name") != "@earendil-works/pi-coding-agent" || J.Text(
-                metadata,
-                "version"
-            ) != "1.0.0" ||
+            if J.Text(metadata, "name") != "@earendil-works/pi-coding-agent" || J.Text(metadata, "version") == "" ||
                 !File
                 .Exists(Path.Combine(packagePath, "dist/index.js")) {
-                throw Exception("Only the pi 1.0.0 SDK package layout is supported")
+                throw Exception("The installed pi SDK package layout is required")
             }
             let node = LocalPaths.CanonicalPath(args.Get("node") == "" ? Startup.Find("node"): args.Need("node"))
             if !File.Exists(node) || !Path.IsPathFullyQualified(node) {
@@ -90,7 +85,7 @@ internal class PiHarness {
                         "policy_eligible",
                         true,
                         "capability",
-                        "pi 1.0.0 SDK import and isolated noninteractive session probe; absent effort only",
+                        "pi SDK import and isolated noninteractive session probe; absent effort only",
                         "availability",
                         "unknown",
                         "availability_evidence",
@@ -119,7 +114,7 @@ internal class PiHarness {
             let timer = Stopwatch.StartNew()
             let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
             Preparation.Ready(directory, run)
-            PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
+            let runtime = PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
             let checkout = Path.Combine(directory, "checkout")
             let control = Path.Combine(directory, "pi-control-" + Guid.NewGuid().ToString("N"))
             try {
@@ -140,14 +135,14 @@ internal class PiHarness {
                 run.Fields["state"] = "running"
                 run.Fields["failure_stage"] = "inference"
                 run.Fields["failure_reason"] = "inference_failed"
-                run.Fields["pi_version"] = "1.0.0"
+                run.Fields["pi_version"] = J.Text(runtime, "version")
                 run.Fields["observed_invocation"] = J.Map(
                     "harness",
                     "pi",
                     "sdk_version",
-                    "1.0.0",
+                    J.Text(runtime, "version"),
                     "node_version",
-                    "26.10.0",
+                    J.Text(runtime, "node"),
                     "provider",
                     "local-chat-completions",
                     "model",
