@@ -248,7 +248,8 @@ func Dispatch(options Args) int32 {
     } else if options.Command == "status" && !PublicOutput.Enabled {
         let summary = PublicOutput.RunSummary(Path.GetFullPath(options.Need("run")))
         summary["truncated"] = PublicOutput.Truncated
-        Terminal.Json(J.Parse(J.Write(summary)), "Donor run")
+        PublicOutput.Next(options, "")
+        Terminal.SavedRun(J.Parse(J.Write(summary)))
     }
     if PublicOutput.Enabled && PublicOutput.RunDirectory != "" {
         PublicOutput.ResultData = PublicOutput.RunSummary(PublicOutput.RunDirectory)

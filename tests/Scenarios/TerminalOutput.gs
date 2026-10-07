@@ -165,6 +165,14 @@ internal class TerminalOutput {
                 Check.Map(
                     "version",
                     1,
+                    "repo",
+                    "owner/project",
+                    "issue",
+                    28,
+                    "approval",
+                    "saved-approval-marker",
+                    "base",
+                    String('b', 40),
                     "state",
                     "failed",
                     "donor",
@@ -205,6 +213,12 @@ internal class TerminalOutput {
                             )
                             Check.Contains(result.Output, "Exit code: 23")
                             Check.Contains(result.Output, "literal  spaces")
+                            Check.That(
+                                !result.Output.Contains("saved-approval-marker") && !result.Output.Contains(
+                                    "Artifacts:"
+                                ),
+                                "Human status dumped receipt or artifact metadata"
+                            )
                         }
                         Save(width.ToString() + "-" + background + "-" + command, result.Output)
                     }
@@ -263,6 +277,58 @@ internal class TerminalOutput {
             Plain(redirected.Output)
             Check.Contains(redirected.Output, "Donor run")
             Save("redirected", redirected.Output)
+            let recordPath = Path.Combine(saved, "run.json")
+            let record = Check.Json(File.ReadAllText(recordPath))
+            record["version"] = JsonValue.Create(2)
+            record["source"] = JsonValue.Create("tokate")
+            record["state"] = JsonValue.Create("generated")
+            File.WriteAllText(recordPath, record.ToJsonString())
+            let correctionPath = Path.Combine(saved, "correction.json")
+            File.WriteAllText(
+                correctionPath,
+                Check.Map(
+                    "state",
+                    "failed",
+                    "failure_reason",
+                    "verification_failed",
+                    "error",
+                    "private-correction-marker"
+                )
+                    .ToJsonString()
+            )
+            let generated = TestProcess.Run(binary, []string{"status", "--run", saved, "--plain"}, temp.Env)
+            Check.Success(generated)
+            Check.Contains(generated.Output, "Next: tokate submit --run")
+            Check.That(generated.Output.IndexOf("Next:") < generated.Output.IndexOf("State:"), "Action was not first")
+            for line in generated.Output.Split('\n') {
+                if line.StartsWith("Next:") {
+                    Check.That(!line.Contains("--json"), "Human action selected machine output")
+                }
+            }
+            Check.Contains(generated.Output, "Details: tokate status --run")
+            Check.Contains(generated.Output, "Correction: failed")
+            Check.Contains(generated.Output, "Correction error:")
+            Check.That(
+                !generated.Output.Contains("private-correction-marker"),
+                "Correction status leaked private evidence"
+            )
+            File.Delete(correctionPath)
+            record["state"] = JsonValue.Create("verifying")
+            record["verification"] = JsonArray()
+            let snapshot = record.ToJsonString()
+            File.WriteAllText(recordPath, snapshot)
+            let path = temp.Env["PATH"]
+            temp.Env["PATH"] = ""
+            let verifying = TestProcess.Run(binary, []string{"status", "--run", saved, "--plain"}, temp.Env)
+            Check.Success(verifying)
+            Check.Contains(verifying.Output, "State: verifying")
+            Check.Contains(verifying.Output, "Verification: no result recorded")
+            Check.That(
+                !verifying.Output.Contains("Next:") && !verifying.Output.Contains("Error:"),
+                "Invented action or failure"
+            )
+            Check.That(File.ReadAllText(recordPath) == snapshot, "Status changed saved evidence")
+            temp.Env["PATH"] = path
             let invalid = Pty(
                 binary,
                 []string{"work", "--plain", "--bad-[red]literal[/]\u001b[31mcontrol\u001b[0m"},

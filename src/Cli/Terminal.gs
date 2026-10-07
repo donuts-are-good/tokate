@@ -370,6 +370,86 @@ internal class Terminal {
             }
         }
 
+        internal func SavedRun(value JsonElement) {
+            if Console.IsOutputRedirected && !Plain && !Ascii {
+                Json(value, "Donor run")
+                return
+            }
+            Heading("Donor run")
+            var details = ""
+            for action in PublicOutput.Actions {
+                if action.Length > 1 {
+                    if action[1] == "status" {
+                        details = Command(action)
+                    } else {
+                        Row("Next", Command(Array.FindAll(action, word -> word != "--json")))
+                    }
+                }
+            }
+            let state = J.Text(value, "state")
+            if state != "" {
+                Row("State", state, state == "failed" ? "red": "yellow")
+            }
+            let repo = J.Text(value, "repo")
+            let issue = J.Get(value, "issue").ToString()
+            if repo != "" {
+                Row("Task", repo + (issue == "" ? "": " #" + issue))
+            }
+            let checks = J.Items(J.Get(value, "verification"))
+            if checks.Count == 0 {
+                Row("Verification", "no result recorded")
+            } else {
+                let check = checks[checks.Count - 1]
+                let checkState = J.Text(check, "state")
+                Row("Verification", J.Number(value, "verification_count").ToString() + " recorded")
+                if checkState != "" {
+                    Row("Recorded check", checkState)
+                }
+                let exitCode = J.Get(check, "exit_code").ToString()
+                if exitCode != "" {
+                    Row("Exit code", exitCode)
+                }
+                let command = Command(J.Get(check, "command"))
+                if command != "" && exitCode != "0" {
+                    Row("Command", command)
+                }
+            }
+            for key in[]string{"run", "donor", "model", "effort", "pr_url"} {
+                let text = J.Text(value, key)
+                if text != "" {
+                    Row(key == "pr_url" ? "PR": Label(key), text)
+                }
+            }
+            if J.Text(value, "model") == "" {
+                for tool in J.Items(J.Get(value, "tools")) {
+                    let model = J.Text(tool, "model")
+                    let effort = J.Text(tool, "effort")
+                    if model != "" {
+                        Row("Reported model", model + (effort == "" ? "": " / " + effort))
+                    }
+                }
+            }
+            let failure = J.Text(J.Get(value, "error"), "message")
+            if failure != "" {
+                Row("Error", failure, "red")
+            }
+            let correction = J.Get(value, "correction")
+            let correctionState = J.Text(correction, "state")
+            if correctionState != "" {
+                Row("Correction", correctionState, correctionState == "failed" ? "red": "yellow")
+            }
+            let correctionFailure = J.Text(J.Get(correction, "error"), "message")
+            if correctionFailure != "" {
+                Row("Correction error", correctionFailure, "red")
+            }
+            if J.Bool(value, "truncated") {
+                Message("Bounded snapshot: some data was omitted.", "yellow")
+            }
+            if details != "" {
+                Row("Details", details)
+            }
+        }
+
         internal func ContributionStatus(value JsonElement) {
             if PublicOutput.Enabled {
                 return
