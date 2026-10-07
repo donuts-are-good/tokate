@@ -23,6 +23,10 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
+        if args.Length == 5 && args[0] == "--omp-boundary" {
+            OmpProof.Boundary(args[1], args[2], args[3], args[4])
+            return 0
+        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
