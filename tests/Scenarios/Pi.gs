@@ -96,6 +96,50 @@ internal class PiChecks {
                 catalog.Endpoint,
                 "--non-interactive"
             }
+            let codex = Path.Combine(flow.Bin, "codex")
+            let hiddenCodex = Path.Combine(flow.Bin, "unused-codex")
+            File.Move(codex, hiddenCodex)
+            try {
+                let diagnosis = Check.Envelope(
+                    flow.Call(
+                        []string{"doctor", "--managed", "--harness", "pi", "--pi-root", root, "--node", node, "--json"}
+                    ),
+                    "doctor",
+                    "ok"
+                )
+                for tool in diagnosis["data"]?["tools"]?.AsArray() ?? JsonArray() {
+                    Check.That(Check.Text(tool["name"]) != "codex", "Pi diagnostics required Codex")
+                }
+            } finally {
+                File.Move(hiddenCodex, codex)
+            }
+            let installMarker = Path.Combine(flow.Temp.Root, "unexpected-install")
+            let curl = Path.Combine(flow.Bin, "curl")
+            File.WriteAllText(curl, "#!/bin/sh\nprintf called > '" + installMarker + "'\nexit 17\n")
+            File.SetUnixFileMode(curl, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            Check.Envelope(
+                flow.Call(
+                    []string{
+                        "doctor",
+                        "--managed",
+                        "--harness",
+                        "pi",
+                        "--pi-root",
+                        root,
+                        "--node",
+                        pathNode,
+                        "--fix",
+                        "--yes",
+                        "--json"
+                    },
+                    1
+                ),
+                "doctor",
+                "error",
+                "missing_tools"
+            )
+            Check.That(!File.Exists(installMarker), "Failed Pi probe triggered installation of an existing runtime")
+            File.Delete(curl)
             let explicitSelection = Check.Json(flow.Call(args.ToArray()).Output)
             let providerIndex = args.IndexOf("--provider")
             args.RemoveRange(providerIndex, 2)

@@ -51,7 +51,7 @@ internal class DonorSelection {
                 }
                 return
             }
-            for key in[]string{"harness", "provider", "endpoint", "pi-root", "node"} {
+            for key in[]string{"harness", "provider", "endpoint", "pi-root", "node", "harness-path"} {
                 if args.Get(key) == "" && J.Text(saved, key) != "" {
                     args.Values["--" + key] = J.Text(saved, key)
                 }
@@ -85,7 +85,7 @@ internal class DonorSelection {
             var effort = args.Get("effort", compatible ? J.Text(saved, "effort"): "")
             let explicitPair = args.Get("model") != "" || args.Get("effort") != ""
             var overridden = explicitPair
-            for key in[]string{"endpoint", "pi-root", "node"} {
+            for key in[]string{"endpoint", "pi-root", "node", "harness-path"} {
                 overridden = overridden || (args.Get(key) != "" && args.Get(key) != J.Text(saved, key))
             }
             var source = args.Get("profile") != "" ? "saved donor profile " + args.Get("profile") +
@@ -101,7 +101,7 @@ internal class DonorSelection {
                 }
                 return PiHarness.Select(args, policy, source)
             }
-            let capabilities = CodexRuntime.Capabilities()
+            let capabilities = CodexRuntime.Capabilities(args.Get("harness-path"))
             var availability = args.Get("availability", "unknown")
             let unavailable = availability == "unavailable" ? model: ""
             let choices = SortedDictionary[string, JsonElement](StringComparer.Ordinal)
@@ -274,7 +274,7 @@ internal class DonorSelection {
                 throw Exception(failure)
             }
             policy.Validate(run.Text("model"), run.Text("effort"), run.Number("seconds"), run.Flag("network"))
-            let capabilities = CodexRuntime.Capabilities()
+            let capabilities = CodexRuntime.Capabilities(run.Text("harness_path"))
             var supported HashSet[string]
             if !capabilities.TryGetValue(run.Text("model"), out supported) || !supported.Contains(run.Text("effort")) {
                 throw Exception("Saved model/effort is no longer compatible with native Codex. No retry or fallback.")

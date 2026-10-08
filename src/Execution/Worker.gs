@@ -14,7 +14,7 @@ internal class Worker {
             args.Add(key + "=" + value)
         }
 
-        internal func CodexPath() string -> CodexRuntime.Resolve()
+        internal func CodexPath(path string = "") string -> CodexRuntime.Resolve(path)
 
         internal func Run(
             directory string,
@@ -22,9 +22,10 @@ internal class Worker {
             input string? = nil,
             seconds int32 = 60,
             capture bool = false,
-            budget RuntimeBudget? = nil
+            budget RuntimeBudget? = nil,
+            harnessPath string = ""
         ) CommandResult {
-            let codex = CodexPath()
+            let codex = CodexPath(harnessPath)
             for path in[]string{
                 directory,
                 codex,
@@ -106,21 +107,23 @@ internal class Worker {
             }
         }
 
-        internal func Filesystem(checkout string, gitRead bool = false) string {
+        internal func Filesystem(checkout string, gitRead bool = false, harnessPath string = "") string {
             let gitMode = gitRead ? "read": "deny"
             return "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " + J.Write(checkout) +
                 " = \"write\", " +
-                J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(CodexPath()) +
+                J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(
+                CodexPath(harnessPath)
+            ) +
                 " = \"read\" }"
         }
 
-        internal func Probe(directory string, checkout string) {
+        internal func Probe(directory string, checkout string, harnessPath string = "") {
             let sentinel = Path.Combine(directory, "private-probe")
             let args = List[string]{"sandbox", "-P", "tokate", "--include-managed-config", "-C", checkout}
             var failure Exception? = nil
             try {
                 File.WriteAllText(sentinel, "private")
-                Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
+                Config(args, "permissions.tokate.filesystem", Filesystem(checkout, harnessPath: harnessPath))
                 Config(args, "permissions.tokate.network.enabled", "false")
                 args.AddRange(
                     []string{
@@ -135,10 +138,10 @@ internal class Worker {
                         "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
                         "probe",
                         sentinel,
-                        CodexPath()
+                        CodexPath(harnessPath)
                     }
                 )
-                let result = Run(directory, args.ToArray())
+                let result = Run(directory, args.ToArray(), harnessPath: harnessPath)
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
                     throw CliFailure(
                         "verification_failed",
@@ -162,7 +165,7 @@ internal class Worker {
                 args[args.Count - 4] = "dotnet msbuild -nologo -version"
                 args[args.Count - 3] = "toolchain"
                 try {
-                    let toolchain = Run(directory, args.ToArray())
+                    let toolchain = Run(directory, args.ToArray(), harnessPath: harnessPath)
                     if toolchain.Code != 0 || toolchain.Truncated || toolchain.ReadFailed {
                         throw Exception("Pinned SDK startup failed")
                     }
@@ -175,7 +178,7 @@ internal class Worker {
             }
         }
 
-        internal func Doctor() bool {
+        internal func Doctor(harnessPath string = "") bool {
             let root = Path.Combine("/var/tmp", "tokate-doctor-" + Guid.NewGuid().ToString("N"))
             try {
                 Directory.CreateDirectory(
@@ -203,7 +206,7 @@ internal class Worker {
                 if pinned {
                     File.Copy(global, Path.Combine(checkout, "global.json"))
                 }
-                Probe(root, checkout)
+                Probe(root, checkout, harnessPath)
                 return pinned
             } finally {
                 Directory.Delete(root, true)
@@ -255,7 +258,11 @@ internal class Worker {
                 PiHarness.Execute(directory, run, record, prompt, options.Get("continue-truncated") == "true")
                 return
             }
-            let login = Commands.Run(CodexPath(), []string{"login", "status"}, harness: true)
+            let harnessPath = run.Text("harness_path")
+            if options.Get("harness-path") != "" && options.Get("harness-path") != harnessPath {
+                throw Exception("The saved run fixes its harness path; use that path or start a fresh claim")
+            }
+            let login = Commands.Run(CodexPath(harnessPath), []string{"login", "status"}, harness: true)
             if login.Code != 0 || !(login.Output + login.Error).Contains("Logged in using ChatGPT") {
                 throw CliFailure(
                     "authentication_required",
@@ -263,7 +270,7 @@ internal class Worker {
                     []string{"codex", "login"}
                 )
             }
-            let version = Commands.Checked(CodexPath(), []string{"--version"}, harness: true)
+            let version = Commands.Checked(CodexPath(harnessPath), []string{"--version"}, harness: true)
             if !version.StartsWith("codex-cli ") {
                 throw Exception("A supported Codex CLI is required")
             }
@@ -306,7 +313,7 @@ internal class Worker {
                     }
                 }
             }
-            Probe(directory, checkout)
+            Probe(directory, checkout, harnessPath)
             let args = List[string]{
                 "exec",
                 "--strict-config",
@@ -331,7 +338,7 @@ internal class Worker {
             Config(args, "web_search", "\"disabled\"")
             Config(args, "allow_login_shell", "false")
             Config(args, "default_permissions", "\"tokate\"")
-            Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
+            Config(args, "permissions.tokate.filesystem", Filesystem(checkout, harnessPath: harnessPath))
             Config(args, "permissions.tokate.network.enabled", run.Flag("network") ? "true": "false")
             Config(args, "shell_environment_policy.inherit", "\"none\"")
             Config(
@@ -385,7 +392,8 @@ internal class Worker {
                         prompt,
                         run.Flag("unlimited") ? 0: run.Number("seconds"),
                         true,
-                        coding
+                        coding,
+                        harnessPath
                     )
                 }
                 run.Fields["output_truncated"] = result.OutputTruncated

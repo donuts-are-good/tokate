@@ -102,11 +102,19 @@ internal class PiHarness {
             ) {
                 throw Exception("Managed pi requires verified Linux x64 bubblewrap isolation; no host fallback")
             }
+            if args.Get("harness-path") != "" && !LocalPaths.Executable(
+                LocalPaths.RuntimePath(args.Need("harness-path"))
+            ) {
+                throw Exception("The selected Pi executable is missing or not executable; check --harness-path")
+            }
             var root = args.Get("pi-root")
             if root == "" {
-                let executable = LocalPaths.Find("pi")
+                let executable = LocalPaths.Harness("pi", args.Get("harness-path"))
                 if executable == "" {
                     throw Exception("Install pi or supply --pi-root pointing to its existing node_modules directory")
+                }
+                if !LocalPaths.Executable(executable) {
+                    throw Exception("The selected Pi executable is missing or not executable; check --harness-path")
                 }
                 let cli = LocalPaths.CanonicalPath(executable)
                 let installedPackage = Directory.GetParent(cli)?.Parent?.Parent?.FullName ?? ""

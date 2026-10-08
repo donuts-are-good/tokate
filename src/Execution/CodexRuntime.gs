@@ -16,8 +16,8 @@ func RuntimeMetadataOpen(path string, flags int32) int32;
 
 internal class CodexRuntime {
     shared {
-        internal func Capabilities() Dictionary[string, HashSet[string]] {
-            let executable = CodexRuntime.Resolve()
+        internal func Capabilities(path string = "") Dictionary[string, HashSet[string]] {
+            let executable = CodexRuntime.Resolve(path)
             let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
             Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             try {
@@ -113,8 +113,8 @@ internal class CodexRuntime {
             ) != 0
         }
 
-        internal func Resolve() string {
-            let selected = LocalPaths.Find("codex")
+        internal func Resolve(path string = "") string {
+            let selected = LocalPaths.Harness("codex", path)
             if selected == "" {
                 throw CliFailure("missing_tools", "Install Codex and add codex to PATH.")
             }

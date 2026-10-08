@@ -76,6 +76,9 @@ internal class ContributionClaim {
             if args.Get("verification-reserve") != "" {
                 run.Fields["verification_reserve"] = reserve
             }
+            if args.Get("harness-path") != "" {
+                run.Fields["harness_path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
+            }
             run.Fields["network"] = network
             run.Fields["branch"] = "tokate/issue-" + number.ToString() + "-" + J.Text(record, "sha").Substring(0, 12)
             run.Fields["state"] = "preparing"

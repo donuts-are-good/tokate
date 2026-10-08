@@ -266,7 +266,23 @@ internal class DonorSelectionChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
-            Set(flow)
+            let custom = Path.Combine(flow.Temp.Root, "custom-codex")
+            File.Move(Path.Combine(flow.Bin, "codex"), custom)
+            flow.Call(
+                []string{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high", "--harness-path", custom}
+            )
+            let defaults = File.ReadAllText(Settings(flow))
+            Check.Contains(defaults, custom)
+            Check.That(
+                !flow.Call([]string{"defaults", "read"}).Output.Contains(custom),
+                "Public defaults exposed harness path"
+            )
+            let invalid = flow.Call(
+                []string{"select", "--repo", "owner/project", "--harness-path", custom + "-missing", "--json"},
+                1
+            )
+            Check.Envelope(invalid, "select", "error", "missing_tools")
+            Check.That(File.ReadAllText(Settings(flow)) == defaults, "Invalid override changed saved defaults")
             let claimed = flow.Call(
                 []string{
                     "claim",
@@ -281,6 +297,7 @@ internal class DonorSelectionChecks {
             let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
             let path = Path.Combine(run, "run.json")
             let original = File.ReadAllText(path)
+            Check.That(Check.Text(Check.Json(original)["harness_path"]) == custom, "Claim lost its custom harness path")
             Set(flow, effort: "xhigh")
             flow.Mode("capability_changed")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "no longer compatible")

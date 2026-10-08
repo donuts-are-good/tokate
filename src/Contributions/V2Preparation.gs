@@ -154,6 +154,9 @@ internal class V2Preparation {
                 run.Fields["harness"] = J.Text(selection, "harness")
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
+                if args.Get("harness-path") != "" {
+                    run.Fields["harness_path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
+                }
                 if J.Text(selection, "harness") == "pi" {
                     run.Fields["pi_endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
                     run.Fields["pi_root"] = args.Need("pi-root")
