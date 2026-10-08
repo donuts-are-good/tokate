@@ -119,7 +119,8 @@ jobs:
           prefix="$RUNNER_TEMP/harness-smoke/hermes"
           revision=$(git ls-remote https://github.com/NousResearch/hermes-agent.git refs/heads/main | cut -f1)
           [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-          curl -qfsSL --proto '=https' --proto-redir '=https' "https://raw.githubusercontent.com/NousResearch/hermes-agent/$revision/scripts/install.sh" -o "$prefix/install.sh"
+          printf 'Hermes source revision: %s\n' "$revision"
+          curl -qfsSL --connect-timeout 10 --max-time 30 --retry 3 --retry-max-time 60 --proto '=https' --proto-redir '=https' "https://raw.githubusercontent.com/NousResearch/hermes-agent/$revision/scripts/install.sh" -o "$prefix/install.sh"
           env -i HOME="$prefix" PATH="$PATH" LANG=C.UTF-8 bash "$prefix/install.sh" --commit "$revision" --dir "$prefix/source" --hermes-home "$prefix/settings" --non-interactive --skip-browser --skip-computer-use
           test "$(git -C "$prefix/source" rev-parse HEAD)" = "$revision"
           version=$(env -i HOME="$prefix" PATH="$prefix/.local/bin:$PATH" LANG=C.UTF-8 HERMES_HOME="$prefix/settings" "$prefix/.local/bin/hermes" --version)
