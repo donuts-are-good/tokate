@@ -1,21 +1,27 @@
 Fixes #{{issue}}
 
-## Task and independent verification
+## Changes and verification
 
 {{report}}
 
 ## Donated AI usage
 
+Contribution by @{{donor}}. Review the changes and required CI before merging.
+
+<details>
+<summary>Donation details</summary>
+
 | Field | Value |
 | --- | --- |
-| Donor | @{{donor}} |
-| Selected model (donor-reported) | `{{model}}` |
+| Model (donor-reported) | `{{model}}` |
 | Reasoning effort | `{{effort}}` |
-| Runtime | {{seconds}} seconds |
+| Runtime (seconds) | {{seconds}} |
 | Base commit | `{{base}}` |
 | Policy digest | `{{policy}}` |
 | Token counts (donor-reported) | {{usage}} |
 
-Model selection and token counts are donor-reported. Raw agent reports and command output remain local. Review the patch against the approved issue; the generated check summary does not establish acceptance. GitHub checks and maintainer review determine acceptance. No automatic merge.
+Model identity and usage are donor-reported. Raw logs remain local.
+
+</details>
 
 {{receipt}}
