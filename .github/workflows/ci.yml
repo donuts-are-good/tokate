@@ -4,6 +4,15 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      full:
+        description: Run the full release suite and latest native harness proofs
+        type: boolean
+        default: false
+      tests:
+        description: Existing test selector, such as --traffic-commands ComposedChecks
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -42,6 +51,7 @@ jobs:
           sudo apparmor_parser -r /etc/apparmor.d/tokate-commands
           /usr/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
       - name: Install latest Codex and Pi for native integration proofs
+        if: ${{ inputs.full == true }}
         working-directory: ${{ runner.temp }}
         run: |
           prefix="$RUNNER_TEMP/tokate-harnesses"
@@ -56,22 +66,33 @@ jobs:
           printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
           printf 'TOKATE_HARNESS_PREFIX=%s\nTOKATE_CODEX=%s\nTOKATE_NODE=%s\n' "$prefix" "$native" "$node_path" >> "$GITHUB_ENV"
           printf '| Harness | Tested version | Coverage |\n| --- | --- | --- |\n| Node | %s | Runtime |\n| Codex | %s | Native integration |\n| Pi | %s | Managed integration |\n' "$node_version" "$codex_version" "$pi_version" >> "$GITHUB_STEP_SUMMARY"
-      - run: bash scripts/build.sh
+      - name: Build and check the selected system
+        env:
+          TOKATE_TEST_ARGS: ${{ inputs.tests }}
+        run: |
+          read -r -a test_args <<< "$TOKATE_TEST_ARGS"
+          bash scripts/verify.sh "${test_args[@]}"
       - run: artifacts/linux-x64/tokate --version
       - name: Prove latest native Codex tools and isolation without inference
+        if: ${{ inputs.full == true }}
         run: python3 scripts/native-proof.py --codex "$TOKATE_CODEX"
       - name: Prove the same Codex installation with donor-local Node
+        if: ${{ inputs.full == true }}
         run: python3 scripts/local-codex-proof.py --prefix "$TOKATE_HARNESS_PREFIX" --node "$TOKATE_NODE"
       - name: Prove latest Pi managed workflow without inference
+        if: ${{ inputs.full == true }}
         run: python3 scripts/pi-proof.py --pi-root "$TOKATE_HARNESS_PREFIX/lib/node_modules" --node "$TOKATE_NODE"
       - run: git diff --check
       - name: Probe the real managed sandbox without inference
+        if: ${{ inputs.full == true }}
         run: artifacts/linux-x64/tokate doctor
       - name: Package the tested Node runtime with the suite binaries
+        if: ${{ inputs.full == true }}
         run: |
           cp "$TOKATE_NODE" artifacts/tests/node
           tar -czf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts linux-x64/tokate tests/tokate-tests tests/node
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ inputs.full == true }}
         with:
           name: tokate-binaries
           path: ${{ runner.temp }}/tokate-binaries.tar.gz
@@ -79,6 +100,7 @@ jobs:
           retention-days: 1
           compression-level: 0
   harness-installation:
+    if: ${{ inputs.full == true }}
     name: Latest Claude, OMP and Hermes installation only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -127,6 +149,7 @@ jobs:
           printf '%s\n' "$version"
           printf '| Hermes | %s (main `%s`) | Installation only |\n' "${version%%$'\n'*}" "$revision" >> "$GITHUB_STEP_SUMMARY"
   suite:
+    if: ${{ inputs.full == true }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -167,4 +190,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - run: test '${{ needs.build.result }}' = success && test '${{ needs.suite.result }}' = success && test '${{ needs.harness-installation.result }}' = success
+      - run: |
+          test '${{ needs.build.result }}' = success
+          if [[ '${{ inputs.full }}' == true ]]; then
+            test '${{ needs.suite.result }}' = success
+            test '${{ needs.harness-installation.result }}' = success
+          else
+            test '${{ needs.suite.result }}' = skipped
+            test '${{ needs.harness-installation.result }}' = skipped
+          fi
