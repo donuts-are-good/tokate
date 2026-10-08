@@ -24,6 +24,8 @@ func Main(args[]string) int32 {
         }
         options = Args(args)
         traffic = options.Get("traffic") == "true"
+        Cli.Validate(options, guided: DonorSelection.Interactive(options))
+        GuidedWork.Fill(options)
         Cli.Validate(options)
         validated = true
         PublicOutput.Command = options.Command

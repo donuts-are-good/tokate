@@ -869,7 +869,7 @@ internal class CliDiscovery {
             }
             let work = Call(binary, []string{"work", "--help"}, temp).Output
             Check.Contains(work, "inference")
-            Check.Contains(work, "publish a draft PR")
+            Check.Contains(work, "publication step")
             Check.Contains(work, "default: min(3600, owner limit)")
             Check.Contains(work, "(required)")
             Check.Contains(work, "use --run DIR instead of required inputs")
@@ -907,6 +907,12 @@ internal class CliDiscovery {
                 []string{"revoke", "--issue=2", "https://github.com/owner/project/issues/1"},
                 []string{"revoke", "--issue=https://github.com/owner/project/pull/1"},
                 []string{"revoke", "--issue=https://example.test/owner/project/issues/1"},
+                []string{"work", "owner/project", "--repo=other/project", "--issue=1"},
+                []string{"work", "https://example.test/owner/project"},
+                []string{"checks", "https://github.com/owner/project/pull/1", "--pr=2"},
+                []string{"checks", "https://github.com/owner/project/pull/1", "--repo=other/project"},
+                []string{"checks", "https://example.test/owner/project/pull/1"},
+                []string{"work", "owner/project", "--run=x"},
                 []string{"revoke", "--issue=https://github.com/owner/project/issues/0"},
                 []string{"revoke", "--issue=https://github.com/owner/project/issues/999999999999"},
                 []string{
@@ -1001,6 +1007,10 @@ internal class CliDiscovery {
             File.Delete(Path.Combine(bin, "setsid"))
             File.CreateSymbolicLink(Path.Combine(bin, "setsid"), "/usr/bin/setsid")
             for argv in[][]string{
+                []string{"policy", "owner/project"},
+                []string{"policy", "https://github.com/owner/project"},
+                []string{"checks", "https://github.com/owner/project/pull/1"},
+                []string{"verify-pr", "https://github.com/owner/project/pull/1"},
                 []string{"work", "https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
                 []string{"work", "--issue=https://github.com/owner/project/issues/1", "--model=model", "--effort=high"},
                 []string{

@@ -215,10 +215,10 @@ internal class Cli {
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "doctor",
-                "owner,managed,external,auth,non-interactive",
+                "owner,managed,external,auth",
                 "",
                 "Check the selected role locally; no login required unless --auth, no inference.",
-                "[--owner|--managed|--external] [--auth] [--non-interactive]",
+                "[--owner|--managed|--external] [--auth]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -455,8 +455,8 @@ internal class Cli {
                 "work",
                 "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
-                "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
+                "Run the selected coding harness, verify work and show the publication step. Uses donor inference.",
+                "[OWNER/REPO | ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--profile NAME | --model MODEL --effort EFFORT] [--seconds N] [options]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
                 ,
                 effects: "local_read local_write github_read github_write inference"
@@ -633,7 +633,11 @@ internal class Cli {
                 } else if command.Name == "completion" {
                     []string{"bash|zsh|fish"}
                 } else if command.Has("issue") {
-                    []string{"ISSUE_URL"}
+                    []string{"OWNER/REPO|REPO_URL|ISSUE_URL"}
+                } else if command.Has("pr") {
+                    []string{"OWNER/REPO|REPO_URL|PR_URL"}
+                } else if command.Has("repo") {
+                    []string{"OWNER/REPO|REPO_URL"}
                 } else {
                     []string{}
                 }
@@ -693,17 +697,25 @@ internal class Cli {
             if name == "" {
                 text.AppendLine("Tokate " + ApplicationInfo.Version() + " (toh-KAH-teh)")
                 text.AppendLine("Donate AI usage to approved GitHub issues.\n\nUsage: tokate <command> [options]\n")
+                text.AppendLine("Run tokate for guided setup, donations and saved work.\n")
+                let common = HashSet[string](
+                    "init work claim submit status checks access defaults doctor update".Split(' ')
+                )
+                let specialist = List[string]()
                 for command in Commands {
+                    if !common.Contains(command.Name) {
+                        specialist.Add(command.Name)
+                        continue
+                    }
                     if width < 80 {
                         OptionHelp(text, command.Name, command.Summary.Replace("\n", " "), width)
                     } else {
                         text.AppendLine("  " + command.Name.PadRight(18) + command.Summary.Replace("\n", " "))
                     }
                 }
+                text.AppendLine("\nMore commands: " + String.Join(", ", specialist) + ".")
                 text.AppendLine("\nUse tokate <command> --help, tokate help <command>, or -h for details.")
-                text.AppendLine(
-                    "Value options accept --name=value. Issue URLs and unique local GitHub remotes supply --repo."
-                )
+                text.AppendLine("Use OWNER/REPO, a GitHub issue/PR URL, or a unique local GitHub remote for context.")
                 text.AppendLine(
                     "Explicit --repo OWNER/REPO and --issue N remain available. PRs are drafts; owners review and merge."
                 )
@@ -728,6 +740,17 @@ internal class Cli {
                 }
                 if command.Has("issue") {
                     text.AppendLine("An issue URL can replace --repo and --issue.")
+                }
+                if command.Has("pr") {
+                    text.AppendLine("A PR URL can replace --repo and --pr.")
+                }
+                if command.Has("repo") {
+                    text.AppendLine("OWNER/REPO or a repository URL can replace --repo.")
+                }
+                if name == "work" || name == "claim" {
+                    text.AppendLine(
+                        "In a terminal, missing task, tool and budget choices are guided. Redirected input and --json never prompt."
+                    )
                 }
                 if name == "work" || name == "checks" || name == "prepare" || name == "status" {
                     text.AppendLine(
@@ -761,7 +784,7 @@ internal class Cli {
             return numbers
         }
 
-        internal func Validate(args Args) {
+        internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
             if args.Get("continue-approval") != "" && args.Get("base-branch") != "" {
                 throw Exception("--continue-approval derives its original target and excludes --base-branch")
@@ -815,8 +838,8 @@ internal class Cli {
                         throw Exception("--run conflicts with " + key)
                     }
                 }
-                if args.IssueUrl != "" {
-                    throw Exception("--run conflicts with an issue URL")
+                if args.Target != "" {
+                    throw Exception("--run conflicts with a repository or task argument")
                 }
             }
             if args.Get("verification-reserve") != "" && args.Command == "prepare" && args.Get("source") != "tokate" {
@@ -937,6 +960,9 @@ internal class Cli {
                     args.Command == "prepare" ||
                     args.Command == "status"
             ) {
+                return
+            }
+            if guided && (args.Command == "work" || args.Command == "claim") && args.Get("continue-from") == "" {
                 return
             }
             for option in Options {

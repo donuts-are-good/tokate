@@ -839,8 +839,64 @@ internal class PreparationChecks {
             test.Flow.NoPr()
         }
 
+        private func Guided(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            flow.Temp.Env["TERM"] = "dumb"
+            flow.Temp.Env["NO_COLOR"] = "1"
+            flow.Call([]string{"defaults", "set", "--profile", "ready", "--model", "gpt-6.1-sol", "--effort", "high"})
+            let args = []string{"work", "owner/project", "--runs", Path.Combine(flow.Temp.Root, "runs")}
+            let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "\n")
+            Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
+            Check.Contains(cancelled.Output, "Issue number")
+            Check.Contains(cancelled.Output, "Cancelled")
+            let declined = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\nready\n60\n20\nn\nn\n")
+            Check.That(declined.Code == 1, declined.Output + declined.Error)
+            Check.Contains(declined.Output, "Task: owner/project #1")
+            Check.Contains(declined.Output, "60 seconds total; 20 reserved for verification")
+            Check.Contains(declined.Output, "Command network: denied")
+            Check.Contains(declined.Output, "Donation was not confirmed")
+            flow.Reload()
+            Check.That(
+                flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,
+                "Cancelled wizard wrote remotely"
+            )
+            Check.That(!Directory.Exists(Path.Combine(flow.Temp.Root, "runs")), "Cancelled wizard created a run")
+            flow.NoInference()
+            let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "owner\nexit\nexit\n")
+            Check.Success(owner)
+            Check.Contains(owner.Output, "repo> ")
+            Check.That(
+                !Directory.Exists(Path.Combine(flow.Temp.Root, ".github")),
+                "Cancelled owner setup wrote configuration"
+            )
+            flow.Call([]string{"work", "owner/project", "--non-interactive"}, 1)
+            flow.Call([]string{"work", "owner/project", "--json"}, 1)
+            let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\nready\n60\n20\nn\ny\n")
+            Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
+            let run = RunPath(flow)
+            let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(Check.Text(pending["state"]) == "claim_pending", "Guided work lost pending state")
+            Check.That(
+                Check.Text(pending["seconds"]) == "60" && Check.Text(pending["verification_reserve"]) == "20",
+                "Guided budget changed"
+            )
+            flow.Reload()
+            let comment = flow.State["request_comments"]?[0] ?? throw Exception("Missing guided claim")
+            Check.That(Check.Text(flow.State["request_count"]) == "1", "Guided work posted more than once")
+            flow.NoInference()
+            test.Coordinate(PostedEvent(test, comment))
+            let unavailable = TerminalOutput.Pty(binary, args, flow.Temp, 40, "\n")
+            Check.That(unavailable.Code == 1, unavailable.Output + unavailable.Error)
+            Check.Contains(unavailable.Output.Replace("\r\n", " ").Replace("\n", " "), "No available approved issues")
+            flow.NoInference()
+            flow.NoPr()
+        }
+
         internal func All(binary string, selected string = "") {
             for name in[]string{
+                "Guided",
                 "Acquisition",
                 "PendingClaim",
                 "ClaimGates",
@@ -859,6 +915,9 @@ internal class PreparationChecks {
                     continue
                 }
                 switch name {
+                    case "Guided" {
+                        Guided(binary)
+                    }
                     case "Acquisition" {
                         Acquisition(binary)
                     }

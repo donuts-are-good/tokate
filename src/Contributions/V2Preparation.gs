@@ -196,7 +196,7 @@ internal class V2Preparation {
             }
             Overlaps.RequireDependencies(repo, issue)
             let run = Plan(args, repo, issue, viewer, state, record, "tokate")
-            if args.Command == "work" {
+            if args.Command == "work" || args.Guided {
                 DonorSelection.Confirm(args, J.Get(run.Element(), "selection"))
             }
             let request = J.Parse(

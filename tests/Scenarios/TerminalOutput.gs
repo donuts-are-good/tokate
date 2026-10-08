@@ -111,7 +111,7 @@ internal class TerminalOutput {
                 []string{},
                 flow.Temp,
                 20,
-                "owner/project\nhelp\nwork\nstatus\nissue\n0\nstatus\nissue\nhttps://github.com/owner/project/issues/1\n" +
+                "repository\nowner/project\nhelp\nwork\nstatus\nissue\n0\nstatus\nissue\nhttps://github.com/owner/project/issues/1\n" +
                     "status\nissue\nhttps://github.com/owner/project/issues/0\nstatus\nissue\n" +
                     "https://github.com/owner/project/issues/999999999999\nstatus\nissue\n" +
                     "https://github.com/other/project/issues/1\nstatus\nissue\nowner/project\nstatus\nrefresh\npolicy\nexit\n"
@@ -143,7 +143,7 @@ internal class TerminalOutput {
             Save("20-interactive", result.Output)
             flow.Git("-C", flow.Temp.Root, "remote", "add", "upstream", "https://github.com/other/project.git")
             flow.ResetTraffic()
-            let canceled = Pty(binary, []string{}, flow.Temp, 40, "exit\n")
+            let canceled = Pty(binary, []string{}, flow.Temp, 40, "repository\nexit\nexit\n")
             Check.Success(canceled)
             Check.Contains(canceled.Output, "Ambiguous local remotes")
             Check.Contains(canceled.Output, "repo> ")

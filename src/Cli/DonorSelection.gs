@@ -231,6 +231,29 @@ internal class DonorSelection {
         }
 
         internal func Confirm(args Args, selection JsonElement) {
+            if args.Guided && args.Get("yes") != "true" {
+                Terminal.Heading(args.Command == "claim" ? "Confirm reservation request": "Confirm donation")
+                Terminal.Row("Task", args.Need("repo") + " #" + args.Need("issue"))
+                Terminal.Row("Tool", J.Text(selection, "harness") + " / " + J.Text(selection, "provider"))
+                Terminal.Row("Model", J.Text(selection, "model") + " / " + J.Text(selection, "effort"))
+                Terminal.Row(
+                    "Budget",
+                    args.Need("seconds") + " seconds total; " + args.Get("verification-reserve", "0") +
+                        " reserved for verification"
+                )
+                Terminal.Row("Command network", args.Get("allow-network") == "true" ? "allowed": "denied")
+                Terminal.Row("Availability", J.Text(selection, "availability"))
+                Console.Error.Write(
+                    args.Command == "claim" ? "Post this claim without inference? [y/N] ": "Post this claim and start this donation when accepted? [y/N] "
+                )
+                if !String.Equals(Console.ReadLine(), "y", StringComparison.OrdinalIgnoreCase) {
+                    throw Exception("Donation was not confirmed. No claim or inference was started.")
+                }
+                if args.Command == "work" {
+                    args.Values["--yes"] = "true"
+                }
+                return
+            }
             let source = J.Text(selection, "source")
             if args.Get("yes") == "true" ||
                 source == "explicit invocation" ||

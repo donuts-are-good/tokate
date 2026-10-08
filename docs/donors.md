@@ -7,8 +7,6 @@ harness installations outside `/tmp`.
 
 ```sh
 gh auth login
-tokate status --repo OWNER/REPO
-tokate policy --repo OWNER/REPO
 ```
 
 Choose an approved, available issue. If access is required, request it and wait
@@ -56,7 +54,11 @@ endpoints, authentication and paid Pi providers are not supported by this route.
 
 ## Claim, work and submit
 
-For example, reserve one hour, including 20 minutes reserved for verification:
+In a terminal, start with `tokate work OWNER/REPO`. Choose an available approved
+issue, tool and budget. Review the task, model and network permissions before confirming.
+
+To reserve without starting inference, for example for one hour with 20 minutes
+reserved for verification:
 
 ```sh
 tokate claim https://github.com/OWNER/REPO/issues/42 --profile local \
@@ -83,8 +85,8 @@ automatic retry, continuation or model fallback. Review [data and isolation limi
 
 ## Check progress
 
-Bare `tokate` offers repository status or saved contributions. Saved inspection
-works offline and requires explicit selection. For scripts or a custom run path:
+Bare `tokate` also offers saved contributions. Inspection works offline and requires
+explicit selection. For scripts or a custom run path:
 
 ```sh
 tokate status --run RUN_DIRECTORY

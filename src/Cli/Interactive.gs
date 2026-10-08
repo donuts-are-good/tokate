@@ -19,7 +19,7 @@ internal class Interactive {
             return args
         }
 
-        private func Repository() string {
+        internal func Repository() string {
             var inferred = ""
             try {
                 inferred = RepositoryInput.Local()
@@ -164,6 +164,28 @@ internal class Interactive {
             }
         }
 
+        private func Start(command string) {
+            PublicOutput.Reset(command)
+            try {
+                let options = Args([]string{command})
+                if command == "init" {
+                    let repo = Repository()
+                    if repo == "" {
+                        return
+                    }
+                    options.Values["--repo"] = repo
+                }
+                Cli.Validate(options, guided: true)
+                GuidedWork.Fill(options)
+                Cli.Validate(options)
+                let code = Dispatch(options)
+                PublicOutput.Next(options, "")
+                Terminal.RunOutcome(code, "")
+            } finally {
+                PublicOutput.Reset()
+            }
+        }
+
         internal func Run() int32 {
             if !OperatingSystem.IsLinux() {
                 throw Exception("This release supports Linux")
@@ -171,18 +193,20 @@ internal class Interactive {
             Terminal.InteractiveHeading()
             var repo = ""
             while repo == "" {
-                Terminal.Message("repository / saved / help / exit", "default")
+                Terminal.Message("donate / owner / repository / saved / help / exit", "default")
                 Console.Write("action> ")
                 let answer = Console.ReadLine()?.Trim()
                 if answer == nil || answer == "" || answer == "exit" {
                     return 0
                 }
                 try {
-                    if answer == "saved" {
+                    if answer == "donate" || answer == "owner" {
+                        Start(answer == "donate" ? "work": "init")
+                    } else if answer == "saved" {
                         Saved()
                     } else if answer == "help" {
                         Terminal.Message(
-                            "Open a repository or inspect saved contributions offline. You can also enter OWNER/REPO directly.",
+                            "donate starts guided work. owner opens repository setup. repository shows current work. saved inspects local contributions offline. You can also enter OWNER/REPO directly.",
                             "default"
                         )
                     } else {

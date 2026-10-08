@@ -187,7 +187,7 @@ internal class Diagnostics {
             Check.That(!File.Exists(calls), "Offline commands started prerequisite probes")
             Call(binary, temp, []string{"work", "--run", saved}, "error", "invalid_state")
             Check.That(!File.Exists(calls), "Rejected external saved work probed managed tools")
-            let owner = Call(binary, temp, []string{"doctor", "--owner", "--non-interactive"})
+            let owner = Call(binary, temp, []string{"doctor", "--owner"})
             Check.That(
                 Check.Text(owner["data"]?["scope"]) == "owner" && owner["data"]?["tools"]?.AsArray().Count == 4,
                 "Owner checked donor tools"
