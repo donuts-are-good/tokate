@@ -846,7 +846,9 @@ internal class PreparationChecks {
             flow.Temp.Env["TERM"] = "dumb"
             flow.Temp.Env["NO_COLOR"] = "1"
             flow.Call([]string{"defaults", "set", "--profile", "ready", "--model", "gpt-6.1-sol", "--effort", "high"})
-            let args = []string{"work", "owner/project", "--runs", Path.Combine(flow.Temp.Root, "runs")}
+            flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
+            let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
+            let args = []string{"work", "owner/project"}
             let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "\n")
             Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
             Check.Contains(cancelled.Output, "Issue number")
@@ -862,7 +864,7 @@ internal class PreparationChecks {
                 flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,
                 "Cancelled wizard wrote remotely"
             )
-            Check.That(!Directory.Exists(Path.Combine(flow.Temp.Root, "runs")), "Cancelled wizard created a run")
+            Check.That(!Directory.Exists(runRoot), "Cancelled wizard created a run")
             flow.NoInference()
             let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "owner\nexit\nexit\n")
             Check.Success(owner)
@@ -875,7 +877,9 @@ internal class PreparationChecks {
             flow.Call([]string{"work", "owner/project", "--json"}, 1)
             let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\nready\n60\n20\nn\ny\n")
             Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
-            let run = RunPath(flow)
+            let runs = Directory.GetDirectories(runRoot)
+            Check.That(runs.Length == 1, "Guided claim did not use the selected state root")
+            let run = runs[0]
             let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(pending["state"]) == "claim_pending", "Guided work lost pending state")
             Check.That(

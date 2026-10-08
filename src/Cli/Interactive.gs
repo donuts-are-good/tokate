@@ -118,7 +118,8 @@ internal class Interactive {
                             " / " +
                             J.Text(row, "donor") + " / " + J.Text(row, "model") + " / " + J.Text(row, "state") +
                             " / " +
-                            Path.GetFileName(J.Text(row, "run")),
+                            Path.GetFileName(J.Text(row, "run")) +
+                            (J.Text(row, "storage") == "previous" ? " (previous storage)": ""),
                         "default"
                     )
                     index++
