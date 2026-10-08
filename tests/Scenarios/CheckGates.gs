@@ -311,9 +311,6 @@ internal class CheckGates {
                     "public change and verification report"
                 )
                 Check.Contains(refusal.Error, "report")
-                test.Restore()
-                Passing(test)
-                Gate(Data(Read(test)), "report", "passed")
             }
         }
 

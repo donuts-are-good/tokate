@@ -30,8 +30,13 @@ internal class ReserveChecks {
         private func Version(binary string, version int32, completed Chan[Exception?]) {
             var failure Exception? = nil
             try {
+                using let test = CoordinationFixture(binary)
+                let run = Prepare(test, version)
+                using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
                 for mode in[]string{"success", "timeout", "completed_timeout", "slow_candidate", "empty", "workflow"} {
-                    Managed(binary, version, mode)
+                    baseline.Restore()
+                    test.Flow.Reload()
+                    Managed(test.Flow, run, mode)
                 }
             } catch (error Exception) {
                 failure = error
@@ -85,13 +90,12 @@ internal class ReserveChecks {
             v2.Flow.NoInference()
         }
 
-        private func Managed(binary string, version int32, mode string) {
-            using let v2 = CoordinationFixture(binary)
+        private func Prepare(v2 CoordinationFixture, version int32) string {
             let flow = v2.Flow
             if version == 1 {
                 flow.Initialize()
             } else {
-                v2.Initialize()
+                v2.Initialize(false)
             }
             flow.VerificationPolicy("sleep 3; test -f result.txt", second: "sleep 1; test -f result.txt")
             flow.Approve()
@@ -106,6 +110,10 @@ internal class ReserveChecks {
                 )
                 run = v2.Prepare("tokate", seconds: "8", reserve: "2")
             }
+            return run
+        }
+
+        private func Managed(flow NativeFixture, run string, mode string) {
             let before = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(
                 Check.Text(before["seconds"]) == "8" && Check.Text(before["verification_reserve"]) == "2",

@@ -366,6 +366,9 @@ internal class ContinuationChecks {
         }
 
         private func Owner(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "advanced",
                 "revoked",
@@ -379,8 +382,8 @@ internal class ContinuationChecks {
                 "numeric-repo",
                 "numeric-valid"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 var prior = Check.Text(Read(source)["approval"])
                 let oldBase = Check.Text(Read(source)["base"])
                 if mode.StartsWith("numeric-", StringComparison.Ordinal) {
@@ -475,6 +478,9 @@ internal class ContinuationChecks {
         }
 
         private func Refusals(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "ordinary-grant",
                 "wrong-donor",
@@ -504,8 +510,8 @@ internal class ContinuationChecks {
                 "hooks",
                 "revoked"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Grant(flow, source)
                 let checkout = Path.Combine(source, "checkout")
                 let saved = Read(source)
@@ -624,6 +630,9 @@ internal class ContinuationChecks {
         }
 
         private func Interruptions(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "capture",
                 "init",
@@ -639,8 +648,8 @@ internal class ContinuationChecks {
                 "write",
                 "capture-hardlink"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Directory.CreateSymbolicLink(
                     Path.Combine(source, "checkout/.verification-data"),
                     Path.Combine(flow.Temp.Root, "home")
@@ -752,9 +761,12 @@ internal class ContinuationChecks {
         }
 
         private func Cache(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for tracked in[]bool{false, true} {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Grant(flow, source)
                 let checkout = Path.Combine(source, "checkout")
                 let folder = Path.Combine(checkout, ".verification-data")
