@@ -11,7 +11,7 @@ partial class Desktop {
     private var ownerTab string = "Contributions"
     private var ownerStep int32
     private var ownerPolicy JsonElement
-    private var ownerStatus JsonElement
+    private let ownerWork Dictionary[string, JsonElement] = Dictionary[string, JsonElement]()
     private var ownerAccess JsonElement
     private var ownerIssues List[JsonElement] = List[JsonElement]()
     private var ownerCanWrite bool
@@ -82,12 +82,16 @@ partial class Desktop {
                         return
                     }
                     ownerOpen = true
+                    activityAction = "Refresh project"
                     ownerCanWrite = Field(Field(repo.Value, "permissions"), "push").ValueKind == JsonValueKind.True
                     ownerBranch = TextOf(repo.Value, "default_branch")
                     Execute(
                         []string{"policy", "--repo", ownerRepository},
                         policy -> {
                             ReadOwnerPolicy(Field(Field(policy.Value, "data"), "policy"))
+                            if TextOf(ownerPolicy, "target_branch") != "" {
+                                ownerBranch = TextOf(ownerPolicy, "target_branch")
+                            }
                             if policy.ExitCode != 0 {
                                 ownerTab = "Setup"
                                 message = "Project policy could not be loaded. Check access before applying setup."
@@ -106,24 +110,31 @@ partial class Desktop {
 
     private func RefreshOwner() {
         Execute(
-            []string{"status", "--repo", ownerRepository},
+            []string{"api", "repos/" + ownerRepository + "/issues?state=open&sort=updated&per_page=30"},
             result -> {
-                ownerStatus = Field(result.Value, "data")
-                Execute(
-                    []string{"api", "repos/" + ownerRepository + "/issues?state=open&sort=updated&per_page=30"},
-                    issues -> {
-                        if Error(issues) {
-                            return
-                        }
-                        ownerIssues.Clear()
-                        for issue in Items(issues.Value) {
-                            if Field(issue, "pull_request").ValueKind == JsonValueKind.Undefined {
-                                ownerIssues.Add(issue)
-                            }
-                        }
-                    },
-                    "gh"
-                )
+                if Error(result) {
+                    return
+                }
+                ownerWork.Clear()
+                ownerIssues.Clear()
+                for issue in Items(result.Value) {
+                    if Field(issue, "pull_request").ValueKind == JsonValueKind.Undefined {
+                        ownerIssues.Add(issue)
+                    }
+                }
+            },
+            "gh"
+        )
+    }
+
+    private func InspectOwnerIssue(number string) {
+        Execute(
+            []string{"status", "--repo", ownerRepository, "--issue", number},
+            result -> {
+                for item in Items(Field(Field(result.Value, "data"), "work")) {
+                    ownerWork[TextOf(item, "issue")] = item
+                }
+                Error(result)
             }
         )
     }
@@ -167,21 +178,23 @@ partial class Desktop {
             approved = approved || TextOf(label, "name") == "tokate:approved"
         }
         var remote JsonElement
-        for item in Items(Field(ownerStatus, "work")) {
-            if TextOf(item, "issue") == number {
-                remote = item
-            }
-        }
+        ownerWork.TryGetValue(number, out remote)
         let card = DonatePanel()
         card.Children.Add(
             Row(
                 []Blob{
                     Heading("#" + number + "  " + TextOf(issue, "title"), 27),
-                    StatusBadge(approved ? TextOf(remote, "state").Replace('_', ' '): "Needs approval")
+                    StatusBadge(
+                        remote.ValueKind == JsonValueKind.Object ? TextOf(remote, "state").Replace(
+                            '_',
+                            ' '
+                        ): approved ? "Approved": "Needs approval"
+                    )
                 }
             )
         )
         let actions = Row([]Blob{})
+        actions.Children.Add(Action("Inspect contribution #" + number, () -> InspectOwnerIssue(number)))
         actions.Children.Add(
             Action(
                 "Open issue #" + number,
@@ -204,9 +217,13 @@ partial class Desktop {
                         args.Add(ownerBranch)
                     }
                     OwnerAction(
-                        approved ? "Revoke issue approval": "Approve issue",
+                        approved ? "Revoke issue approval #" + number: "Approve issue #" + number,
                         args.ToArray(),
-                        approved ? "Stop future work under this approval.": "Authorize this issue under the current project policy."
+                        approved ? "Stop future work under this approval.": "Authorize issue #" +
+                            number +
+                            " on " +
+                            ownerBranch +
+                            " under the current project policy."
                     )
                 },
                 !approved,

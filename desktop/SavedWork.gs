@@ -82,6 +82,7 @@ partial class Desktop {
     }
 
     private func Discover() {
+        activityAction = "Refresh contributions"
         savedPaths.Clear()
         savedWork.Clear()
         savedLoaded = true
