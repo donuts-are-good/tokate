@@ -381,6 +381,9 @@ partial class Desktop : Cell {
         page = next
         report = ""
         message = ""
+        if next == "Saved work" && !savedLoaded && runDirectory == "" && !busy {
+            Discover()
+        }
     }
 
     private func Confirm(
@@ -402,7 +405,8 @@ partial class Desktop : Cell {
         completed Action[CommandResult],
         tool string = "tokate",
         directory string = "",
-        seconds int32 = 120
+        seconds int32 = 120,
+        completeOnError bool = false
     ) {
         if busy {
             return
@@ -477,7 +481,7 @@ partial class Desktop : Cell {
             message = result.Error != "" ? result.Error: TextOf(result.Value, "status") == "pending" ?
             "Pending. Another person or the coordinator needs to act.": result.ExitCode != 0 ?
             "This action needs attention.": ""
-            if result.Error == "" {
+            if result.Error == "" || completeOnError {
                 completed(result)
             }
             if !busy {
@@ -820,7 +824,9 @@ partial class Desktop : Cell {
         let donating = page == "Donate" && step == 3
         let live = donating && donationStarted
         let body = Container{
-            Key: page == "Donate" ? page + step.ToString(): page,
+            Key: page == "Donate" ? page + step.ToString(): page == "My project" ? page +
+                ownerTab +
+                ownerStep.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
             Height: welcome || live ? Percent(100): Length.Auto,

@@ -250,6 +250,19 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
                 )
             }
         }
+        host.Resize(1440, 900, 1440, 900)
+        Settle(host)
+        guard let tools = Find(adapter.Root, AccessibilityRole.Group, "Coding tool settings") else {
+            throw Exception("Missing tool card")
+        }
+        guard let limits = Find(adapter.Root, AccessibilityRole.Group, "Time limit settings") else {
+            throw Exception("Missing limit card")
+        }
+        Require(Math.Abs(tools.Bounds.Height - limits.Bounds.Height) < 1, "Donation cards have different heights")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Back")?.Bounds.Y >= tools.Bounds.Y + tools.Bounds.Height,
+            "Navigation is inside a settings card"
+        )
         Require(
             Find(adapter.Root, AccessibilityRole.Button, "60 min")?.Disabled == true,
             "Preset exceeds the owner time limit"
@@ -398,10 +411,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         Require(footer.Bounds.Y + footer.Bounds.Height <= window.Height, "Elapsed footer overflowed the window")
         Activate(window, adapter, "My project")
         Settle(host)
-        Require(
-            Find(adapter.Root, AccessibilityRole.Text, "Make room for good work.") != nil,
-            "Navigation is blocked during work"
-        )
+        Require(Find(adapter.Root, AccessibilityRole.Text, "My project") != nil, "Navigation is blocked during work")
         Require(
             Find(adapter.Root, AccessibilityRole.Status, "Donation running") == nil &&
                 Find(adapter.Root, AccessibilityRole.Text, "Command output") == nil,
@@ -504,6 +514,7 @@ func TestDesktop() {
 
 func Main() {
     TestDesktop()
+    WorkspaceFlow()
     let literal = CommandRunner().Run([]string{"%s", "{\"value\":\"$(literal); *\"}"}, "/usr/bin/printf")
     Require(
         literal.Error == "" && TextOf(literal.Value, "value") == "$(literal); *",
@@ -542,6 +553,6 @@ func Main() {
         File.Delete(marker)
     }
     Console.WriteLine(
-        "PASS: responsive home, field editing, donation progress, navigation during work, output limits and graceful interruption"
+        "PASS: responsive layout, donation controls, saved contribution states, owner setup preservation, confirmation boundaries and cancellation"
     )
 }
