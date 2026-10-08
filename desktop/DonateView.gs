@@ -6,7 +6,43 @@ import System
 import System.Collections.Generic
 import System.Text.Json
 
+class HarnessChoice(id string, name string, icon string) {
+    let Id string = id
+    let Name string = name
+    let Icon string = icon
+}
+
 partial class Desktop {
+    private let harnessChoices[]HarnessChoice = []HarnessChoice{
+        HarnessChoice("codex", "Codex", "terminal"),
+        HarnessChoice("pi", "Pi / local", "memory"),
+    }
+
+    private func HarnessCards() Blob {
+        let choices = Row([]Blob{})
+        for item in harnessChoices {
+            let choice = item
+            choices.Children.Add(
+                ChoiceCard(
+                    choice.Name,
+                    "",
+                    choice.Icon,
+                    harness == choice.Id,
+                    () -> {
+                        harness = choice.Id
+                        model = choice.Id == "codex" ? "gpt-6.1-sol": ""
+                        effort = choice.Id == "codex" ? "high": ""
+                        profile = ""
+                        if choice.Id == "codex" && codexModels.Count == 0 {
+                            LoadCodexModels()
+                        }
+                    }
+                )
+            )
+        }
+        return choices
+    }
+
     private func DonationHeading() Blob {
         let names = []string{"Issue", "Limits", "Review", "Donation"}
         let numerals = []string{"I", "II", "III", "IV"}
@@ -55,6 +91,7 @@ partial class Desktop {
             MinHeight: 82,
             Padding: 20,
             Gap: 10,
+            AlignSelf: AlignSelf.Stretch,
             AlignItems: AlignItems.FlexStart,
             BackgroundColor: selected ? Paper(): Surface(),
             BorderWidth: selected ? 2: 1,
@@ -67,12 +104,12 @@ partial class Desktop {
             Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: title, Description: detail},
             OnClick: choose,
             Container{
+                Width: Percent(100),
                 FlexDirection: FlexDirection.Row,
                 AlignItems: AlignItems.Center,
                 Gap: 12,
                 MaterialIcons.Create(icon, 24, Accent()),
-                Heading(title, 27),
-                Container{FlexGrow: 1},
+                Container{FlexGrow: 1, FlexBasis: 0, MinWidth: 0, Heading(title, 27)},
                 MaterialIcons.Create("check_circle", 18, selected ? Accent(): Color.Transparent),
             },
         }
@@ -157,49 +194,19 @@ partial class Desktop {
             }
         } else if step == 1 {
             body.Children.Add(Heading(selectedRepository + " #" + issue + "  " + issueTitle, 27))
-            let columns = contentWidth >= 900
+            let columns = contentWidth >= 740
             let settings = Row([]Blob{})
             settings.FlexDirection = columns ? FlexDirection.Row: FlexDirection.Column
-            settings.AlignItems = AlignItems.FlexStart
+            settings.AlignItems = AlignItems.Stretch
+            settings.FlexWrap = FlexWrap.NoWrap
             let tools = DonatePanel()
             tools.FlexGrow = columns ? 1: 0
             tools.FlexBasis = columns ? Length(0): Length.Auto
             tools.Width = columns ? Length.Auto: Percent(100)
             tools.MinWidth = columns ? 350: 0
+            tools.Accessibility = Accessibility{Role: AccessibilityRole.Group, Name: "Coding tool settings"}
             tools.Children.Add(Heading("Coding tool", 28))
-            tools.Children.Add(
-                Row(
-                    []Blob{
-                        ChoiceCard(
-                            "Codex",
-                            "Use your installed coding agent.",
-                            "terminal",
-                            harness == "codex",
-                            () -> {
-                                harness = "codex"
-                                model = "gpt-6.1-sol"
-                                effort = "high"
-                                profile = ""
-                                if codexModels.Count == 0 {
-                                    LoadCodexModels()
-                                }
-                            }
-                        ),
-                        ChoiceCard(
-                            "Pi / local",
-                            "Lend inference from your local model.",
-                            "memory",
-                            harness == "pi",
-                            () -> {
-                                harness = "pi"
-                                model = ""
-                                effort = ""
-                                profile = ""
-                            }
-                        )
-                    }
-                )
-            )
+            tools.Children.Add(HarnessCards())
             if profiles.ValueKind == JsonValueKind.Object {
                 let buttons = List[Blob]()
                 for item in profiles.EnumerateObject() {
@@ -302,6 +309,7 @@ partial class Desktop {
             time.FlexBasis = columns ? Length(0): Length.Auto
             time.Width = columns ? Length.Auto: Percent(100)
             time.MinWidth = columns ? 350: 0
+            time.Accessibility = Accessibility{Role: AccessibilityRole.Group, Name: "Time limit settings"}
             time.Children.Add(Row([]Blob{MaterialIcons.Create("schedule", 25, Accent()), Heading("Time limits", 28)}))
             let presets = Row([]Blob{})
             let maximum = Number(policy, "max_seconds")
