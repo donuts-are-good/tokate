@@ -40,13 +40,13 @@ internal class SuiteCatalog {
                     }
                 }
                 case "SynchronizationV2" {
-                    SynchronizationChecks.All(binary, "v2")
+                    SynchronizationChecks.All(binary, "v2,v2-task")
                 }
                 case "SynchronizationV2First" {
-                    SynchronizationChecks.All(binary, "v2", 1)
+                    SynchronizationChecks.All(binary, "v2,v2-task", 1)
                 }
                 case "SynchronizationV2Second" {
-                    SynchronizationChecks.All(binary, "v2", 2)
+                    SynchronizationChecks.All(binary, "v2,v2-task", 2)
                 }
                 case "SynchronizationV1" {
                     SynchronizationChecks.All(binary, "v1")

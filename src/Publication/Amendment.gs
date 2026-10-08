@@ -229,11 +229,16 @@ internal class Amendment {
                 ),
                 J.Get(viewer, "id")
             )
-            SyncAuthority(run, amendment, record)
+            SyncAuthority(run, amendment, record, original)
             return J.Parse(J.Write(map[string, Object?]{"record": record, "state": value, "sha": state.Sha}))
         }
 
-        private func SyncAuthority(run Data, amendment Data?, record JsonElement) {
+        private func SyncAuthority(
+            run Data,
+            amendment Data?,
+            record JsonElement,
+            contribution JsonElement = default(JsonElement)
+        ) {
             if amendment != nil {
                 Synchronization.Live(
                     run.Text("repo"),
@@ -246,7 +251,8 @@ internal class Amendment {
                     amendment.Text("commit"),
                     amendment.Text("sync"),
                     amendment.Text("expected"),
-                    amendment.Text("previous")
+                    amendment.Text("previous"),
+                    contribution: contribution
                 )
             }
         }
@@ -386,7 +392,8 @@ internal class Amendment {
                     commit,
                     sync,
                     expected,
-                    run.Text("commit")
+                    run.Text("commit"),
+                    contribution: J.Get(J.Get(authority, "state"), "contribution")
                 )
                 let snapshot = Snapshot(checkout, run, commit, run.Text("commit"), record, history)
                 let archive = Archive(directory, run)

@@ -554,6 +554,9 @@ internal partial class Fixture {
             if file == "state.json" && State["coordination_state_override"] != nil {
                 content = Check.Text(State["coordination_state_override"])
             }
+            if file == "synchronization.json" && State["synchronization_override"] != nil {
+                content = Check.Text(State["synchronization_override"])
+            }
             return Answer(
                 Check.Map("encoding", "base64", "content", Convert.ToBase64String(Encoding.UTF8.GetBytes(content)))
             )

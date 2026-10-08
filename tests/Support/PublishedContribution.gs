@@ -26,14 +26,16 @@ internal class PublishedContribution : IDisposable {
             v2 bool = false,
             synchronization bool = false,
             baseBranch string = "",
-            mutating bool = false
+            mutating bool = false,
+            taskScoped bool = false
         ) PublishedContribution {
             let coordination = CoordinationFixture(binary)
             try {
                 let run = v2 ? V2Original(
                     coordination,
                     synchronization: synchronization,
-                    baseBranch: baseBranch
+                    baseBranch: baseBranch,
+                    taskScoped: taskScoped
                 ): Original(
                     coordination.Flow,
                     mutating: mutating,
@@ -120,7 +122,8 @@ internal class PublishedContribution : IDisposable {
             native bool = false,
             modelPolicy string = "",
             synchronization bool = false,
-            baseBranch string = ""
+            baseBranch string = "",
+            taskScoped bool = false
         ) string {
             flow.Initialize(approve: false)
             if synchronization {
@@ -143,7 +146,30 @@ internal class PublishedContribution : IDisposable {
                 File.WriteAllText(path, policy.ToJsonString())
                 flow.Flow.Commit("External amendment effort policy")
             }
-            flow.Flow.Approve(baseBranch)
+            if taskScoped {
+                let path = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(path))
+                policy["approval_scope"] = JsonValue.Create("task")
+                policy["eligibility"] = JsonValue.Create("trusted")
+                File.WriteAllText(path, policy.ToJsonString())
+                flow.Flow.Commit("Owner Trusted task eligibility")
+                if baseBranch != "" {
+                    flow.Flow.Git("-C", flow.Flow.Upstream, "branch", "-f", baseBranch)
+                }
+                let args = List[string]{"approve", "--repo", "owner/project", "--issue", "1"}
+                if baseBranch != "" {
+                    args.AddRange([]string{"--base-branch", baseBranch})
+                }
+                flow.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
+                flow.Flow.Call(args.ToArray(), owner: true)
+                flow.Flow.Call(
+                    []string{"access", "--repo", "owner/project", "--operation", "trust", "--donor", "donor"},
+                    owner: true
+                )
+                Check.That(flow.State()["state"]?["approval"]?["donor"] == nil, "Task approval assigned a donor")
+            } else {
+                flow.Flow.Approve(baseBranch)
+            }
             flow.Flow.Reload()
             var approvals int32
             for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
@@ -153,8 +179,11 @@ internal class PublishedContribution : IDisposable {
                     approvals++
                 }
             }
-            Check.That(approvals == 1, "Published fixture repeated approval before claiming")
-            let claim = flow.Claim(baseBranch != "")
+            Check.That(approvals == (taskScoped ? 0: 1), "Published fixture repeated approval before claiming")
+            let claim = taskScoped ? flow.ClaimRequest(): flow.Claim(baseBranch != "")
+            if taskScoped {
+                flow.Coordinate(flow.Event(claim))
+            }
             if native {
                 File.WriteAllText(
                     flow.Tools,
@@ -172,6 +201,16 @@ internal class PublishedContribution : IDisposable {
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
+            if taskScoped {
+                let contribution = flow.State()["state"]?["contribution"] ?? throw Exception("Missing contribution")
+                Check.That(
+                    Check.Text(contribution["actor"]) == "123" && Check.Text(contribution["donor"]) == "donor" &&
+                        Check.Text(contribution["metadata"]?["fork"]) == "donor/project",
+                    "Task publication lost canonical numeric donor and fork"
+                )
+                flow.Flow.Reload()
+                Check.That(flow.Flow.State["issue"]?["assignees"]?.AsArray().Count == 0, "Task fixture assigned donor")
+            }
             return run
         }
 
