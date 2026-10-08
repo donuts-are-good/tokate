@@ -9,18 +9,7 @@ import System.Text.Json
 internal class Preparation {
     shared {
         internal func RunDirectory(args Args, id string) string {
-            let root = Path.GetFullPath(
-                args.Get(
-                    "runs",
-                    Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".local",
-                        "state",
-                        "tokate",
-                        "runs"
-                    )
-                )
-            )
+            let root = Path.GetFullPath(args.Get("runs", RunStorage.Root()))
             return Path.Combine(root, id)
         }
 

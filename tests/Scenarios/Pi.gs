@@ -7,6 +7,129 @@ import System.Text.Json.Nodes
 
 internal class PiChecks {
     shared {
+        internal func Runtime(binary string, sdk string = "") {
+            using let test = CoordinationFixture(binary)
+            using let catalog = PiCatalog()
+            test.Initialize(approve: false)
+            let flow = test.Flow
+            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["model_policy"] = JsonValue.Create("whitelist")
+            policy["models"] = Check.Json("{\"fixture-model\":[\"absent\"]}")
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Commit("Pi runtime selection fixture")
+            let agent = Path.Combine(flow.Temp.Root, "agent")
+            let launcher = Path.Combine(agent, "bin/pi")
+            let root = Path.Combine(agent, "install/releases/1.1.0/node_modules")
+            let installed = Path.Combine(root, "@earendil-works/pi-coding-agent")
+            Directory.CreateDirectory(Path.Combine(installed, "dist/bundle"))
+            Directory.CreateDirectory(Path.GetDirectoryName(launcher) ?? "")
+            File.WriteAllText(launcher, "#!/bin/sh\nexit 77\n")
+            File.SetUnixFileMode(launcher, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            File.CreateSymbolicLink(Path.Combine(flow.Bin, "pi"), launcher)
+            if sdk == "" {
+                File.WriteAllText(
+                    Path.Combine(installed, "package.json"),
+                    "{\"name\":\"@earendil-works/pi-coding-agent\",\"version\":\"fixture-runtime\",\"type\":\"module\"}"
+                )
+                File.WriteAllText(
+                    Path.Combine(installed, "dist/index.js"),
+                    NativeFixture.Template("PiContinuation.mjs")
+                )
+                File.WriteAllText(
+                    Path.Combine(installed, "dist/bundle/cli.js"),
+                    "throw Error('launcher must not run');\n"
+                )
+            } else {
+                Check.Success(
+                    TestProcess.Run(
+                        "/usr/bin/cp",
+                        []string{"-a", "--reflink=auto", "--", Path.GetFullPath(sdk) + "/.", root},
+                        flow.Temp.Env
+                    )
+                )
+            }
+            let versionPath = Path.Combine(agent, "install/current-version")
+            File.WriteAllText(versionPath, "1.1.0\n")
+            let markerPath = Path.Combine(agent, "install/managed-install.json")
+            let marker = Check.Map(
+                "kind",
+                "pi-managed-install",
+                "schemaVersion",
+                1,
+                "layout",
+                "releases-v1",
+                "entrypoint",
+                Check.Map("type", "symlink", "path", Path.Combine(flow.Bin, "pi"))
+            )
+            File.WriteAllText(markerPath, marker.ToJsonString())
+            flow.Temp.Env["PI_CODING_AGENT_DIR"] = agent
+            File.WriteAllText(
+                Path.Combine(agent, "models.json"),
+                "{\"providers\":{\"local\":{\"baseUrl\":\"" +
+                    catalog.Endpoint +
+                    "\",\"api\":\"openai-completions\",\"models\":[{\"id\":\"fixture-model\",\"reasoning\":false,\"contextWindow\":32768,\"maxTokens\":4096}]}}}"
+            )
+            let data = Path.Combine(flow.Temp.Root, "data")
+            flow.Temp.Env["XDG_DATA_HOME"] = data
+            let node = Path.Combine(data, "pi-node/current/bin/node")
+            Directory.CreateDirectory(Path.GetDirectoryName(node) ?? "")
+            let actualNode = TestProcess.Node()
+            File.Copy(actualNode, node)
+            let pathNode = Path.Combine(flow.Bin, "node")
+            File.WriteAllText(pathNode, "#!/bin/sh\nexit 88\n")
+            File.SetUnixFileMode(pathNode, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            let args = List[string]{
+                "select",
+                "--repo",
+                "owner/project",
+                "--harness",
+                "pi",
+                "--provider",
+                "local-chat-completions",
+                "--model",
+                "fixture-model",
+                "--effort",
+                "absent",
+                "--endpoint",
+                catalog.Endpoint,
+                "--non-interactive",
+                "--plain"
+            }
+            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            args.AddRange([]string{"--node", pathNode})
+            flow.Call(args.ToArray(), 1)
+            args[args.Count - 1] = actualNode
+            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            args.RemoveRange(args.Count - 2, 2)
+            for version in[]string{"../escape\n", ".\n", "1.1.0\nother\n"} {
+                File.WriteAllText(versionPath, version)
+                flow.Call(args.ToArray(), 1)
+            }
+            File.WriteAllText(versionPath, "1.1.0\n")
+            marker["layout"] = JsonValue.Create("unknown")
+            File.WriteAllText(markerPath, marker.ToJsonString())
+            flow.Call(args.ToArray(), 1)
+            marker["layout"] = JsonValue.Create("releases-v1")
+            File.WriteAllText(markerPath, marker.ToJsonString())
+            File.Delete(node)
+            File.Copy(actualNode, pathNode, true)
+            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            File.Delete(Path.Combine(flow.Bin, "pi"))
+            File.CreateSymbolicLink(Path.Combine(flow.Bin, "pi"), Path.Combine(installed, "dist/bundle/cli.js"))
+            File.SetUnixFileMode(
+                Path.Combine(installed, "dist/bundle/cli.js"),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            flow.NoInference()
+            flow.NoPr()
+            Console.WriteLine(
+                "PASS Pi npm and managed runtime discovery, private Node, explicit overrides and malformed metadata refusal without inference"
+            )
+        }
+
         internal func Run(binary string, root string, node string, directory string, endpoint string, mode string) {
             let flow = CoordinationFixture(binary)
             let catalogRejected = mode.StartsWith("catalog-") && mode != "catalog-metadata" && !mode.StartsWith(

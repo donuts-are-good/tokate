@@ -26,6 +26,44 @@ internal class RequestData {
             return value
         }
 
+        internal func Comment(request JsonElement) string {
+            Request(request)
+            let action = J.Text(request, "action")
+            let payload = Canonical(request).Replace("`", "\\u0060")
+            Parse(payload)
+            return "/tokate " +
+                action +
+                "\n\n" +
+                "**Pending coordinator review.** Requested by the author of this comment.\n\n" +
+                "This request does not grant access or confirm a reservation or publication. " +
+                "Check this issue with `tokate status` for the recorded outcome and next action.\n\n" +
+                "<details>\n<summary>Coordination data</summary>\n\n```json\n" +
+                payload +
+                "\n```\n</details>"
+        }
+
+        internal func CommentData(body string) JsonElement {
+            if Encoding.UTF8.GetByteCount(body) > 9216 || !body.StartsWith("/tokate ", StringComparison.Ordinal) {
+                throw Exception("Invalid or oversized coordination comment")
+            }
+            let text = body.Substring(8)
+            if text.TrimStart().StartsWith("{", StringComparison.Ordinal) {
+                return Parse(text)
+            }
+            let marker = "\n```json\n"
+            let start = body.IndexOf(marker, StringComparison.Ordinal)
+            let ending = "\n```\n</details>"
+            if start < 0 || !body.EndsWith(ending, StringComparison.Ordinal) {
+                throw Exception("Malformed readable coordination request")
+            }
+            let payload = body.Substring(start + marker.Length, body.Length - start - marker.Length - ending.Length)
+            let request = Parse(payload)
+            if body != Comment(request) {
+                throw Exception("Coordination comment differs from its request")
+            }
+            return request
+        }
+
         internal func FileData(path string, limit int32) JsonElement {
             using let file = File.OpenRead(path)
             using let bytes = MemoryStream()

@@ -118,8 +118,12 @@ internal class Check {
             return result.Output.Trim()
         }
 
-        internal func PostedRequest(state JsonNode) JsonNode -> Json(
-            Text(state["posted_request"]?["body"]).Substring(8)
-        )
+        internal func PostedRequest(state JsonNode) JsonNode {
+            let body = Text(state["posted_request"]?["body"])
+            if body.Contains("\n```json\n") {
+                return Json(body.Split("\n```json\n")[1].Split("\n```\n")[0])
+            }
+            return Json(body.Substring(8))
+        }
     }
 }

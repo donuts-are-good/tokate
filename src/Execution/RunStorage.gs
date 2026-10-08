@@ -1,10 +1,64 @@
 package Tokate
 
 import System
+import System.Collections.Generic
 import System.IO
+import System.Text.Json
 
 internal class RunStorage {
     shared {
+        internal func Root() string -> Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".local/state/tokate/runs"
+        )
+
+        internal func Discover() JsonElement {
+            let rows = SortedDictionary[string, Object?](StringComparer.Ordinal)
+            var skipped int32
+            var scanned int32
+            var truncated bool
+            let root = Root()
+            if Directory.Exists(root) {
+                LocalPaths.DirectoryPath(root)
+                for directory in Directory.EnumerateDirectories(root) {
+                    if scanned >= 128 {
+                        truncated = true
+                        break
+                    }
+                    scanned++
+                    try {
+                        Preparation.ControlPaths(directory)
+                        let value = RequestData.FileData(Path.Combine(directory, "run.json"), 1024 * 1024)
+                        RepositoryIdentity.Repo(J.Text(value, "repo"))
+                        for key in[]string{"id", "repo", "donor", "model", "state"} {
+                            if J.Text(value, key).Length > 256 {
+                                throw Exception("Saved contribution metadata is too long")
+                            }
+                        }
+                        if J.Number(value, "issue") < 1 || J.Text(value, "state") == "" {
+                            throw Exception("Incomplete saved contribution")
+                        }
+                        rows[directory] = map[string, Object?]{
+                            "run": directory,
+                            "id": J.Text(value, "id"),
+                            "repo": J.Text(value, "repo"),
+                            "issue": J.Number(value, "issue"),
+                            "donor": J.Text(value, "donor"),
+                            "model": J.Text(value, "model"),
+                            "state": J.Text(value, "state")
+                        }
+                    } catch (error Exception) {
+                        skipped++
+                    }
+                }
+            }
+            return J.Parse(
+                J.Write(
+                    map[string, Object?]{"runs": List[Object?](rows.Values), "skipped": skipped, "truncated": truncated}
+                )
+            )
+        }
+
         private func Size(path string) int64 {
             if FileInfo(path).LinkTarget != nil {
                 return 0

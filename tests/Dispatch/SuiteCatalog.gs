@@ -27,6 +27,9 @@ internal class SuiteCatalog {
                     if CiShard.Include("DonorSelection") {
                         DonorSelectionChecks.All(binary)
                     }
+                    if CiShard.Include("PiRuntime") {
+                        PiChecks.Runtime(binary)
+                    }
                     if CiShard.Include("Verification") {
                         VerificationChecks.All(binary)
                     }

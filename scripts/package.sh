@@ -9,8 +9,7 @@ trap 'rm -rf "$staging"' EXIT
 mkdir -p "$staging/$bundle/docs" "$staging/$bundle/licenses"
 install -m 755 artifacts/linux-x64/tokate "$staging/$bundle/tokate"
 cp README.md AGENTS.md LICENSE "$staging/$bundle/"
-cp docs/reference.md docs/transparency.md "$staging/$bundle/docs/"
-cp docs/coordination-v2.md docs/pi.md "$staging/$bundle/docs/"
+cp docs/owners.md docs/donors.md docs/recovery.md docs/security.md docs/development.md "$staging/$bundle/docs/"
 cp licenses/dotnet-LICENSE.TXT licenses/dotnet-THIRD-PARTY-NOTICES.TXT \
     licenses/GSharp.txt licenses/Spectre.Console.txt "$staging/$bundle/licenses/"
 tar --owner=0 --group=0 --numeric-owner -czf "artifacts/$bundle.tar.gz" \

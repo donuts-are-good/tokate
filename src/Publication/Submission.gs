@@ -78,7 +78,7 @@ internal class Submission {
                     }
                     var candidate JsonElement
                     try {
-                        candidate = RequestData.Parse(body.Substring(8))
+                        candidate = RequestData.CommentData(body)
                     } catch {
                         continue
                     }
@@ -238,7 +238,7 @@ internal class Submission {
             try {
                 let posted = GitHub.Api(
                     "repos/" + repo + "/issues/" + issue.ToString() + "/comments",
-                    map[string, Object?]{"body": "/tokate " + RequestData.Canonical(request)},
+                    map[string, Object?]{"body": RequestData.Comment(request)},
                     expires: expires
                 )
                 let failure = "Comment write response lacks exact request evidence"
@@ -249,8 +249,7 @@ internal class Submission {
                 if RepositoryIdentity.PositiveId(author) != RepositoryIdentity.PositiveId(actor) || J.Text(
                     posted,
                     "body"
-                ) != "/tokate " +
-                    RequestData.Canonical(request) {
+                ) != RequestData.Comment(request) {
                     throw Exception(failure)
                 }
                 RepositoryIdentity.PositiveId(J.Get(posted, "id"))

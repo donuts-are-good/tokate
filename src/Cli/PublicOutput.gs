@@ -16,6 +16,15 @@ internal class PublicOutput {
         internal var Truncated bool
         internal let Actions List[[]string] = List[[]string]()
 
+        internal func Reset(command string = "help") {
+            Command = command
+            RunDirectory = ""
+            FailureCode = "command_failed"
+            ResultData = nil
+            Truncated = false
+            Actions.Clear()
+        }
+
         internal func Prose(value string) string -> Prose(value, ref Truncated)
 
         internal func Prose(value string, ref truncated bool) string {

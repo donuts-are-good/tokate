@@ -27,6 +27,10 @@ func Main(args[]string) int32 {
             project,
             "artifacts/linux-x64/tokate"
         )
+        if (args.Length == 1 || args.Length == 2) && args[0] == "--pi-runtime" {
+            PiChecks.Runtime(binary, args.Length == 2 ? args[1]: "")
+            return 0
+        }
         if args.Length == 6 && args[0] == "--pi-proof" {
             PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
             return 0
@@ -65,6 +69,10 @@ func Main(args[]string) int32 {
         }
         if args.Length == 1 && args[0] == "--json-cli" {
             CliDiscovery.Structured(binary)
+            return 0
+        }
+        if args.Length == 1 && args[0] == "--saved-runs" {
+            CliDiscovery.Saved(binary)
             return 0
         }
         if args.Length == 1 && args[0] == "--progress" {
