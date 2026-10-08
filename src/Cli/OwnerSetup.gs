@@ -53,18 +53,7 @@ internal class OwnerSetup {
                     }
                 }
                 if key == "models" {
-                    let models = map[string, Object?]{}
-                    while true {
-                        let model = Answer("Model name (Enter finishes the list)").Trim()
-                        if model == "" {
-                            return J.Write(models)
-                        }
-                        if models.ContainsKey(model) {
-                            throw Exception("Model already selected: " + model)
-                        }
-                        let efforts = Answer("Allowed efforts, separated by spaces (use absent for no effort control)")
-                        models[model] = efforts.Replace(',', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    }
+                    return ModelChecklist().Run()
                 }
                 let commands = List[Object]()
                 while true {
@@ -118,6 +107,41 @@ internal class OwnerSetup {
                 throw Exception("Setup file path is a directory")
             }
             return path
+        }
+
+        private func Tools(args Args, fields map[string, Object?], interactive bool) {
+            let value = J.Parse(J.Write(fields))
+            var requested = args.Get("tools")
+            if requested == "" && interactive && J.Number(value, "version") == 2 {
+                let current = List[string]()
+                for tool in J.Items(J.Get(value, "allowed_tools")) {
+                    current.Add(J.Text(tool, "harness") + "/" + J.Text(tool, "provider"))
+                }
+                Terminal.Message("Current allowed tools: " + String.Join(", ", current), error: true)
+                requested = Answer(
+                    "Allowed tools: codex (Subscription), pi (Local); comma-separated, Enter keeps current"
+                )
+            }
+            if requested == "" {
+                return
+            }
+            if J.Number(value, "version") != 2 {
+                throw Exception("Tool selection requires version 2; use --upgrade explicitly")
+            }
+            let selected = HashSet[string](StringComparer.Ordinal)
+            let tools = List[Object]()
+            for name in requested.Split(',') {
+                let harness = name.Trim()
+                if harness != "codex" && harness != "pi" {
+                    throw Exception("Choose codex, pi, or codex,pi for allowed managed tools")
+                }
+                if selected.Add(harness) {
+                    let pair = Args([]string{"defaults", "set", "--harness", harness})
+                    DonorDefaults.NormalizePair(pair)
+                    tools.Add(map[string, Object?]{"harness": harness, "provider": pair.Need("provider")})
+                }
+            }
+            fields["allowed_tools"] = tools
         }
 
         internal func Run(args Args) {
@@ -206,6 +230,7 @@ internal class OwnerSetup {
                     fields["eligibility"] = "trusted"
                 }
             }
+            Tools(args, fields, interactive)
             for key in[]string{
                 "eligibility",
                 "base-branch",

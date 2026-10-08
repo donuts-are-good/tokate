@@ -846,6 +846,9 @@ internal class PreparationChecks {
             flow.Temp.Env["TERM"] = "dumb"
             flow.Temp.Env["NO_COLOR"] = "1"
             flow.Call([]string{"defaults", "set", "--profile", "ready", "--model", "gpt-6.1-sol", "--effort", "high"})
+            flow.Call(
+                []string{"defaults", "set", "--profile", "rejected", "--model", "not-allowed", "--effort", "high"}
+            )
             flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
             let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
             let args = []string{"work", "owner/project"}
@@ -859,6 +862,7 @@ internal class PreparationChecks {
             Check.Contains(declined.Output, "60 seconds total; 20 reserved for verification")
             Check.Contains(declined.Output, "Command network: denied")
             Check.Contains(declined.Output, "Donation was not confirmed")
+            Check.That(!declined.Output.Contains("rejected:"), "Guided menu offered an owner-rejected profile")
             flow.Reload()
             Check.That(
                 flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,

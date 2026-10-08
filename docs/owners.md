@@ -24,14 +24,13 @@ policies, including external actors. The coordinator does not execute donor code
 It can close PRs without current owner authorization. Review that behavior before
 enabling the workflow.
 
-New setup uses Trusted access and permits managed Codex. To permit local Pi,
-include this pair in the policy's `allowed_tools` array before committing:
+New setup uses Trusted access. Select Codex (Subscription), Pi (Local), or both
+at the allowed-tools prompt. Scripts can use `--tools codex,pi`. Omission preserves
+existing tools; new noninteractive setup defaults to Codex.
 
-```json
-{"harness":"pi","provider":"local-chat-completions"}
-```
-
-A model whitelist must include the exact local model ID with `["absent"]` effort.
+The model checklist searches as you type. Space selects, Enter accepts, and F2
+adds a model absent from local discovery. Suggestions are not selected for you.
+A local model needs its exact ID and `absent` effort. Availability remains unknown.
 Use `tokate init --help` for scripted setup and policy options. Optional root
 `DECREE.md` contains task instructions captured at approval. It cannot expand
 permissions or donor budgets. Use `protected_paths` to protect verification tooling

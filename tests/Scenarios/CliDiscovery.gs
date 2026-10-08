@@ -287,7 +287,7 @@ internal class CliDiscovery {
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 env,
-                "whitelist\nmodel-a\nhigh xhigh\n\n\nmain\n\n\n\n/usr/bin/true\n\nverify, build\n\ny\n"
+                "whitelist\nadd\nmodel-a\nhigh xhigh\n\n\n\nmain\n\n\n\n/usr/bin/true\n\nverify, build\n\ny\n"
             )
             Check.Success(terminal)
             Check.That(
@@ -305,6 +305,34 @@ internal class CliDiscovery {
                     selected["required_checks"]?.ToJsonString() == "[\"verify\",\"build\"]",
                 "Interactive setup lost selected models, commands or check names"
             )
+            flow.Call([]string{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high"})
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "local",
+                    "--harness",
+                    "pi",
+                    "--model",
+                    "local-model",
+                    "--effort",
+                    "absent",
+                    "--endpoint",
+                    "http://127.0.0.1:12345/v1"
+                }
+            )
+            let picker = TestProcess.Run(
+                "python3",
+                []string{
+                    Path.Combine(Directory.GetCurrentDirectory(), "tests/Tools/model-checklist.py"),
+                    binary,
+                    Path.Combine(flow.Temp.Root, "checklist")
+                },
+                env
+            )
+            Check.Success(picker)
+            Console.Write(picker.Output)
             flow.NoInference()
             flow.NoPr()
             Console.WriteLine(

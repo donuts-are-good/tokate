@@ -119,6 +119,11 @@ internal class Cli {
                 "Whitelist map of exact models to effort arrays; absent declares no effort control"
             ),
             CliOption(
+                "tools",
+                "TOOLS",
+                "Allowed managed tools, comma-separated: codex (Subscription), pi (Local); omitted preserves policy"
+            ),
+            CliOption(
                 "eligibility",
                 "MODE",
                 "Task eligibility; new repositories default to trusted",
@@ -263,7 +268,7 @@ internal class Cli {
             ),
             CliCommand(
                 "init",
-                "repo,path,model-policy,models,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
+                "repo,path,model-policy,models,tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
                 "repo",
                 "Preview and confirm owner policy and a pinned shared workflow; preserve existing customization.",
                 "[--repo OWNER/REPO] [--path DIR] [options]",
@@ -653,10 +658,19 @@ internal class Cli {
                         "operations": modes,
                         "required_inputs": inputs,
                         "repository_inputs": command.Has("repo") ? (
-                            command.Has("issue") ? []string{"repo", "issue_url", "local_github_remote"}: []string{
+                            command.Has("issue") ? []string{
                                 "repo",
+                                "repository_argument",
+                                "issue_url",
                                 "local_github_remote"
-                            }
+                            }:
+                            command.Has("pr") ? []string{
+                                "repo",
+                                "repository_argument",
+                                "pr_url",
+                                "local_github_remote"
+                            }:
+                            []string{"repo", "repository_argument", "local_github_remote"}
                         ): []string{},
                         "exclusive_run_inputs": conflicts,
                         "effects": effects,
