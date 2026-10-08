@@ -346,8 +346,11 @@ internal class PublicOutput {
             return result
         }
 
-        internal func Checks(run Data, rows JsonElement, status string) {
+        internal func Checks(run Data, rows JsonElement, status string, facts Dictionary[string, Object?]) {
             let result = Select(run.Element(), "repo,pr,pr_url,commit")
+            for fact in facts {
+                result[fact.Key] = fact.Value
+            }
             result["checks_status"] = status
             result["checks"] = Rows(rows, "name,state,bucket,link,workflow")
             result["check_count"] = J.Items(rows).Count

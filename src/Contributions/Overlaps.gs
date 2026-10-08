@@ -85,6 +85,11 @@ internal class Overlaps {
 
         private func Dependencies(repo string, issue int32, facts Dictionary[string, Object?]) {
             let rows = List[Object]()
+            facts["dependencies"] = rows
+            facts["dependency_count"] = 0
+            facts["dependencies_status"] = "incomplete"
+            facts["dependencies_output_complete"] = true
+            facts["dependency_gate"] = "unknown"
             let seen = HashSet[string](StringComparer.Ordinal)
             var complete bool
             var valid bool = true
@@ -145,27 +150,48 @@ internal class Overlaps {
                         row["resolution"] = resolution
                         row["gate"] = gate
                         Retain(rows, row)
+                        facts["dependency_count"] = count
+                        facts["dependencies_output_complete"] = rows.Count == count
+                        facts["dependency_gate"] = blocked ? "blocked": "unknown"
                     }
                     if value.GetArrayLength() < 100 {
                         complete = valid
                         break
                     }
                 }
+            } catch (error ApiDeadlineException) {
+                throw error
             } catch (error Exception) {
                 Failure(facts, "dependencies", error)
+            } finally {
+                facts["dependencies"] = rows
+                facts["dependency_count"] = count
+                facts["dependencies_status"] = complete ? "complete": "incomplete"
+                facts["dependencies_output_complete"] = rows.Count == count
+                facts["dependency_gate"] = blocked ? "blocked": (
+                    !complete ? "unknown": (review ? "owner_review": "no_open_dependencies")
+                )
             }
-            facts["dependencies"] = rows
-            facts["dependency_count"] = count
-            facts["dependencies_status"] = complete ? "complete": "incomplete"
-            facts["dependencies_output_complete"] = rows.Count == count
-            facts["dependency_gate"] = blocked ? "blocked": (
-                !complete ? "unknown": (review ? "owner_review": "no_open_dependencies")
-            )
         }
 
-        internal func RequireDependencies(repo string, issue int32) {
-            let facts = Dictionary[string, Object?]()
-            Dependencies(repo, issue, facts)
+        internal func DependencyEvidence(
+            repo string,
+            issue int32,
+            evidence Dictionary[string, Object?]? = nil
+        ) Dictionary[string, Object?] {
+            let facts = evidence ?? Dictionary[string, Object?]()
+            let remaining = Remaining
+            try {
+                Remaining = 24000
+                Dependencies(repo, issue, facts)
+            } finally {
+                Remaining = remaining
+            }
+            return facts
+        }
+
+        internal func RequireDependencies(repo string, issue int32, evidence Dictionary[string, Object?]? = nil) {
+            let facts = evidence ?? DependencyEvidence(repo, issue)
             ApiTransport.CheckDeadline()
             if facts["dependencies_status"]?.ToString() != "complete" ||
                 facts["dependency_gate"]?.ToString() != "no_open_dependencies" {

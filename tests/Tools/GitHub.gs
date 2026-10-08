@@ -176,16 +176,20 @@ internal partial class Fixture {
                         case <- after(TimeSpan.FromMilliseconds(Int32.Parse(pause))) { }
                     }
                 }
-                let status = Int32.Parse(Check.Text(fault["status"]))
-                if status == 0 {
-                    Console.Error.WriteLine("synthetic-response-secret HTTP 404 in an unauthoritative transport error")
-                    return 1
+                if Check.Text(fault["passthrough"]) != "true" {
+                    let status = Int32.Parse(Check.Text(fault["status"]))
+                    if status == 0 {
+                        Console.Error.WriteLine(
+                            "synthetic-response-secret HTTP 404 in an unauthoritative transport error"
+                        )
+                        return 1
+                    }
+                    return Response(
+                        status,
+                        Check.Map("message", Check.Text(fault["message"])),
+                        Check.Text(fault["headers"])
+                    )
                 }
-                return Response(
-                    status,
-                    Check.Map("message", Check.Text(fault["message"])),
-                    Check.Text(fault["headers"])
-                )
             }
         }
         if path == "user" {
@@ -462,6 +466,21 @@ internal partial class Fixture {
             } else if fault == "wrong-identical-base" && comparison[0] == sha {
                 value["base_commit"] = Check.Map("sha", String('a', 40))
             }
+            let effect = Check.Text(State["compare_read_effect"])
+            if effect != "" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                if effect == "head" {
+                    let head = pull["head"] ?? throw Exception("Missing head")
+                    head["sha"] = JsonValue.Create(String('a', 40))
+                } else if effect == "reopen" {
+                    pull["state"] = JsonValue.Create("open")
+                } else if effect == "merged" {
+                    pull["state"] = JsonValue.Create("closed")
+                    pull["merged"] = JsonValue.Create(true)
+                    pull["merged_at"] = JsonValue.Create("2026-01-01T00:00:00Z")
+                }
+                State["compare_read_effect"] = nil
+            }
             return Answer(value)
         }
         if tail.StartsWith("commits/") && tail.Contains("/check-runs?") {
@@ -482,7 +501,9 @@ internal partial class Fixture {
                 State["check_state_times"] = times
             }
             let effect = Check.Text(State["check_read_effect"])
-            if effect == "head" {
+            if effect.StartsWith("late-") {
+                State["compare_read_effect"] = JsonValue.Create(effect.Substring(5))
+            } else if effect == "head" {
                 let head = State["pulls"]?[0]?["head"] ?? throw Exception("Missing PR head")
                 head["sha"] = JsonValue.Create(String('a', 40))
             } else if effect == "retarget" {
@@ -491,6 +512,29 @@ internal partial class Fixture {
             } else if effect == "approval" {
                 let issue = State["issue"] ?? throw Exception("Missing issue")
                 issue["labels"] = JsonArray()
+            } else if effect.StartsWith("closed") || effect.StartsWith("merged") {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["state"] = JsonValue.Create("closed")
+                if effect == "closed-reopen" {
+                    State["compare_read_effect"] = JsonValue.Create("reopen")
+                }
+                if effect.StartsWith("merged") {
+                    pull["merged"] = JsonValue.Create(true)
+                    pull["merged_at"] = JsonValue.Create("2026-01-01T00:00:00Z")
+                }
+                if effect == "merged-issue" {
+                    let issue = State["issue"] ?? throw Exception("Missing issue")
+                    issue["state"] = JsonValue.Create("closed")
+                }
+                if effect == "merged-branch" {
+                    Git("fork", []string{"update-ref", "-d", "refs/heads/" + Check.Text(pull["head"]?["ref"])})
+                }
+            } else if effect == "draft" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["draft"] = JsonValue.Create(false)
+            } else if effect == "receipt" {
+                let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
+                pull["body"] = JsonValue.Create(Check.Text(pull["body"]) + "\nChanged owner-facing text\n")
             }
             let move = State["overlap_move_target"]
             if move != nil {

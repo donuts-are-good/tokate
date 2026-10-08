@@ -18,7 +18,7 @@ internal class CommitChecks {
                         response,
                         "sha"
                     ) != head {
-                        throw Exception("Commit status belongs to a different head")
+                        throw CliFailure("stale_approval", "Commit status belongs to a different head")
                     }
                     let items = J.Get(response, kind == "check-runs" ? "check_runs": "statuses")
                     if items.ValueKind != JsonValueKind.Array {
@@ -41,7 +41,7 @@ internal class CommitChecks {
                         if kind == "check-runs" && J.Get(check, "head_sha")
                             .ValueKind != JsonValueKind.Undefined &&
                             J.Text(check, "head_sha") != head {
-                            throw Exception("Commit check belongs to a different head")
+                            throw CliFailure("stale_approval", "Commit check belongs to a different head")
                         }
                         let state = if kind == "check-runs" {
                             if J.Text(check, "status") == "completed" {
