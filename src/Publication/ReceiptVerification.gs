@@ -180,6 +180,10 @@ internal class ReceiptVerification {
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["commit"] = J.Text(head, "sha")
             run.Fields["policy"] = J.Get(record, "policy")
+            let authority = J.Get(J.Get(receipt, "amendment"), "summary")
+            if authority.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = authority
+            }
             Binding(run, receipt, approval, J.Text(record, "sha"))
             Synchronization.Keep(run.Fields, history)
             return run
@@ -457,6 +461,14 @@ internal class ReceiptVerification {
             run.Fields["commit"] = exactHead
             run.Fields["pr_url"] = J.Text(pull, "html_url")
             run.Fields["policy"] = J.Get(record, "policy")
+            let authority = J.Get(current, "summary").ValueKind == JsonValueKind.Undefined ?
+            J.Get(metadata, "summary"): J.Get(current, "summary")
+            if current.GetRawText() == contribution.GetRawText() {
+                run.Fields["public_report"] = PrBody.CoordinatedReport(metadata).Trim()
+            }
+            if authority.ValueKind != JsonValueKind.Undefined {
+                run.Fields["public_summary"] = authority
+            }
             ReceiptVerification.Binding(run, receipt, approval, state.Sha)
             Synchronization.Keep(run.Fields, history)
             return run

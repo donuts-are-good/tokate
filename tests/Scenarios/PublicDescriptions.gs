@@ -251,8 +251,11 @@ internal class PublicDescriptions {
             let receiptPrefix = "<!-- tokate-receipt:"
             let receiptStart = body.IndexOf(receiptPrefix, StringComparison.Ordinal) + receiptPrefix.Length
             let receiptEnd = body.IndexOf(" -->", receiptStart, StringComparison.Ordinal)
-            let correction = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))["correction"] ??
+            guard let correction = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))[
+                "correction"
+            ] else {
                 throw Exception("Missing correction receipt")
+            }
             let legacy = "Explicit donor correction " + Check.Text(correction["uuid"]) +
                 ": donor-reported correction tools: " +
                 tools +
@@ -327,6 +330,69 @@ internal class PublicDescriptions {
                 } else {
                     flow.NoPr()
                 }
+            }
+        }
+
+        private func Readiness(binary string) {
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow)
+            let body = Body(flow)
+            flow.Reload()
+            flow.State.AsObject().Remove("exec_count")
+            flow.Save()
+            Check.Contains(body, "- Add a result containing the fixture completion text.")
+            Check.Contains(body, "Verification:")
+            Check.Contains(body, "Tokate observed locally")
+            flow.Reload()
+            flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+            flow.Save()
+            guard let ready = Check.Json(flow.Call([]string{"checks", "--run", run, "--json"}).Output)["data"] else {
+                throw Exception("Missing readiness result")
+            }
+            Check.That(
+                Check.Text(ready["gates"]?["report"]?["status"]) == "passed" && Check.Text(
+                    ready["machine_status"]
+                ) == "passed",
+                "Current public report did not compose machine success: " + ready.ToJsonString()
+            )
+            Check.That(Check.Text(ready["owner_review"]) == "required", "Report readiness removed owner review")
+            for kind in[]string{"missing", "altered"} {
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let current = Check.Text(pull["body"])
+                let start = current.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+                let end = current.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal) +
+                    "<!-- tokate-report:end -->".Length
+                Check.That(start >= 0 && end > start, "Managed contribution lost its report region")
+                pull["body"] = JsonValue.Create(
+                    current.Remove(start, end - start).Insert(
+                        start,
+                        kind == "missing" ?
+                        "<!-- tokate-report:start --><!-- tokate-report:end -->":
+                        "<!-- tokate-report:start -->\nOwner note without a change or verification report.\n<!-- tokate-report:end -->"
+                    )
+                )
+                flow.Save()
+                let refusal = flow.Call([]string{"checks", "--run", run, "--json"}, 1)
+                Check.Envelope(refusal, "checks", "error", "invalid_state")
+                let refused = Check.Json(refusal.Output)["data"] ?? throw Exception("Missing refusal result")
+                Check.That(
+                    Check.Text(refused["gates"]?["report"]?["status"]) == "failed" && Check.Text(
+                        refused["machine_status"]
+                    ) == "failed",
+                    "Missing or altered public report returned machine success: " + refused.ToJsonString()
+                )
+                Check.That(
+                    Check.Text(refused["gates"]?["receipt"]?["status"]) == "passed" && Check.Text(
+                        refused["gates"]?["checks"]?["status"]
+                    ) == "passed",
+                    "Report refusal discarded current receipt or CI evidence"
+                )
+                Check.Contains(
+                    refused["required_owner_actions"]?.ToJsonString() ?? "",
+                    "public change and verification report"
+                )
+                flow.NoInference()
             }
         }
 
@@ -441,6 +507,10 @@ internal class PublicDescriptions {
                 (selected == "" && CiShard.Include("PublicDescriptions/MissingAndUnsafe")) {
                 MissingAndUnsafe(binary)
                 Console.WriteLine("PASS missing summary fallback and unsafe publication refusal")
+            }
+            if selected == "Readiness" || (selected == "" && CiShard.Include("PublicDescriptions/Readiness")) {
+                Readiness(binary)
+                Console.WriteLine("PASS current public report readiness with missing and altered report refusal")
             }
             if selected == "ManagedBounds" || (selected == "" && CiShard.Include("PublicDescriptions/ManagedBounds")) {
                 ManagedBounds(binary)

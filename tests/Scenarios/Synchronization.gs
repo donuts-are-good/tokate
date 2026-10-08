@@ -185,6 +185,12 @@ internal class SynchronizationChecks {
             if grant != "" {
                 args.AddRange([]string{"--sync", grant})
             }
+            args.AddRange(
+                []string{
+                    "--summary",
+                    PublishedContribution.Summary(flow, candidate, "Update reviewed result content for this amendment.")
+                }
+            )
             return flow.Call(args.ToArray(), code)
         }
 

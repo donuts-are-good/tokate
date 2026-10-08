@@ -193,7 +193,21 @@ internal class TargetBranches {
                     Path.Combine(flow.Bin, "fork"),
                     "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
                 )
-                let result = flow.Call([]string{"external", "--run", run, "--commit", head})
+                let result = flow.Call(
+                    []string{
+                        "external",
+                        "--run",
+                        run,
+                        "--commit",
+                        head,
+                        "--summary",
+                        PublishedContribution.Summary(
+                            flow,
+                            head,
+                            "Add a result containing the external contribution text."
+                        )
+                    }
+                )
                 Check.Contains(result.Error, base)
                 Check.Contains(result.Error, moved)
                 flow.NoInference()

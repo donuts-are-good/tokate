@@ -16,11 +16,24 @@ internal class AmendmentFlow {
             commit string,
             code int32 = 0,
             tools string = "",
-            owner bool = false
+            owner bool = false,
+            summary bool = true
         ) Result {
             let args = List[string]{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
             if tools != "" {
                 args.AddRange([]string{"--tools", tools})
+            }
+            if summary {
+                args.AddRange(
+                    []string{
+                        "--summary",
+                        PublishedContribution.Summary(
+                            flow,
+                            commit,
+                            "Update reviewed result content for this amendment."
+                        )
+                    }
+                )
             }
             return flow.Call(args.ToArray(), code, owner: owner)
         }
@@ -666,10 +679,10 @@ internal class AmendmentFlow {
             let tools = native && modelPolicy == "" ? "": flow.Tools
             if mode == "lost_push_response" || mode == "lost_request_response" {
                 flow.Flow.Mode(mode)
-                Amend(flow.Flow, run, commit, mode == "lost_request_response" ? 0: 1, tools)
+                Amend(flow.Flow, run, commit, mode == "lost_request_response" ? 0: 1, tools, summary: !legacy)
                 flow.Flow.Mode("")
             }
-            Amend(flow.Flow, run, commit, tools: tools)
+            Amend(flow.Flow, run, commit, tools: tools, summary: !legacy)
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             Check.That(Check.Text(request["action"]) == "amend", "Wrong amendment request")

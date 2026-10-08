@@ -49,8 +49,9 @@ internal class CheckGates {
             return result
         }
 
-        private func Data(result Result) JsonNode -> Check.Json(result.Output)["data"] ??
-            throw Exception("Missing checks result")
+        private func Data(result Result) JsonNode -> (
+            Check.Json(result.Output)["data"] ?? throw Exception("Missing checks result")
+        )
 
         private func Gate(data JsonNode, name string, status string) {
             Check.That(
@@ -70,7 +71,7 @@ internal class CheckGates {
             let flow = test.Coordination.Flow
             Passing(test)
             let result = Data(Read(test))
-            for name in[]string{"lifecycle", "receipt", "checks", "dependencies", "freshness"} {
+            for name in[]string{"lifecycle", "receipt", "report", "checks", "dependencies", "freshness"} {
                 Gate(result, name, "passed")
             }
             Check.That(
@@ -246,6 +247,76 @@ internal class CheckGates {
             )
         }
 
+        private func Report(test PublishedContribution, v2 bool) {
+            let flow = test.Coordination.Flow
+            let report = "<!-- tokate-report:start -->"
+            let boundary = "<!-- tokate-report:end -->"
+            for kind in[]string{
+                "missing",
+                "changes",
+                "verification",
+                "unavailable",
+                "summary",
+                "verification-claim",
+                "observation",
+                "limits"
+            } {
+                if !v2 &&
+                    (kind == "summary" || kind == "verification-claim" || kind == "observation" || kind == "limits") {
+                    continue
+                }
+                test.Restore()
+                Passing(test)
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let body = Check.Text(pull["body"])
+                let start = body.IndexOf(report, StringComparison.Ordinal)
+                let end = body.IndexOf(boundary, StringComparison.Ordinal) + boundary.Length
+                Check.That(start >= 0 && end > start, "Published contribution lost its report region")
+                let original = body.Substring(start + report.Length, end - boundary.Length - start - report.Length)
+                let verified = "\nVerification:\n\n- Fixture report.\n- GitHub CI: not assessed here; missing or pending checks are not success."
+                let region = switch kind {
+                    case "missing": ""
+                    case "changes": verified
+                    case "verification": "\n- Add a result describing this candidate.\n"
+                    case "summary": "\n- Add unrelated behavior from another candidate.\n" + verified
+                    case "verification-claim": original.Replace(
+                        "Fixture content check passed.",
+                        "All platform tests passed."
+                    )
+                    case "observation": original.Replace(
+                        "coordinator did not observe execution",
+                        "coordinator verified all execution"
+                    )
+                    case "limits": original + "\n\nLimits:\n\n- No limitations remain.\n"
+                    default: "\n- Change summary unavailable for this candidate; review the diff.\n" + verified
+                }
+                pull["body"] = JsonValue.Create(
+                    body.Remove(start, end - start).Insert(start, report + region + boundary)
+                )
+                flow.Save()
+                let refusal = Read(test, 1)
+                let result = Data(refusal)
+                Gate(result, "report", "failed")
+                Gate(result, "receipt", "passed")
+                Gate(result, "checks", "passed")
+                Gate(result, "dependencies", "passed")
+                Gate(result, "freshness", "passed")
+                Check.That(
+                    Check.Text(result["machine_status"]) == "failed" && Check.Text(result["checks_status"]) == "passed",
+                    "Passing receipt and CI carried a refused public report: " + result.ToJsonString()
+                )
+                Check.Contains(
+                    result["required_owner_actions"]?.ToJsonString() ?? "",
+                    "public change and verification report"
+                )
+                Check.Contains(refusal.Error, "report")
+                test.Restore()
+                Passing(test)
+                Gate(Data(Read(test)), "report", "passed")
+            }
+        }
+
         private func Dependencies(test PublishedContribution) {
             let flow = test.Coordination.Flow
             for kind in[]string{"open", "not_planned", "duplicate", "unavailable", "completed"} {
@@ -320,6 +391,7 @@ internal class CheckGates {
                 flow.Save()
                 let result = Data(Read(test, 1))
                 Gate(result, "freshness", "stale")
+                Gate(result, "report", "stale")
                 Gate(result, "checks", "stale")
                 Check.That(
                     Check.Text(result["checks_observed_status"]) == "passed" && Check.Text(
@@ -504,6 +576,7 @@ internal class CheckGates {
             for v2 in[]bool{false, true} {
                 using let test = PublishedContribution.Create(binary, v2: v2)
                 Success(test)
+                Report(test, v2)
                 CheckEvidence(test)
                 Dependencies(test)
                 Movement(test)
@@ -514,7 +587,7 @@ internal class CheckGates {
                 }
             }
             Console.WriteLine(
-                "PASS composed check gates, required owner actions, exact-head conflicts, dependency refusal, movement, lifecycle, publication authority, deadlines and JSON/human consistency"
+                "PASS composed check gates, required owner actions, exact-head conflicts, public report refusal, dependency refusal, movement, lifecycle, publication authority, deadlines and JSON/human consistency"
             )
         }
     }

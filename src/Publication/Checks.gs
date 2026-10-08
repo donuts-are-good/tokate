@@ -9,6 +9,7 @@ internal class Checks {
     shared {
         private let BindingFields string = "version,issue,approval,authority_revision,donor,base,base_branch,commit,expected,reservation,receipt_hash,policy_hash"
         private let Review string = "Review implementation scope, acceptance criteria, semantic compatibility and limitations; decide final acceptance and merge. Machine checks do not accept or complete the issue or remove draft status."
+        private let ReportAction string = "Require a current public change and verification report bound to this exact commit; publication may preserve the work as a draft."
 
         private func Identity(pull JsonElement) string {
             let result = PublicOutput.Select(pull, "state,draft,merged,merged_at,closed_at")
@@ -35,7 +36,7 @@ internal class Checks {
         }
 
         private func Invalidate(gates Dictionary[string, Object?], facts Dictionary[string, Object?]) {
-            for name in[]string{"receipt", "checks", "dependencies", "lifecycle"} {
+            for name in[]string{"receipt", "report", "checks", "dependencies", "lifecycle"} {
                 let gate = gates[name] as Dictionary[string, Object?] ?? throw Exception("Invalid check gate")
                 let status = gate["status"]?.ToString() ?? "unread"
                 if status == "passed" || status == "failed" || status == "pending" {
@@ -116,7 +117,7 @@ internal class Checks {
             var target string = ""
             while true {
                 let gates = map[string, Object?]{}
-                for name in[]string{"lifecycle", "receipt", "checks", "dependencies", "freshness"} {
+                for name in[]string{"lifecycle", "receipt", "report", "checks", "dependencies", "freshness"} {
                     gates[name] = map[string, Object?]{"status": "unread"}
                 }
                 let facts = map[string, Object?]{
@@ -196,6 +197,23 @@ internal class Checks {
                     binding = currentBinding
                     identity = Identity(pull)
                     target = currentTarget
+                    stage = "report"
+                    var reportFailure string = ""
+                    try {
+                        PublicSummary.Current(
+                            PrBody.ReportText(J.Text(pull, "body"), ""),
+                            J.Get(run.Element(), "public_summary"),
+                            run.Text("commit"),
+                            run.Text("public_report")
+                        )
+                        gates["report"] = map[string, Object?]{"status": "passed", "evidence": "complete"}
+                    } catch (error Exception) {
+                        reportFailure = error.Message
+                        gates["report"] = map[string, Object?]{
+                            "status": "failed",
+                            "reason": "missing_or_altered_public_report"
+                        }
+                    }
                     stage = "checks"
                     let rows = CommitChecks.Read(run.Text("repo"), run.Text("commit"), observed)
                     var failed bool
@@ -291,7 +309,14 @@ internal class Checks {
                     }
                     ApiTransport.CheckDeadline()
                     gates["freshness"] = map[string, Object?]{"status": "passed"}
+                    if reportFailure != "" && !pending {
+                        stage = "report"
+                        throw CliFailure("invalid_state", reportFailure)
+                    }
                     facts["machine_status"] = status
+                    if reportFailure != "" {
+                        facts["required_owner_actions"] = []string{ReportAction, Review}
+                    }
                     Show(run, observed, facts, directory, ref previous)
                     if failed {
                         return 1
@@ -334,8 +359,10 @@ internal class Checks {
                     }
                     if facts["owner_review"]?.ToString() == "required" {
                         let action = stage == "dependencies" ? "Inspect native dependencies; every dependency must be closed as completed before machine success.": (
-                            stage == "checks" ? "Inspect incomplete or unavailable exact-head CI evidence before acceptance.":
-                            "Inspect current approval, receipt, protected paths, PR head, target and lifecycle evidence before acceptance."
+                            stage == "checks" ? "Inspect incomplete or unavailable exact-head CI evidence before acceptance.": (
+                                stage == "report" ? ReportAction:
+                                "Inspect current approval, receipt, protected paths, PR head, target and lifecycle evidence before acceptance."
+                            )
                         )
                         facts["required_owner_actions"] = []string{action, Review}
                         for row in observed {

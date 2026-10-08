@@ -532,7 +532,7 @@ internal class Cli {
                 "checks",
                 "run,repo,pr,watch,timeout",
                 "repo,pr",
-                "Read receipt, exact-head CI, dependency and freshness gates with required owner actions; --run also saves results locally. Exit: 0 machine gates passed, 8 pending, 1 failed. Owners retain acceptance and merge.",
+                "Read receipt, public report, exact-head CI, dependency and freshness gates with required owner actions; --run also saves results locally. Exit: 0 machine gates passed, 8 pending, 1 failed. Owners retain acceptance and merge.",
                 "[--repo OWNER/REPO] --pr N [--watch] [--timeout N]\n       tokate checks --run DIR [--watch] [--timeout N]",
                 "checks --run /path/to/run --watch"
                 ,

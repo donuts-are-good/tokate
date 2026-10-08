@@ -195,7 +195,17 @@ internal class PublishedContribution : IDisposable {
                 flow.Flow.Call([]string{"work", "--run", run})
             } else {
                 let commit = flow.Candidate(claim)
-                flow.Flow.Call([]string{"external", "--run", run, "--commit", commit})
+                flow.Flow.Call(
+                    []string{
+                        "external",
+                        "--run",
+                        run,
+                        "--commit",
+                        commit,
+                        "--summary",
+                        Summary(flow.Flow, commit, "Add a result containing the external contribution text.")
+                    }
+                )
             }
             flow.Flow.Call([]string{"submit", "--run", run})
             flow.Flow.Reload()
@@ -212,6 +222,25 @@ internal class PublishedContribution : IDisposable {
                 Check.That(flow.Flow.State["issue"]?["assignees"]?.AsArray().Count == 0, "Task fixture assigned donor")
             }
             return run
+        }
+
+        internal func Summary(flow NativeFixture, commit string, change string) string {
+            let path = Path.Combine(flow.Temp.Root, "public-summary-" + Guid.NewGuid().ToString("N") + ".json")
+            File.WriteAllText(
+                path,
+                Check.Map(
+                    "head",
+                    JsonValue.Create(commit),
+                    "changes",
+                    Check.Json("[\"" + change + "\"]"),
+                    "verification",
+                    Check.Json("[\"Fixture content check passed.\"]"),
+                    "limitations",
+                    Check.Json("[]")
+                )
+                    .ToJsonString()
+            )
+            return path
         }
 
         private func SetupOwner(flow NativeFixture) {
