@@ -225,7 +225,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.racer.start()
         private, outside = fixture['private'], fixture['outside']
         code = f"""from pathlib import Path
-import socket
+import socket, ssl
+assert ssl.create_default_context().get_ca_certs(), 'System HTTPS trust store is unavailable'
+try:
+    with open(ssl.get_default_verify_paths().cafile, 'ab'):
+        pass
+except OSError:
+    pass
+else:
+    raise AssertionError('System HTTPS trust store is writable')
 for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
     try:
         Path(path).read_bytes()
