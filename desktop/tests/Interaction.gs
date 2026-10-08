@@ -118,6 +118,16 @@ func AwaitControl(
     throw Exception("Timed out waiting for " + name + " / " + value)
 }
 
+func ScrollOutput(host TestHost, window Window, adapter TestAccessibility, end bool) {
+    let view = Find(adapter.Root, AccessibilityRole.Generic, "Donation output") ?? throw Exception("Missing output")
+    Require(
+        window.PerformAccessibilityAction(view.Id, AccessibilityActionRequest(AccessibilityAction.Focus)),
+        "Cannot focus activity"
+    )
+    Press(window, end ? Key.End: Key.Home)
+    Settle(host)
+}
+
 func Script(directory string, name string, body string) {
     let path = Path.Combine(directory, name)
     File.WriteAllText(path, "#!/bin/sh\n" + body)
@@ -182,7 +192,11 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "[ \"$$HOME\" = \"$$CODEX_HOME\" ] && [ \"$$PWD\" = \"$$HOME\" ] && [ \"$1 $2 $3\" = 'debug models --bundled' ] || exit 1\nprintf '%s' '{\"models\":[{\"slug\":\"gpt-6.1-sol\",\"display_name\":\"GPT-6.1-Sol\",\"supported_reasoning_levels\":[{\"effort\":\"high\"},{\"effort\":\"ultra\"}]},{\"slug\":\"gpt-6-luna\",\"display_name\":\"GPT-6-Luna\",\"supported_reasoning_levels\":[{\"effort\":\"high\"},{\"effort\":\"max\"}]}]}'\n"
         )
         Environment.SetEnvironmentVariable("PATH", fixture + ":" + previous)
+        let githubPath = Path.Combine(fixture, "gh")
+        let github = File.ReadAllText(githubPath)
+        File.WriteAllText(githubPath, github.Replace("{\"name\":\"tokate:approved\"}", ""))
         Require(window.PlatformInput.CommitText("https://github.com/owner/repo/issues/278"), "Cannot enter issue URL")
+        Settle(host)
         guard let lookup = Find(adapter.Root, AccessibilityRole.Button, "Find approved issues") else {
             throw Exception("Missing lookup button")
         }
@@ -207,6 +221,13 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Loading displayed a donation output panel"
         )
         File.WriteAllText(Path.Combine(fixture, "release-lookup"), "release")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Issue #278 needs owner approval.")
+        Require(
+            Find(adapter.Root, AccessibilityRole.ComboBox, "Model") == nil,
+            "Unapproved issue reached model selection"
+        )
+        File.WriteAllText(githubPath, github)
+        Activate(window, adapter, "Find approved issues")
         AwaitControl(host, adapter, AccessibilityRole.ComboBox, "Model", "GPT-6.1-Sol")
         Require(Find(adapter.Root, AccessibilityRole.Text, "Set your limits") != nil, "Step II heading missing")
         Require(Find(adapter.Root, AccessibilityRole.Text, "II") != nil, "Step II numeral missing")
@@ -214,6 +235,33 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             Find(adapter.Root, AccessibilityRole.ComboBox, "Reasoning effort")?.Value == "High",
             "Default effort is not High"
         )
+        for width in[]int32{800, 1024, 1280, 1920, 800} {
+            host.Resize(width, 600, width, 600)
+            Settle(host)
+            for name in[]string{"Model", "Reasoning effort", "Coding minutes", "Verification minutes"} {
+                var found = Find(adapter.Root, AccessibilityRole.ComboBox, name)
+                found ??= Find(adapter.Root, AccessibilityRole.TextInput, name)
+                guard let control = found else {
+                    throw Exception("Missing donation control: " + name)
+                }
+                Require(
+                    control.Bounds.X >= 202 && control.Bounds.X + control.Bounds.Width <= width + 1,
+                    "Donation control escaped the window: " + name
+                )
+            }
+        }
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "60 min")?.Disabled == true,
+            "Preset exceeds the owner time limit"
+        )
+        Activate(window, adapter, "15 min")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Coding minutes")?.Value == "15",
+            "Preset was not applied"
+        )
+        Activate(window, adapter, "30 min")
+        Settle(host)
         Activate(window, adapter, "Model", AccessibilityRole.ComboBox)
         Settle(host)
         Press(window, Key.End)
@@ -272,7 +320,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         AwaitControl(host, adapter, AccessibilityRole.Text, "Review")
         Activate(window, adapter, "Reserve contribution")
         Settle(host)
-        Activate(window, adapter, "Confirm")
+        Activate(window, adapter, "Send request")
         AwaitControl(host, adapter, AccessibilityRole.Text, "Reserving donation")
         Require(
             Find(adapter.Root, AccessibilityRole.Text, "Command output") == nil &&
@@ -329,18 +377,20 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation", enabled: true)
         Activate(window, adapter, "Start donation")
         Settle(host)
-        Require(FindText(adapter.Root, "Coding: Unlimited"), "Donation lost the unlimited coding choice")
-        Activate(window, adapter, "Confirm")
+        Require(FindText(adapter.Root, "Unlimited"), "Donation lost the unlimited coding choice")
+        Activate(window, adapter, "Start this donation")
         AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
         AwaitControl(host, adapter, AccessibilityRole.Text, "Command output")
         let transcript = Stopwatch.StartNew()
         while !FindText(adapter.Root, "Output line 50") && transcript.Elapsed.TotalSeconds < 5 {
             Settle(host)
         }
-        Require(
-            FindText(adapter.Root, "Preparing checkout") && FindText(adapter.Root, "Output line 50"),
-            "The output panel lost transcript lines"
-        )
+        Require(FindText(adapter.Root, "Output line 50"), "The output panel did not follow new activity")
+        ScrollOutput(host, window, adapter, false)
+        Require(FindText(adapter.Root, "Preparing checkout"), "The output panel lost earlier activity")
+        Activate(window, adapter, "Follow live")
+        Settle(host)
+        Require(FindText(adapter.Root, "Output line 50"), "Cannot return to the latest activity")
         AwaitControl(host, adapter, AccessibilityRole.Text, "Elapsed 00:00:01")
         guard let footer = Find(adapter.Root, AccessibilityRole.Text, "Elapsed 00:00:01") else {
             throw Exception("Missing elapsed footer")
@@ -359,6 +409,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         )
         Activate(window, adapter, "Donate")
         AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
+        ScrollOutput(host, window, adapter, false)
         Require(FindText(adapter.Root, "Preparing checkout"), "Donation output was lost after navigation")
         Activate(window, adapter, "Cancel command")
         let cancelled = Stopwatch.StartNew()
@@ -378,7 +429,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation", enabled: true)
         Activate(window, adapter, "Start donation")
         Settle(host)
-        Require(FindText(adapter.Root, "Coding: Unlimited"), "Saved work did not confirm its Unlimited budget")
+        Require(FindText(adapter.Root, "Unlimited"), "Saved work did not confirm its Unlimited budget")
         Activate(window, adapter, "Go back")
         Settle(host)
         Require(Find(adapter.Root, AccessibilityRole.Text, "Donation") != nil, "Saved work did not open Donate")
@@ -428,10 +479,11 @@ func TestDesktop() {
     )
     Settle(host)
     let field = Find(adapter.Root, AccessibilityRole.TextInput) ?? throw Exception("Missing repository input")
-    Require(
-        window.PerformAccessibilityAction(field.Id, AccessibilityActionRequest(AccessibilityAction.Focus)),
-        "Cannot focus input"
-    )
+    let x = float32(field.Bounds.X + field.Bounds.Width / 2)
+    let y = float32(field.Bounds.Y + field.Bounds.Height / 2)
+    window.PlatformInput.PointerPress(1, PointerDevice.Mouse, x, y, PointerButton.Primary, KeyModifiers{}, 1)
+    window.PlatformInput.PointerRelease(1, PointerDevice.Mouse, x, y, PointerButton.Primary, KeyModifiers{}, 0)
+    Settle(host)
     Require(window.PlatformInput.CommitText("owner/repoz"), "Cannot enter repository")
     Press(window, Key.Backspace)
     Require(window.PlatformInput.Editor?.Text == "owner/repo", "Backspace did not remove the last character")

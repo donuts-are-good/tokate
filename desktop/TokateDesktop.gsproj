@@ -15,6 +15,7 @@
     <PackageReference Include="Goo.Animations" Version="0.2.5" />
     <GooShaderEffect Include="Shaders/fresco.slang" />
     <Content Include="../branding/artwork/backdrop.png;../branding/artwork/hands-smooth.png;../branding/artwork/sun.png;../branding/artwork/moon.png;../branding/artwork/stone-olive.png" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../branding/artwork/*-daylight.png;../branding/artwork/*-moonlight.png" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../branding/fonts/newsreader.ttf;../branding/fonts/cormorant.ttf;../branding/fonts/cormorant-italic.ttf;../branding/fonts/Newsreader-LICENSE.txt;../branding/fonts/Cormorant-LICENSE.txt" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets/*.svg" CopyToOutputDirectory="PreserveNewest" />
     <Watch Include="**/*.gs" Exclude="bin/**;obj/**" />

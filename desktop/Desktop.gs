@@ -45,6 +45,8 @@ partial class Desktop : Cell {
     private var confirmation Action?
     private var confirmationTitle string = ""
     private var confirmationText string = ""
+    private var confirmationLabel string = "Confirm"
+    private var confirmationContent Func[Blob]?
 
     init(assets Artwork) {
         art = assets
@@ -67,10 +69,18 @@ partial class Desktop : Cell {
         outputViewport.MetricsChanged += metrics -> {
             let follow = outputRange - outputOffset <= 2
             let changed = metrics.ScrollRange.Y != outputRange
+            if metrics.ScrollOffset.Y < Math.Min(outputOffset, metrics.ScrollRange.Y) - 1 {
+                followOutput = false
+                Rebuild()
+            }
             outputRange = metrics.ScrollRange.Y
             outputOffset = metrics.ScrollOffset.Y
-            if changed && follow {
-                outputViewport.ScrollTo(0, outputRange)
+            if changed && follow && followOutput {
+                if activityLines.Count > 0 {
+                    outputViewport.ScrollToItem(activityLines[activityLines.Count - 1].Index.ToString())
+                } else {
+                    outputViewport.ScrollTo(0, outputRange)
+                }
             }
         }
     }
@@ -166,9 +176,15 @@ partial class Desktop : Cell {
         }
     }
 
-    private func Action(label string, click Action, primary bool = false, disabled bool = false) Blob {
+    private func Action(
+        label string,
+        click Action,
+        primary bool = false,
+        disabled bool = false,
+        allowWhileBusy bool = false
+    ) Blob {
         let loading = busy && activityVisible && page == activityPage && activityAction == label && !donationRunning
-        let unavailable = disabled || (busy && !loading) || (loading && stopping)
+        let unavailable = disabled || (busy && !loading && !allowWhileBusy) || (loading && stopping)
         let button = ActionButton{
             Content: label,
             AccessibilityName: loading ? "Cancel command": label,
@@ -367,10 +383,18 @@ partial class Desktop : Cell {
         message = ""
     }
 
-    private func Confirm(title string, text string, action Action) {
+    private func Confirm(
+        title string,
+        text string,
+        action Action,
+        label string = "Confirm",
+        content Func[Blob]? = nil
+    ) {
         confirmationTitle = title
         confirmationText = text
         confirmation = action
+        confirmationLabel = label
+        confirmationContent = content
     }
 
     private func Execute(
@@ -573,6 +597,49 @@ partial class Desktop : Cell {
         )
     }
 
+    private func SectionBackground() Blob {
+        let background = Container{
+            Position: PositionType.Absolute,
+            Left: 0,
+            Right: 0,
+            Top: 0,
+            Bottom: 0,
+            HitTestSelf: false,
+        }
+        if page == "Welcome" {
+            background.ShaderEffect = art.Effect
+            background.Children.Add(
+                Image{Source: art.Backdrop, Fit: ImageFit.Cover, Width: Percent(100), Height: Percent(100)}
+            )
+            return background
+        }
+        let scene Landscape? = switch page {
+            case "Donate": art.Donate
+            case "My project": art.Project
+            case "Saved work": art.Saved
+            default: nil
+        }
+        if let landscape = scene {
+            background.Opacity = 0.65
+            background.Children.Add(
+                Image{Source: landscape.Daylight, Fit: ImageFit.Cover, Width: Percent(100), Height: Percent(100)}
+            )
+            background.Children.Add(
+                Image{
+                    Source: landscape.Moonlight,
+                    Fit: ImageFit.Cover,
+                    Position: PositionType.Absolute,
+                    Left: 0,
+                    Right: 0,
+                    Top: 0,
+                    Bottom: 0,
+                    Opacity: twilight.Value,
+                }
+            )
+        }
+        return background
+    }
+
     private func HomeCard(title string, target string) Blob -> Keyboard(
         Button{
             FlexGrow: 1,
@@ -689,7 +756,7 @@ partial class Desktop : Cell {
             Open: confirmation != nil,
             KeyBindings: WidgetKeyBindings.Editing(host?.PlatformInput),
             Header: Heading(confirmationTitle, 32),
-            Content: Label(confirmationText),
+            Content: confirmationContent?.Invoke() ?? Label(confirmationText),
             AccessibilityName: confirmationTitle,
             Width: 580,
             Padding: 30,
@@ -697,11 +764,11 @@ partial class Desktop : Cell {
             BackgroundColor: Surface(),
             BorderColor: Line(),
             CancelText: "Go back",
-            ConfirmText: "Confirm",
+            ConfirmText: confirmationLabel,
             CancelContent: Label("Go back"),
-            ConfirmContent: Label("Confirm"),
+            ConfirmContent: Label(confirmationLabel),
             CreateCancel: (options, content) -> DialogButton("Go back", content),
-            CreateConfirm: (options, content) -> DialogButton("Confirm", content),
+            CreateConfirm: (options, content) -> DialogButton(confirmationLabel, content),
             CreateRoot: (options, backdrop, panel) -> Container{
                 Position: PositionType.Absolute,
                 Left: 0,
@@ -748,21 +815,22 @@ partial class Desktop : Cell {
         }
         let welcome = page == "Welcome"
         let donating = page == "Donate" && step == 3
+        let live = donating && donationStarted
         let body = Container{
             Key: page == "Donate" ? page + step.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
-            Height: welcome || donating ? Percent(100): Length.Auto,
+            Height: welcome || live ? Percent(100): Length.Auto,
             MinHeight: 0,
             MaxWidth: welcome ? Percent(100): Length(1050),
             AlignSelf: AlignSelf.Center,
             Gap: 18,
             content,
         }
-        if message != "" && !donating {
+        if message != "" && !donating && page != "Donate" {
             body.Children.Add(Label(message, 16, true))
         }
-        if report != "" && !donating {
+        if report != "" && !donating && page != "Donate" {
             body.Children.Add(
                 Text{
                     Content: report,
@@ -793,16 +861,7 @@ partial class Desktop : Cell {
                 FlexBasis: 0,
                 MinWidth: 0,
                 MinHeight: 0,
-                Container{
-                    Position: PositionType.Absolute,
-                    Left: 0,
-                    Right: 0,
-                    Top: 0,
-                    Bottom: 0,
-                    Opacity: welcome ? 1: 0,
-                    ShaderEffect: art.Effect,
-                    Image{Source: art.Backdrop, Fit: ImageFit.Cover, Width: Percent(100), Height: Percent(100)},
-                },
+                SectionBackground(),
                 WindowChrome{
                     Host: host,
                     Height: 42,
@@ -867,13 +926,15 @@ partial class Desktop : Cell {
                     MinWidth: 0,
                     MinHeight: 0,
                     OverflowX: Overflow.Hidden,
-                    OverflowY: welcome || donating ? Overflow.Hidden: Overflow.Scroll,
+                    OverflowY: welcome || live ? Overflow.Hidden: Overflow.Scroll,
                     Padding: welcome ? 0: 28,
                     body,
                 },
             },
         }
-        root.Children.Add(Container{Width: 0, Height: 0, Dialog()})
+        if confirmation != nil {
+            root.Children.Add(Container{Width: 0, Height: 0, Dialog()})
+        }
         return root
     }
 }

@@ -46,6 +46,17 @@ partial class Desktop {
         if result.ExitCode == 0 {
             return false
         }
+        if page == "Donate" {
+            message = TextOf(Field(result.Value, "error"), "message")
+            if message == "" {
+                message = result.Diagnostics.Trim().Split('\n')[0]
+            }
+            if message == "" {
+                message = "Could not complete this action."
+            }
+            report = ""
+            return true
+        }
         ShowResult(result)
         return true
     }
@@ -54,6 +65,8 @@ partial class Desktop {
         try {
             selectedRepository = Repository(repository)
             unlimited = false
+            issues.Clear()
+            account = ""
             let parts = repository.Trim().TrimEnd('/').Split('/')
             let requested = parts.Length > 2 && parts[parts.Length - 2] == "issues" ? parts[parts.Length - 1]: ""
             if requested != "" && (!int32.TryParse(requested, out var number) || number <= 0) {
@@ -106,8 +119,13 @@ partial class Desktop {
                                             issues.Add(item)
                                         }
                                     }
-                                    message = issues.Count == 0 ? "No approved issues in the first 20 results. The owner needs to approve work.":
-                                    ""
+                                    message = issues.Count == 0 ? requested == "" ?
+                                    "No approved issues found.":
+                                    Field(found.Value, "pull_request").ValueKind != JsonValueKind.Undefined ?
+                                    "This is a pull request. Choose an issue.":
+                                    TextOf(found.Value, "state") != "open" ?
+                                    "Issue #" + requested + " is closed.":
+                                    "Issue #" + requested + " needs owner approval.": ""
                                     if requested != "" && issues.Count == 1 {
                                         ChooseIssue(issues[0])
                                     }
@@ -282,8 +300,7 @@ partial class Desktop {
             }
             Confirm(
                 "Reserve this contribution?",
-                DonationSummary() +
-                    "\n\nThis posts a claim on GitHub. It does not start inference. Starting work is a separate action.",
+                "",
                 () -> {
                     step = 3
                     donationStarted = false
@@ -311,308 +328,24 @@ partial class Desktop {
                         },
                         seconds: 600
                     )
+                },
+                label: "Send request",
+                content: () -> Container{
+                    Gap: 16,
+                    Heading(selectedRepository + " #" + issue, 25),
+                    Row(
+                        []Blob{
+                            SummaryTile("Coding", unlimited ? "Unlimited": coding + " minutes", "schedule"),
+                            SummaryTile("Verification", verification + " minutes", "verified"),
+                        }
+                    ),
+                    ReviewDetail("Model", model + " / " + effort),
+                    ReviewDetail("Network", network ? "Allowed": "Offline"),
                 }
             )
         } catch (error Exception) {
             message = error.Message
         }
-    }
-
-    private func DonationSummary() string -> selectedRepository +
-        " #" +
-        issue +
-        "\n" +
-        issueTitle +
-        "\nAccount: " +
-        account +
-        "\nTool: " +
-        harness +
-        " / " +
-        model +
-        " / " +
-        effort +
-        "\nCoding: " +
-        (unlimited ? "Unlimited": coding + " minutes") +
-        "\nVerification: " +
-        verification +
-        " minutes\nProject network: " +
-        (network ? "allowed": "offline")
-
-    private func Donate() Blob {
-        if step == 3 {
-            return Donation()
-        }
-        let body = Container{Gap: 20}
-        let numeral = Heading(step == 0 ? "I": step == 1 ? "II": "III")
-        numeral.Color = Accent()
-        numeral.Width = 54
-        body.Children.Add(
-            Container{
-                FlexDirection: FlexDirection.Row,
-                AlignItems: AlignItems.Baseline,
-                Gap: 16,
-                numeral,
-                Heading(step == 0 ? "Choose an issue": step == 1 ? "Set your limits": "Review"),
-            }
-        )
-        body.Children.Add(Rule())
-        if step == 0 {
-            body.Children.Add(
-                Label(
-                    "Start with a project you care about. Tokate reads its approved issues and contribution policy.",
-                    19,
-                    true
-                )
-            )
-            body.Children.Add(
-                Entry(
-                    "GitHub repository or issue URL",
-                    repository,
-                    value -> {
-                        repository = value
-                    },
-                    "owner/repository",
-                    540
-                )
-            )
-            body.Children.Add(Row([]Blob{Action("Find approved issues", () -> LoadProject(), true)}))
-            if account != "" {
-                body.Children.Add(Label("GitHub account: " + account + "   /   " + selectedRepository, 16, true))
-            }
-            for item in issues {
-                let current = item
-                body.Children.Add(
-                    Action("#" + TextOf(item, "number") + "   " + TextOf(item, "title"), () -> ChooseIssue(current))
-                )
-            }
-            body.Children.Add(
-                Label(
-                    "Shows up to 20 recently updated approved issues. Access is checked again before reservation.",
-                    16,
-                    true
-                )
-            )
-        } else if step == 1 {
-            body.Children.Add(Heading("#" + issue + "  " + issueTitle, 27))
-            body.Children.Add(
-                Row(
-                    []Blob{
-                        Action(
-                            "Codex",
-                            () -> {
-                                harness = "codex"
-                                model = "gpt-6.1-sol"
-                                effort = "high"
-                                profile = ""
-                                if codexModels.Count == 0 {
-                                    LoadCodexModels()
-                                }
-                            }
-                        ),
-                        Action(
-                            "Pi / local",
-                            () -> {
-                                harness = "pi"
-                                model = ""
-                                effort = ""
-                                profile = ""
-                            }
-                        )
-                    }
-                )
-            )
-            if profiles.ValueKind == JsonValueKind.Object {
-                let buttons = List[Blob]()
-                for item in profiles.EnumerateObject() {
-                    let name = item.Name
-                    let value = item.Value
-                    buttons.Add(
-                        Action(
-                            "Use " + name,
-                            () -> {
-                                profile = name
-                                UseSelection(value)
-                            }
-                        )
-                    )
-                }
-                body.Children.Add(Row(buttons.ToArray()))
-            }
-            body.Children.Add(
-                Label(profile == "" ? "Selected tool: " + harness: "Selected profile: " + profile, 16, true)
-            )
-            if harness == "codex" {
-                body.Children.Add(
-                    Row(
-                        []Blob{
-                            Dropdown(
-                                "Model",
-                                model,
-                                CodexChoices(false),
-                                value -> {
-                                    model = value
-                                    profile = ""
-                                    var supported = false
-                                    for choice in CodexChoices(true) {
-                                        supported = supported || choice.Id == effort
-                                    }
-                                    if !supported {
-                                        effort = ""
-                                    }
-                                },
-                                310
-                            ),
-                            Dropdown(
-                                "Reasoning effort",
-                                effort,
-                                CodexChoices(true),
-                                value -> {
-                                    effort = value
-                                    profile = ""
-                                },
-                                210
-                            ),
-                        }
-                    )
-                )
-            } else {
-                body.Children.Add(
-                    Row(
-                        []Blob{
-                            Entry(
-                                "Model",
-                                model,
-                                value -> {
-                                    model = value
-                                    profile = ""
-                                },
-                                "Exact model ID",
-                                310
-                            ),
-                            Entry(
-                                "Reasoning effort",
-                                effort,
-                                value -> {
-                                    effort = value
-                                    profile = ""
-                                },
-                                "For example, high",
-                                210
-                            ),
-                        }
-                    )
-                )
-            }
-            if harness == "pi" {
-                body.Children.Add(
-                    Entry(
-                        "Local endpoint",
-                        endpoint,
-                        value -> {
-                            endpoint = value
-                            profile = ""
-                        },
-                        "http://127.0.0.1:8080/v1",
-                        540
-                    )
-                )
-            }
-            if AllowsUnlimited() {
-                body.Children.Add(
-                    Check(
-                        "Unlimited coding time",
-                        unlimited,
-                        value -> {
-                            unlimited = value
-                        }
-                    )
-                )
-            }
-            let budgets = List[Blob]()
-            if !unlimited {
-                budgets.Add(
-                    Entry(
-                        "Coding minutes",
-                        coding,
-                        value -> {
-                            coding = value
-                        },
-                        width: 250
-                    )
-                )
-            }
-            budgets.Add(
-                Entry(
-                    "Verification minutes",
-                    verification,
-                    value -> {
-                        verification = value
-                    },
-                    width: 270
-                )
-            )
-            body.Children.Add(Row(budgets.ToArray()))
-            body.Children.Add(
-                Check(
-                    "Allow project commands to use the network",
-                    network,
-                    value -> {
-                        network = value
-                    }
-                )
-            )
-            body.Children.Add(
-                Label(
-                    "The selected tool owns authentication. Time limits do not cap token charges or server resources.",
-                    16,
-                    true
-                )
-            )
-            body.Children.Add(
-                Row(
-                    []Blob{
-                        Action(
-                            "Back",
-                            () -> {
-                                step = 0
-                            }
-                        ),
-                        Action("Check selection & review", () -> ReviewDonation(), true)
-                    }
-                )
-            )
-        } else {
-            body.Children.Add(
-                Container{
-                    Padding: 24,
-                    Gap: 16,
-                    BackgroundColor: Surface(),
-                    BorderRadius: 6,
-                    Label(DonationSummary(), 20)
-                }
-            )
-            body.Children.Add(
-                Label(
-                    "The CLI checked this selection against the installed tool and owner policy.\nReservation spends no inference. You can start later from Saved work.",
-                    18,
-                    true
-                )
-            )
-            body.Children.Add(
-                Row(
-                    []Blob{
-                        Action(
-                            "Change details",
-                            () -> {
-                                step = 1
-                            }
-                        ),
-                        Action("Reserve contribution", () -> Reserve(), true)
-                    }
-                )
-            )
-        }
-        return body
     }
 
     private func Discover() {
