@@ -143,14 +143,17 @@ partial class Desktop : Cell {
     }
 
     private func Action(label string, click Action, primary bool = false, disabled bool = false) Blob {
+        let unavailable = disabled || busy
         let button = ActionButton{
             Content: label,
             OnClick: click,
-            Disabled: disabled || busy,
+            Disabled: unavailable,
             BackgroundColor: primary ? Ink(): Surface(),
             TextColor: primary ? Paper(): Ink(),
             HoverBackgroundColor: primary ? Accent(): Paper(),
             ActiveBackgroundColor: Accent(),
+            DisabledBackgroundColor: Surface(),
+            DisabledTextColor: Muted(),
             BorderColor: primary ? Ink(): Line(),
             FocusBorderColor: Accent(),
             ShowFocusHighlight: keyboardFocus,
@@ -159,7 +162,7 @@ partial class Desktop : Cell {
             FontSize: 18,
             Height: 44,
             BorderRadius: 5,
-            TransitionMs: motion ? 180: 0,
+            TransitionMs: motion && !unavailable ? 180: 0,
         }.Build()
         button.MaxWidth = Percent(100)
         button.MinHeight = 44
@@ -590,6 +593,7 @@ partial class Desktop : Cell {
         }
         let welcome = page == "Welcome"
         let body = Container{
+            Key: page == "Donate" ? page + step.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
             Height: welcome ? Percent(100): Length.Auto,
