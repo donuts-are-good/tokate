@@ -67,7 +67,10 @@ jobs:
       - run: git diff --check
       - name: Probe the real managed sandbox without inference
         run: artifacts/linux-x64/tokate doctor
-      - run: tar -czf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts linux-x64/tokate tests/tokate-tests
+      - name: Package the tested Node runtime with the suite binaries
+        run: |
+          cp "$TOKATE_NODE" artifacts/tests/node
+          tar -czf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts linux-x64/tokate tests/tokate-tests tests/node
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: tokate-binaries
