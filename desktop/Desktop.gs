@@ -620,6 +620,7 @@ partial class Desktop : Cell {
             default: nil
         }
         if let landscape = scene {
+            background.ShaderEffect = art.LandscapeEffect
             background.Opacity = 0.65
             background.Children.Add(
                 Image{Source: landscape.Daylight, Fit: ImageFit.Cover, Width: Percent(100), Height: Percent(100)}
@@ -806,6 +807,8 @@ partial class Desktop : Cell {
         }
         art.Effect.SetParameter(0, Vector4(float32(twilight.Value), oilPaint ? 1.0F: 0.0F, 0.0F, 0.04F))
         art.Effect.Playing = false
+        art.LandscapeEffect.SetParameter(0, Vector4(0.0F, oilPaint ? 1.0F: 0.0F, 0.0F, 0.04F))
+        art.LandscapeEffect.Playing = false
         let content = switch page {
             case "Donate": Donate()
             case "My project": Owner()

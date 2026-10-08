@@ -19,9 +19,11 @@ class Artwork : IDisposable {
         Path.Combine(AppContext.BaseDirectory, "Shaders/fresco.goo-effect")
     )
     let Effect ShaderEffect
+    let LandscapeEffect ShaderEffect
 
     init() {
         Effect = ShaderEffect(Program)
+        LandscapeEffect = ShaderEffect(Program)
     }
 
     func Dispose() {
