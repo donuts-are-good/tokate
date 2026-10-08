@@ -129,8 +129,11 @@ for cancelled in (False, True):
         ], policy["allowed_tools"]
     finally:
         try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
+            ended, _ = os.waitpid(pid, os.WNOHANG)
+            if not ended:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+        except (ChildProcessError, ProcessLookupError):
             pass
         os.close(fd)
 
