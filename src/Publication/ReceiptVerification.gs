@@ -54,6 +54,10 @@ internal class ReceiptVerification {
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let value = state.Value()
             let contribution = J.Get(value, "contribution")
+            if J.Text(value, "approval_id") != J.Text(receipt, "approval") ||
+                contribution.ValueKind != JsonValueKind.Object {
+                throw CliFailure("stale_approval", "PR approval or contribution no longer matches")
+            }
             let metadata = J.Get(contribution, "metadata")
             let current = CoordinationState.Current(value)
             let outcome = J.Get(current, "outcome")

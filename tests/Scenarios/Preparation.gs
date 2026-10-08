@@ -122,14 +122,16 @@ internal class PreparationChecks {
                     "--model",
                     "gpt-6.1-sol",
                     "--effort",
-                    "high"
+                    "high",
+                    "--seconds",
+                    "30"
                 }
                 let success = mode == "renamed" || mode == "explicit"
                 if mode == "explicit" {
                     args.AddRange([]string{"--fork", "donor/custom"})
                 }
                 args.AddRange([]string{"--runs", Path.Combine(flow.Temp.Root, "runs")})
-                flow.Call(args.ToArray(), success ? 0: 1)
+                flow.Acquire(args.ToArray(), success ? 0: 1)
                 if success {
                     let saved = Check.Json(File.ReadAllText(Path.Combine(RunPath(flow), "run.json")))
                     Check.That(

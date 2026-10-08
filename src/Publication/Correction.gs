@@ -63,7 +63,7 @@ internal class Correction {
 
         internal func Completed(directory string, run Data) Dictionary[string, Object?] {
             if run.Number("version") != 2 || run.Text("source") != "tokate" {
-                throw Exception("Correction requires a current managed contribution")
+                throw Exception("Correction requires a current managed contribution; external work uses external --run")
             }
             let state = run.Text("state")
             if run.Number("pr") != 0 || state == "published" {

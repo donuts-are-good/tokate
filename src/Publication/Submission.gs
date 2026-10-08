@@ -328,7 +328,7 @@ internal class Submission {
                         J.Get(state.Value(), "reservation"),
                         "reservation"
                     ) != run.Text("id") {
-                        throw Exception("Saved publication has stale coordination authority")
+                        throw CliFailure("stale_approval", "Saved publication has stale coordination authority")
                     }
                     state.Reservation(J.Get(viewer, "id"))
                     state.Check(

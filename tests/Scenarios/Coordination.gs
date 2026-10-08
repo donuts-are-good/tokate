@@ -1128,7 +1128,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let path = Event(request)
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(34, 4, 22, 0, result)
+        Flow.Traffic(61, 4, 45, 0, result)
         Flow.Call([]string{"submit", "--run", run})
         let published = File.ReadAllText(Path.Combine(run, "run.json"))
         let saved = Check.Json(published)

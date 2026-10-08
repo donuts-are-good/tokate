@@ -13,12 +13,12 @@ internal class WorkspacePreparation {
             return Path.Combine(root, id)
         }
 
-        private func Identity(run Data, normalized bool = true) string -> Data.Hash(
+        private func Identity(run Data) string -> Data.Hash(
             J.Write(
                 map[string, Object?]{
                     "version": run.Number("version"),
                     "id": run.Text("id"),
-                    "repo": normalized ? run.Text("repo").ToLowerInvariant(): run.Text("repo"),
+                    "repo": run.Text("repo").ToLowerInvariant(),
                     "issue": run.Number("issue"),
                     "donor_id": J.Get(run.Element(), "donor_id"),
                     "approval": run.Text("approval"),
@@ -27,15 +27,15 @@ internal class WorkspacePreparation {
                     "base_branch": run.Text("base_branch"),
                     "branch": run.Text("branch"),
                     "source": run.Text("source"),
-                    "fork": normalized ? run.Text("requested_fork").ToLowerInvariant(): run.Text("requested_fork"),
-                    "head_repo": normalized ? run.Text("head_repo").ToLowerInvariant(): run.Text("head_repo")
+                    "fork": run.Text("requested_fork").ToLowerInvariant(),
+                    "head_repo": run.Text("head_repo").ToLowerInvariant()
                 }
             )
         )
 
         private func Identified(run Data) bool {
             let identity = run.Text("preparation_identity")
-            return identity == BoundIdentity(run) || identity == BoundIdentity(run, false)
+            return identity == BoundIdentity(run)
         }
 
         internal func CheckIdentity(run Data) {
@@ -44,8 +44,8 @@ internal class WorkspacePreparation {
             }
         }
 
-        private func BoundIdentity(run Data, normalized bool = true) string {
-            var identity = Identity(run, normalized)
+        private func BoundIdentity(run Data) string {
+            var identity = Identity(run)
             if run.Text("harness_path") != "" {
                 identity = Data.Hash(identity + ":" + run.Text("harness_path"))
             }

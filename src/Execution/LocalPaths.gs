@@ -59,8 +59,8 @@ internal class LocalPaths {
             return name == "pi" && Executable(managed) ? managed: ""
         }
 
-        internal func StateDirectory(legacy bool = false) string {
-            let configured = legacy ? "": Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? ""
+        internal func StateDirectory(defaultLocation bool = false) string {
+            let configured = defaultLocation ? "": Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? ""
             let root = Path.IsPathFullyQualified(configured) ? configured: Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ".local/state"
