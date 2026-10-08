@@ -322,13 +322,11 @@ internal class CliDiscovery {
                     "http://127.0.0.1:12345/v1"
                 }
             )
+            let pickerScript = Path.Combine(flow.Temp.Root, "model-checklist.py")
+            File.WriteAllText(pickerScript, NativeFixture.Template("model-checklist.py"))
             let picker = TestProcess.Run(
                 "python3",
-                []string{
-                    Path.Combine(Directory.GetCurrentDirectory(), "tests/Tools/model-checklist.py"),
-                    binary,
-                    Path.Combine(flow.Temp.Root, "checklist")
-                },
+                []string{pickerScript, binary, Path.Combine(flow.Temp.Root, "checklist")},
                 env
             )
             Check.Success(picker)

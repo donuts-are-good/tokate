@@ -366,7 +366,7 @@ internal class DonorSelectionChecks {
                 flow.Temp.Root,
                 "runs"
             ) +
-                "'"
+                "' --harness codex --seconds 30"
             let declined = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
@@ -798,6 +798,9 @@ internal class DonorSelectionChecks {
                     Console.WriteLine(
                         "PASS unrestricted explicit/default/terminal selection, known controls and no fallback"
                     )
+                } else if selected == "InteractiveChoices" {
+                    InteractiveChoices(binary)
+                    Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
                 } else {
                     throw Exception("Unknown selection test group")
                 }
