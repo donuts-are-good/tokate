@@ -420,7 +420,19 @@ internal class PiChecks {
             if continuation {
                 work.Add("--continue-truncated")
             }
-            let worked = flow.Flow.Call(work.ToArray(), success ? 0: 1)
+            var worked Result
+            if mode == "on" {
+                flow.Flow.Temp.Env["TERM"] = "xterm-256color"
+                worked = TerminalOutput.Pty(binary, work.ToArray(), flow.Flow.Temp, 100)
+                Check.Success(worked)
+                Check.Contains(worked.Output, "tokate / Donation")
+                Check.Contains(worked.Output, "bash: setsid sh")
+                Check.Contains(worked.Output, "Assistant: Changes: synthetic edits.")
+                Check.Contains(worked.Output, "Verification 1:")
+                Check.Contains(worked.Output, "\x1b[?1049l")
+            } else {
+                worked = flow.Flow.Call(work.ToArray(), success ? 0: 1)
+            }
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             if mode.StartsWith("catalog-recheck-") {
                 PrivateCatalog(worked.Output + worked.Error + Check.Text(saved["error"]), endpoint)

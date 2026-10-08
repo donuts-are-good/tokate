@@ -433,6 +433,16 @@ internal class Verification {
                         }
                     )
                     args.AddRange(command)
+                    var outputLine Action[string]? = nil
+                    var errorLine Action[string]? = nil
+                    if DonationView.Active() {
+                        if outputPath != "" {
+                            outputLine = line -> DonationView.Append(line)
+                        }
+                        if errorPath != "" {
+                            errorLine = line -> DonationView.Append(line)
+                        }
+                    }
                     result = Commands.Run(
                         "/usr/bin/bwrap",
                         args.ToArray(),
@@ -443,7 +453,9 @@ internal class Verification {
                         outputPath: outputPath,
                         errorPath: errorPath,
                         budget: budget,
-                        pidNamespace: true
+                        pidNamespace: true,
+                        outputLine: outputLine,
+                        errorLine: errorLine
                     )
                 } catch (error Exception) {
                     CleanupRuntime(storage.FullName, error)

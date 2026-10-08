@@ -13,6 +13,40 @@ internal class WizardHome : Exception { }
 
 internal class WizardScreen {
     shared {
+        private var Opened bool
+
+        internal func Available() bool -> Interactive.Available() &&
+            !Terminal.Plain &&
+            Environment.GetEnvironmentVariable("TERM") != "dumb"
+
+        internal func Open() {
+            if !Opened && Available() {
+                Console.Error.Write("\x1b[?1049h")
+                Opened = true
+            }
+        }
+
+        internal func Close() {
+            if Opened {
+                Console.Error.Write("\x1b[0m\x1b[?1049l")
+                Opened = false
+            }
+        }
+
+        internal func Pending(text string = "Loading next step...") bool {
+            if !Opened {
+                return false
+            }
+            Console.Error.Write(
+                "\r" +
+                    Color("paper") +
+                    Color("muted") +
+                    Clip(Terminal.Clean(text).Replace('\n', ' '), Math.Max(1, Console.WindowWidth - 1)) +
+                    "\x1b[K"
+            )
+            return true
+        }
+
         internal func Color(name string) string {
             if Terminal.Plain || Environment.GetEnvironmentVariable("NO_COLOR") != nil ||
                 Environment.GetEnvironmentVariable("TERM") == "dumb" {
@@ -40,11 +74,13 @@ internal class WizardScreen {
 
         internal func Clip(value string, width int32) string {
             let text = StringBuilder()
+            let measurement = RenderOptions(Terminal.Output(true).Profile.Capabilities, Size(int32.MaxValue, 1))
             let elements = StringInfo.GetTextElementEnumerator(value)
             var used int32
             while elements.MoveNext() {
                 let item = elements.GetTextElement()
-                let cells = Cells(item)
+                let rendered IRenderable = Text(item)
+                let cells = rendered.Measure(measurement, int32.MaxValue).Max
                 if used + cells > width {
                     break
                 }
@@ -125,7 +161,7 @@ internal class WizardScreen {
 
         private func Input(title string, body string, prompt string, fallback string) string {
             let prefix = Terminal.Clean(prompt + (fallback == "" ? "": " [" + fallback + "]") + ": ")
-            if !Interactive.Available() || Terminal.Plain || Environment.GetEnvironmentVariable("TERM") == "dumb" {
+            if !Available() {
                 Console.Error.WriteLine("\ntokate / " + Terminal.Clean(title) + "\n" + Terminal.Clean(body))
                 Console.Error.WriteLine("h Home   q Quit   ? Explain")
                 Console.Error.Write(Terminal.Clean(prefix))
@@ -133,7 +169,7 @@ internal class WizardScreen {
             }
             let oldControl = Console.TreatControlCAsInput
             Console.TreatControlCAsInput = true
-            Console.Error.Write("\x1b[?1049h")
+            Open()
             var redraw = true
             let gate = Object()
             using let resumed = PosixSignalRegistration.Create(
@@ -266,8 +302,8 @@ internal class WizardScreen {
                     }
                 }
             } finally {
-                Console.Error.Write("\x1b[0m\x1b[?1049l")
                 Console.TreatControlCAsInput = oldControl
+                Pending()
             }
         }
 

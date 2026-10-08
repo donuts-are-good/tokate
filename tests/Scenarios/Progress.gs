@@ -10,9 +10,19 @@ import System.Text.RegularExpressions
 
 internal class ProgressChecks {
     shared {
-        internal func All(binary string) {
+        internal func All(binary string, filter string = "") {
+            if filter == "Tty" {
+                for mode in[]string{"tty", "no_color", "plain", "dumb", "cancel"} {
+                    Tty(binary, mode)
+                }
+                return
+            }
             let baseline = Success(binary, false)
             Check.That(Success(binary, true) == baseline, "Progress changed remote request counts")
+            if filter == "Json" {
+                Console.WriteLine("PASS structured progress keeps transcripts private and preserves request counts")
+                return
+            }
             Bounded(binary)
             for scenario in[]string{
                 "inference_failure",
@@ -25,7 +35,7 @@ internal class ProgressChecks {
             } {
                 Failure(binary, scenario)
             }
-            for mode in[]string{"tty", "plain", "no_color", "dumb"} {
+            for mode in[]string{"tty", "plain", "no_color", "dumb", "cancel"} {
                 Tty(binary, mode)
             }
             Console.WriteLine(
@@ -247,6 +257,7 @@ internal class ProgressChecks {
         private func Tty(binary string, mode string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
+            flow.VerificationPolicy("printf 'live-verification-output\\n'; sleep 1; test -f result.txt")
             flow.Approve()
             let run = flow.Claim()
             flow.Mode("progress_delay")
@@ -254,18 +265,24 @@ internal class ProgressChecks {
             if mode == "no_color" {
                 flow.Temp.Env["NO_COLOR"] = ""
             }
+            if mode == "tty" || mode == "no_color" || mode == "cancel" {
+                let script = Path.Combine(flow.Temp.Root, "donation-view.py")
+                File.WriteAllText(script, NativeFixture.Template("donation-view.py"))
+                let result = TestProcess.Run("python3", []string{script, binary, run, mode}, flow.Temp.Env)
+                Check.Success(result)
+                Console.Write(result.Output)
+                return
+            }
             let command = "stty cols 80 rows 24; " +
                 Quote(binary) +
                 " work --run " +
                 Quote(run) +
                 (mode == "plain" ? " --plain --ascii": "")
-            let timer = Stopwatch.StartNew()
             let result = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 flow.Temp.Env
             )
-            timer.Stop()
             Check.Success(result)
             Check.Contains(result.Output, "Inference:")
             Check.Contains(result.Output, "s remaining")
@@ -273,15 +290,7 @@ internal class ProgressChecks {
             let visible = Regex.Replace(result.Output, "\\x1b\\[[0-?]*[ -/]*[@-~]", "")
             Check.Contains(visible, "Run completed. Run: " + run)
             Check.Contains(visible, "Next: tokate status --run " + run + " --json")
-            if mode == "tty" {
-                let updates = result.Output.Split("\r\x1b[2KInference:").Length - 1
-                Check.That(
-                    updates >= 2 && updates <= Math.Ceiling(timer.Elapsed.TotalSeconds / 5) + 1,
-                    "TTY progress did not use restrained updates"
-                )
-            } else {
-                Check.That(!result.Output.Contains('\x1b'), "Plain/no-color progress contains escape codes")
-            }
+            Check.That(!result.Output.Contains('\x1b'), "Plain progress contains escape codes")
         }
     }
 }

@@ -11,6 +11,32 @@ import System.Text.RegularExpressions
 
 internal class PiHarness {
     shared {
+        private func Activity(line string) {
+            let value = J.Parse(line)
+            if J.Text(value, "type") != "pi.event" {
+                return
+            }
+            let event = J.Text(value, "event")
+            if event == "assistant_end" && J.Text(value, "text") != "" {
+                DonationView.Append("Assistant: " + J.Text(value, "text"))
+            } else if event == "tool_execution_start" {
+                let args = J.Get(value, "args")
+                let detail = J.Text(args, "command") == "" ? J.Text(args, "path"): J.Text(args, "command")
+                DonationView.Append(J.Text(value, "tool") + ": " + detail)
+            } else if event == "tool_execution_end" {
+                for item in J.Items(J.Get(J.Get(value, "result"), "content")) {
+                    if J.Text(item, "type") == "text" {
+                        DonationView.Append(J.Text(item, "text"))
+                    }
+                }
+                if J.Bool(value, "is_error") {
+                    DonationView.Append("Tool failed: " + J.Text(value, "tool"))
+                }
+            } else if event == "compaction_end" || event == "length_continuation" {
+                DonationView.Append(event == "compaction_end" ? "Context compacted": "Continuing truncated response")
+            }
+        }
+
         private func ManagedRuntime(cli string, args Args) string {
             let agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
             let markerPath = Path.Combine(agent, "install/managed-install.json")
@@ -234,6 +260,10 @@ internal class PiHarness {
                             coding,
                             RuntimeBudget(timer, run.Number("seconds"))
                         )
+                        var activity Action[string]? = nil
+                        if DonationView.Active() {
+                            activity = line -> Activity(line)
+                        }
                         result = Commands.Run(
                             "/usr/bin/bwrap",
                             args.ToArray(),
@@ -246,7 +276,8 @@ internal class PiHarness {
                             outputPath: Path.Combine(directory, "events.jsonl"),
                             errorPath: Path.Combine(directory, "stderr.log"),
                             budget: coding,
-                            pidNamespace: true
+                            pidNamespace: true,
+                            outputLine: activity
                         )
                     }
                     run.Fields["output_truncated"] = result.OutputTruncated

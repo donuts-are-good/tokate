@@ -250,6 +250,7 @@ try {
                 }
                 emit({ type: 'pi.event', event: 'assistant_end', stop_reason: message.stopReason, model: message.model,
                     provider: message.provider, response_model: message.responseModel ?? null, usage: message.usage,
+                    text: message.content.filter(x => x.type === 'text').map(x => x.text).join('\n').slice(0, 16384),
                     ...(message.stopReason === 'length' ? partialView(message.content) : {}) });
             }
             if (event.type === 'compaction_end') {

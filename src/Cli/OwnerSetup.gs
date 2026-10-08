@@ -443,6 +443,7 @@ internal class OwnerSetup {
             let oldWorkflow = File.Exists(workflow) ? File.ReadAllText(workflow): ""
             CoordinatorSetup.EventPolicy(repo, Path.GetRelativePath(root, workflow))
             let yaml = oldWorkflow == "" ? CoordinatorSetup.Resolve(): oldWorkflow
+            WizardScreen.Close()
             Preview(path, before, text)
             Preview(workflow, oldWorkflow, yaml)
             if File.Exists(template) {

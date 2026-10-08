@@ -17,7 +17,13 @@ internal class Interactive {
             if options.Get("run") != "" {
                 PublicOutput.RunDirectory = options.Need("run")
             }
-            let result = Dispatch(options)
+            var result int32
+            try {
+                result = Dispatch(options)
+            } finally {
+                DonationView.Close()
+                WizardScreen.Close()
+            }
             PublicOutput.Next(options, result == 0 ? "": "command_failed")
             Terminal.RunOutcome(result, "")
             return result

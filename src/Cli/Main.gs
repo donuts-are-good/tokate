@@ -46,6 +46,8 @@ func Main(args[]string) int32 {
             )
         }
     } catch (error Exception) {
+        DonationView.Close()
+        WizardScreen.Close()
         exitCode = 1
         code = !validated ? "invalid_arguments": PublicOutput.FailureCode
         if error is CliFailure failure {
@@ -63,6 +65,8 @@ func Main(args[]string) int32 {
             Terminal.Message(Cli.ErrorUsage(args), error: true)
         }
     } finally {
+        DonationView.Close()
+        WizardScreen.Close()
         if traffic {
             ApiTransport.Report()
         }

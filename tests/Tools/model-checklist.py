@@ -155,7 +155,9 @@ try:
     resize(fd, 80, 24)
     expect(fd, b"Choice: x")
     os.write(fd, b"\x151\r")
-    expect(fd, b"Project")
+    transition = expect(fd, b"Project")
+    assert b"Loading next step..." in transition, transition
+    assert b"\x1b[?1049l" not in transition and b"\x1b[?1049h" not in transition, "Wizard disappeared between steps"
     os.write(fd, b"https://github.com/owner/project/issues/0\r")
     expect(fd, b"Invalid positive number")
     os.write(fd, b"h\r")

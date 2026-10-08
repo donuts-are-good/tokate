@@ -25,6 +25,38 @@ internal class CommandOutput {
     internal var Failure Exception?
 }
 
+internal class CommandLines {
+    private let Line StringBuilder = StringBuilder()
+    private let Observe Action[string]
+    private var Oversize bool
+
+    internal init(observe Action[string]) {
+        Observe = observe
+    }
+
+    internal func Flush() {
+        if !Oversize && Line.Length > 0 {
+            try {
+                Observe.Invoke(Line.ToString())
+            } catch (error Exception) { }
+        }
+        Line.Clear()
+        Oversize = false
+    }
+
+    internal func Add(buffer[]char, count int32) {
+        for i in 0 ... count {
+            if buffer[i] == '\n' {
+                Flush()
+            } else if Line.Length < 65536 {
+                Line.Append(buffer[i])
+            } else {
+                Oversize = true
+            }
+        }
+    }
+}
+
 internal class CommandInterrupted : Exception {
     internal let Result CommandResult
 
@@ -170,10 +202,15 @@ internal class Commands {
             reader StreamReader,
             output Chan[CommandOutput],
             failed Chan[Exception],
-            capture FileStream? = nil
+            capture FileStream? = nil,
+            observe Action[string]? = nil
         ) {
             let result = CommandOutput()
             let text = StringBuilder()
+            var lines CommandLines? = nil
+            if let observer = observe {
+                lines = CommandLines(observer)
+            }
             try {
                 using let writer StreamWriter? = capture == nil ? nil: StreamWriter(
                     capture,
@@ -196,6 +233,7 @@ internal class Commands {
                     result.Truncated = result.Truncated || retained < count
                     if retained > 0 {
                         text.Append(buffer, 0, retained)
+                        lines?.Add(buffer, retained)
                         if writer != nil && result.Failure == nil {
                             try {
                                 writer.Write(buffer, 0, retained)
@@ -210,6 +248,7 @@ internal class Commands {
                 result.Failure = error
                 failed <- error
             }
+            lines?.Flush()
             result.Text = text.ToString()
             output <- result
         }
@@ -277,7 +316,9 @@ internal class Commands {
             outputPath string = "",
             errorPath string = "",
             budget RuntimeBudget? = nil,
-            pidNamespace bool = false
+            pidNamespace bool = false,
+            outputLine Action[string]? = nil,
+            errorLine Action[string]? = nil
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
             if !pidNamespace {
@@ -407,9 +448,9 @@ internal class Commands {
                 onCancel = handler
                 go Commands.Write(process.StandardInput, input, stdin)
                 inputStarted = true
-                go Commands.Read(reader, stdout, failed, outputCapture)
+                go Commands.Read(reader, stdout, failed, outputCapture, outputLine)
                 outputStarted = true
-                go Commands.Read(process.StandardError, stderr, failed, errorCapture)
+                go Commands.Read(process.StandardError, stderr, failed, errorCapture, errorLine)
                 errorStarted = true
                 ready = true
                 while !inputDone || !outputDone || !errorDone || !exitDone {

@@ -90,14 +90,16 @@ internal class ModelChecklist {
     )
 
     private func Custom() {
-        Console.Error.Write("Model name (blank returns): ")
-        let model = Console.ReadLine()?.Trim() ?? throw Exception("Setup cancelled")
+        let model = WizardScreen.Read("Add model", "Model name (blank returns)", "Model name")
         if model == "" {
             return
         }
         RequestData.ModelIdentifier(model)
-        Console.Error.Write("Allowed efforts, separated by spaces (absent for no effort control): ")
-        let efforts = Console.ReadLine() ?? throw Exception("Setup cancelled")
+        let efforts = WizardScreen.Read(
+            "Add model",
+            "Allowed efforts, separated by spaces (absent for no effort control)",
+            "Allowed efforts"
+        )
         for effort in efforts.Replace(',', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries) {
             RequestData.Token(effort)
             Add(model, effort, "Owner entry [route unknown]")
@@ -215,7 +217,7 @@ internal class ModelChecklist {
     private func Screen() bool {
         let oldControl = Console.TreatControlCAsInput
         Console.TreatControlCAsInput = true
-        Console.Error.Write("\x1b[?1049h\x1b[0m")
+        WizardScreen.Open()
         using let resumed = PosixSignalRegistration.Create(PosixSignal.SIGCONT, context -> Invalidate())
         try {
             var previous = []string{}
@@ -371,8 +373,8 @@ internal class ModelChecklist {
                 }
             }
         } finally {
-            Console.Error.Write("\x1b[0m\x1b[?1049l")
             Console.TreatControlCAsInput = oldControl
+            WizardScreen.Pending()
         }
     }
 

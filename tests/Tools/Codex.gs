@@ -200,6 +200,22 @@ internal partial class Fixture {
             return 0
         }
         if mode == "progress_delay" {
+            Console.WriteLine(
+                "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Coding transcript ready\"}}"
+            )
+            for i in 0 ... 45 {
+                Console.WriteLine(
+                    "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Activity line " +
+                        i.ToString() + "\"}}"
+                )
+            }
+            Console.WriteLine(
+                "{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"printf tool-output\"}}"
+            )
+            Console.WriteLine(
+                "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"status\":\"completed\",\"exit_code\":0,\"aggregated_output\":\"tool-output\\u001b]2;INJECTED_TITLE\\u0007\"}}"
+            )
+            Console.Out.Flush()
             let seconds = Int32.Parse(Check.Text(State["progress_delay_seconds"] ?? JsonValue.Create(6)))
             using let delay = after(TimeSpan.FromSeconds(seconds))
             select {
