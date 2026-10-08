@@ -110,11 +110,12 @@ internal class RunStorage {
         }
 
         private func Size(path string) int64 {
-            if FileInfo(path).LinkTarget != nil {
+            let info = FileInfo(path)
+            if info.LinkTarget != nil {
                 return 0
             }
-            if !Directory.Exists(path) {
-                return FileInfo(path).Length
+            if (info.Attributes & FileAttributes.Directory) == 0 || !Directory.Exists(path) {
+                return info.Length
             }
             var bytes int64
             for entry in Directory.EnumerateFileSystemEntries(path) {
