@@ -102,6 +102,7 @@ internal class DonorSelection {
         }
 
         internal func Resolve(args Args, policy Policy) JsonElement {
+            DonorDefaults.NormalizePair(args)
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
             if args.Get("continue-truncated") == "true" && harness != "pi" {

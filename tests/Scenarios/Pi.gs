@@ -94,10 +94,45 @@ internal class PiChecks {
                 "absent",
                 "--endpoint",
                 catalog.Endpoint,
-                "--non-interactive",
-                "--plain"
+                "--non-interactive"
             }
-            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            let explicitSelection = Check.Json(flow.Call(args.ToArray()).Output)
+            let providerIndex = args.IndexOf("--provider")
+            args.RemoveRange(providerIndex, 2)
+            let inferredSelection = Check.Json(flow.Call(args.ToArray()).Output)
+            Check.That(
+                JsonNode.DeepEquals(explicitSelection, inferredSelection),
+                "Omitted Pi provider changed the explicit selection"
+            )
+            args.AddRange([]string{"--provider", "openai"})
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Unsupported pi provider")
+            args.RemoveRange(args.Count - 2, 2)
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "local",
+                    "--harness",
+                    "pi",
+                    "--model",
+                    "fixture-model",
+                    "--effort",
+                    "absent",
+                    "--endpoint",
+                    catalog.Endpoint
+                }
+            )
+            let profiled = Check.Json(
+                flow.Call([]string{"select", "--repo", "owner/project", "--profile", "local", "--non-interactive"})
+                    .Output
+            )
+            let expectedProfile = explicitSelection.DeepClone()
+            expectedProfile["source"] = JsonValue.Create("saved donor profile local")
+            Check.That(JsonNode.DeepEquals(expectedProfile, profiled), "Saved Pi profile lost selection precedence")
+            args.AddRange([]string{"--profile", "local", "--provider", "openai"})
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Named donor profile conflicts")
+            args.RemoveRange(args.Count - 4, 4)
             args.AddRange([]string{"--node", pathNode})
             flow.Call(args.ToArray(), 1)
             args[args.Count - 1] = actualNode
@@ -140,8 +175,9 @@ internal class PiChecks {
             Check.Contains(flow.Call(args.ToArray(), 1).Error, "Cannot locate the Pi SDK")
             flow.NoInference()
             flow.NoPr()
+            Check.That(flow.State["posted_request"] == nil, "Pi selection posted a claim request")
             Console.WriteLine(
-                "PASS Pi npm and managed runtime discovery, private Node, explicit overrides and malformed metadata refusal without inference"
+                "PASS Pi provider inference, profile precedence, conflict refusal and runtime discovery without claims or inference"
             )
         }
 
