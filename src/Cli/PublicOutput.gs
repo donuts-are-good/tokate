@@ -63,6 +63,9 @@ internal class PublicOutput {
                 case "inference_failed" {
                     return "Inference did not complete successfully. Inspect private events and report artifacts; fresh owner approval is required for another attempt."
                 }
+                case "endpoint_unavailable" {
+                    return "Selected local endpoint did not provide valid bounded metadata advertising the exact model ID. No inference started."
+                }
                 case "output_too_large" {
                     return "The complete result cannot fit within 64 KiB. Use focused help or private artifacts for details."
                 }
@@ -127,6 +130,7 @@ internal class PublicOutput {
                 "invalid_state",
                 "verification_failed",
                 "inference_failed",
+                "endpoint_unavailable",
                 "command_failed"
             },
             reason

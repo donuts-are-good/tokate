@@ -384,7 +384,8 @@ internal class ReceiptVerification {
                 J.Text(metadata, "fork"),
                 J.Text(metadata, "branch"),
                 exactHead,
-                ready: ready
+                ready: ready,
+                contribution: contribution
             )
             if paths && history.GetArrayLength() > 0 {
                 Synchronization.Remote(
@@ -424,7 +425,8 @@ internal class ReceiptVerification {
                     J.Text(metadata, "fork"),
                     J.Text(metadata, "branch"),
                     exactHead,
-                    ready: ready
+                    ready: ready,
+                    contribution: contribution
                 )
             }
             if AccessState.Task(approval) {
