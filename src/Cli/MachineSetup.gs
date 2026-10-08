@@ -72,6 +72,9 @@ internal class MachineSetup {
                         "sudo was not found. Install the listed packages with an administrator, then rerun doctor."
                     )
                 }
+                if PublicOutput.Enabled || Console.IsInputRedirected {
+                    args.Add("-n")
+                }
                 args.Add(manager)
             }
             if manager.EndsWith("apt-get") {
@@ -210,10 +213,13 @@ internal class MachineSetup {
                 } else {
                     let script = Path.Combine(temporary, "install.sh")
                     Download("https://pi.dev/install.sh", script)
-                    if Installation.Execute("/bin/sh", []string{script}, capture: true) != 0 {
+                    let code = PublicOutput.Enabled || Console.IsInputRedirected ?
+                    Installation.Execute("/usr/bin/setsid", []string{"--wait", "/bin/sh", script}, capture: true):
+                    Installation.Execute("/bin/sh", []string{script}, capture: true)
+                    if code != 0 {
                         throw CliFailure(
                             "missing_tools",
-                            "The official Pi installer did not complete; existing configuration was kept"
+                            "The official Pi installer did not complete. Run interactive doctor --managed --harness pi --fix for its Node setup prompts; existing configuration was kept."
                         )
                     }
                     var path = LocalPaths.Harness("pi")
