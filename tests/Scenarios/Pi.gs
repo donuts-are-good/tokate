@@ -243,6 +243,7 @@ internal class PiChecks {
                 Path.Combine(flow.Flow.Bin, "pi"),
                 Path.Combine(root, "@earendil-works/pi-coding-agent/dist/bundle/cli.js")
             )
+            File.CreateSymbolicLink(Path.Combine(flow.Flow.Bin, "node"), node)
             let args = List[string]{
                 "prepare",
                 "--repo",
