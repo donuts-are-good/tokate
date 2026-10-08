@@ -7,76 +7,49 @@ import System.IO
 import System.Text
 import System.Text.RegularExpressions
 
-internal class CliOption {
-    internal let Name string
-    internal let Value string
-    internal let Description string
-    internal let Choices string
-    internal init(name string, value string, description string, choices string = "") {
-        Name = name
-        Value = value
-        Description = description
-        Choices = choices
-    }
+internal class CliOption(name string, value string, description string, choices string = "") {
+    internal let Name string = name
+    internal let Value string = value
+    internal let Description string = description
+    internal let Choices string = choices
 
-    internal func Describe(command string) string {
-        if (command == "init" || command == "coordinator-setup") && Name == "yes" {
-            return "Apply the reviewed configuration files; no inference"
-        }
-        if (command == "init" || command == "coordinator-setup") && Name == "non-interactive" {
-            return "Never prompt; supply missing choices explicitly; preview unless --yes is given"
-        }
-        if command == "external" && Name == "seconds" {
-            return "Separate positive verification budget, at most the owner limit; required only for correction"
-        }
-        if command == "external" && Name == "tools" {
-            return "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
-        }
-        if command == "repair" && Name == "run" {
-            return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
-        }
-        if command == "repair" && Name == "path" {
-            return "Clean, self-contained candidate checkout; default current directory; separate from repair evidence"
-        }
-        if command == "repair" && Name == "commit" {
-            return "Exact candidate; default from the selected owner synchronization grant; conflicts are refused"
-        }
-        if (command == "work" || command == "claim") && Name == "seconds" {
-            return "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
-        }
-        return (command == "amend" || command == "repair") && Name == "seconds" ?
-        "Separate positive verification budget; required, at most the owner limit": Description.Replace(
-            "{{seconds}}",
-            command == "recover" ? "300": "min(3600, owner limit)"
-        )
+    internal func Describe(command string) string -> switch Name {
+        case "yes" when(
+            command == "init" || command == "coordinator-setup"
+        ): "Apply the reviewed configuration files; no inference"
+        case "non-interactive" when(
+            command == "init" || command == "coordinator-setup"
+        ): "Never prompt; supply missing choices explicitly; preview unless --yes is given"
+        case "seconds" when command == "external": "Separate positive verification budget, at most the owner limit; required only for correction"
+        case "tools" when command == "external": "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
+        case "run" when command == "repair": "Separate saved repair evidence directory; initially empty, reused on explicit resume"
+        case "path" when command == "repair": "Clean, self-contained candidate checkout; default current directory; separate from repair evidence"
+        case "commit" when command == "repair": "Exact candidate; default from the selected owner synchronization grant; conflicts are refused"
+        case "seconds" when(
+            command == "work" || command == "claim"
+        ): "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
+        case "seconds" when command == "amend" || command == "repair":
+        "Separate positive verification budget; required, at most the owner limit"
+        default: Description.Replace("{{seconds}}", command == "recover" ? "300": "min(3600, owner limit)")
     }
 }
 
-internal class CliCommand {
-    internal let Name string
-    internal let Options string
-    internal let Required string
-    internal let Summary string
-    internal let Usage string
-    internal let Example string
-    internal let Effects string
-    internal init(
-        name string,
-        options string,
-        required string,
-        summary string,
-        usage string,
-        example string,
-        effects string = "local_read"
-    ) {
-        Name = name
-        Options = options
-        Required = required
-        Summary = summary
-        Usage = usage
-        Example = example
-        Effects = effects
-    }
+internal class CliCommand(
+    name string,
+    options string,
+    required string,
+    summary string,
+    usage string,
+    example string,
+    effects string = "local_read"
+) {
+    internal let Name string = name
+    internal let Options string = options
+    internal let Required string = required
+    internal let Summary string = summary
+    internal let Usage string = usage
+    internal let Example string = example
+    internal let Effects string = effects
 
     internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,plain,ascii,").Contains(
         "," + name + ","
