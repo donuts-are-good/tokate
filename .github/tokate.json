@@ -8,6 +8,9 @@
     "gpt-6-astra": [
       "xhigh"
     ],
+    "flash": [
+      "low"
+    ],
     "glm-5.3-flash": [
       "minimal",
       "low",
