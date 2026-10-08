@@ -363,9 +363,16 @@ internal class Worker {
                     using let progress = TerminalProgress(
                         "Inference",
                         coding,
-                        RuntimeBudget(timer, run.Number("seconds"))
+                        RuntimeBudget(timer, run.Flag("unlimited") ? 0: run.Number("seconds"))
                     )
-                    result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true, coding)
+                    result = Run(
+                        directory,
+                        args.ToArray(),
+                        prompt,
+                        run.Flag("unlimited") ? 0: run.Number("seconds"),
+                        true,
+                        coding
+                    )
                 }
                 run.Fields["output_truncated"] = result.OutputTruncated
                 run.Fields["error_truncated"] = result.ErrorTruncated

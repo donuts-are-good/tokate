@@ -249,8 +249,10 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
                    ('read', {'path': '.git/config'}), ('read', {'path': '/tokate-control/models.json'}),
                    ('bash', {'command': 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE', 'timeout': 4}),
                    ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
-        if self.server.case == 'cancel':
+        if self.server.case in ['cancel', 'unlimited-cancel']:
             planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
+        elif self.server.case == 'unlimited':
+            planned = [('bash', {'command': 'sleep 10; printf final > result.txt'})]
         elif self.server.case == 'off':
             planned += [('read', {'path': path}) for path in ['race-leaf', 'race-dir/models.json'] * 4]
             planned += [('write', {'path': 'race-leaf', 'content': 'synthetic-safe-update'})]
@@ -284,7 +286,7 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
 with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    cases = args.cases or (catalog_cases if args.catalog_only else ['reasoning', 'off', 'on', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases])
+    cases = args.cases or (catalog_cases if args.catalog_only else ['reasoning', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases])
     for case in cases:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
@@ -310,7 +312,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
             env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TOKATE_TEST_ROOT': str(fixture_root),
                    'TOKATE_BINARY': str(Path(args.binary).resolve())}
             command = [args.tests, '--pi-proof', str(args.pi_root.resolve()), args.node, directory, f'http://127.0.0.1:{port}/v1', case]
-            if case in ['cancel', 'length-cancel']:
+            if case in ['cancel', 'length-cancel', 'unlimited-cancel']:
                 process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
                 deadline = time.monotonic() + 45
                 fixture = None
@@ -318,7 +320,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 while time.monotonic() < deadline and process.poll() is None:
                     if (root / 'fixture.json').exists():
                         fixture = json.loads((root / 'fixture.json').read_text())
-                        ready = (Path(fixture['checkout']) / 'running').exists() if case == 'cancel' else server.length_waiting.is_set()
+                        ready = (Path(fixture['checkout']) / 'running').exists() if case in ['cancel', 'unlimited-cancel'] else server.length_waiting.is_set()
                         if ready:
                             break
                     time.sleep(0.1)
@@ -380,10 +382,10 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 elif case in ['continued', 'repeated']:
                     assert server.calls == 3, f'{case}: expected one tool-write prelude and two responses at the length boundary'
                     assert server.compactions == 0, 'Length continuation changed the compaction threshold'
-                elif case not in ['reasoning', 'off', 'on', 'catalog-metadata']:
+                elif case not in ['reasoning', 'off', 'on', 'unlimited', 'catalog-metadata']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
                 saved = json.loads((root / 'result.json').read_text())
-                if case in ['reasoning', 'off', 'on', 'compact', 'continued', 'catalog-metadata']:
+                if case in ['reasoning', 'off', 'on', 'unlimited', 'compact', 'continued', 'catalog-metadata']:
                     assert saved['usage']['input_tokens'] == server.input_tokens, 'Usage omitted context compaction'
                     assert saved['usage']['output_tokens'] == server.output_tokens, 'Usage omitted context compaction'
                 if case in ['incomplete', 'repeated', 'truncated-tool']:

@@ -199,15 +199,19 @@ internal class GuidedWork {
             (J.Text(value, "harness") == "pi" ? " | Local | ": " | Subscription | ") +
             J.Text(value, "model") + " / " + J.Text(value, "effort") + " | availability unknown"
 
-        internal func Budget(args Args, limit int32 = 86400) {
+        internal func Budget(args Args, limit int32 = 86400, allowUnlimited bool = false) {
+            if args.Get("unlimited") == "true" && !allowUnlimited {
+                throw Exception("Repository policy does not allow unlimited coding")
+            }
             while true {
                 let answer = WizardScreen.Read(
                     "Set your limit",
-                    "Choose your coding time in minutes. Verification has a separate reserve.",
-                    "Coding minutes",
-                    "30",
+                    allowUnlimited ? "Choose coding minutes, or type unlimited. Verification keeps a separate time limit.": "Choose your coding time in minutes. Verification has a separate reserve.",
+                    allowUnlimited ? "Coding minutes or unlimited": "Coding minutes",
+                    args.Get("unlimited") == "true" ? "unlimited": "30",
                     "This is a client time limit, not a token, billing or server-resource cap."
                 )
+                let unlimited = allowUnlimited && answer.Trim().Equals("unlimited", StringComparison.OrdinalIgnoreCase)
                 var coding int32
                 var reserve int32
                 let verification = WizardScreen.Read(
@@ -216,13 +220,26 @@ internal class GuidedWork {
                     "Verification minutes",
                     "30"
                 )
-                if int32.TryParse(answer, out coding) && int32.TryParse(verification, out reserve) &&
-                    coding > 0 &&
+                if int32.TryParse(verification, out reserve) &&
                     reserve > 0 &&
-                    coding <= 1440 &&
                     reserve <= 1440 &&
-                    (coding + reserve) * 60 <= limit {
-                    args.Values["--seconds"] = ((coding + reserve) * 60).ToString()
+                    reserve * 60 <= limit &&
+                    (
+                    unlimited ||
+                        (
+                        int32.TryParse(answer, out coding) &&
+                            coding > 0 &&
+                            coding <= 1440 &&
+                            (coding + reserve) * 60 <= limit
+                    )
+                ) {
+                    if unlimited {
+                        args.Values["--unlimited"] = "true"
+                        args.Values.Remove("--seconds")
+                    } else {
+                        args.Values.Remove("--unlimited")
+                        args.Values["--seconds"] = ((coding + reserve) * 60).ToString()
+                    }
                     args.Values["--verification-reserve"] = (reserve * 60).ToString()
                     return
                 }
@@ -256,7 +273,9 @@ internal class GuidedWork {
                 (args.Command != "work" && args.Command != "claim") {
                 return
             }
-            let guided = args.Get("repo") == "" || args.Get("issue") == "" || args.Get("seconds") == "" ||
+            let guided = args.Get("repo") == "" || args.Get("issue") == "" ||
+                (args.Get("seconds") == "" && args.Get("unlimited") != "true") ||
+                (args.Get("unlimited") == "true" && args.Get("verification-reserve") == "") ||
                 (args.Get("profile") == "" && args.Get("harness") == "" && args.Get("model") == "")
             if !guided {
                 return
@@ -284,8 +303,10 @@ internal class GuidedWork {
             } else {
                 OwnerApproval.Approved(repo, args.Number("issue"), donor)
             }
-            if args.Get("seconds") == "" {
-                Budget(args, J.Number(policy.Value, "max_seconds"))
+            let allowUnlimited = J.Number(policy.Value, "version") == 2 && J.Bool(policy.Value, "allow_unlimited")
+            if (args.Get("seconds") == "" && args.Get("unlimited") != "true") ||
+                (args.Get("unlimited") == "true" && args.Get("verification-reserve") == "") {
+                Budget(args, J.Number(policy.Value, "max_seconds"), allowUnlimited)
             }
             if args.Get("profile") == "" && args.Get("harness") == "" && args.Get("model") == "" {
                 Profile(args, policy)
@@ -297,7 +318,7 @@ internal class GuidedWork {
             while true {
                 Terminal.Step("Checking the selected coding tool...")
                 let selection = DonorSelection.Resolve(args, policy)
-                let reserve = RuntimeBudget.Reserve(args, args.Number("seconds"))
+                let reserve = RuntimeBudget.Reserve(args, RuntimeBudget.ReadSeconds(args))
                 args.Values["--verification-reserve"] = reserve.ToString()
                 let body = repo + " #" + args.Need("issue") + "\n\nTool     " + J.Text(selection, "harness") +
                     " / " +
@@ -306,8 +327,11 @@ internal class GuidedWork {
                     "effort"
                 ) +
                     "\nCoding   " +
-                    ((args.Number("seconds") - reserve) / 60.0).ToString("0.##") +
-                    " minutes" +
+                    (
+                    args.Get("unlimited") == "true" ? "No time limit": (
+                        (RuntimeBudget.ReadSeconds(args) - reserve) / 60.0
+                    ).ToString("0.##") + " minutes"
+                ) +
                     "\nChecks   " +
                     (reserve / 60.0).ToString("0.##") +
                     " minutes reserved" +
@@ -356,7 +380,7 @@ internal class GuidedWork {
                         Profile(args, policy)
                     }
                     if change == 2 {
-                        Budget(args, J.Number(policy.Value, "max_seconds"))
+                        Budget(args, J.Number(policy.Value, "max_seconds"), allowUnlimited)
                     }
                 } else {
                     Network(args, policy)

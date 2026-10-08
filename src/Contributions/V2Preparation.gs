@@ -129,18 +129,21 @@ internal class V2Preparation {
             run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
             run.Fields["source"] = source
             run.Fields["tools"] = tools
-            if args.Command == "work" || args.Command == "claim" {
+            if (args.Command == "work" || args.Command == "claim") && args.Get("unlimited") != "true" {
                 args.Need("seconds")
             }
-            run.Fields["seconds"] = args.Number(
-                "seconds",
+            run.Fields["seconds"] = RuntimeBudget.ReadSeconds(
+                args,
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
+            if args.Get("unlimited") == "true" {
+                run.Fields["unlimited"] = true
+            }
             if args.Get("verification-reserve") != "" {
                 run.Fields["verification_reserve"] = RuntimeBudget.Reserve(args, run.Number("seconds"))
             }
             run.Fields["network"] = args.Get("allow-network") == "true"
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             if source == "tokate" {
                 let declared = J.Items(tools)[0]
                 run.Fields["model"] = J.Text(declared, "model")
@@ -154,6 +157,7 @@ internal class V2Preparation {
                     run.Fields["pi_node"] = args.Need("node")
                 }
             }
+            RuntimeBudget.Validate(run)
             return run
         }
 
@@ -284,7 +288,7 @@ internal class V2Preparation {
                 run.Text("effort") != J.Text(J.Items(tools)[0], "effort") {
                 throw CliFailure("invalid_state", "Pending claim selection differs from its declared tool")
             }
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             RuntimeBudget.Validate(run)
             DonorSelection.Revalidate(run, policy)
             Overlaps.RequireDependencies(run.Text("repo"), run.Number("issue"))

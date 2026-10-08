@@ -258,7 +258,7 @@ internal class PiHarness {
                         using let progress = TerminalProgress(
                             "Pi inference",
                             coding,
-                            RuntimeBudget(timer, run.Number("seconds"))
+                            RuntimeBudget(timer, run.Flag("unlimited") ? 0: run.Number("seconds"))
                         )
                         var activity Action[string]? = nil
                         if DonationView.Active() {
@@ -269,7 +269,7 @@ internal class PiHarness {
                             args.ToArray(),
                             checkout,
                             prompt,
-                            run.Number("seconds"),
+                            run.Flag("unlimited") ? 0: run.Number("seconds"),
                             isolated: true,
                             cancellation: Chan[bool](1),
                             strictOutput: true,

@@ -196,7 +196,8 @@ internal open class CoordinationFixture : IDisposable {
         code int32 = 0,
         seconds string = "30",
         network bool = false,
-        reserve string = ""
+        reserve string = "",
+        unlimited bool = false
     ) string {
         let state = State()
         let args = List[string]{
@@ -218,6 +219,10 @@ internal open class CoordinationFixture : IDisposable {
         }
         if reserve != "" {
             args.AddRange([]string{"--verification-reserve", reserve})
+        }
+        if unlimited {
+            args.RemoveRange(args.IndexOf("--seconds"), 2)
+            args.Add("--unlimited")
         }
         if network {
             args.Add("--allow-network")

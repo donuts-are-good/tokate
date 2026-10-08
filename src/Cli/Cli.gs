@@ -180,9 +180,14 @@ internal class Cli {
             ),
             CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
             CliOption(
+                "unlimited",
+                "",
+                "No coding time limit when owner permits; requires --verification-reserve and excludes --seconds"
+            ),
+            CliOption(
                 "verification-reserve",
                 "N",
-                "Managed verification reserve in seconds; positive and smaller than total; default: 0"
+                "Verification seconds; required with --unlimited, otherwise reserved within --seconds; default: 0"
             ),
             CliOption("fork", "LOGIN/REPO", "Explicit donor fork; otherwise discover one or create it once"),
             CliOption(
@@ -327,7 +332,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs,continue-from,yes",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,yes",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       [--continue-from DIR --seconds N --verification-reserve N --yes]\n       tokate prepare --run DIR",
@@ -461,7 +466,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
@@ -471,7 +476,7 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,unlimited,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
                 "Run the selected coding harness, verify work and show the publication step. Uses donor inference.",
                 "[OWNER/REPO | ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--profile NAME | --model MODEL --effort EFFORT] [--seconds N] [options]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
@@ -813,6 +818,17 @@ internal class Cli {
 
         internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
+            if args.Get("unlimited") == "true" {
+                if args.Get("seconds") != "" || args.Get("continue-from") != "" ||
+                    (args.Command == "prepare" && args.Get("source") != "tokate") {
+                    throw Exception(
+                        "--unlimited requires fresh managed work and excludes --seconds and --continue-from"
+                    )
+                }
+                if !guided && !args.Help {
+                    args.Need("verification-reserve")
+                }
+            }
             if args.Get("continue-approval") != "" && args.Get("base-branch") != "" {
                 throw Exception("--continue-approval derives its original target and excludes --base-branch")
             }

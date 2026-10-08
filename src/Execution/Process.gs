@@ -127,16 +127,22 @@ internal class RuntimeBudget {
         Seconds = seconds
     }
 
-    internal func Expired() bool -> Timer.Elapsed.TotalSeconds >= Seconds
+    internal func Expired() bool -> Seconds > 0 && Timer.Elapsed.TotalSeconds >= Seconds
 
-    internal func Left() string -> Math.Max(0, Math.Ceiling(Seconds - Timer.Elapsed.TotalSeconds)).ToString() + "s"
+    internal func Left() string -> Seconds == 0 ? "unlimited": Math.Max(
+        0,
+        Math.Ceiling(Seconds - Timer.Elapsed.TotalSeconds)
+    )
+        .ToString() + "s"
 
     internal func Status() string -> Math.Floor(Timer.Elapsed.TotalSeconds).ToString() +
         "s elapsed, " +
-        Left() +
-        " remaining"
+        (Seconds == 0 ? "no time limit": Left() + " remaining")
 
     internal func Remaining() int32 {
+        if Seconds == 0 {
+            return -1
+        }
         let remaining = Math.Floor(Seconds * 1000.0 - Timer.Elapsed.TotalMilliseconds)
         if remaining < 1 {
             throw Exception("Runtime allowance exhausted")
@@ -148,22 +154,44 @@ internal class RuntimeBudget {
     Commands.GitOutput(Commands.GitResult(checkout, args, budget: this))
 
     shared {
+        internal func ReadSeconds(args Args, fallback string = "") int32 -> args.Get("unlimited") == "true" ?
+        args.Number("verification-reserve"): args.Number("seconds", fallback)
+
         internal func Reserve(args Args, seconds int32) int32 {
             let reserve = args.Get("verification-reserve") == "" ? 0: args.Number("verification-reserve")
-            if reserve >= seconds {
+            if args.Get("unlimited") == "true" {
+                if reserve < 1 || reserve != seconds {
+                    throw Exception("Unlimited coding requires a separate positive verification budget")
+                }
+            } else if reserve >= seconds {
                 throw Exception("--verification-reserve must be strictly smaller than the total budget")
             }
             return reserve
         }
 
         internal func Validate(run Data) {
+            let unlimited = J.Get(run.Element(), "unlimited")
+            if unlimited.ValueKind != JsonValueKind.Undefined &&
+                unlimited.ValueKind != JsonValueKind.True &&
+                unlimited.ValueKind != JsonValueKind.False {
+                throw Exception("Invalid saved unlimited coding choice")
+            }
+            if run.Flag("unlimited") &&
+                (
+                run.Number("version") != 2 || run.Text("source") != "tokate" || run.Number(
+                    "verification_reserve"
+                ) < 1 ||
+                    run.Number("verification_reserve") != run.Number("seconds")
+            ) {
+                throw Exception("Unlimited coding requires managed v2 work and a separate positive verification budget")
+            }
             let field = J.Get(run.Element(), "verification_reserve")
             var reserve int32
             if field.ValueKind != JsonValueKind.Undefined &&
                 (
                 field.ValueKind != JsonValueKind.Number || !field.TryGetInt32(out reserve) ||
                     reserve < 1 ||
-                    reserve >= run.Number("seconds")
+                    (run.Flag("unlimited") ? reserve != run.Number("seconds"): reserve >= run.Number("seconds"))
             ) {
                 throw Exception("Invalid saved verification reserve")
             }
@@ -172,6 +200,9 @@ internal class RuntimeBudget {
         internal func Description(run Data) string {
             let total = run.Number("seconds")
             let reserve = run.Number("verification_reserve")
+            if run.Flag("unlimited") {
+                return "unlimited coding time; independent verification budget " + reserve.ToString() + "s"
+            }
             return "total allowance " + total.ToString() + "s, coding allowance " + (total - reserve).ToString() +
                 "s, verification reserve " +
                 reserve.ToString() + "s"
@@ -401,7 +432,9 @@ internal class Commands {
             using let outputCapture = Capture(outputPath)
             using let errorCapture = Capture(errorPath)
             let requested = milliseconds > 0 ? milliseconds: seconds * 1000
-            let allowance = TimeSpan.FromMilliseconds(Math.Min(requested, budget?.Remaining() ?? requested))
+            let remaining = budget?.Remaining() ?? -1
+            let limit = requested > 0 && remaining > 0 ? Math.Min(requested, remaining): Math.Max(requested, remaining)
+            let allowance = TimeSpan.FromMilliseconds(limit > 0 ? limit: -1)
             let started = Chan[Process?](1)
             let exited = Chan[Exception?](1)
             let stdin = Chan[Exception?](1)
@@ -454,7 +487,7 @@ internal class Commands {
                 errorStarted = true
                 ready = true
                 while !inputDone || !outputDone || !errorDone || !exitDone {
-                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                    if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     var failure Exception? = nil
@@ -495,7 +528,7 @@ internal class Commands {
                         }
                         default { }
                     }
-                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                    if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     if let error = failure {
@@ -541,7 +574,7 @@ internal class Commands {
                     }
                     default { }
                 }
-                if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                     terminal = Exception("Runtime limit reached for " + exe)
                 }
             }

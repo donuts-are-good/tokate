@@ -24,6 +24,9 @@ internal class ContributionClaim {
             let selection = DonorSelection.Resolve(args, policy)
             let model = J.Text(selection, "model")
             let effort = J.Text(selection, "effort")
+            if args.Get("unlimited") == "true" {
+                throw Exception("Unlimited coding requires managed version-2 work")
+            }
             let seconds = args.Number(
                 "seconds",
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
@@ -226,7 +229,8 @@ internal class ContributionClaim {
             if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
                 RepositoryAccess.ValidateRun(run)
             }
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            RuntimeBudget.Validate(run)
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             V2Continuation.Recheck(run, state)
             return record
         }

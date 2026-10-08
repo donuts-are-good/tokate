@@ -186,7 +186,8 @@ internal class PiChecks {
             let catalogRejected = mode.StartsWith("catalog-") && mode != "catalog-metadata" && !mode.StartsWith(
                 "catalog-recheck-"
             )
-            let interrupted = mode == "cancel" || mode == "length-cancel"
+            let interrupted = mode == "cancel" || mode == "length-cancel" || mode == "unlimited-cancel"
+            let unlimited = mode.StartsWith("unlimited")
             let continuation = mode == "continued" ||
                 mode == "repeated" ||
                 mode == "identity" ||
@@ -201,6 +202,9 @@ internal class PiChecks {
             policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\",\"minimal\",\"high\",\"xhigh\"]}")
             policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
             policy["allow_network"] = JsonValue.Create(true)
+            if unlimited {
+                policy["allow_unlimited"] = JsonValue.Create(true)
+            }
             policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test \\\"$$(cat result.txt)\\\" = final\"]]")
             File.WriteAllText(policyPath, policy.ToJsonString())
             let custom = Path.Combine(flow.Flow.Upstream, ".pi")
@@ -271,6 +275,11 @@ internal class PiChecks {
             }
             if mode == "on" {
                 args.Add("--allow-network")
+            }
+            if unlimited {
+                args.RemoveRange(args.IndexOf("--seconds"), 2)
+                args.Add("--unlimited")
+                args[args.IndexOf("--verification-reserve") + 1] = "8"
             }
             if mode != "off" {
                 args.AddRange([]string{"--pi-root", root})
@@ -443,7 +452,8 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "reasoning" ||
+            let success = mode == "unlimited" ||
+                mode == "reasoning" ||
                 mode == "off" ||
                 mode == "on" ||
                 mode == "compact" ||

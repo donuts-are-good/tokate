@@ -241,8 +241,11 @@ internal class DonorSelection {
                 Terminal.Row("Model", J.Text(selection, "model") + " / " + J.Text(selection, "effort"))
                 Terminal.Row(
                     "Budget",
-                    args.Need("seconds") + " seconds total; " + args.Get("verification-reserve", "0") +
-                        " reserved for verification"
+                    (
+                        args.Get("unlimited") == "true" ? "Unlimited coding; ": args.Need("seconds") +
+                            " seconds total; "
+                    ) +
+                        args.Get("verification-reserve", "0") + " reserved for verification"
                 )
                 Terminal.Row("Command network", args.Get("allow-network") == "true" ? "allowed": "denied")
                 Terminal.Row("Availability", J.Text(selection, "availability"))
