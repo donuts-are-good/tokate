@@ -146,6 +146,9 @@ internal class DisposableVerificationChecks {
                     Check.Text(status?["storage"]?["next_safe_cleanup"]),
                     mode == "success" ? "later amendment will no longer be available": "no-inference recovery"
                 )
+                if mode == "success" {
+                    StorageAccounting(flow, run, status?["storage"])
+                }
                 if mode != "success" {
                     flow.NoPr()
                 }
@@ -158,6 +161,43 @@ internal class DisposableVerificationChecks {
             Console.WriteLine(
                 "PASS disposable CLI verification preserves evidence and donor data, cleans runtime files, build output and detached descendants on success, failure, timeout and signals"
             )
+        }
+
+        private func StorageAccounting(flow NativeFixture, run string, before JsonNode?) {
+            using let outside = Temp()
+            let source = Path.Combine(outside.Root, "data")
+            File.WriteAllText(source, "outside")
+            let rootFile = Path.Combine(run, "size-probe")
+            let checkoutFile = Path.Combine(run, "checkout/size-probe")
+            let fileLink = Path.Combine(run, "size-file-link")
+            let directoryLink = Path.Combine(run, "size-directory-link")
+            try {
+                File.WriteAllText(rootFile, "12345")
+                File.WriteAllText(checkoutFile, "1234567")
+                File.CreateSymbolicLink(fileLink, source)
+                Directory.CreateSymbolicLink(directoryLink, outside.Root)
+                let after = Check.Json(flow.Call([]string{"status", "--run", run, "--json"}).Output)["data"]?["storage"]
+                Check.That(
+                    Int64.Parse(Check.Text(after?["retained_bytes"])) == Int64.Parse(
+                        Check.Text(before?["retained_bytes"])
+                    ) +
+                        12,
+                    "Storage count followed links or lost regular files"
+                )
+                Check.That(
+                    Int64.Parse(Check.Text(after?["checkout_bytes"])) == Int64.Parse(
+                        Check.Text(before?["checkout_bytes"])
+                    ) +
+                        7,
+                    "Checkout storage count changed scope"
+                )
+                Check.That(File.ReadAllText(source) == "outside", "Storage measurement changed linked data")
+            } finally {
+                File.Delete(rootFile)
+                File.Delete(checkoutFile)
+                File.Delete(fileLink)
+                Directory.Delete(directoryLink)
+            }
         }
 
         private func CopyFailure(binary string) {
