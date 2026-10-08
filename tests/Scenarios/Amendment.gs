@@ -17,7 +17,8 @@ internal class AmendmentFlow {
             code int32 = 0,
             tools string = "",
             owner bool = false,
-            summary bool = true
+            summary bool = true,
+            json bool = false
         ) Result {
             let args = List[string]{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
             if tools != "" {
@@ -34,6 +35,9 @@ internal class AmendmentFlow {
                         )
                     }
                 )
+            }
+            if json {
+                args.Add("--json")
             }
             return flow.Call(args.ToArray(), code, owner: owner)
         }
@@ -404,7 +408,13 @@ internal class AmendmentFlow {
             }
         }
 
-        private func AssertPublished(flow NativeFixture, run string, commit string, owner bool = false) {
+        private func AssertPublished(
+            flow NativeFixture,
+            run string,
+            commit string,
+            owner bool = false,
+            summary bool = true
+        ) {
             Check.That(Check.Text(Saved(run)["commit"]) == commit, "Saved amendment head differs")
             flow.Reload()
             Check.That(flow.State["pulls"]?.AsArray().Count == 1, "Amendment duplicated PR")
@@ -414,10 +424,17 @@ internal class AmendmentFlow {
             Check.Contains(body, "cover original work only")
             Check.Contains(body, commit)
             Check.That(!body.Contains("synthetic-raw-"), "Detailed evidence was published")
-            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: owner)
+            Check.Envelope(
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: owner),
+                "verify-pr",
+                "ok"
+            )
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\",\"state\":\"SUCCESS\"}]")
             flow.Save()
-            flow.Call([]string{"checks", "--run", run}, owner: owner)
+            let checks = flow.Call([]string{"checks", "--run", run}, summary ? 0: 1, owner: owner)
+            if !summary {
+                Check.Contains(checks.Error, "PR report has no change summary for this candidate")
+            }
             Check.That(
                 Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "checks.json")))["head"]) == commit,
                 "Owner checks were not bound to amendment"
@@ -468,8 +485,43 @@ internal class AmendmentFlow {
             let run = PublishedContribution.Original(flow, owner)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             Review(flow, true)
+            let failedCommit = Edit(flow, run, "")
+            let rejected = Check.Envelope(
+                Amend(flow, run, failedCommit, 1, owner: owner, summary: false, json: true),
+                "amend",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(rejected["data"]?["amendment"]?["state"]) == "failed" && Check.Text(
+                    rejected["data"]?["amendment"]?["commit"]
+                ) == failedCommit,
+                "JSON amendment lost failed attempt"
+            )
+            let failed = Saved(Path.Combine(run, "amendments", failedCommit))
+            Check.That(Check.Text(failed["state"]) == "failed", "Failed verification lost evidence")
+            Check.That(
+                Check.Text(failed["verification"]?[1]?["exit_code"]) != "0",
+                "Failed amendment accepted verification"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                "Failed amendment changed saved publication"
+            )
+            Check.That(Directory.Exists(Path.Combine(run, "checkout")), "Failed amendment deleted checkout")
+            Amend(flow, run, failedCommit, 1, owner: owner, summary: false)
             let commit = Edit(flow, run)
-            Amend(flow, run, commit, owner: owner)
+            let published = Check.Envelope(
+                Amend(flow, run, commit, owner: owner, summary: false, json: true),
+                "amend",
+                "ok"
+            )
+            Check.That(
+                Check.Text(published["data"]?["amendment"]?["state"]) == "published" && Check.Text(
+                    published["data"]?["commit"]
+                ) == commit,
+                "JSON amendment lost published head"
+            )
             let amended = Saved(Path.Combine(run, "amendments", commit))
             Check.That(
                 Check.Text(amended["seconds"]) == "30" && Check.Text(Check.Json(original)["seconds"]) == "20",
@@ -480,11 +532,11 @@ internal class AmendmentFlow {
                 "Amendment did not run every original owner command"
             )
             AssertOriginal(run, original)
-            AssertPublished(flow, run, commit, owner)
+            AssertPublished(flow, run, commit, owner, summary: false)
             flow.Reload()
             let pushes = Check.Text(flow.State["git_pushes"])
             flow.ResetTraffic()
-            Amend(flow, run, commit, owner: owner)
+            Amend(flow, run, commit, owner: owner, summary: false)
             flow.Reload()
             Check.That(Check.Text(flow.State["git_pushes"]) == pushes, "Repeated applied amendment push")
             for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
@@ -543,7 +595,6 @@ internal class AmendmentFlow {
             using let original = PublishedContribution.Create(binary)
             using let mutating = PublishedContribution.Create(binary, mutating: true)
             for failure in[]string{
-                "checks",
                 "protected",
                 "protected-unicode",
                 "protected-template",
@@ -568,7 +619,7 @@ internal class AmendmentFlow {
                 let commit = Edit(
                     flow,
                     run,
-                    failure == "checks" ? "": "Reviewed\n",
+                    "Reviewed\n",
                     failure == "protected" ? ".github/workflows/review.yml":
                     failure == "protected-unicode" ? ".github/workflows/é.yml":
                     failure == "protected-template" ? ".github/tokate-pr.md": "result.txt"
@@ -635,15 +686,6 @@ internal class AmendmentFlow {
                 Amend(flow, run, commit, 1, tools)
                 Check.That(Check.Text(Saved(run)["commit"]) == before, "Rejected amendment changed saved publication")
                 Check.That(Directory.Exists(Path.Combine(run, "checkout")), "Rejected amendment deleted checkout")
-                if failure == "checks" {
-                    let saved = Saved(Path.Combine(run, "amendments", commit))
-                    Check.That(Check.Text(saved["state"]) == "failed", "Failed verification lost evidence")
-                    Check.That(
-                        Check.Text(saved["verification"]?[1]?["exit_code"]) != "0",
-                        "Failed amendment accepted verification"
-                    )
-                    Amend(flow, run, commit, 1)
-                }
             }
         }
 
@@ -855,75 +897,43 @@ internal class AmendmentFlow {
             }
         }
 
-        private func Structured(binary string) {
-            using let flow = NativeFixture(binary)
-            let run = PublishedContribution.Original(flow)
-            let original = File.ReadAllText(Path.Combine(run, "run.json"))
-            let failedCommit = Edit(flow, run, "")
-            let failed = Check.Envelope(
-                flow.Call([]string{"amend", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
-                "amend",
-                "error",
-                "verification_failed"
-            )
-            Check.That(
-                Check.Text(failed["data"]?["amendment"]?["state"]) == "failed" && Check.Text(
-                    failed["data"]?["amendment"]?["commit"]
-                ) == failedCommit,
-                "JSON amendment lost failed attempt"
-            )
-            let commit = Edit(flow, run)
-            let published = Check.Envelope(
-                flow.Call([]string{"amend", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
-                "amend",
-                "ok"
-            )
-            Check.That(
-                Check.Text(published["data"]?["amendment"]?["state"]) == "published" && Check.Text(
-                    published["data"]?["commit"]
-                ) == commit,
-                "JSON amendment lost published head"
-            )
-            AssertOriginal(run, original)
-            flow.Reload()
-            Check.That(
-                Check.Text(flow.State["exec_count"]) == "1" && flow.State["pulls"]?.AsArray().Count == 1,
-                "JSON amendment repeated inference or PR"
-            )
-            Check.Envelope(
-                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10", "--json"}, owner: true),
-                "verify-pr",
-                "ok"
-            )
-        }
-
         internal func All(binary string, only string = "") {
             var matched bool
-            for name in[]string{
-                "Structured",
-                "ArchiveRefusals",
-                "ArchiveIntegrity",
-                "ArchiveIdentity",
-                "LegacyArchives",
-                "ReceiptAuthority",
-                "ForkIdentity",
-                "V1",
-                "V1Owner",
-                "V1Push",
-                "V1Body",
-                "Rejections",
-                "InterruptedVerification",
-                "V2",
-                "V2Absent",
-                "V2Native",
-                "V2Push",
-                "V2Request",
-                "V2Body",
-                "V2State",
-                "V2StateBefore",
-                "V2LegacyStateBefore",
-                "V2Stale"
+            for test in[]TestCase[string]{
+                TestCase[string]("ArchiveRefusals", async (value string) -> ArchiveRefusals(value)),
+                TestCase[string]("ArchiveIntegrity", async (value string) -> ArchiveIntegrity(value)),
+                TestCase[string]("ArchiveIdentity", async (value string) -> ArchiveIdentity(value)),
+                TestCase[string]("LegacyArchives", async (value string) -> LegacyArchives(value)),
+                TestCase[string]("ReceiptAuthority", async (value string) -> ReceiptAuthority(value)),
+                TestCase[string]("ForkIdentity", async (value string) -> ForkIdentity(value)),
+                TestCase[string]("V1", async (value string) -> V1(value)),
+                TestCase[string]("V1Owner", async (value string) -> V1(value, true)),
+                TestCase[string]("V1Push", async (value string) -> V1Interrupted(value, "lost_push_response")),
+                TestCase[string]("V1Body", async (value string) -> V1Interrupted(value, "lost_body_response")),
+                TestCase[string]("Rejections", async (value string) -> Rejections(value)),
+                TestCase[string]("InterruptedVerification", async (value string) -> InterruptedVerification(value)),
+                TestCase[string]("V2", async (value string) -> V2(value)),
+                TestCase[string](
+                    "V2Absent",
+                    async (value string) -> {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            V2(value, "absent", native: true, modelPolicy: mode)
+                        }
+                    }
+                ),
+                TestCase[string]("V2Native", async (value string) -> V2(value, native: true)),
+                TestCase[string]("V2Push", async (value string) -> V2(value, "lost_push_response")),
+                TestCase[string]("V2Request", async (value string) -> V2(value, "lost_request_response")),
+                TestCase[string]("V2Body", async (value string) -> V2(value, "lost_body_response")),
+                TestCase[string]("V2State", async (value string) -> V2(value, "lost_state_response")),
+                TestCase[string]("V2StateBefore", async (value string) -> V2(value, "interrupted_state_write")),
+                TestCase[string](
+                    "V2LegacyStateBefore",
+                    async (value string) -> V2(value, "interrupted_state_write", legacy: true)
+                ),
+                TestCase[string]("V2Stale", async (value string) -> V2Stale(value))
             } {
+                let name = test.Name
                 if only != "" && only != name {
                     continue
                 }
@@ -931,79 +941,7 @@ internal class AmendmentFlow {
                 if !CiShard.Include("Amendment/" + name) {
                     continue
                 }
-                switch name {
-                    case "ArchiveRefusals" {
-                        ArchiveRefusals(binary)
-                    }
-                    case "ArchiveIdentity" {
-                        ArchiveIdentity(binary)
-                    }
-                    case "ArchiveIntegrity" {
-                        ArchiveIntegrity(binary)
-                    }
-                    case "LegacyArchives" {
-                        LegacyArchives(binary)
-                    }
-                    case "ForkIdentity" {
-                        ForkIdentity(binary)
-                    }
-                    case "ReceiptAuthority" {
-                        ReceiptAuthority(binary)
-                    }
-                    case "Structured" {
-                        Structured(binary)
-                    }
-                    case "V1" {
-                        V1(binary)
-                    }
-                    case "V1Owner" {
-                        V1(binary, true)
-                    }
-                    case "V1Push" {
-                        V1Interrupted(binary, "lost_push_response")
-                    }
-                    case "V1Body" {
-                        V1Interrupted(binary, "lost_body_response")
-                    }
-                    case "InterruptedVerification" {
-                        InterruptedVerification(binary)
-                    }
-                    case "Rejections" {
-                        Rejections(binary)
-                    }
-                    case "V2" {
-                        V2(binary)
-                    }
-                    case "V2Absent" {
-                        for mode in[]string{"whitelist", "unrestricted"} {
-                            V2(binary, "absent", native: true, modelPolicy: mode)
-                        }
-                    }
-                    case "V2Native" {
-                        V2(binary, native: true)
-                    }
-                    case "V2Push" {
-                        V2(binary, "lost_push_response")
-                    }
-                    case "V2Request" {
-                        V2(binary, "lost_request_response")
-                    }
-                    case "V2Body" {
-                        V2(binary, "lost_body_response")
-                    }
-                    case "V2State" {
-                        V2(binary, "lost_state_response")
-                    }
-                    case "V2StateBefore" {
-                        V2(binary, "interrupted_state_write")
-                    }
-                    case "V2LegacyStateBefore" {
-                        V2(binary, "interrupted_state_write", legacy: true)
-                    }
-                    case "V2Stale" {
-                        V2Stale(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS amendment " + name)
             }
             Check.That(matched, "Unknown amendment selector: " + only)

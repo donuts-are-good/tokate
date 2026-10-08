@@ -174,31 +174,21 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func StructuredFailures() {
-        for scenario in[]string{"authentication", "inference"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim(seconds: "1")
-            if scenario == "authentication" {
-                File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
-                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                let value = Check.Envelope(failure, "work", "error", "authentication_required")
-                Check.That(
-                    Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
-                        value["next_actions"]?[0]?[1]
-                    ) == "login",
-                    "Missing complete authentication action"
-                )
-                flow.NoInference()
-            } else {
-                flow.Mode("timeout")
-                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                Check.Envelope(failure, "work", "error", "inference_failed")
-                flow.Reload()
-                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Inference failure retried")
-            }
-            flow.NoPr()
-        }
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim(seconds: "1")
+        File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
+        let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+        let value = Check.Envelope(failure, "work", "error", "authentication_required")
+        Check.That(
+            Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
+                value["next_actions"]?[0]?[1]
+            ) == "login",
+            "Missing complete authentication action"
+        )
+        flow.NoInference()
+        flow.NoPr()
         EventDelimiters()
     }
 
@@ -588,7 +578,8 @@ internal partial class NativeFlow : NativeFixture {
         Approve()
         let run = Claim(seconds: "1")
         Mode("timeout")
-        let failure = Call([]string{"work", "--run", run}, 1)
+        let failure = Call([]string{"work", "--run", run, "--json"}, 1)
+        Check.Envelope(failure, "work", "error", "inference_failed")
         Check.That(!(failure.Output + failure.Error).Contains("partial-secret"), "Raw output escaped timeout")
         Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "partial-secret")
         Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-partial-stderr-secret")
