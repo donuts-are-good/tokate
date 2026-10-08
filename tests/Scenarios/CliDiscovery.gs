@@ -725,9 +725,112 @@ internal class CliDiscovery {
             )
         }
 
+        internal func Saved(binary string) {
+            using let temp = Temp()
+            temp.Env["TERM"] = "dumb"
+            temp.Env["NO_COLOR"] = "1"
+            temp.Env["PATH"] = Path.Combine(temp.Root, "bin")
+            let executable = Path.Combine(temp.Root, "tokate saved")
+            File.Copy(binary, executable)
+            let root = Path.Combine(temp.Env["HOME"], ".local/state/tokate/runs")
+            let first = Path.Combine(root, "a first")
+            let second = Path.Combine(root, "b second")
+            Directory.CreateDirectory(first)
+            Directory.CreateDirectory(second)
+            let record = Check.Map(
+                "version",
+                2,
+                "id",
+                "first",
+                "repo",
+                "owner/project",
+                "issue",
+                1,
+                "donor",
+                "donor",
+                "model",
+                "fixture-model",
+                "state",
+                "claimed",
+                "source",
+                "tokate",
+                "seconds",
+                60,
+                "verification_reserve",
+                20
+            )
+            File.WriteAllText(Path.Combine(first, "run.json"), record.ToJsonString())
+            record["id"] = JsonValue.Create("second")
+            record["state"] = JsonValue.Create("generated")
+            record["model"] = JsonValue.Create("second\u001b[31m")
+            File.WriteAllText(Path.Combine(second, "run.json"), record.ToJsonString())
+            let firstBytes = Check.Hash(Path.Combine(first, "run.json"))
+            let secondBytes = Check.Hash(Path.Combine(second, "run.json"))
+            let broken = Path.Combine(root, "broken")
+            let oversized = Path.Combine(root, "oversized")
+            Directory.CreateDirectory(broken)
+            Directory.CreateDirectory(oversized)
+            File.WriteAllText(Path.Combine(broken, "run.json"), "{")
+            File.WriteAllText(Path.Combine(oversized, "run.json"), String('x', 1024 * 1024 + 1))
+            Directory.CreateSymbolicLink(Path.Combine(root, "linked"), first)
+            let command = []string{"-q", "-e", "-c", "exec '" + executable.Replace("'", "'\"'\"'") + "'", "/dev/null"}
+            let selected = TestProcess.Run(
+                "/usr/bin/script",
+                command,
+                temp.Env,
+                input: "saved\n99\n1\nsaved\n2\nexit\n"
+            )
+            Check.Success(selected)
+            Check.Contains(selected.Output, "a first")
+            Check.Contains(selected.Output, "b second")
+            Check.Contains(selected.Output, "Skipped unreadable or invalid entries: 3")
+            Check.Contains(selected.Output, "Choose one of the listed numbers.")
+            Check.Contains(selected.Output, "tokate work")
+            let last = selected.Output.Substring(selected.Output.LastIndexOf("Donor run"))
+            Check.Contains(last, "tokate submit")
+            Check.That(!last.Contains("tokate work"), "Saved selection retained the previous run action")
+            Check.That(!selected.Output.Contains("\u001b[31m"), "Saved metadata injected terminal controls")
+            Check.That(
+                !selected.Output.Contains("repo> ") && !selected.Output.Contains("Missing tools"),
+                "Offline selection required repository tools"
+            )
+            Check.That(
+                Check.Hash(Path.Combine(first, "run.json")) == firstBytes && Check.Hash(
+                    Path.Combine(second, "run.json")
+                ) == secondBytes,
+                "Saved inspection changed metadata"
+            )
+            Check.That(
+                Directory.GetFileSystemEntries(first).Length == 1 && Directory.GetFileSystemEntries(second).Length == 1,
+                "Saved inspection created execution artifacts"
+            )
+            Directory.Delete(second, true)
+            let cancelled = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\n\nexit\n")
+            Check.Success(cancelled)
+            Check.That(!cancelled.Output.Contains("Donor run"), "Only remaining contribution was selected implicitly")
+            record["model"] = JsonValue.Create(String('x', 257))
+            File.WriteAllText(Path.Combine(first, "run.json"), record.ToJsonString())
+            let empty = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\nexit\n")
+            Check.Success(empty)
+            Check.Contains(empty.Output, "No readable saved contributions.")
+            Check.That(!empty.Output.Contains("Saved contribution number"), "Empty list requested a selection")
+            for index in 0 ... 130 {
+                Directory.CreateDirectory(Path.Combine(root, "extra-" + index.ToString()))
+            }
+            let bounded = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\n\nexit\n")
+            Check.Success(bounded)
+            Check.Contains(bounded.Output, "Only the first 128 entries were inspected")
+            Console.WriteLine(
+                "PASS offline saved contribution selection, cancellation, invalid and linked metadata, bounded discovery, private state preservation and action reset"
+            )
+        }
+
         internal func All(binary string, shell string = "bash") {
-            Structured(binary)
-            TerminalOutput.All(binary)
+            if shell == "bash" {
+                Structured(binary)
+                TerminalOutput.All(binary)
+                Saved(binary)
+            }
             Check.That(shell == "bash" || shell == "zsh" || shell == "fish", "Choose bash, zsh or fish")
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")

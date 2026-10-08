@@ -1,6 +1,7 @@
 package Tokate
 
 import System
+import System.IO
 import System.Text.Json
 
 internal class Interactive {
@@ -104,12 +105,93 @@ internal class Interactive {
             "red"
         )
 
+        private func Saved() {
+            PublicOutput.Reset("status")
+            try {
+                let saved = RunStorage.Discover()
+                let rows = J.Items(J.Get(saved, "runs"))
+                Terminal.Heading("Saved contributions")
+                var index int32 = 1
+                for row in rows {
+                    Terminal.Message(
+                        index.ToString() + ") " + J.Text(row, "repo") + " #" + J.Number(row, "issue").ToString() +
+                            " / " +
+                            J.Text(row, "donor") + " / " + J.Text(row, "model") + " / " + J.Text(row, "state") +
+                            " / " +
+                            Path.GetFileName(J.Text(row, "run")),
+                        "default"
+                    )
+                    index++
+                }
+                if J.Number(saved, "skipped") > 0 {
+                    Terminal.Message(
+                        "Skipped unreadable or invalid entries: " + J.Number(saved, "skipped").ToString(),
+                        "yellow"
+                    )
+                }
+                if J.Bool(saved, "truncated") {
+                    Terminal.Message(
+                        "Only the first 128 entries were inspected. Use status --run for another saved directory.",
+                        "yellow"
+                    )
+                }
+                if rows.Count == 0 {
+                    Terminal.Message("No readable saved contributions.", "default")
+                    return
+                }
+                while true {
+                    Console.Write("Saved contribution number (blank cancels)> ")
+                    let answer = Console.ReadLine()?.Trim()
+                    if answer == nil || answer == "" || answer == "exit" {
+                        return
+                    }
+                    var selected int32
+                    if !int32.TryParse(answer, out selected) || selected < 1 || selected > rows.Count {
+                        Terminal.Message("Choose one of the listed numbers.", "yellow")
+                        continue
+                    }
+                    let directory = J.Text(rows[selected - 1], "run")
+                    let options = Args([]string{"status", "--run", directory})
+                    Cli.Validate(options)
+                    PublicOutput.RunDirectory = directory
+                    let summary = PublicOutput.RunSummary(directory)
+                    PublicOutput.Next(options, "")
+                    Terminal.SavedRun(J.Parse(J.Write(summary)))
+                    return
+                }
+            } finally {
+                PublicOutput.Reset()
+            }
+        }
+
         internal func Run() int32 {
             if !OperatingSystem.IsLinux() {
                 throw Exception("This release supports Linux")
             }
             Terminal.InteractiveHeading()
-            var repo = Repository()
+            var repo = ""
+            while repo == "" {
+                Terminal.Message("repository / saved / help / exit", "default")
+                Console.Write("action> ")
+                let answer = Console.ReadLine()?.Trim()
+                if answer == nil || answer == "" || answer == "exit" {
+                    return 0
+                }
+                try {
+                    if answer == "saved" {
+                        Saved()
+                    } else if answer == "help" {
+                        Terminal.Message(
+                            "Open a repository or inspect saved contributions offline. You can also enter OWNER/REPO directly.",
+                            "default"
+                        )
+                    } else {
+                        repo = answer == "repository" ? Repository(): RepositoryInput.Repo(answer)
+                    }
+                } catch (error Exception) {
+                    Error(error)
+                }
+            }
             if repo == "" {
                 return 0
             }
