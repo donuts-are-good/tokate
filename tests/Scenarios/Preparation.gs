@@ -682,6 +682,29 @@ internal class PreparationChecks {
             )
             flow.Reload()
             let comment = flow.State["request_comments"]?.AsArray()[0] ?? throw Exception("Missing posted claim")
+            let body = Check.Text(comment["body"])
+            Check.That(body.StartsWith("/tokate claim\n"), "Claim did not expose its action")
+            Check.Contains(body, "Pending coordinator review.")
+            Check.Contains(body, "Requested by the author of this comment.")
+            Check.Contains(body, "<summary>Coordination data</summary>")
+            Check.Contains(body, "`tokate status`")
+            let id = Check.Text(comment["id"])
+            for changed in[]string{
+                body.Replace("Pending coordinator review.", "Reservation accepted."),
+                body.Replace("/tokate claim\n", "/tokate publish\n"),
+                body + "\nExtra request",
+                body.Replace("\n```\n</details>", " trailing\n```\n</details>")
+            } {
+                comment["body"] = JsonValue.Create(changed)
+                flow.Reload()
+                (flow.State["comments"] ?? throw Exception("Missing comments"))[id] = comment.DeepClone()
+                flow.Save()
+                test.Coordinate(PostedEvent(test, comment), 1)
+            }
+            comment["body"] = JsonValue.Create(body)
+            flow.Reload()
+            (flow.State["comments"] ?? throw Exception("Missing comments"))[id] = comment.DeepClone()
+            flow.Save()
             test.Coordinate(PostedEvent(test, comment))
             flow.Call([]string{"work", "--run", run})
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))

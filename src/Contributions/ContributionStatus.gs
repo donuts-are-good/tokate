@@ -678,7 +678,11 @@ internal class ContributionStatus {
                 next = Next(
                     "donor",
                     Text(row, "eligibility_status") == "eligible" ?
-                    "Create a claim request file using the observed coordination state; a request file and work selections are still required.":
+                    "Use tokate claim https://github.com/" +
+                        repo +
+                        "/issues/" +
+                        Text(row, "issue") +
+                        " with your selected profile or model and an explicit time budget.":
                     "An eligible donor must select the task and prepare a claim request. Inspect access grants if no donor is eligible."
                 )
             } else {
@@ -742,7 +746,7 @@ internal class ContributionStatus {
                 stage = "lease_expired_or_released"
                 next = Next(
                     "donor",
-                    "Create a fresh claim request if eligible; a request file is required and saved-work continuation is a separate operation."
+                    "Use tokate claim for a fresh donation if eligible. Inspect saved work before choosing a separately authorized continuation."
                 )
             }
             if Text(row, "holder_eligible") == "False" {

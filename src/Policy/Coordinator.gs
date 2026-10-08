@@ -56,7 +56,7 @@ internal class Coordinator {
             if !text.StartsWith("/tokate ", StringComparison.Ordinal) {
                 throw Exception("Canonical comment is not a request")
             }
-            let request = RequestData.Parse(text.Substring(8))
+            let request = RequestData.CommentData(text)
             RequestData.Request(request)
             let state = CoordinationState.Load(repo, number)
             let binding = RequestData.Binding(actor, request)
