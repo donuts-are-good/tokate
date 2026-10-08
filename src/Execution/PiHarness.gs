@@ -124,7 +124,8 @@ internal class PiHarness {
             }
             Runtime(args)
             PiBoundary.Probe(args.Need("pi-root"), args.Need("node"))
-            let limits = PiBoundary.ModelLimits(args.Need("pi-root"), args.Need("node"), model, endpoint)
+            let limits = PiBoundary.ModelSettings(args.Need("pi-root"), args.Need("node"), model, endpoint)
+            PiBoundary.CheckEffort(limits, effort)
             let catalog = PiCatalog.Read(args.Need("node"), model, endpoint)
             return J.Parse(
                 J.Write(
@@ -136,7 +137,7 @@ internal class PiHarness {
                         "source": source,
                         "policy_hash": policy.Digest,
                         "policy_eligible": true,
-                        "capability": "pi SDK import and isolated noninteractive session probe; absent effort only",
+                        "capability": "pi SDK model capabilities and isolated noninteractive session probe",
                         "availability": "advertised",
                         "availability_evidence": "Selected endpoint advertises the exact model ID; weights and coding capability are unverified",
                         "endpoint_catalog": catalog,
@@ -169,23 +170,18 @@ internal class PiHarness {
             Preparation.Ready(directory, run)
             let runtime = PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
             let endpoint = PiBoundary.Endpoint(run.Text("pi_endpoint"))
-            let limits = PiBoundary.ModelLimits(
+            let limits = PiBoundary.ModelSettings(
                 run.Text("pi_root"),
                 run.Text("pi_node"),
                 run.Text("model"),
                 endpoint,
                 coding
             )
+            PiBoundary.CheckEffort(limits, run.Text("effort"))
             let checkout = Path.Combine(directory, "checkout")
             let control = Path.Combine(directory, "pi-control-" + Guid.NewGuid().ToString("N"))
             try {
-                PiBoundary.Control(
-                    control,
-                    run.Text("model"),
-                    endpoint,
-                    J.Number(limits, "contextWindow"),
-                    J.Number(limits, "maxTokens")
-                )
+                PiBoundary.Control(control, run.Text("model"), endpoint, limits)
                 let args = PiBoundary.Boundary(checkout, run.Text("pi_root"), run.Text("pi_node"), control, true)
                 args.AddRange(
                     []string{
@@ -196,7 +192,8 @@ internal class PiHarness {
                         run.Text("model"),
                         run.Flag("network") ? "true": "false",
                         "",
-                        continueTruncated ? "true": "false"
+                        continueTruncated ? "true": "false",
+                        run.Text("effort")
                     }
                 )
                 ContributionClaim.Recheck(run)
@@ -220,7 +217,7 @@ internal class PiHarness {
                         "node_version": J.Text(runtime, "node"),
                         "provider": "local-chat-completions",
                         "model": run.Text("model"),
-                        "effort": "absent",
+                        "effort": run.Text("effort"),
                         "context_window": J.Number(limits, "contextWindow"),
                         "max_tokens": J.Number(limits, "maxTokens"),
                         "length_continuation_limit": continuationLimit
@@ -258,7 +255,13 @@ internal class PiHarness {
                     if result.Code != 0 || result.Truncated || result.ReadFailed {
                         throw Exception(PiEvidence.Failure(result.Output))
                     }
-                    let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"), continuationLimit)
+                    let usage = PiEvidence.Completed(
+                        directory,
+                        result.Output,
+                        run.Text("model"),
+                        run.Text("effort"),
+                        continuationLimit
+                    )
                     run.Fields["turn_completed"] = true
                     run.Fields["usage"] = usage
                     run.Fields[

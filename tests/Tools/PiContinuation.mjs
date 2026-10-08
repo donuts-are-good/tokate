@@ -30,10 +30,11 @@ export const createEditToolDefinition = (cwd, { operations }) => ({
         await operations.writeFile(filename, text);
     },
 });
-export async function createAgentSession({ cwd, model, customTools }) {
+export async function createAgentSession({ cwd, model, thinkingLevel, customTools }) {
     let observer;
     const session = {
         model,
+        thinkingLevel,
         agent: { finishTurn: async () => ({ action: 'end' }), prepareRequest: async request => request },
         getToolDefinition: name => customTools.find(tool => tool.name === name),
         getActiveToolNames: () => customTools.map(tool => tool.name),

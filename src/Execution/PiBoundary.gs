@@ -106,7 +106,7 @@ internal class PiBoundary {
             return args
         }
 
-        internal func ModelLimits(
+        internal func ModelSettings(
             root string,
             node string,
             model string,
@@ -135,7 +135,7 @@ internal class PiBoundary {
                         args.Add(key + "=" + value)
                     }
                 }
-                args.AddRange([]string{node, script, root, model})
+                args.AddRange([]string{node, "--experimental-import-meta-resolve", script, root, model})
                 let result = Commands.Run(
                     "/usr/bin/unshare",
                     args.ToArray(),
@@ -150,8 +150,8 @@ internal class PiBoundary {
                         "Pi requires one configured local model at the selected endpoint; no inference started"
                     )
                 }
-                let limits = RequestData.Parse(result.Output.Trim(), 1024)
-                RequestData.Keys(limits, "contextWindow,maxTokens")
+                let limits = RequestData.Parse(result.Output.Trim(), 4096)
+                RequestData.Keys(limits, "contextWindow,maxTokens,reasoning,thinkingLevelMap,compat,efforts")
                 let contextWindow = J.Number(limits, "contextWindow")
                 let maxTokens = J.Number(limits, "maxTokens")
                 if contextWindow < 1 || maxTokens < 1 || maxTokens > contextWindow {
@@ -163,7 +163,18 @@ internal class PiBoundary {
             }
         }
 
-        internal func Control(control string, model string, endpoint string, contextWindow int32, maxTokens int32) {
+        internal func CheckEffort(settings JsonElement, effort string) {
+            for level in J.Items(J.Get(settings, "efforts")) {
+                if level.GetString() == effort {
+                    return
+                }
+            }
+            throw Exception(
+                "Pi does not support the selected reasoning effort for this configured model; choose a supported level before starting"
+            )
+        }
+
+        internal func Control(control string, model string, endpoint string, settings JsonElement) {
             Directory.CreateDirectory(
                 control,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -183,10 +194,11 @@ internal class PiBoundary {
                                     map[string, Object?]{
                                         "id": model,
                                         "name": model,
-                                        "reasoning": false,
+                                        "reasoning": J.Get(settings, "reasoning"),
+                                        "thinkingLevelMap": J.Get(settings, "thinkingLevelMap"),
                                         "input": []string{"text"},
-                                        "contextWindow": contextWindow,
-                                        "maxTokens": maxTokens,
+                                        "contextWindow": J.Number(settings, "contextWindow"),
+                                        "maxTokens": J.Number(settings, "maxTokens"),
                                         "cost": map[string, Object?]{
                                             "input": 0,
                                             "output": 0,
@@ -195,7 +207,11 @@ internal class PiBoundary {
                                         },
                                         "compat": map[string, Object?]{
                                             "supportsDeveloperRole": false,
-                                            "supportsReasoningEffort": false,
+                                            "supportsReasoningEffort": J.Get(
+                                                J.Get(settings, "compat"),
+                                                "supportsReasoningEffort"
+                                            ),
+                                            "thinkingFormat": J.Text(J.Get(settings, "compat"), "thinkingFormat"),
                                             "maxTokensField": "max_tokens"
                                         }
                                     }
@@ -218,7 +234,14 @@ internal class PiBoundary {
                 File.WriteAllText(Path.Combine(checkout, ".git/config"), "synthetic-private")
                 File.WriteAllText(Path.Combine(storage.FullName, "credential-sentinel"), "synthetic-private")
                 let control = Path.Combine(storage.FullName, "control")
-                Control(control, "tokate-probe", "http://127.0.0.1:1/v1", 32768, 4096)
+                Control(
+                    control,
+                    "tokate-probe",
+                    "http://127.0.0.1:1/v1",
+                    J.Parse(
+                        "{\"contextWindow\":32768,\"maxTokens\":4096,\"reasoning\":false,\"thinkingLevelMap\":{},\"compat\":{\"supportsReasoningEffort\":false,\"thinkingFormat\":\"openai\"}}"
+                    )
+                )
                 let args = Boundary(checkout, root, node, control, false)
                 args.AddRange(
                     []string{

@@ -162,7 +162,7 @@ internal class PiChecks {
             let policyPath = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["model_policy"] = JsonValue.Create("whitelist")
-            policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\"]}")
+            policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\",\"minimal\",\"high\",\"xhigh\"]}")
             policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
             policy["allow_network"] = JsonValue.Create(true)
             policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test \\\"$$(cat result.txt)\\\" = final\"]]")
@@ -191,6 +191,12 @@ internal class PiChecks {
             )
             let provider = models["providers"]?["synthetic"] ?? throw Exception("Missing synthetic provider")
             provider["baseUrl"] = JsonValue.Create(endpoint)
+            if mode == "reasoning" {
+                let model = provider["models"]?[0] ?? throw Exception("Missing reasoning model")
+                model["reasoning"] = JsonValue.Create(true)
+                model["thinkingLevelMap"] = Check.Json("{\"minimal\":null,\"high\":\"medium\",\"xhigh\":null}")
+                model["compat"] = Check.Json("{\"thinkingFormat\":\"openai\",\"supportsReasoningEffort\":true}")
+            }
             let modelsPath = Path.Combine(agentDir, "models.json")
             File.WriteAllText(modelsPath, models.ToJsonString())
             File.CreateSymbolicLink(
@@ -214,7 +220,7 @@ internal class PiChecks {
                 "--model",
                 "synthetic/model:exact",
                 "--effort",
-                "absent",
+                mode == "reasoning" ? "high": "absent",
                 "--node",
                 node,
                 "--endpoint",
@@ -253,6 +259,46 @@ internal class PiChecks {
                 flow.Flow.NoInference()
                 Console.WriteLine("PASS native Pi workflow " + mode)
                 return
+            }
+            if mode == "reasoning" {
+                for effort in[]string{"absent", "minimal", "xhigh"} {
+                    let rejected = args.ToArray()
+                    rejected[Array.IndexOf(rejected, "--effort") + 1] = effort
+                    Check.Contains(flow.Flow.Call(rejected, 1).Error, "does not support the selected reasoning effort")
+                }
+                flow.Flow.Temp.Env["TERM"] = "dumb"
+                flow.Flow.Temp.Env["NO_COLOR"] = "1"
+                let guided = TerminalOutput.Pty(
+                    binary,
+                    []string{"work", "owner/project"},
+                    flow.Flow.Temp,
+                    80,
+                    "1\n1\n1\n1\n" + endpoint + "\nsynthetic/model:exact\n1\n1\nq\n"
+                )
+                Check.That(guided.Code == 1, guided.Output + guided.Error)
+                Check.Contains(guided.Output, "Reasoning effort")
+                Check.Contains(guided.Output, "Review donation")
+                Check.Contains(guided.Output, "synthetic/model:exact / high")
+                flow.Flow.NoInference()
+                flow.Flow.Call(
+                    []string{
+                        "defaults",
+                        "set",
+                        "--profile",
+                        "reasoning",
+                        "--harness",
+                        "pi",
+                        "--provider",
+                        "local-chat-completions",
+                        "--model",
+                        "synthetic/model:exact",
+                        "--effort",
+                        "high",
+                        "--endpoint",
+                        endpoint
+                    }
+                )
+                Check.Contains(flow.Flow.Call([]string{"defaults", "read", "--profile", "reasoning"}).Output, "high")
             }
             if mode == "off" {
                 for option in[]string{"--effort", "--model", "--endpoint"} {
@@ -361,7 +407,8 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "off" ||
+            let success = mode == "reasoning" ||
+                mode == "off" ||
                 mode == "on" ||
                 mode == "compact" ||
                 mode == "continued" ||
@@ -434,6 +481,12 @@ internal class PiChecks {
                     File.ReadAllText(Path.Combine(run, "events.jsonl"))
                 )
                     .ToJsonString()
+            )
+            Check.That(
+                Check.Text(saved["effort"]) == (mode == "reasoning" ? "high": "absent") && Check.Text(
+                    saved["observed_invocation"]?["effort"]
+                ) == Check.Text(saved["effort"]),
+                "Pi lost selected effort"
             )
             Check.That(
                 Check.Text(saved["observed_invocation"]?["length_continuation_limit"]) == (continuation ? "1": "0"),

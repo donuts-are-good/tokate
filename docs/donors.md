@@ -37,11 +37,12 @@ Profiles store neither budgets nor network consent.
 Install current Pi and Node using [Pi's official instructions](https://pi.dev/).
 Configure the model in Pi and start a no-auth HTTP loopback Chat Completions endpoint.
 Tokate does not install a harness or start a model server. The owner must allow
-`pi/local-chat-completions` and your exact model with `absent` effort.
+`pi/local-chat-completions` and your exact model and reasoning level. The guided CLI
+offers levels from Pi. Use `absent` only for a model without reasoning.
 
 ```sh
 tokate defaults set --profile local --harness pi --model 'MODEL_ID' \
-  --effort absent --endpoint http://127.0.0.1:8080/v1
+  --effort high --endpoint http://127.0.0.1:8080/v1
 tokate select --repo OWNER/REPO --profile local
 ```
 

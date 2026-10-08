@@ -19,6 +19,7 @@ parser.add_argument('--node', default=shutil.which('node'))
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
 parser.add_argument('--binary', default='artifacts/linux-x64/tokate')
 parser.add_argument('--catalog-only', action='store_true')
+parser.add_argument('--case', action='append', dest='cases', help='Run only a named system scenario')
 args = parser.parse_args()
 if not args.node:
     parser.error('Node is not on PATH; supply --node with the installed executable')
@@ -139,7 +140,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.server.calls += 1
         assert self.path == '/v1/chat/completions'
         assert body['model'] == 'synthetic/model:exact'
-        assert 'reasoning_effort' not in body
+        if self.server.case == 'reasoning':
+            assert body.get('reasoning_effort') == 'medium', 'Selected high effort did not use the configured Pi mapping'
+        else:
+            assert 'reasoning_effort' not in body
         compacting = not body.get('tools')
         if compacting:
             assert self.server.case in ['compact', 'compact-failed']
@@ -272,7 +276,7 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
 with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    cases = catalog_cases if args.catalog_only else ['off', 'on', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases]
+    cases = args.cases or (catalog_cases if args.catalog_only else ['reasoning', 'off', 'on', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases])
     for case in cases:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
@@ -368,10 +372,10 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 elif case in ['continued', 'repeated']:
                     assert server.calls == 3, f'{case}: expected one tool-write prelude and two responses at the length boundary'
                     assert server.compactions == 0, 'Length continuation changed the compaction threshold'
-                elif case not in ['off', 'on', 'catalog-metadata']:
+                elif case not in ['reasoning', 'off', 'on', 'catalog-metadata']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
                 saved = json.loads((root / 'result.json').read_text())
-                if case in ['off', 'on', 'compact', 'continued', 'catalog-metadata']:
+                if case in ['reasoning', 'off', 'on', 'compact', 'continued', 'catalog-metadata']:
                     assert saved['usage']['input_tokens'] == server.input_tokens, 'Usage omitted context compaction'
                     assert saved['usage']['output_tokens'] == server.output_tokens, 'Usage omitted context compaction'
                 if case in ['incomplete', 'repeated', 'truncated-tool']:
@@ -381,7 +385,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                     assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', 'Deadline fabricated completion'
                     assert 'Runtime limit' in saved['error'], 'Original coding deadline was not retained'
             assert not server.errors, server.errors
-            assert server.catalog_calls == (3 if case == 'off' else 2), 'Metadata selection/launch checks were omitted or retried'
+            assert server.catalog_calls == (3 if case in ['off', 'reasoning'] else 2), 'Metadata selection/launch checks were omitted or retried'
             if case in length_cases:
                 evidence = json.loads((root / 'result.json').read_text())
                 events = [json.loads(line) for line in evidence['events'].splitlines()]

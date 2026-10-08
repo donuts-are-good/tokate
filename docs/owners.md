@@ -30,7 +30,8 @@ existing tools; new noninteractive setup defaults to Codex.
 
 The model checklist searches as you type. Space selects, Enter accepts, and F2
 adds a model absent from local discovery. Suggestions are not selected for you.
-A local model needs its exact ID and `absent` effort. Availability remains unknown.
+A local model needs its exact ID and supported reasoning levels. Use `absent` only
+for models without reasoning. Availability remains unknown.
 Use `tokate init --help` for scripted setup and policy options. Optional root
 `DECREE.md` contains task instructions captured at approval. It cannot expand
 permissions or donor budgets. Use `protected_paths` to protect verification tooling

@@ -231,11 +231,13 @@ internal class Policy {
         RequestData.ModelIdentifier(model)
         if J.Number(Value, "version") != 2 ||
             !AllowsTool("pi", "local-chat-completions") ||
-            effort != "absent" ||
+            !ValidEffort(effort) ||
+            effort == "unknown" ||
+            effort == "ultra" ||
             model == "unknown" ||
             !Allows(model, effort) {
             throw Exception(
-                "Managed pi requires version 2, exact pi/local-chat-completions permission, an exact model and allowed absent effort"
+                "Managed pi requires version 2, exact pi/local-chat-completions permission, an exact model and allowed reasoning effort"
             )
         }
         ValidateBudget(seconds, network)

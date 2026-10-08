@@ -69,8 +69,8 @@ internal class DonorDefaults {
                 RequestData.Token(J.Text(value, key))
             }
             if J.Text(value, "harness") == "pi" {
-                if J.Text(value, "provider") != "local-chat-completions" || J.Text(value, "effort") != "absent" {
-                    throw Exception("Pi profiles require local-chat-completions and absent effort")
+                if J.Text(value, "provider") != "local-chat-completions" {
+                    throw Exception("Pi profiles require local-chat-completions")
                 }
                 RequestData.ModelIdentifier(J.Text(value, "model"))
                 PiBoundary.Endpoint(J.Text(value, "endpoint"))
@@ -152,8 +152,8 @@ internal class DonorDefaults {
                 RequestData.ModelIdentifier(args.Need(key)): RequestData.Token(args.Need(key))
             }
             if args.Get("harness") == "pi" {
-                if args.Get("provider") != "local-chat-completions" || args.Get("effort") != "absent" {
-                    throw Exception("Pi profiles require local-chat-completions and absent effort")
+                if args.Get("provider") != "local-chat-completions" {
+                    throw Exception("Pi profiles require local-chat-completions")
                 }
                 choice["endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
                 for key in[]string{"pi-root", "node"} {

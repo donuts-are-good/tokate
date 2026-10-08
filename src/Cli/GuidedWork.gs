@@ -147,8 +147,30 @@ internal class GuidedWork {
                     "Choose the exact model configured in Pi and advertised by your server.",
                     "Model ID"
                 )
-                args.Values["--effort"] = "absent"
                 PiHarness.Runtime(args)
+                let settings = PiBoundary.ModelSettings(
+                    args.Need("pi-root"),
+                    args.Need("node"),
+                    args.Need("model"),
+                    PiBoundary.Endpoint(args.Need("endpoint"))
+                )
+                let efforts = List[string]()
+                for level in J.Items(J.Get(settings, "efforts")) {
+                    let effort = level.GetString() ?? ""
+                    if policy.Allows(args.Need("model"), effort) {
+                        efforts.Add(effort)
+                    }
+                }
+                if efforts.Count == 0 {
+                    throw Exception("The owner policy permits none of this Pi model's supported reasoning levels")
+                }
+                args.Values["--effort"] = efforts[
+                    WizardScreen.Choose(
+                        "Reasoning effort",
+                        "Choose a level supported by Pi and permitted by the project.",
+                        efforts.ToArray()
+                    ) - 1
+                ]
             } else {
                 let models = List[string]()
                 let efforts = List[string]()

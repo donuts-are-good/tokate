@@ -24,10 +24,13 @@ internal class PiEvidence {
             return "Pi did not complete; inspect private captured evidence. No retry or fallback"
         }
 
-        internal func Completed(directory string, output string, model string, continuationLimit int32) Dictionary[
-            string,
-            Object?
-        ] {
+        internal func Completed(
+            directory string,
+            output string,
+            model string,
+            effort string,
+            continuationLimit int32
+        ) Dictionary[string, Object?] {
             var completed int32
             var started int32
             var continued int32
@@ -45,7 +48,7 @@ internal class PiEvidence {
                     if J.Text(item, "model") != model || J.Text(item, "provider") != "local-chat-completions" || J.Text(
                         item,
                         "effort"
-                    ) != "absent" {
+                    ) != effort {
                         throw Exception("Pi invocation identity differs from exact selection")
                     }
                     if (item.GetInt32OrNil("length_continuation_limit") ?? -1) != continuationLimit {
