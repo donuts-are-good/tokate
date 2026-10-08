@@ -148,7 +148,7 @@ internal class TargetBranches {
         }
 
         private func V2(binary string, branch string, external bool) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             let flow = test.Flow
             let base = Target(flow, branch)
@@ -226,7 +226,7 @@ internal class TargetBranches {
         }
 
         private func Freshness(binary string, version int32, change string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             let flow = test.Flow
             if version == 2 {
                 test.Initialize()
@@ -314,7 +314,7 @@ internal class TargetBranches {
         }
 
         private func Legacy(binary string, version int32) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             let flow = test.Flow
             if version == 2 {
                 test.Initialize()

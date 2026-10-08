@@ -35,7 +35,7 @@ internal class PiChecks {
                 )
                 File.WriteAllText(
                     Path.Combine(installed, "dist/index.js"),
-                    NativeFixture.Template("PiContinuation.mjs")
+                    TestResources.Template("PiContinuation.mjs")
                 )
                 File.WriteAllText(
                     Path.Combine(installed, "dist/bundle/cli.js"),
@@ -313,7 +313,7 @@ internal class PiChecks {
                 }
                 flow.Flow.Temp.Env["TERM"] = "dumb"
                 flow.Flow.Temp.Env["NO_COLOR"] = "1"
-                let guided = TerminalOutput.Pty(
+                let guided = TestTerminal.Pty(
                     binary,
                     []string{"work", "owner/project"},
                     flow.Flow.Temp,
@@ -469,7 +469,7 @@ internal class PiChecks {
             var worked Result
             if mode == "on" {
                 flow.Flow.Temp.Env["TERM"] = "xterm-256color"
-                worked = TerminalOutput.Pty(binary, work.ToArray(), flow.Flow.Temp, 100)
+                worked = TestTerminal.Pty(binary, work.ToArray(), flow.Flow.Temp, 100)
                 Check.Success(worked)
                 Check.Contains(worked.Output, "tokate / Donation")
                 Check.Contains(worked.Output, "bash: setsid sh")

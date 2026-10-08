@@ -852,11 +852,11 @@ internal class PreparationChecks {
             flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
             let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
             let args = []string{"work", "owner/project"}
-            let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "q\n")
+            let cancelled = TestTerminal.Pty(binary, args, flow.Temp, 80, "q\n")
             Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
             Check.Contains(cancelled.Output, "Choose an issue")
             Check.Contains(cancelled.Output, "Cancelled")
-            let declined = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
+            let declined = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
             Check.That(declined.Code == 1, declined.Output + declined.Error)
             Check.Contains(declined.Output, "Review donation")
             Check.Contains(declined.Output, "owner/project #1")
@@ -871,7 +871,7 @@ internal class PreparationChecks {
             )
             Check.That(!Directory.Exists(runRoot), "Cancelled wizard created a run")
             flow.NoInference()
-            let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
+            let owner = TestTerminal.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
             Check.Success(owner)
             Check.Contains(owner.Output, "Project")
             Check.That(
@@ -880,7 +880,7 @@ internal class PreparationChecks {
             )
             flow.Call([]string{"work", "owner/project", "--non-interactive"}, 1)
             flow.Call([]string{"work", "owner/project", "--json"}, 1)
-            let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
+            let accepted = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
             Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
             let runs = Directory.GetDirectories(runRoot)
             Check.That(runs.Length == 1, "Guided claim did not use the selected state root")
@@ -896,7 +896,7 @@ internal class PreparationChecks {
             Check.That(Check.Text(flow.State["request_count"]) == "1", "Guided work posted more than once")
             flow.NoInference()
             test.Coordinate(PostedEvent(test, comment))
-            let unavailable = TerminalOutput.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
+            let unavailable = TestTerminal.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
             Check.That(unavailable.Code == 1, unavailable.Output + unavailable.Error)
             Check.Contains(
                 unavailable.Output.Replace("\r\n", " ").Replace("\n", " "),

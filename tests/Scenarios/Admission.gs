@@ -517,7 +517,7 @@ internal class AdmissionChecks {
                 owner: true
             )
             Check.That(!File.Exists(output), "Missing event policy enabled automatic closure")
-            let central = NativeFixture.Template("coordinator.yml")
+            let central = TestResources.Template("coordinator.yml")
             Check.Contains(central, "contents: read")
             Check.Contains(central, "admit --repo")
             Check.That(

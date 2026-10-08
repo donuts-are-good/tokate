@@ -7,36 +7,11 @@ import System.Text.RegularExpressions
 
 internal class TerminalOutput {
     shared {
-        internal func Pty(binary string, args[]string, temp Temp, width int32, input string? = nil) Result {
-            var command = "stty cols " + width.ToString() + " rows 24; '" + binary.Replace("'", "'\"'\"'") + "'"
-            for arg in args {
-                command += " '" + arg.Replace("'", "'\"'\"'") + "'"
-            }
-            if Array.IndexOf(args, "--json") >= 0 {
-                command += " 2>'" + Path.Combine(temp.Root, "diagnostics") + "'"
-            }
-            return TestProcess.Run(
-                "/usr/bin/script",
-                []string{"-q", "-e", "-c", command, "/dev/null"},
-                temp.Env,
-                input,
-                cwd: temp.Root
-            )
-        }
-
         private func Plain(text string) {
             for c in text {
                 Check.That(!Char.IsControl(c) || c == '\n' || c == '\r', "Control sequence in plain human output")
             }
             Check.That(!text.Contains('☼') && !text.Contains('─'), "Plain output contains ornaments")
-        }
-
-        internal func Save(name string, text string) {
-            let directory = Environment.GetEnvironmentVariable("TOKATE_TERMINAL_CAPTURE") ?? ""
-            if directory != "" {
-                Directory.CreateDirectory(directory)
-                File.WriteAllText(Path.Combine(directory, name + ".txt"), text)
-            }
         }
 
         private func Checks(binary string) {
@@ -66,7 +41,7 @@ internal class TerminalOutput {
                         flow.Temp.Env["TERM"] = "xterm-256color"
                         flow.Temp.Env["COLORTERM"] = "truecolor"
                         flow.Temp.Env["COLORFGBG"] = background == "light" ? "0;15": "15;0"
-                        let result = Pty(binary, []string{"checks", "--run", run}, flow.Temp, width)
+                        let result = TestTerminal.Pty(binary, []string{"checks", "--run", run}, flow.Temp, width)
                         Check.That(
                             result.Code == (state == "pass" ? 0: (state == "pending" ? 8: 1)),
                             result.Output + result.Error
@@ -80,11 +55,11 @@ internal class TerminalOutput {
                         Check.Contains(result.Output, state)
                         Check.Contains(result.Output, "https://github.com/owner/project/pull/10")
                         Check.Contains(result.Output, link)
-                        Save(width.ToString() + "-" + background + "-checks-" + state, result.Output)
+                        TestTerminal.Save(width.ToString() + "-" + background + "-checks-" + state, result.Output)
                     }
                 }
             }
-            let plain = Pty(binary, []string{"checks", "--run", run, "--plain"}, flow.Temp, 40)
+            let plain = TestTerminal.Pty(binary, []string{"checks", "--run", run, "--plain"}, flow.Temp, 40)
             Check.That(plain.Code == 1, plain.Output + plain.Error)
             Plain(plain.Output)
             Check.Contains(plain.Output, "Checks failed")
@@ -106,7 +81,7 @@ internal class TerminalOutput {
             flow.Save()
             flow.Temp.Env["TERM"] = "dumb"
             flow.ResetTraffic()
-            let result = Pty(
+            let result = TestTerminal.Pty(
                 binary,
                 []string{},
                 flow.Temp,
@@ -136,10 +111,10 @@ internal class TerminalOutput {
             }
             Check.That(reads == 1, "Issue selection should read only the approved issue index")
             flow.NoInference()
-            Save("20-interactive", result.Output)
+            TestTerminal.Save("20-interactive", result.Output)
             flow.Git("-C", flow.Temp.Root, "remote", "add", "upstream", "https://github.com/other/project.git")
             flow.ResetTraffic()
-            let canceled = Pty(binary, []string{}, flow.Temp, 40, "1\nq\n")
+            let canceled = TestTerminal.Pty(binary, []string{}, flow.Temp, 40, "1\nq\n")
             Check.Success(canceled)
             Check.That(!canceled.Output.Contains("Ambiguous"), "Optional inference displayed a command-line error")
             flow.Reload()
@@ -191,7 +166,7 @@ internal class TerminalOutput {
                     for command in[]string{"help", "status", "doctor"} {
                         let argv = command == "status" ? []string{"status", "--run", saved}:
                         (command == "help" ? []string{"help", "work"}: []string{"doctor"})
-                        let result = Pty(binary, argv, temp, width)
+                        let result = TestTerminal.Pty(binary, argv, temp, width)
                         Check.That(result.Code == (command == "doctor" ? 1: 0), result.Output + result.Error)
                         Check.Contains(result.Output, "Tokate")
                         Check.Contains(result.Output, "\u001b[")
@@ -214,63 +189,68 @@ internal class TerminalOutput {
                                 "Human status dumped receipt or artifact metadata"
                             )
                         }
-                        Save(width.ToString() + "-" + background + "-" + command, result.Output)
+                        TestTerminal.Save(width.ToString() + "-" + background + "-" + command, result.Output)
                     }
                 }
-                let rootHelp = Pty(binary, []string{"--help"}, temp, width)
+                let rootHelp = TestTerminal.Pty(binary, []string{"--help"}, temp, width)
                 Check.That(rootHelp.Code == 0, rootHelp.Output + rootHelp.Error)
                 Check.Contains(rootHelp.Output, "authorize-sync")
-                Save(width.ToString() + "-help", rootHelp.Output)
-                let ascii = Pty(binary, []string{"help", "work", "--ascii"}, temp, width)
+                TestTerminal.Save(width.ToString() + "-help", rootHelp.Output)
+                let ascii = TestTerminal.Pty(binary, []string{"help", "work", "--ascii"}, temp, width)
                 Check.That(ascii.Code == 0, ascii.Output + ascii.Error)
                 Check.Contains(ascii.Output, "* ")
                 Check.That(
                     !ascii.Output.Contains('☼') && !ascii.Output.Contains('─'),
                     "ASCII ornaments contain Unicode"
                 )
-                Save(width.ToString() + "-ascii", ascii.Output)
+                TestTerminal.Save(width.ToString() + "-ascii", ascii.Output)
                 temp.Env["TERM"] = "linux"
                 temp.Env["COLORTERM"] = ""
-                let limited = Pty(binary, []string{"help", "work", "--ascii"}, temp, width)
+                let limited = TestTerminal.Pty(binary, []string{"help", "work", "--ascii"}, temp, width)
                 Check.That(limited.Code == 0, limited.Output + limited.Error)
                 Check.That(
                     !limited.Output.Contains("38;2;") && !limited.Output.Contains("38;5;"),
                     "Limited terminal received extended colors"
                 )
-                Save(width.ToString() + "-limited", limited.Output)
+                TestTerminal.Save(width.ToString() + "-limited", limited.Output)
                 temp.Env["TERM"] = "xterm-256color"
                 temp.Env["COLORTERM"] = "truecolor"
-                let plain = Pty(binary, []string{"status", "--run", saved, "--plain"}, temp, width)
+                let plain = TestTerminal.Pty(binary, []string{"status", "--run", saved, "--plain"}, temp, width)
                 Check.That(plain.Code == 0, plain.Output + plain.Error)
                 Plain(plain.Output)
                 Check.Contains(plain.Output, identity)
                 Check.Contains(plain.Output, url)
                 Check.Contains(plain.Output, saved)
-                Save(width.ToString() + "-plain", plain.Output)
+                TestTerminal.Save(width.ToString() + "-plain", plain.Output)
                 temp.Env["NO_COLOR"] = ""
-                let noColor = Pty(binary, []string{"status", "--run", saved}, temp, width)
+                let noColor = TestTerminal.Pty(binary, []string{"status", "--run", saved}, temp, width)
                 Check.That(noColor.Code == 0, noColor.Output + noColor.Error)
                 Plain(noColor.Output)
-                Save(width.ToString() + "-no-color", noColor.Output)
+                TestTerminal.Save(width.ToString() + "-no-color", noColor.Output)
                 temp.Env.Remove("NO_COLOR")
                 temp.Env["TERM"] = "dumb"
-                let dumb = Pty(binary, []string{"status", "--run", saved}, temp, width)
+                let dumb = TestTerminal.Pty(binary, []string{"status", "--run", saved}, temp, width)
                 Check.That(dumb.Code == 0, dumb.Output + dumb.Error)
                 Plain(dumb.Output)
                 Check.Contains(dumb.Output, "State: failed")
-                Save(width.ToString() + "-dumb", dumb.Output)
+                TestTerminal.Save(width.ToString() + "-dumb", dumb.Output)
                 temp.Env["TERM"] = "xterm-256color"
-                let json = Pty(binary, []string{"status", "--run", saved, "--plain", "--ascii", "--json"}, temp, width)
+                let json = TestTerminal.Pty(
+                    binary,
+                    []string{"status", "--run", saved, "--plain", "--ascii", "--json"},
+                    temp,
+                    width
+                )
                 let envelope = Check.Envelope(json, "status", "ok")
                 Check.That(Check.Text(envelope["data"]?["model"]) == untrusted, "Presentation changed JSON data")
-                Save(width.ToString() + "-json", json.Output)
+                TestTerminal.Save(width.ToString() + "-json", json.Output)
             }
             temp.Env["TERM"] = "xterm-256color"
             let redirected = TestProcess.Run(binary, []string{"status", "--run", saved, "--plain"}, temp.Env)
             Check.Success(redirected)
             Plain(redirected.Output)
             Check.Contains(redirected.Output, "Donor run")
-            Save("redirected", redirected.Output)
+            TestTerminal.Save("redirected", redirected.Output)
             let recordPath = Path.Combine(saved, "run.json")
             let record = Check.Json(File.ReadAllText(recordPath))
             record["version"] = JsonValue.Create(2)
@@ -323,7 +303,7 @@ internal class TerminalOutput {
             )
             Check.That(File.ReadAllText(recordPath) == snapshot, "Status changed saved evidence")
             temp.Env["PATH"] = path
-            let invalid = Pty(
+            let invalid = TestTerminal.Pty(
                 binary,
                 []string{"work", "--plain", "--bad-[red]literal[/]\u001b[31mcontrol\u001b[0m"},
                 temp,

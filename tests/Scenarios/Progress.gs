@@ -241,7 +241,7 @@ internal class ProgressChecks {
             flow.Approve()
             test.Claim()
             flow.Temp.Env["TERM"] = "dumb"
-            let guided = TerminalOutput.Pty(
+            let guided = TestTerminal.Pty(
                 binary,
                 []string{
                     "work",
@@ -402,7 +402,7 @@ internal class ProgressChecks {
             }
             if mode == "tty" || mode == "no_color" || mode == "cancel" {
                 let script = Path.Combine(flow.Temp.Root, "donation-view.py")
-                File.WriteAllText(script, NativeFixture.Template("donation-view.py"))
+                File.WriteAllText(script, TestResources.Template("donation-view.py"))
                 let result = TestProcess.Run("python3", []string{script, binary, run, mode}, flow.Temp.Env)
                 Check.Success(result)
                 Console.Write(result.Output)

@@ -70,7 +70,7 @@ internal class ReserveChecks {
                 flow.Call([]string{"work", "--run", flow.Temp.Root, "--verification-reserve", "1"}, 1).Error,
                 "--run conflicts with --verification-reserve"
             )
-            using let v2 = CoordinationFlow(binary)
+            using let v2 = CoordinationFixture(binary)
             v2.Initialize()
             v2.Claim()
             v2.Prepare(reserve: "1", code: 1)
@@ -86,7 +86,7 @@ internal class ReserveChecks {
         }
 
         private func Managed(binary string, version int32, mode string) {
-            using let v2 = CoordinationFlow(binary)
+            using let v2 = CoordinationFixture(binary)
             let flow = v2.Flow
             if version == 1 {
                 flow.Initialize()

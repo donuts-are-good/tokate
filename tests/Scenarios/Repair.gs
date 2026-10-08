@@ -248,7 +248,7 @@ internal class RepairChecks {
 
         private func Valid(test RepairCase, measure bool = false) {
             if measure {
-                SynchronizationChecks.StartTreeTraffic(test.Flow)
+                test.Flow.StartTreeTraffic()
             }
             let result = test.Call()
             Check.That(
@@ -257,7 +257,7 @@ internal class RepairChecks {
             )
             let saved = test.Saved()
             if measure {
-                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, true)
+                test.Flow.TreeTraffic(test.Previous, 1, false, true)
             }
             let checks = Check.Text(saved["verification"])
             let id = Check.Text(saved["id"])
@@ -279,11 +279,11 @@ internal class RepairChecks {
                 "Repair lost head or marker"
             )
             if measure {
-                SynchronizationChecks.StartTreeTraffic(test.Flow)
+                test.Flow.StartTreeTraffic()
             }
             VerifyReceipt(test)
             if measure {
-                SynchronizationChecks.TreeTraffic(test.Flow, test.Previous, 1, false, false)
+                test.Flow.TreeTraffic(test.Previous, 1, false, false)
             }
             test.Call()
             Check.That(

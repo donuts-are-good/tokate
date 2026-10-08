@@ -182,7 +182,7 @@ internal class CliDiscovery {
             Check.Contains(safePreview.Error, "not verified")
             Check.That(File.ReadAllText(workflowPath) == escaped, "Preview changed the custom workflow")
             let custom = Path.Combine(root, ".github/tokate-pr.md")
-            File.WriteAllText(custom, NativeFixture.Template("tokate-pr.md") + "Owner customization\n")
+            File.WriteAllText(custom, TestResources.Template("tokate-pr.md") + "Owner customization\n")
             File.WriteAllText(workflowPath, "custom owner workflow\n")
             flow.Call(
                 []string{
@@ -248,7 +248,7 @@ internal class CliDiscovery {
             Check.That(File.ReadAllText(policyPath) == restricted, "Invalid policy replaced owner work")
             let legacy = Path.Combine(flow.Temp.Root, "legacy")
             Directory.CreateDirectory(Path.Combine(legacy, ".github/workflows"))
-            File.WriteAllText(Path.Combine(legacy, ".github/tokate.json"), NativeFixture.Template("tokate.json"))
+            File.WriteAllText(Path.Combine(legacy, ".github/tokate.json"), TestResources.Template("tokate.json"))
             File.WriteAllText(Path.Combine(legacy, ".github/workflows/tokate-coordinator.yml"), "legacy owner wiring\n")
             let legacyText = File.ReadAllText(Path.Combine(legacy, ".github/tokate.json"))
             flow.Call(
@@ -275,7 +275,7 @@ internal class CliDiscovery {
             let upgraded = Check.Json(File.ReadAllText(Path.Combine(legacy, ".github/tokate.json")))
             Check.That(
                 Check.Text(upgraded["model_policy"]) == "whitelist" && upgraded["models"]?.ToJsonString() == Check
-                    .Json(NativeFixture.Template("tokate.json"))["models"]
+                    .Json(TestResources.Template("tokate.json"))["models"]
                     ?.ToJsonString(),
                 "Upgrade removed model restrictions"
             )
@@ -323,7 +323,7 @@ internal class CliDiscovery {
                 }
             )
             let pickerScript = Path.Combine(flow.Temp.Root, "model-checklist.py")
-            File.WriteAllText(pickerScript, NativeFixture.Template("model-checklist.py"))
+            File.WriteAllText(pickerScript, TestResources.Template("model-checklist.py"))
             let picker = TestProcess.Run(
                 "python3",
                 []string{pickerScript, binary, Path.Combine(flow.Temp.Root, "checklist")},
@@ -333,7 +333,7 @@ internal class CliDiscovery {
             Console.Write(picker.Output)
             let previousToken = flow.Temp.Env["GH_TOKEN"]
             flow.Temp.Env["GH_TOKEN"] = "fixture-owner"
-            let guided = TerminalOutput.Pty(
+            let guided = TestTerminal.Pty(
                 binary,
                 []string{},
                 flow.Temp,

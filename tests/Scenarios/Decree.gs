@@ -8,11 +8,11 @@ import System.Text.Json.Nodes
 
 internal class DecreeFlow : IDisposable {
     internal let Flow NativeFixture
-    internal let V2 CoordinationFlow?
+    internal let V2 CoordinationFixture?
 
     internal init(binary string, version int32) {
         if version == 2 {
-            let coordination = CoordinationFlow(binary)
+            let coordination = CoordinationFixture(binary)
             V2 = coordination
             Flow = coordination.Flow
         } else {

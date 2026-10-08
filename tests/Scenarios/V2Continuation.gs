@@ -26,7 +26,7 @@ internal class V2ContinuationChecks {
                 Path.Combine(installed, "package.json"),
                 "{\"name\":\"@earendil-works/pi-coding-agent\",\"version\":\"fixture-continuation\",\"type\":\"module\"}"
             )
-            File.WriteAllText(Path.Combine(installed, "dist/index.js"), NativeFixture.Template("PiContinuation.mjs"))
+            File.WriteAllText(Path.Combine(installed, "dist/index.js"), TestResources.Template("PiContinuation.mjs"))
             let config = Path.Combine(test.Flow.Temp.Root, "pi-models")
             Directory.CreateDirectory(config)
             test.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = config

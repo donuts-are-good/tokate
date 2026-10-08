@@ -765,7 +765,7 @@ internal class ContributionStatusChecks {
             let raw = Check.Json(legacy.Output)
             Check.That(raw.ToJsonString() == structured["data"]?.ToJsonString(), "Terminal and structured facts differ")
             test.Flow.Temp.Env["TERM"] = "xterm-256color"
-            let narrow = TerminalOutput.Pty(
+            let narrow = TestTerminal.Pty(
                 binary,
                 []string{"status", "--repo", "owner/project", "--issue", "1", "--plain"},
                 test.Flow.Temp,
@@ -889,7 +889,7 @@ internal class ContributionStatusChecks {
                 process.StandardInput.WriteLine("owner/project")
                 process.StandardInput.Flush()
                 let truncated = Frame(frames)
-                TerminalOutput.Save("interactive-status-truncated", truncated)
+                TestTerminal.Save("interactive-status-truncated", truncated)
                 Check.Contains(truncated, "Bounded snapshot: some data was omitted.")
                 Check.Contains(truncated, "Review donor access and grant eligibility if appropriate.")
                 Check.Contains(truncated, "Command: tokate access --repo owner/project --operation list --issue 1")
@@ -903,7 +903,7 @@ internal class ContributionStatusChecks {
                 process.StandardInput.WriteLine("refresh")
                 process.StandardInput.Flush()
                 let failed = Frame(frames)
-                TerminalOutput.Save("interactive-status-failed", failed)
+                TestTerminal.Save("interactive-status-failed", failed)
                 Check.Contains(failed, "unavailable; partial facts only")
                 Check.Contains(failed, "GitHub read failed (HTTP 403).")
                 Check.Contains(failed, "Issue: #1 " + title)
@@ -915,7 +915,7 @@ internal class ContributionStatusChecks {
                 process.StandardInput.WriteLine("refresh")
                 process.StandardInput.Flush()
                 let healthy = Frame(frames)
-                TerminalOutput.Save("interactive-status-healthy", healthy)
+                TestTerminal.Save("interactive-status-healthy", healthy)
                 Check.Contains(healthy, "State: reservation needed")
                 Check.Contains(healthy, "Role: donor")
                 Check.That(
