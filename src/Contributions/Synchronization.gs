@@ -108,15 +108,11 @@ internal class Synchronization {
             if J.Number(value, "issue") < 1 || J.Number(value, "pr") < 1 {
                 throw Exception(failure)
             }
-            if (approvalVersion != 1 && approvalVersion != 2) || J.Get(value, "receipt")
-                .ValueKind != JsonValueKind.Object {
+            if approvalVersion != 2 || J.Get(value, "receipt").ValueKind != JsonValueKind.Object {
                 throw Exception(failure)
             }
             Numeric(J.Get(value, "repository_id"))
-            if !Regex.IsMatch(
-                J.Text(value, "approval"),
-                J.Number(value, "approval_version") == 2 ? "^[0-9a-f]{64}$": "^[0-9a-f]{40}$"
-            ) {
+            if !Regex.IsMatch(J.Text(value, "approval"), "^[0-9a-f]{64}$") {
                 throw Exception("Invalid original synchronization approval identity")
             }
             RepositoryIdentity.CommitSha(J.Text(value, "base"))
@@ -124,11 +120,7 @@ internal class Synchronization {
             RepositoryIdentity.CommitSha(J.Text(value, "previous"))
             RepositoryIdentity.CommitSha(J.Text(value, "candidate"))
             RepositoryIdentity.Repo(J.Text(value, "fork"))
-            if J.Number(value, "approval_version") == 2 {
-                RepositoryIdentity.CommitSha(J.Text(value, "expected"))
-            } else if J.Text(value, "expected") != "" {
-                throw Exception("Version-1 grant cannot claim coordination authority")
-            }
+            RepositoryIdentity.CommitSha(J.Text(value, "expected"))
             let info = GitHub.Api("repos/" + repo)
             Numeric(J.Get(info, "id"))
             let reference = GitHub.Api("repos/" + repo + "/git/ref/heads/" + Ref(value))
@@ -152,7 +144,7 @@ internal class Synchronization {
         }
 
         private func Target(repo string, approval JsonElement, target string, upstream string) {
-            ApprovalBase.Check(repo, approval, J.Number(approval, "version"))
+            ApprovalBase.Check(repo, approval)
             if target != J.Text(approval, "base_branch") || GitHub.Branch(repo, target) != upstream {
                 throw Exception("Synchronization target moved; a new exact owner grant is required")
             }
@@ -179,11 +171,8 @@ internal class Synchronization {
             let approvalVersion = J.Number(approved, "version")
             let approvedBase = J.Text(approved, "base")
             let target = J.Text(approved, "base_branch")
-            var donor = J.Text(approved, "donor")
-            if AccessState.Task(approved) {
-                RepositoryIdentity.PositiveId(J.Get(contribution, "actor"))
-                donor = RepositoryIdentity.Login(J.Text(contribution, "donor"))
-            }
+            RepositoryIdentity.PositiveId(J.Get(contribution, "actor"))
+            let donor = RepositoryIdentity.Login(J.Text(contribution, "donor"))
             let failure = "Synchronization differs from original approval, PR or historical receipt"
             let prefix = List[Object]()
             var last JsonElement
@@ -363,8 +352,7 @@ internal class Synchronization {
                 throw Exception(branchFailure)
             }
             Target(repo, approval, J.Text(value, "target"), J.Text(value, "upstream"))
-            if J.Number(value, "approval_version") == 2 && CoordinationState.Load(repo, J.Number(value, "issue"))
-                .Sha != J.Text(value, "expected") {
+            if CoordinationState.Load(repo, J.Number(value, "issue")).Sha != J.Text(value, "expected") {
                 throw Exception("Synchronization expected coordination state changed")
             }
         }
@@ -381,18 +369,12 @@ internal class Synchronization {
             Open(pull)
             let receipt = PrBody.Receipt(J.Text(pull, "body"))
             let issue = J.Number(receipt, "issue")
-            var record JsonElement
-            var expected = ""
-            if J.Number(receipt, "version") == 2 {
-                let state = CoordinationState.Load(repo, issue)
-                let value = state.Value()
-                let actor = J.Get(J.Get(value, "contribution"), "actor")
-                record = state.Check(repo, issue, J.Text(receipt, "donor"), actor)
-                state.Reservation(actor)
-                expected = state.Sha
-            } else {
-                record = OwnerApproval.Approved(repo, issue, J.Text(receipt, "donor"))
-            }
+            let state = CoordinationState.Load(repo, issue)
+            let coordination = state.Value()
+            let actor = J.Get(J.Get(coordination, "contribution"), "actor")
+            let record = state.Check(repo, issue, J.Text(receipt, "donor"), actor)
+            state.Reservation(actor)
+            let expected = state.Sha
             let approval = J.Get(record, "approval")
             let target = J.Text(approval, "base_branch")
             let previous = J.Text(J.Get(pull, "head"), "sha")

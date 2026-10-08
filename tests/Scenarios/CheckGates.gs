@@ -571,7 +571,7 @@ internal class CheckGates {
 
         internal func All(binary string) {
             for v2 in[]bool{false, true} {
-                using let test = PublishedContribution.Create(binary, v2: v2)
+                using let test = PublishedContribution.Create(binary, external: v2)
                 Success(test)
                 Report(test, v2)
                 CheckEvidence(test)

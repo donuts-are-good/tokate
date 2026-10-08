@@ -33,8 +33,11 @@ internal class EligibilityChecks {
             let policy = Check.Json(File.ReadAllText(path))
             policy["approval_scope"] = JsonValue.Create("task")
             policy["eligibility"] = JsonValue.Create(mode)
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Owner task eligibility " + mode)
+            let text = policy.ToJsonString()
+            if File.ReadAllText(path) != text {
+                File.WriteAllText(path, text)
+                test.Flow.Commit("Owner task eligibility " + mode)
+            }
         }
 
         private func Setup(test CoordinationFixture, mode string) {

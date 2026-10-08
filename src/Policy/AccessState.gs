@@ -8,7 +8,7 @@ internal class AccessState {
     internal var Sha string = ""
     internal var RepoId int64
     internal let Members List[JsonElement] = List[JsonElement]()
-    internal func Allows(actor int64, mode string, issue int32 = 0, assigned bool = false) bool {
+    internal func Allows(actor int64, mode string, issue int32 = 0) bool {
         var trusted bool
         var denied bool
         var granted bool
@@ -21,7 +21,7 @@ internal class AccessState {
                 }
             }
         }
-        return !denied && (mode == "open" || granted || assigned || (mode == "trusted" && trusted))
+        return !denied && (mode == "open" || granted || (mode == "trusted" && trusted))
     }
 
     internal func Value() JsonElement -> J.Parse(
@@ -79,14 +79,6 @@ internal class AccessState {
 
     shared {
         internal func Task(approval JsonElement) bool {
-            let declaration = J.Get(approval, "approval_scope")
-            let mode = J.Get(approval, "eligibility")
-            let identity = J.Get(approval, "repo_id")
-            if declaration.ValueKind == JsonValueKind.Undefined &&
-                mode.ValueKind == JsonValueKind.Undefined &&
-                (identity.ValueKind == JsonValueKind.Undefined || J.Number(approval, "version") == 1) {
-                return false
-            }
             RequestData.Parse(J.Write(approval), 1024 * 1024)
             let eligibility = J.Text(approval, "eligibility")
             let donor = J.Get(approval, "donor")
@@ -95,7 +87,7 @@ internal class AccessState {
                 donor.ValueKind != JsonValueKind.Undefined {
                 throw CliFailure("stale_approval", "Malformed or contradictory task eligibility approval")
             }
-            RepositoryIdentity.PositiveId(identity)
+            RepositoryIdentity.PositiveId(J.Get(approval, "repo_id"))
             return true
         }
 
@@ -145,9 +137,7 @@ internal class AccessState {
         }
 
         internal func Check(repo string, issue int32, approval JsonElement, actor JsonElement) {
-            if !Task(approval) {
-                return
-            }
+            Task(approval)
             PublicOutput.ResultData = map[string, Object?]{
                 "repo": repo,
                 "issue": issue,
@@ -469,20 +459,7 @@ internal class AccessState {
                 RepositoryIdentity.PositiveId(J.Get(viewer, "id"))
                 let issue = args.Number("issue")
                 let state = CoordinationState.Load(repo, issue)
-                let record = state.Check(
-                    repo,
-                    issue,
-                    RepositoryIdentity.Login(J.Text(viewer, "login")),
-                    J.Get(viewer, "id")
-                )
-                if !Task(J.Get(record, "approval")) {
-                    PublicOutput.ResultData = map[string, Object?]{
-                        "repo": repo,
-                        "issue": issue,
-                        "eligible": true,
-                        "eligibility": "assignment"
-                    }
-                }
+                state.Check(repo, issue, RepositoryIdentity.Login(J.Text(viewer, "login")), J.Get(viewer, "id"))
                 if !PublicOutput.Enabled {
                     Terminal.Json(J.Parse(J.Write(PublicOutput.ResultData)), "Donor eligibility")
                 }

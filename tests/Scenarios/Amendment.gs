@@ -56,20 +56,10 @@ internal class AmendmentFlow {
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
-        private func Review(flow NativeFixture, legacy bool = false) {
+        private func Review(flow NativeFixture) {
             flow.Reload()
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
-            var body = Check.Text(pull["body"])
-            if legacy {
-                let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
-                let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
-                if body.Contains("<!-- tokate-run:") {
-                    body = body.Remove(start, end + "<!-- tokate-report:end -->".Length - start).Insert(
-                        start,
-                        "Generated a patch for the approved issue. Independent owner verification: 2/2 checks passed.\n\nReview the changes against the issue\'s acceptance criteria and limitations."
-                    )
-                }
-            }
+            let body = Check.Text(pull["body"])
             pull["body"] = JsonValue.Create("Owner review before\n" + body + "\nOwner review after")
             flow.Save()
         }
@@ -135,7 +125,7 @@ internal class AmendmentFlow {
 
         private func ForkIdentity(binary string) {
             for v2 in[]bool{false, true} {
-                using let prepared = PublishedContribution.Create(binary, v2: v2)
+                using let prepared = PublishedContribution.Create(binary, external: v2)
                 let flow = prepared.Coordination.Flow
                 let run = prepared.Run
                 let commit = Edit(flow, run)
@@ -284,7 +274,6 @@ internal class AmendmentFlow {
                 Amend(flow, run, commit, 1)
                 let second = Edit(flow, run, "Another amendment\n")
                 Amend(flow, run, second, 1)
-                flow.Call([]string{"publish", "--run", run}, 1)
                 Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == saved, "Changed archive was accepted")
                 Check.That(
                     fault == "unsealed" ? !File.Exists(Path.Combine(archive, "manifest.json")):
@@ -297,82 +286,16 @@ internal class AmendmentFlow {
             }
         }
 
-        private func LegacyArchives(binary string) {
-            for mode in[]string{"v1-published", "v1-interrupted", "v2-published", "v2-requested"} {
-                let v2 = mode.StartsWith("v2")
-                using let prepared = PublishedContribution.Create(binary, v2: v2)
-                let coordination = prepared.Coordination
-                let flow = coordination.Flow
-                let run = prepared.Run
-                let commit = Edit(flow, run)
-                if mode == "v1-interrupted" {
-                    flow.Mode("lost_body_response")
-                }
-                Amend(flow, run, commit, mode == "v1-interrupted" ? 1: 0)
-                flow.Mode("")
-                if mode == "v2-published" {
-                    flow.Reload()
-                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
-                    Amend(flow, run, commit)
-                }
-                let archive = Path.Combine(run, "original-evidence")
-                File.Delete(Path.Combine(archive, "manifest.json"))
-                File.Delete(Path.Combine(archive, "seal.json"))
-                for evidence in Directory.EnumerateDirectories(archive) {
-                    Directory.Delete(evidence, true)
-                }
-                let location = Path.Combine(run, "amendments", commit)
-                let saved = Saved(location)
-                saved.AsObject().Remove("original_evidence_sha256")
-                File.WriteAllText(Path.Combine(location, "run.json"), saved.ToJsonString())
-                let original = File.ReadAllText(Path.Combine(archive, "run.json"))
-                let checks = File.ReadAllText(Path.Combine(location, "verification.json"))
-                flow.ResetTraffic()
-                let replay = Amend(flow, run, commit)
-                Check.Contains(replay.Output, "Legacy original evidence is unsealed")
-                Check.That(
-                    File.ReadAllText(Path.Combine(location, "verification.json")) == checks,
-                    "Legacy replay repeated verification"
-                )
-                if mode == "v2-requested" {
-                    flow.Reload()
-                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
-                    Amend(flow, run, commit)
-                }
-                let next = Edit(flow, run, "Legacy continuation\n")
-                Amend(flow, run, next)
-                if v2 {
-                    flow.Reload()
-                    coordination.Coordinate(coordination.Event(Check.PostedRequest(flow.State)))
-                    Amend(flow, run, next)
-                    flow.NoInference()
-                } else {
-                    flow.Call([]string{"publish", "--run", run})
-                    flow.Reload()
-                    Check.That(Check.Text(flow.State["exec_count"]) == "1", "Legacy amendment repeated inference")
-                }
-                Check.That(
-                    File.ReadAllText(Path.Combine(archive, "run.json")) == original && !File.Exists(
-                        Path.Combine(archive, "manifest.json")
-                    ) &&
-                        !File.Exists(Path.Combine(archive, "seal.json")),
-                    "Legacy original evidence was rewritten or resealed"
-                )
-                Check.That(Directory.GetDirectories(archive).Length == 0, "Legacy evidence was reconstructed")
-                let originalRecord = Path.Combine(archive, "report.md")
-                File.WriteAllText(originalRecord, "Changed legacy evidence")
-                Amend(flow, run, next, 1)
-            }
-        }
-
         private func ReceiptAuthority(binary string) {
             using let prepared = PublishedContribution.Create(binary)
             let flow = prepared.Coordination.Flow
             let run = prepared.Run
             let commit = Edit(flow, run)
             Amend(flow, run, commit)
+            flow.CoordinatePosted()
+            Amend(flow, run, commit)
             using let snapshot = FixtureSnapshot(flow.Temp.Root)
-            for field in[]string{"issue", "head", "approval", "model", "original_head", "amendment"} {
+            for field in[]string{"issue", "head", "approval", "reservation", "expected", "amendment"} {
                 snapshot.Restore()
                 flow.Reload()
                 let location = Path.Combine(run, "amendments", commit)
@@ -398,7 +321,7 @@ internal class AmendmentFlow {
                 flow.Save()
                 let original = File.ReadAllText(Path.Combine(run, "run.json"))
                 flow.ResetTraffic()
-                flow.Call([]string{"publish", "--run", run}, 1)
+                flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1)
                 Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == original, "Altered receipt was accepted")
                 flow.Reload()
                 for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
@@ -478,117 +401,6 @@ internal class AmendmentFlow {
                 Check.Text(flow.State["pulls"]?[0]?["head"]?["sha"]) == Check.Text(Check.Json(original)["commit"]),
                 "Failed amendment changed remote PR"
             )
-        }
-
-        private func V1(binary string, owner bool = false) {
-            using let flow = NativeFixture(binary)
-            let run = PublishedContribution.Original(flow, owner)
-            let original = File.ReadAllText(Path.Combine(run, "run.json"))
-            Review(flow, true)
-            let failedCommit = Edit(flow, run, "")
-            let rejected = Check.Envelope(
-                Amend(flow, run, failedCommit, 1, owner: owner, summary: false, json: true),
-                "amend",
-                "error",
-                "verification_failed"
-            )
-            Check.That(
-                Check.Text(rejected["data"]?["amendment"]?["state"]) == "failed" && Check.Text(
-                    rejected["data"]?["amendment"]?["commit"]
-                ) == failedCommit,
-                "JSON amendment lost failed attempt"
-            )
-            let failed = Saved(Path.Combine(run, "amendments", failedCommit))
-            Check.That(Check.Text(failed["state"]) == "failed", "Failed verification lost evidence")
-            Check.That(
-                Check.Text(failed["verification"]?[1]?["exit_code"]) != "0",
-                "Failed amendment accepted verification"
-            )
-            Check.That(
-                File.ReadAllText(Path.Combine(run, "run.json")) == original,
-                "Failed amendment changed saved publication"
-            )
-            Check.That(Directory.Exists(Path.Combine(run, "checkout")), "Failed amendment deleted checkout")
-            Amend(flow, run, failedCommit, 1, owner: owner, summary: false)
-            let commit = Edit(flow, run)
-            let published = Check.Envelope(
-                Amend(flow, run, commit, owner: owner, summary: false, json: true),
-                "amend",
-                "ok"
-            )
-            Check.That(
-                Check.Text(published["data"]?["amendment"]?["state"]) == "published" && Check.Text(
-                    published["data"]?["commit"]
-                ) == commit,
-                "JSON amendment lost published head"
-            )
-            let amended = Saved(Path.Combine(run, "amendments", commit))
-            Check.That(
-                Check.Text(amended["seconds"]) == "30" && Check.Text(Check.Json(original)["seconds"]) == "20",
-                "Amendment budget was not separate from original execution"
-            )
-            Check.That(
-                amended["verification"]?.AsArray().Count == 2,
-                "Amendment did not run every original owner command"
-            )
-            AssertOriginal(run, original)
-            AssertPublished(flow, run, commit, owner, summary: false)
-            flow.Reload()
-            let pushes = Check.Text(flow.State["git_pushes"])
-            flow.ResetTraffic()
-            Amend(flow, run, commit, owner: owner, summary: false)
-            flow.Reload()
-            Check.That(Check.Text(flow.State["git_pushes"]) == pushes, "Repeated applied amendment push")
-            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                Check.That(Check.Text(call["method"]) == "GET", "Repeated applied amendment body write")
-            }
-            Check.That(flow.State["exec_count"]?.ToString() == "1", "Amendment repeated inference")
-            let tools = Path.Combine(flow.Temp.Root, "amend-tools.json")
-            File.WriteAllText(
-                tools,
-                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"coding_seconds\":12,\"usage\":{\"output_tokens\":9}}]"
-            )
-            let second = Edit(flow, run, "Second review correction\n")
-            Amend(flow, run, second, tools: tools, owner: owner)
-            AssertOriginal(run, original)
-            AssertPublished(flow, run, second, owner)
-            Check.That(Saved(run)["amendments"]?.AsArray().Count == 2, "Missing amendment history")
-            flow.Reload()
-            Check.Contains(Check.Text(flow.State["pulls"]?[0]?["body"]), "donor-reported tools")
-            flow.ResetTraffic()
-            flow.Call([]string{"publish", "--run", run}, owner: owner)
-            flow.Reload()
-            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                Check.That(Check.Text(call["method"]) == "GET", "Published amendment replay repeated a write")
-            }
-        }
-
-        private func V1Interrupted(binary string, mode string) {
-            using let flow = NativeFixture(binary)
-            let run = PublishedContribution.Original(flow)
-            Review(flow)
-            let commit = Edit(flow, run)
-            flow.Mode(mode)
-            Amend(flow, run, commit, 1)
-            Check.That(
-                File.Exists(Path.Combine(run, "amendments", commit, "publication.json")),
-                "Publication intent lost"
-            )
-            flow.Mode("")
-            Review(flow)
-            flow.Reload()
-            let pushes = Check.Text(flow.State["git_pushes"])
-            flow.ResetTraffic()
-            Amend(flow, run, commit)
-            flow.Reload()
-            for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                if mode == "lost_body_response" {
-                    Check.That(Check.Text(call["method"]) != "PATCH", "Repeated applied body write")
-                }
-            }
-            Check.That(Check.Text(flow.State["git_pushes"]) == pushes, "Interrupted response repeated an applied push")
-            AssertPublished(flow, run, commit)
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Recovery repeated inference")
         }
 
         private func Rejections(binary string) {
@@ -689,18 +501,12 @@ internal class AmendmentFlow {
             }
         }
 
-        private func V2(
-            binary string,
-            mode string = "",
-            native bool = false,
-            modelPolicy string = "",
-            legacy bool = false
-        ) {
+        private func V2(binary string, mode string = "", native bool = false, modelPolicy string = "") {
             using let flow = CoordinationFixture(binary)
-            let run = PublishedContribution.V2Original(flow, native, modelPolicy)
+            let run = PublishedContribution.PublishRun(flow, native, modelPolicy)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             let contribution = Check.Text(flow.State()["state"]?["contribution"])
-            Review(flow.Flow, true)
+            Review(flow.Flow)
             let commit = Edit(flow.Flow, run)
             if modelPolicy != "" {
                 File.WriteAllText(
@@ -711,10 +517,10 @@ internal class AmendmentFlow {
             let tools = native && modelPolicy == "" ? "": flow.Tools
             if mode == "lost_push_response" || mode == "lost_request_response" {
                 flow.Flow.Mode(mode)
-                Amend(flow.Flow, run, commit, mode == "lost_request_response" ? 0: 1, tools, summary: !legacy)
+                Amend(flow.Flow, run, commit, mode == "lost_request_response" ? 0: 1, tools, summary: true)
                 flow.Flow.Mode("")
             }
-            Amend(flow.Flow, run, commit, tools: tools, summary: !legacy)
+            Amend(flow.Flow, run, commit, tools: tools, summary: true)
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             Check.That(Check.Text(request["action"]) == "amend", "Wrong amendment request")
@@ -727,7 +533,6 @@ internal class AmendmentFlow {
                 "Amendment repeated an applied request comment"
             )
             let path = flow.Event(request)
-            var legacyBody = ""
             if mode == "lost_body_response" || mode == "lost_state_response" || mode == "interrupted_state_write" {
                 flow.Flow.Mode(mode)
                 flow.Coordinate(path, 1)
@@ -736,32 +541,6 @@ internal class AmendmentFlow {
                     mode == "lost_state_response" ? 0: 1
                 )
                 flow.Flow.Mode("")
-                if legacy {
-                    flow.Flow.Reload()
-                    let pull = flow.Flow.State["pulls"]?[0] ?? throw Exception("Missing review PR")
-                    let body = Check.Text(pull["body"])
-                    let metadata = request["metadata"] ?? throw Exception("Missing amendment metadata")
-                    let declared = metadata["tools"]?.AsArray() ?? JsonArray()
-                    let legacyReport = "Review amendment: " + Check.Text(metadata["previous"]) + " → " + Check.Text(
-                        metadata["head"]
-                    ) +
-                        ". Donor reports all original owner commands passed locally with a separate " +
-                        Check.Text(metadata["seconds"]) +
-                        " second verification budget; no inference was launched by amend.\n\n" +
-                        "Original execution/model/effort/runtime/usage observations cover original work only. Amendment editing: " +
-                        (
-                        declared.Count == 0 ? "manual; coding time and usage unknown":
-                        "donor-reported tools " + declared.ToJsonString() +
-                            "; identity, coding time and usage not independently attested"
-                    ) +
-                        ". Owner CI and review must validate this exact amended commit."
-                    let start = body.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal) +
-                        "<!-- tokate-report:start -->".Length
-                    let end = body.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal)
-                    legacyBody = body.Remove(start, end - start).Insert(start, "\n" + legacyReport + "\n")
-                    pull["body"] = JsonValue.Create(legacyBody)
-                    flow.Flow.Save()
-                }
             }
             flow.Flow.ResetTraffic()
             flow.Coordinate(path)
@@ -779,18 +558,6 @@ internal class AmendmentFlow {
             flow.Flow.Reload()
             for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                 Check.That(Check.Text(call["method"]) == "GET", "Applied amendment request repeated writes")
-            }
-            if legacy {
-                Check.That(
-                    Check.Text(flow.Flow.State["pulls"]?[0]?["body"]) == legacyBody,
-                    "Legacy replay changed the exact applied body"
-                )
-                Check.Contains(legacyBody, "Owner review before")
-                Check.Contains(legacyBody, "Owner review after")
-                flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                AssertOriginal(run, original)
-                Check.That(flow.State()["state"]?["amendments"]?.AsArray().Count == 1, "Legacy history missing")
-                return
             }
             Amend(flow.Flow, run, commit, tools: tools)
             AssertOriginal(run, original)
@@ -834,7 +601,7 @@ internal class AmendmentFlow {
         }
 
         private func V2Stale(binary string) {
-            using let preparation = PublishedContribution.Create(binary, v2: true)
+            using let preparation = PublishedContribution.Create(binary, external: true)
             for failure in[]string{
                 "expired",
                 "superseded",
@@ -903,13 +670,8 @@ internal class AmendmentFlow {
                 TestCase[string]("ArchiveRefusals", async (value string) -> ArchiveRefusals(value)),
                 TestCase[string]("ArchiveIntegrity", async (value string) -> ArchiveIntegrity(value)),
                 TestCase[string]("ArchiveIdentity", async (value string) -> ArchiveIdentity(value)),
-                TestCase[string]("LegacyArchives", async (value string) -> LegacyArchives(value)),
                 TestCase[string]("ReceiptAuthority", async (value string) -> ReceiptAuthority(value)),
                 TestCase[string]("ForkIdentity", async (value string) -> ForkIdentity(value)),
-                TestCase[string]("V1", async (value string) -> V1(value)),
-                TestCase[string]("V1Owner", async (value string) -> V1(value, true)),
-                TestCase[string]("V1Push", async (value string) -> V1Interrupted(value, "lost_push_response")),
-                TestCase[string]("V1Body", async (value string) -> V1Interrupted(value, "lost_body_response")),
                 TestCase[string]("Rejections", async (value string) -> Rejections(value)),
                 TestCase[string]("InterruptedVerification", async (value string) -> InterruptedVerification(value)),
                 TestCase[string]("V2", async (value string) -> V2(value)),
@@ -927,10 +689,6 @@ internal class AmendmentFlow {
                 TestCase[string]("V2Body", async (value string) -> V2(value, "lost_body_response")),
                 TestCase[string]("V2State", async (value string) -> V2(value, "lost_state_response")),
                 TestCase[string]("V2StateBefore", async (value string) -> V2(value, "interrupted_state_write")),
-                TestCase[string](
-                    "V2LegacyStateBefore",
-                    async (value string) -> V2(value, "interrupted_state_write", legacy: true)
-                ),
                 TestCase[string]("V2Stale", async (value string) -> V2Stale(value))
             } {
                 let name = test.Name

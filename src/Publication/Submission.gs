@@ -11,7 +11,7 @@ internal class Submission {
         internal func Commit(directory string) {
             using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
-            let record = ContributionClaim.RecheckV2(run)
+            let record = ContributionClaim.Recheck(run)
             if run.Text("source") != "tokate" || run.Text("state") != "generated" {
                 throw Exception("Expected successfully verified Tokate execution")
             }
@@ -166,7 +166,7 @@ internal class Submission {
                 }
             }
             let state = CoordinationState.Load(repo, issue)
-            if J.Text(value, "action") != "release" && AccessState.Task(J.Get(state.Value(), "approval")) {
+            if J.Text(value, "action") != "release" {
                 state.Check(repo, issue, RepositoryIdentity.Login(J.Text(viewer, "login")), actor)
             }
             let outcome = RequestData.Recorded(state.Value(), actor, value)
@@ -277,8 +277,8 @@ internal class Submission {
             if run.Text("attempt") != "" {
                 metadata["attempt"] = run.Text("attempt")
             }
-            if V1Continuation.Has(run) {
-                V2Continuation.Keep(metadata, V2Continuation.Metadata(run))
+            if AttemptContinuation.Has(run) {
+                AttemptContinuation.Keep(metadata, AttemptContinuation.Metadata(run))
             }
             if correction != nil {
                 metadata["correction"] = Correction.Provenance(correction)
@@ -341,7 +341,7 @@ internal class Submission {
                     return
                 }
             }
-            let record = ContributionClaim.RecheckV2(run)
+            let record = ContributionClaim.Recheck(run)
             if run.Text("state") != "generated" || run.Text("commit") == "" {
                 throw Exception("Only an independently verified exact commit can be submitted")
             }
@@ -372,7 +372,7 @@ internal class Submission {
                     J.Get(run.Element(), "donor_id")
                 )
                 Publication.Push(checkout, run, run.Text("commit"))
-                ContributionClaim.RecheckV2(run)
+                ContributionClaim.Recheck(run)
             }
             if run.Text("publication_uuid") == "" {
                 let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))

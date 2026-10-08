@@ -10,38 +10,16 @@ internal class ReserveChecks {
     shared {
         internal func All(binary string) {
             Invalid(binary)
-            let completed = Chan[Exception?](2)
-            go ReserveChecks.Version(binary, 1, completed)
-            go ReserveChecks.Version(binary, 2, completed)
-            var failure Exception? = nil
-            for i in 0 ... 2 {
-                let error = <-completed
-                failure = failure ?? error
-            }
-            if let error = failure {
-                throw error
+            using let test = CoordinationFixture(binary)
+            let run = Prepare(test)
+            using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
+            for mode in[]string{"success", "timeout", "completed_timeout", "slow_candidate", "empty", "workflow"} {
+                baseline.Restore()
+                test.Flow.Reload()
+                Managed(test.Flow, run, mode)
             }
             NewWork(binary)
-            Legacy(binary)
             LowerLimit(binary)
-            Recovery(binary)
-        }
-
-        private func Version(binary string, version int32, completed Chan[Exception?]) {
-            var failure Exception? = nil
-            try {
-                using let test = CoordinationFixture(binary)
-                let run = Prepare(test, version)
-                using let baseline = FixtureSnapshot(test.Flow.Temp.Root)
-                for mode in[]string{"success", "timeout", "completed_timeout", "slow_candidate", "empty", "workflow"} {
-                    baseline.Restore()
-                    test.Flow.Reload()
-                    Managed(test.Flow, run, mode)
-                }
-            } catch (error Exception) {
-                failure = error
-            }
-            completed <- failure
         }
 
         private func Invalid(binary string) {
@@ -90,26 +68,18 @@ internal class ReserveChecks {
             v2.Flow.NoInference()
         }
 
-        private func Prepare(v2 CoordinationFixture, version int32) string {
+        private func Prepare(v2 CoordinationFixture) string {
             let flow = v2.Flow
-            if version == 1 {
-                flow.Initialize()
-            } else {
-                v2.Initialize(false)
-            }
+            v2.Initialize(false)
             flow.VerificationPolicy("sleep 3; test -f result.txt", second: "sleep 1; test -f result.txt")
             flow.Approve()
             var run string
-            if version == 1 {
-                run = flow.Claim(seconds: "8", reserve: "2")
-            } else {
-                v2.Claim()
-                File.WriteAllText(
-                    v2.Tools,
-                    "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
-                )
-                run = v2.Prepare("tokate", seconds: "8", reserve: "2")
-            }
+            v2.Claim()
+            File.WriteAllText(
+                v2.Tools,
+                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+            )
+            run = v2.Prepare("tokate", seconds: "8", reserve: "2")
             return run
         }
 
@@ -156,7 +126,7 @@ internal class ReserveChecks {
                 let pid = File.ReadAllText(Path.Combine(flow.Bin, "child.pid"))
                 TestProcess.Collected(pid, "Timeout descendant survived")
                 flow.Call([]string{"recover", "--run", run}, 1)
-                flow.Call([]string{"publish", "--run", run}, 1)
+                flow.Call([]string{"submit", "--run", run}, 1)
             } else {
                 Check.That(
                     Check.Text(saved["turn_completed"]) == "true" && Check.Text(
@@ -175,28 +145,6 @@ internal class ReserveChecks {
             flow.Reload()
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Failed reserve run retried inference")
             flow.NoPr()
-        }
-
-        private func Legacy(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim()
-            let path = Path.Combine(run, "run.json")
-            let saved = Check.Json(File.ReadAllText(path))
-            Check.That(saved["verification_reserve"] == nil, "Omission inferred a reserve")
-            saved.AsObject().Remove("selection")
-            File.WriteAllText(path, saved.ToJsonString())
-            let status = Check.Json(flow.Call([]string{"status", "--run", run, "--json"}).Output)["data"]
-            Check.That(
-                Check.Text(status?["coding_seconds"]) == "30" && Check.Text(status?["verification_reserve"]) == "0",
-                "Legacy allocation changed"
-            )
-            flow.Call([]string{"work", "--run", run})
-            Check.That(
-                Check.Json(File.ReadAllText(path))["verification_reserve"] == nil,
-                "Legacy run acquired an allocation"
-            )
         }
 
         private func LowerLimit(binary string) {
@@ -234,24 +182,6 @@ internal class ReserveChecks {
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(saved["seconds"]) == "5", "Reserve changed default total")
             flow.Call([]string{"work", "--run", run})
-        }
-
-        private func Recovery(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            flow.VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
-            flow.Approve()
-            let run = flow.Claim(seconds: "30", reserve: "20")
-            flow.Mode("verification_recovery")
-            flow.Call([]string{"work", "--run", run}, 1)
-            flow.Mode("")
-            flow.Call([]string{"recover", "--run", run, "--seconds", "5"})
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Recovery launched inference")
-            Check.That(
-                Check.Text(Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))["verification_reserve"]) == "20",
-                "Recovery changed original allocation"
-            )
         }
 
         private func NewWork(binary string) {

@@ -201,7 +201,7 @@ internal class Checks {
                     var reportFailure string = ""
                     try {
                         PublicSummary.Current(
-                            PrBody.ReportText(J.Text(pull, "body"), ""),
+                            PrBody.ReportText(J.Text(pull, "body")),
                             J.Get(run.Element(), "public_summary"),
                             run.Text("commit"),
                             run.Text("public_report")

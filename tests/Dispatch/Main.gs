@@ -80,10 +80,7 @@ func Main(args[]string) int32 {
                 PreparationChecks.All(binary, args.Length == 2 ? args[1]: "")
             }
             case "--continuation" when(args.Length == 1 || args.Length == 2) {
-                ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
-            }
-            case "--continuation-v2" when(args.Length == 1 || args.Length == 2) {
-                V2ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
+                AttemptContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
             }
             case "--cli-setup" when args.Length == 1 {
                 CliDiscovery.Setup(binary)
@@ -121,9 +118,6 @@ func Main(args[]string) int32 {
             }
             case "--amendments" when(args.Length == 1 || args.Length == 2) {
                 AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
-            }
-            case "--repairs" when(args.Length == 1 || args.Length == 2) {
-                RepairChecks.All(binary, args.Length == 2 ? args[1]: "")
             }
             case "--decree" when(args.Length == 1 || args.Length == 2) {
                 DecreeFlow.All(binary, args.Length == 2 ? args[1]: "")

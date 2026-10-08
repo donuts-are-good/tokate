@@ -64,11 +64,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     Check.Contains(
                         test
                             .Flow
-                            .Call(
-                            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-                            1,
-                            owner: true
-                        )
+                            .Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, 1, owner: true)
                             .Error,
                         "Repository write permission is required"
                     )
@@ -298,41 +294,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 test.Flow.NoPr()
             }
         }
-
-        internal func Compatibility(binary string) {
-            using let old = NativeFixture(binary)
-            old.Initialize()
-            old.Approve()
-            let run = old.Claim()
-            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
-            let approval = old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
-            let policyPath = Path.Combine(old.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(policyPath))
-            let models = policy["models"]?.ToJsonString() ?? ""
-            policy["version"] = JsonValue.Create(2)
-            policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
-            File.WriteAllText(policyPath, policy.ToJsonString())
-            old.Commit("Owner opts in to version 2")
-            old.Call([]string{"work", "--run", run}, 1)
-            old.Approve()
-            Check.That(
-                Check.Json(File.ReadAllText(policyPath))["models"]?.ToJsonString() == models &&
-                    Check.Json(File.ReadAllText(policyPath))["model_policy"] == nil,
-                "Version upgrade changed legacy whitelist restrictions"
-            )
-            Check.That(
-                old.Git("-C", old.Upstream, "rev-parse", "refs/heads/tokate/approvals/1") == approval,
-                "Version-2 opt-in rewrote version-1 approval"
-            )
-            Check.That(
-                File.ReadAllText(Path.Combine(run, "run.json")) == saved,
-                "Opt-in reinterpreted or changed old saved work"
-            )
-            let state = Check.Json(old.Call([]string{"coordination", "--repo", "owner/project", "--issue", "1"}).Output)
-            Check.That(state["state"]?["reservation"] == nil, "Old claim acquired implicit version-2 reservation")
-            old.Call([]string{"work", "--run", run}, 1)
-            old.NoInference()
-        }
     }
 
     internal init(binary string) : base(binary) { }
@@ -519,6 +480,8 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let run = Prepare("tokate")
         Flow.Mode("protected_entrypoint")
         Check.Contains(Flow.Call([]string{"work", "--run", run}, 1).Error, "protected owner path")
+        Check.That(File.Exists(Path.Combine(run, "checkout/scripts/verify.sh")), "Rejected verifier edit was discarded")
+        Check.That(!File.Exists(Path.Combine(run, "verification.json")), "Protected verifier was executed")
         Flow.Call([]string{"submit", "--run", run}, 1)
         Flow.NoPr()
     }
@@ -528,7 +491,19 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.Approve()
         let claim = Claim()
         let commit = Candidate(claim, "permitted")
-        Coordinate(Event(PublishRequest(claim, commit)))
+        let history = Path.Combine(Flow.Temp.Root, "donor-work")
+        for i in 0 ... 250 {
+            Flow.DonorGit(history, "commit", "--allow-empty", "--quiet", "-m", "History " + i.ToString())
+        }
+        let historyHead = Flow.Git("-C", history, "rev-parse", "HEAD")
+        Flow.Git(
+            "-C",
+            history,
+            "push",
+            Path.Combine(Flow.Bin, "fork"),
+            "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
+        )
+        Coordinate(Event(PublishRequest(claim, historyHead)))
         Flow.MetadataOnly()
         for fault in[]string{
             "missing-files",
@@ -919,6 +894,24 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let checkout = Path.Combine(run, "checkout")
         let savedPath = Path.Combine(run, "run.json")
         let saved = File.ReadAllText(savedPath)
+        using let baseline = FixtureSnapshot(Flow.Temp.Root)
+        Flow.Git("-C", checkout, "checkout", "--detach", Check.Text(Check.Json(saved)["base"]))
+        File.WriteAllText(Path.Combine(checkout, "result.txt"), "External mixed-tool contribution\n")
+        File.AppendAllText(Path.Combine(checkout, ".github/tokate-pr.md"), "\nhidden protected change\n")
+        Flow.Git("-C", checkout, "add", ".")
+        Flow.DonorGit(checkout, "commit", "-m", "Packed replacement attack")
+        let malicious = Flow.Git("-C", checkout, "rev-parse", "HEAD")
+        Flow.Git("-C", checkout, "replace", malicious, commit)
+        Flow.Git("-C", checkout, "pack-refs", "--all", "--prune")
+        Flow.Git("--no-replace-objects", "-C", checkout, "checkout", "--force", "--detach", malicious)
+        let changed = Check.Json(saved)
+        changed["commit"] = JsonValue.Create(malicious)
+        File.WriteAllText(savedPath, changed.ToJsonString())
+        Flow.Call([]string{"submit", "--run", run}, 1)
+        Check.That(!File.Exists(Path.Combine(run, "request.json")), "Packed replacement obtained publication authority")
+        Flow.NoPr()
+        Flow.NoInference()
+        baseline.Restore()
         for flag in[]string{"--assume-unchanged", "--skip-worktree"} {
             Flow.Git("-C", checkout, "update-index", flag, ".github/tokate-pr.md")
             File.AppendAllText(Path.Combine(checkout, ".github/tokate-pr.md"), "\nhidden work file\n")

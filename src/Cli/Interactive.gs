@@ -48,9 +48,8 @@ internal class Interactive {
                         case "work": "Start reserved donation"
                         case "prepare": "Continue preparation"
                         case "submit": "Submit verified work for a draft PR"
-                        case "publish": "Publish verified work"
                         case "checks": "Check PR review and CI"
-                        case "recover": "Run verification again"
+                        case "recover": "Prepare an explicit correction"
                         default: ""
                     }
                     if label != "" {

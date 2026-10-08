@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "models": {
     "gpt-6.1-sol": [
       "high"
@@ -15,5 +15,13 @@
       "bash",
       "scripts/verify.sh"
     ]
+  ],
+  "approval_scope": "task",
+  "eligibility": "trusted",
+  "allowed_tools": [
+    {
+      "harness": "codex",
+      "provider": "openai"
+    }
   ]
 }

@@ -64,9 +64,11 @@ internal class PublicDescriptions {
             )
             let args = []string{"amend", "--run", run, "--commit", head, "--seconds", "30", "--summary", path}
             flow.Call(args)
+            flow.CoordinatePosted()
+            flow.Call(args)
             let body = Body(flow)
             Check.Contains(body, "- Update result content to show the final reviewed text.")
-            Check.Contains(body, "Tokate observed locally")
+            Check.Contains(body, "Donor-reported: all original owner checks passed locally")
             Check.Contains(body, "Donor-reported: Fixture content check passed.")
             Check.Contains(body, "Browser behavior was not checked.")
             Check.Contains(body, "Maintainer before")
@@ -233,9 +235,10 @@ internal class PublicDescriptions {
                     toolsPath
                 }
             )
+            flow.Publish(run)
             let body = Body(flow)
             Check.Contains(body, "- Add final corrected result text.")
-            Check.Contains(body, "Tokate observed locally")
+            Check.Contains(body, "Donor-reported: original owner checks passed locally")
             Check.Contains(body, "Donor-reported correction tools")
             Check.Contains(body, "cover only the original completed turn")
             Check.That(!body.Contains("- Add a result containing"), "Correction reused original summary")
@@ -324,7 +327,7 @@ internal class PublicDescriptions {
             flow.Save()
             Check.Contains(body, "- Add a result containing the fixture completion text.")
             Check.Contains(body, "Verification:")
-            Check.Contains(body, "Tokate observed locally")
+            Check.Contains(body, "Donor-reported: original owner checks passed locally")
             flow.Reload()
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
             flow.Save()

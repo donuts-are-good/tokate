@@ -47,12 +47,6 @@ internal class ContributionStatusChecks {
             let waiting = Row(Read(test))
             Check.That(Check.Text(waiting["state"]) == "approval_waiting", "Absent approval is ready")
             test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
-            let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(path))
-            policy["approval_scope"] = JsonValue.Create("task")
-            policy["eligibility"] = JsonValue.Create("trusted")
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Trusted status policy")
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
             let needsRequest = Row(Read(test))
             Check.That(
@@ -421,7 +415,7 @@ internal class ContributionStatusChecks {
         }
 
         private func Historical(binary string) {
-            using let published = PublishedContribution.Create(binary, v2: true)
+            using let published = PublishedContribution.Create(binary, external: true)
             let test = published.Coordination
             for merged in[]bool{true, false} {
                 for deleted in[]bool{false, true} {
@@ -651,58 +645,6 @@ internal class ContributionStatusChecks {
                 ) == "approval_waiting",
                 "Open PR revived stale approval"
             )
-            using let legacy = CoordinationFixture(binary)
-            legacy.Flow.Initialize()
-            legacy.Flow.Approve()
-            let approvalSha = legacy.Flow.Git("-C", legacy.Flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
-            let approval = Check.Json(
-                legacy.Flow.Git("-C", legacy.Flow.Upstream, "show", approvalSha + ":.github/tokate-approval.json")
-            )
-            let fork = Path.Combine(legacy.Flow.Bin, "fork")
-            let head = legacy.Flow.Git("-C", fork, "rev-parse", "main")
-            let branch = "tokate/issue-1-" + approvalSha.Substring(0, 12)
-            Draft(legacy, Check.Map("uuid", Guid.NewGuid().ToString("D")), head)
-            legacy.Flow.Reload()
-            let pull = legacy.Flow.State["pulls"]?[0] ?? throw Exception("Missing legacy PR")
-            legacy.Flow.State["pull_list_omit_merged"] = JsonValue.Create(true)
-            (pull["head"] ?? throw Exception("Missing legacy head"))["ref"] = JsonValue.Create(branch)
-            pull["body"] = JsonValue.Create(
-                "<!-- tokate-receipt:" + Check.Map(
-                    "version",
-                    1,
-                    "repo",
-                    "owner/project",
-                    "issue",
-                    1,
-                    "approval",
-                    approvalSha,
-                    "donor",
-                    "donor",
-                    "head",
-                    head,
-                    "model",
-                    "gpt-6.1-sol",
-                    "effort",
-                    "high",
-                    "policy",
-                    Check.Text(approval["policy_hash"])
-                )
-                    .ToJsonString() + " -->"
-            )
-            legacy.Flow.Save()
-            for merged in[]bool{true, false} {
-                legacy.Flow.Git("-C", fork, "update-ref", "refs/heads/" + branch, head)
-                Close(legacy, merged, deleted: true)
-                let row = Row(Read(legacy))
-                Check.That(
-                    Check.Text(row["state"]) == (merged ? "merged_contribution": "closed_unmerged_contribution"),
-                    "Legacy history required a live donor branch"
-                )
-                Check.That(
-                    Check.Text(row["drafts"]?[0]?["binding"]) == "historical",
-                    "Legacy historical identity was not checked"
-                )
-            }
         }
 
         private func Discovery(binary string) {
@@ -754,7 +696,7 @@ internal class ContributionStatusChecks {
             )
         }
 
-        private func LegacyAndTerminal(binary string) {
+        private func TerminalOutput(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
             let structured = Read(test)
@@ -773,25 +715,6 @@ internal class ContributionStatusChecks {
             Check.Contains(narrow.Output, "State: reservation needed")
             Check.Contains(narrow.Output, "Role: donor")
             Check.That(!narrow.Output.Contains('\u001b'), "Narrow plain status contains escapes")
-            using let v1 = NativeFixture(binary)
-            v1.Initialize()
-            v1.Approve()
-            let status = Check.Envelope(
-                v1.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--json"}),
-                "status",
-                "ok"
-            )
-            Check.That(Check.Text(Row(status)["approval_status"]) == "current", "Legacy remote approval unsupported")
-            v1.Call([]string{"access", "--repo", "owner/project", "--operation", "request", "--issue", "1"})
-            let requested = Check.Envelope(
-                v1.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--json"}, owner: true),
-                "status",
-                "ok"
-            )
-            Check.That(
-                Check.Text(requested["data"]?["next"]?["command"]?[5]) == "init",
-                "Absent access authority produced an unusable list command"
-            )
         }
 
         private func RepeatedReads(binary string) {
@@ -868,7 +791,7 @@ internal class ContributionStatusChecks {
             Published(binary)
             Historical(binary)
             Discovery(binary)
-            LegacyAndTerminal(binary)
+            TerminalOutput(binary)
             RepeatedReads(binary)
             Console.WriteLine(
                 "PASS remote status access, discovery, leases, drafts, checks, historical lifecycle, stale authority, API failures, repeated status invocations, roles, narrow terminals and JSON"

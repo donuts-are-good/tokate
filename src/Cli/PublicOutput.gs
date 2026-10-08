@@ -160,12 +160,15 @@ internal class PublicOutput {
 
         internal func RunSummary(directory string) Dictionary[string, Object?] {
             let run = Data.Load(directory)
+            if run.Number("version") != 2 {
+                throw CliFailure("invalid_state", "Unsupported saved run protocol")
+            }
             let value = run.Element()
             let result = J.Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,unlimited,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,unlimited,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
             )
-            if run.Number("version") == 1 || run.Text("source") == "tokate" {
+            if run.Text("source") == "tokate" {
                 result["coding_seconds"] = run.Flag("unlimited") ? nil: run.Number("seconds") - run.Number(
                     "verification_reserve"
                 )
@@ -182,7 +185,7 @@ internal class PublicOutput {
                 local["verified"] = false
                 result["reconciliation"] = local
             }
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 result["predecessor"] = J.Get(value, "continuation")
                 result["continuation_phase"] = run.Text("continuation_phase")
             }
@@ -221,9 +224,7 @@ internal class PublicOutput {
                         "failure_reason"
                     ) == "inference_interrupted"
                 ) ? "inference_failed": run.Text("failure_reason")
-                let code = Recovery.Eligible(run) ? "verification_failed": (
-                    KnownReason(reason) ? reason: "command_failed"
-                )
+                let code = KnownReason(reason) ? reason: "command_failed"
                 result["failure_reason"] = code
                 result["error"] = map[string, Object?]{"code": code, "message": Message(code)}
             }
@@ -333,14 +334,6 @@ internal class PublicOutput {
         }
 
         internal func Next(options Args?, code string) {
-            if options != nil && options.Command == "repair" && code == "" {
-                Actions.Add(
-                    []string{"tokate", "verify-pr", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
-                )
-                Actions.Add(
-                    []string{"tokate", "checks", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
-                )
-            }
             if RunDirectory != "" {
                 try {
                     let run = Data.Load(RunDirectory)
@@ -369,20 +362,13 @@ internal class PublicOutput {
                         code != "stale_approval" {
                         Actions.Add([]string{"tokate", "prepare", "--run", RunDirectory, "--json"})
                     }
-                    if code == "" && run.Text("state") == "claimed" &&
-                        (run.Number("version") == 1 || run.Text("source") == "tokate") {
+                    if code == "" && run.Text("state") == "claimed" && (run.Text("source") == "tokate") {
                         Actions.Add([]string{"tokate", "work", "--run", RunDirectory, "--json"})
                     }
                     if code != "stale_approval" && code != "invalid_state" {
-                        let correction = Path.Combine(RunDirectory, "correction.json")
-                        let original = Path.Combine(RunDirectory, "original-evidence")
-                        if Recovery.Eligible(run) && !File.Exists(correction) && !Directory.Exists(original) {
-                            Actions.Add([]string{"tokate", "recover", "--run", RunDirectory, "--json"})
-                        } else if run.Text("state") == "generated" && run.Number("version") == 1 {
-                            Actions.Add([]string{"tokate", "publish", "--run", RunDirectory, "--json"})
-                        } else if run.Number("pr") > 0 {
+                        if run.Number("pr") > 0 {
                             Actions.Add([]string{"tokate", "checks", "--run", RunDirectory, "--json"})
-                        } else if run.Text("state") == "generated" && run.Number("version") == 2 {
+                        } else if run.Text("state") == "generated" {
                             Actions.Add([]string{"tokate", "submit", "--run", RunDirectory, "--json"})
                         }
                     }
@@ -398,11 +384,10 @@ internal class PublicOutput {
                 if Command != "doctor" {
                     let diagnostic = Startup.NeedsCatalog(Command, options) ? "--managed": (
                         Command == "external" ||
-                            Command == "repair" ||
                             Command == "amend" ||
                             Command == "recover" ||
                             Command == "submit" ||
-                            Command == "publish" ? "--external": "--owner"
+                            Command == "submit" ? "--external": "--owner"
                     )
                     Actions.Add([]string{"tokate", "doctor", diagnostic, "--json"})
                 }

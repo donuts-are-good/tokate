@@ -107,7 +107,7 @@ internal class OwnerSetup {
         private func Tools(args Args, fields map[string, Object?], interactive bool) {
             let value = J.Parse(J.Write(fields))
             var requested = args.Get("allowed-tools")
-            if requested == "" && interactive && J.Number(value, "version") == 2 {
+            if requested == "" && interactive {
                 let current = List[string]()
                 for tool in J.Items(J.Get(value, "allowed_tools")) {
                     current.Add(J.Text(tool, "harness") + "/" + J.Text(tool, "provider"))
@@ -119,9 +119,6 @@ internal class OwnerSetup {
             }
             if requested == "" {
                 return
-            }
-            if J.Number(value, "version") != 2 {
-                throw Exception("Tool selection requires version 2; use --upgrade explicitly")
             }
             let selected = HashSet[string](StringComparer.Ordinal)
             let tools = List[Object]()
@@ -142,8 +139,7 @@ internal class OwnerSetup {
         private func Guide(args Args, fields map[string, Object?]) {
             let repo = args.Need("repo")
             let initial = J.Parse(J.Write(fields))
-            let version = J.Number(initial, "version")
-            if version == 2 && J.Text(initial, "approval_scope") == "task" {
+            if J.Text(initial, "approval_scope") == "task" {
                 let modes = []string{"trusted", "open", "manual"}
                 let current = Array.IndexOf(modes, J.Text(initial, "eligibility")) + 1
                 fields["eligibility"] = modes[
@@ -276,15 +272,13 @@ internal class OwnerSetup {
                     }
                 }
                 if action == 4 {
-                    if version == 2 {
-                        let choice = WizardScreen.Choose(
-                            "Allowed coding tools",
-                            "Owners need neither tool installed.",
-                            []string{"Codex | Subscription", "Pi | Local", "Codex and Pi"}
-                        )
-                        args.Values["--allowed-tools"] = choice == 1 ? "codex": choice == 2 ? "pi": "codex,pi"
-                        Tools(args, fields, false)
-                    }
+                    let choice = WizardScreen.Choose(
+                        "Allowed coding tools",
+                        "Owners need neither tool installed.",
+                        []string{"Codex | Subscription", "Pi | Local", "Codex and Pi"}
+                    )
+                    args.Values["--allowed-tools"] = choice == 1 ? "codex": choice == 2 ? "pi": "codex,pi"
+                    Tools(args, fields, false)
                     fields["allow_network"] = WizardScreen.Choose(
                         "Project network",
                         "Donors must also consent. Inference connectivity is separate.",
@@ -353,8 +347,7 @@ internal class OwnerSetup {
                     "Choose --model-policy unrestricted or whitelist; no model restriction is selected silently"
                 )
             }
-            if existing == nil || args.Get("model-policy") != "" || args.Get("upgrade") == "true" ||
-                mode != existing?.ModelPolicy {
+            if existing == nil || args.Get("model-policy") != "" || mode != existing?.ModelPolicy {
                 fields["model_policy"] = mode
             }
             if mode == "unrestricted" {
@@ -374,16 +367,6 @@ internal class OwnerSetup {
                     throw Exception("Whitelist setup requires --models JSON")
                 }
                 fields["models"] = RequestData.Parse(models)
-            }
-            if args.Get("upgrade") == "true" {
-                fields["version"] = 2
-                if !fields.ContainsKey("allowed_tools") {
-                    fields["allowed_tools"] = []Object{map[string, Object?]{"harness": "codex", "provider": "openai"}}
-                }
-                fields["approval_scope"] = "task"
-                if !fields.ContainsKey("eligibility") {
-                    fields["eligibility"] = "trusted"
-                }
             }
             Tools(args, fields, interactive)
             let value = J.Parse(J.Write(fields))
@@ -462,7 +445,7 @@ internal class OwnerSetup {
                 true
             )
             Terminal.Message(
-                "Generated state: one tokate/access ref for numeric membership and one tokate/contributions/N ref per v2 issue; legacy approvals and explicit synchronization grant refs remain when present. Setup creates no refs; initialize access before task approval.",
+                "Generated state: one tokate/access ref for numeric membership, one tokate/contributions/N ref per issue, and explicit synchronization grant refs. Setup creates no refs; initialize access before task approval.",
                 "cyan",
                 true
             )

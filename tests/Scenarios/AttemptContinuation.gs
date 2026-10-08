@@ -7,7 +7,7 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json.Nodes
 
-internal class V2ContinuationChecks {
+internal class AttemptContinuationChecks {
     shared {
         private func Read(directory string) JsonNode -> Check.Json(
             File.ReadAllText(Path.Combine(directory, "run.json"))
@@ -113,6 +113,8 @@ internal class V2ContinuationChecks {
             )
             File.WriteAllText(Path.Combine(test.Flow.Upstream, "tracked.txt"), "approved\n")
             File.WriteAllText(Path.Combine(test.Flow.Upstream, "baseline.txt"), "baseline\n")
+            Directory.CreateDirectory(Path.Combine(test.Flow.Upstream, "folder"))
+            File.WriteAllText(Path.Combine(test.Flow.Upstream, "folder/child"), "baseline\n")
             let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(path))
             policy["approval_scope"] = JsonValue.Create("task")
@@ -650,6 +652,8 @@ internal class V2ContinuationChecks {
                 "partial",
                 "write",
                 "capture",
+                "target-hardlink",
+                "capture-hardlink",
                 "dirty",
                 "metadata",
                 "events",
@@ -662,11 +666,35 @@ internal class V2ContinuationChecks {
                 test.Flow.Reload()
                 let saved = Read(fresh)
                 saved["state"] = JsonValue.Create("preparing")
-                if mode == "capture" {
+                if mode == "capture" || mode == "capture-hardlink" {
                     saved.AsObject().Remove("continuation_phase")
                     saved.AsObject().Remove("continuation_manifest_sha256")
                     test.Flow.Git("-C", Path.Combine(fresh, "checkout"), "restore", "tracked.txt")
                     File.Delete(Path.Combine(fresh, "checkout/imported.txt"))
+                    if mode == "capture-hardlink" {
+                        File.Delete(Path.Combine(fresh, "continuation.json"))
+                        let peer = Path.Combine(test.Flow.Temp.Root, "capture-peer")
+                        File.WriteAllText(peer, "preserve synthetic peer")
+                        Check.Success(
+                            TestProcess.Run(
+                                "/usr/bin/ln",
+                                []string{peer, Path.Combine(fresh, "continuation.json.tmp")},
+                                test.Flow.Temp.Env
+                            )
+                        )
+                    }
+                } else if mode == "target-hardlink" {
+                    saved["continuation_phase"] = JsonValue.Create("importing")
+                    let peer = Path.Combine(test.Flow.Temp.Root, "linked-peer")
+                    File.WriteAllText(peer, "approved\n")
+                    File.Delete(Path.Combine(fresh, "checkout/tracked.txt"))
+                    Check.Success(
+                        TestProcess.Run(
+                            "/usr/bin/ln",
+                            []string{peer, Path.Combine(fresh, "checkout/tracked.txt")},
+                            test.Flow.Temp.Env
+                        )
+                    )
                 } else if mode == "partial" || mode == "write" {
                     saved["continuation_phase"] = JsonValue.Create("importing")
                     File.Delete(Path.Combine(fresh, "checkout/imported.txt"))
@@ -696,6 +724,18 @@ internal class V2ContinuationChecks {
                 let targetBytes = Bytes(Path.Combine(fresh, "checkout"))
                 test.Flow.Call([]string{"prepare", "--run", fresh}, rejected ? 1: 0)
                 if rejected {
+                    if mode == "target-hardlink" || mode == "capture-hardlink" {
+                        let peer = Path.Combine(
+                            test.Flow.Temp.Root,
+                            mode == "target-hardlink" ? "linked-peer": "capture-peer"
+                        )
+                        Check.That(
+                            File.ReadAllText(peer) == (
+                                mode == "target-hardlink" ? "approved\n": "preserve synthetic peer"
+                            ),
+                            "Continuation wrote through an external hardlink"
+                        )
+                    }
                     Preserved(Path.Combine(fresh, "checkout"), targetBytes)
                     test.Flow.Call([]string{"work", "--run", fresh, "--yes"}, 1)
                 } else {
@@ -731,7 +771,20 @@ internal class V2ContinuationChecks {
                 "protected",
                 "symlink",
                 "hardlink",
+                "unchanged-hardlink",
                 "fifo",
+                "tracked-fifo",
+                "directory-file",
+                "file-directory",
+                "source-repo-id",
+                "source-head-id",
+                "missing-source-id",
+                "unsafe-path",
+                "restored-worktree",
+                "missing-staged-addition",
+                "changed-head",
+                "hooks",
+                "generated-fifo",
                 "staged-conflict",
                 "excluded",
                 "empty"
@@ -772,22 +825,89 @@ internal class V2ContinuationChecks {
                 } else if mode == "staged-conflict" {
                     test.Flow.Git("-C", checkout, "add", "tracked.txt")
                     File.WriteAllText(Path.Combine(checkout, "tracked.txt"), "conflicting evidence\n")
+                } else if mode == "unchanged-hardlink" {
+                    let peer = Path.Combine(test.Flow.Temp.Root, "linked-peer")
+                    File.WriteAllText(peer, "baseline\n")
+                    File.Delete(Path.Combine(checkout, "baseline.txt"))
+                    Check.Success(
+                        TestProcess.Run(
+                            "/usr/bin/ln",
+                            []string{peer, Path.Combine(checkout, "baseline.txt")},
+                            test.Flow.Temp.Env
+                        )
+                    )
+                } else if mode == "tracked-fifo" {
+                    File.Delete(Path.Combine(checkout, "tracked.txt"))
+                    Check.Success(
+                        TestProcess.Run(
+                            "/usr/bin/mkfifo",
+                            []string{Path.Combine(checkout, "tracked.txt")},
+                            test.Flow.Temp.Env
+                        )
+                    )
+                } else if mode == "directory-file" {
+                    Directory.Delete(Path.Combine(checkout, "folder"), true)
+                    File.WriteAllText(Path.Combine(checkout, "folder"), "replacement\n")
+                } else if mode == "file-directory" {
+                    File.Delete(Path.Combine(checkout, "baseline.txt"))
+                    Directory.CreateDirectory(Path.Combine(checkout, "baseline.txt"))
+                    File.WriteAllText(Path.Combine(checkout, "baseline.txt/child"), "replacement\n")
+                } else if mode == "source-repo-id" || mode == "source-head-id" || mode == "missing-source-id" {
+                    let saved = Read(source)
+                    let markerPath = Path.Combine(checkout, ".git/tokate-preparation.json")
+                    let marker = Check.Json(File.ReadAllText(markerPath))
+                    if mode == "missing-source-id" {
+                        saved.AsObject().Remove("preparation_repo_id")
+                        marker.AsObject().Remove("repo_id")
+                    } else {
+                        saved[
+                            mode == "source-repo-id" ? "preparation_repo_id": "preparation_head_id"
+                        ] = JsonValue.Create(99)
+                        marker[mode == "source-repo-id" ? "repo_id": "head_id"] = JsonValue.Create(99)
+                    }
+                    Save(source, saved)
+                    File.WriteAllText(markerPath, marker.ToJsonString())
+                } else if mode == "unsafe-path" {
+                    File.WriteAllText(Path.Combine(checkout, "unsafe\nname"), "unsafe")
+                } else if mode == "restored-worktree" {
+                    test.Flow.Git("-C", checkout, "add", "tracked.txt")
+                    File.WriteAllText(Path.Combine(checkout, "tracked.txt"), "approved\n")
+                } else if mode == "missing-staged-addition" {
+                    test.Flow.Git("-C", checkout, "add", "imported.txt")
+                    File.Delete(Path.Combine(checkout, "imported.txt"))
+                } else if mode == "changed-head" {
+                    test.Flow.Git("-C", checkout, "checkout", "--quiet", "-b", "unrelated")
+                } else if mode == "hooks" {
+                    Directory.CreateDirectory(Path.Combine(checkout, ".git/hooks"))
+                    File.WriteAllText(Path.Combine(checkout, ".git/hooks/pre-commit"), "untrusted")
+                } else if mode == "generated-fifo" {
+                    Directory.CreateDirectory(Path.Combine(checkout, ".verification-data"))
+                    let cache = Path.Combine(checkout, ".verification-data/private")
+                    File.WriteAllText(cache, "source-only output")
+                    test.Flow.Git("-C", checkout, "add", ".verification-data/private")
+                    File.Delete(cache)
+                    Check.Success(TestProcess.Run("/usr/bin/mkfifo", []string{cache}, test.Flow.Temp.Env))
                 } else if mode == "excluded" {
                     Directory.CreateSymbolicLink(
                         Path.Combine(checkout, ".verification-data"),
                         Path.Combine(test.Flow.Temp.Root, "home")
                     )
-                    File.WriteAllText(Path.Combine(checkout, ".env"), "synthetic credential")
+                    for name in[]string{".env", ".ENV", ".npmrc"} {
+                        File.WriteAllText(Path.Combine(checkout, name), "synthetic credential")
+                    }
                 } else if mode == "empty" {
                     test.Flow.Git("-C", checkout, "restore", "tracked.txt")
                     File.Delete(Path.Combine(checkout, "imported.txt"))
                 }
-                let bytes Dictionary[string, string]? = mode == "fifo" ? nil: Bytes(source)
+                let bytes Dictionary[string, string]? = mode.Contains("fifo") ? nil: Bytes(source)
                 let args = Args(test, source)
                 let fresh = Prepare(test, args, rejected ? 1: 0)
                 if !rejected {
                     Check.That(
-                        !File.Exists(Path.Combine(fresh, "checkout/.env")) && !Directory.Exists(
+                        !File.Exists(Path.Combine(fresh, "checkout/.env")) && !File.Exists(
+                            Path.Combine(fresh, "checkout/.ENV")
+                        ) &&
+                            !File.Exists(Path.Combine(fresh, "checkout/.npmrc")) && !Directory.Exists(
                             Path.Combine(fresh, "checkout/.verification-data")
                         ),
                         "Continuation imported excluded data"
@@ -834,11 +954,11 @@ internal class V2ContinuationChecks {
                 TestCase[string]("ImportBoundary", async (value string) -> ImportBoundary(value))
             } {
                 let name = test.Name
-                if selected != "" && selected != name || selected == "" && !CiShard.Include("ContinuationV2/" + name) {
+                if selected != "" && selected != name || selected == "" && !CiShard.Include("Continuation/" + name) {
                     continue
                 }
                 test.Run(binary)
-                Console.WriteLine("PASS v2 continuation " + name)
+                Console.WriteLine("PASS continuation " + name)
             }
         }
     }

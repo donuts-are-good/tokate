@@ -14,8 +14,8 @@ internal class Policy {
         Value = J.Parse(text)
         Digest = Data.Hash(text)
         let version = J.Number(Value, "version")
-        if version != 1 && version != 2 {
-            throw Exception("Policy version must be 1 or 2")
+        if version != 2 {
+            throw Exception("Unsupported policy version; use the current version-2 policy")
         }
         for key in[]string{"pr_text", "close_message", "target_branch"} {
             var occurrences int32
@@ -57,16 +57,11 @@ internal class Policy {
                 scopeFields++
             }
         }
-        if eligibilityFields > 0 || scopeFields > 0 {
-            RequestData.Parse(text, 1024 * 1024)
-            Eligibility = J.Text(Value, "eligibility")
-            let approvalScope = J.Text(Value, "approval_scope")
-            let eligible = Eligibility == "open" || Eligibility == "trusted" || Eligibility == "manual"
-            if eligibilityFields != 1 || scopeFields != 1 || version != 2 || approvalScope != "task" || !eligible {
-                throw Exception(
-                    "Task eligibility requires version 2, approval_scope task, and eligibility open, trusted or manual"
-                )
-            }
+        RequestData.Parse(text, 1024 * 1024)
+        Eligibility = J.Text(Value, "eligibility")
+        let eligible = Eligibility == "open" || Eligibility == "trusted" || Eligibility == "manual"
+        if eligibilityFields != 1 || scopeFields != 1 || J.Text(Value, "approval_scope") != "task" || !eligible {
+            throw Exception("Policy requires approval_scope task and eligibility open, trusted or manual")
         }
         var modes int32
         var modelMaps int32
@@ -100,13 +95,7 @@ internal class Policy {
         var count int32
         if models.ValueKind == JsonValueKind.Object {
             for model in models.EnumerateObject() {
-                if !Regex.IsMatch(
-                    model.Name,
-                    J.Number(
-                        Value,
-                        "version"
-                    ) == 2 ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-                ) {
+                if !Regex.IsMatch(model.Name, "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$") {
                     throw Exception("Invalid model name")
                 }
                 let efforts = J.Items(model.Value)
@@ -160,20 +149,18 @@ internal class Policy {
                 throw Exception("Invalid required check name")
             }
         }
-        if version == 2 {
-            let reservation = J.Get(Value, "reservation_seconds")
-            if reservation.ValueKind != JsonValueKind.Undefined &&
-                (J.Number(Value, "reservation_seconds") < 300 || J.Number(Value, "reservation_seconds") > 604800) {
-                throw Exception("reservation_seconds must be from 300 to 604800 (default 86400)")
-            }
-            let allowedTools = J.Items(J.Get(Value, "allowed_tools"))
-            if allowedTools.Count == 0 {
-                throw Exception("Version 2 requires allowed_tools harness/provider pairs")
-            }
-            for tool in allowedTools {
-                if J.Text(tool, "harness") == "" || J.Text(tool, "provider") == "" {
-                    throw Exception("Each allowed tool needs harness and provider")
-                }
+        let reservation = J.Get(Value, "reservation_seconds")
+        if reservation.ValueKind != JsonValueKind.Undefined &&
+            (J.Number(Value, "reservation_seconds") < 300 || J.Number(Value, "reservation_seconds") > 604800) {
+            throw Exception("reservation_seconds must be from 300 to 604800 (default 86400)")
+        }
+        let allowedTools = J.Items(J.Get(Value, "allowed_tools"))
+        if allowedTools.Count == 0 {
+            throw Exception("Version 2 requires allowed_tools harness/provider pairs")
+        }
+        for tool in allowedTools {
+            if J.Text(tool, "harness") == "" || J.Text(tool, "provider") == "" {
+                throw Exception("Each allowed tool needs harness and provider")
             }
         }
     }
@@ -181,9 +168,6 @@ internal class Policy {
     private func ValidEffort(effort string) bool {
         if Array.IndexOf("minimal low medium high xhigh max ultra".Split(' '), effort) >= 0 {
             return true
-        }
-        if J.Number(Value, "version") != 2 {
-            return false
         }
         if effort == "unknown" {
             return true
@@ -212,16 +196,11 @@ internal class Policy {
     ) &&
         ValidEffort(effort) &&
         effort != "absent" &&
-        (J.Number(Value, "version") != 2 || (model != "unknown" && effort != "unknown"))
+        model != "unknown" &&
+        effort != "unknown"
 
     internal func Validate(model string, effort string, seconds int32, network bool, external bool = false) {
-        if !Regex.IsMatch(
-            model,
-            external && J.Number(
-                Value,
-                "version"
-            ) == 2 ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
-        ) ||
+        if !Regex.IsMatch(model, external ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$") ||
             !ValidEffort(effort) {
             throw Exception("Invalid model name or reasoning effort")
         }
@@ -236,8 +215,7 @@ internal class Policy {
 
     internal func ValidatePi(model string, effort string, seconds int32, network bool) {
         RequestData.ModelIdentifier(model)
-        if J.Number(Value, "version") != 2 ||
-            !AllowsTool("pi", "local-chat-completions") ||
+        if !AllowsTool("pi", "local-chat-completions") ||
             !ValidEffort(effort) ||
             effort == "unknown" ||
             effort == "ultra" ||
@@ -251,7 +229,7 @@ internal class Policy {
     }
 
     internal func ValidateBudget(seconds int32, network bool, unlimited bool = false) {
-        if unlimited && (J.Number(Value, "version") != 2 || !J.Bool(Value, "allow_unlimited")) {
+        if unlimited && !J.Bool(Value, "allow_unlimited") {
             throw Exception("Repository policy does not allow unlimited coding")
         }
         if seconds < 1 || seconds > J.Number(Value, "max_seconds") {
@@ -264,7 +242,7 @@ internal class Policy {
 
     internal func ValidateTools(tools JsonElement, source string = "external") {
         let declarations = J.Items(tools)
-        if J.Number(Value, "version") != 2 || declarations.Count == 0 {
+        if declarations.Count == 0 {
             throw Exception("Version 2 needs a nonempty tool declaration")
         }
         if source != "external" && source != "tokate" {
@@ -303,19 +281,6 @@ internal class Policy {
             }
         }
         return false
-    }
-
-    internal func ValidateEditingTools(tools JsonElement, failure string) {
-        if J.Number(Value, "version") == 2 {
-            ValidateTools(tools)
-            return
-        }
-        for tool in J.Items(tools) {
-            if J.Text(tool, "harness") != "codex" || J.Text(tool, "provider") != "openai" {
-                throw Exception(failure)
-            }
-            Validate(J.Text(tool, "model"), J.Text(tool, "effort"), 1, false)
-        }
     }
 
     shared {

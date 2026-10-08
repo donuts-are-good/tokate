@@ -33,7 +33,6 @@ internal class ProgressChecks {
             for scenario in[]string{
                 "inference_failure",
                 "verification_failure",
-                "publication_failure",
                 "inference_timeout",
                 "verification_timeout",
                 "inference_cancel",
@@ -360,7 +359,7 @@ internal class ProgressChecks {
             flow.Call([]string{"work", "--run", run, "--json", "--plain"}, 1)
             let code = inference ? "inference_failed": (verification ? "verification_failed": "command_failed")
             let failedPhase = publication ? "Publication": (inference ? "Inference": "Verification")
-            let next = publication ? "publish": (verification ? "recover": "status")
+            let next = "status"
             Check.Envelope(result, "work", "error", code)
             Check.Contains(result.Error, failedPhase + " failed (" + code + ")")
             Check.Contains(result.Error, "Next: tokate " + next)

@@ -1,11 +1,8 @@
 package Tokate
 
-import Gsharp.Concurrency
 import System
 import System.Collections.Generic
-import System.IO
 import System.Text.Json
-import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
@@ -45,8 +42,7 @@ internal class Publication {
         }
 
         internal func Match(run Data, pull JsonElement, expectedReceipt JsonElement) {
-            let marker = run.Number("version") == 1 ? "<!-- tokate-run:" + run.Text("id") + " -->":
-            "<!-- tokate-v2:" + run.Text("id") + " -->"
+            let marker = "<!-- tokate-v2:" + run.Text("id") + " -->"
             let body = J.Text(pull, "body")
             let failure = "interrupted_publication: physical PR differs from exact saved run/head/receipt"
             let receipt = RequestData.Parse(PrBody.ReceiptText(body, failure, failure))
@@ -65,9 +61,6 @@ internal class Publication {
             let base = J.Get(pull, "base")
             if J.Text(head, "sha") != run.Text("commit") || J.Text(head, "ref") != run.Text("branch") ||
                 !RepositoryIdentity.SameRepo(J.Text(J.Get(head, "repo"), "full_name"), run.Text("head_repo")) {
-                throw Exception(failure)
-            }
-            if run.Number("version") == 1 && !RepositoryIdentity.SameDonor(J.Get(pull, "user"), run) {
                 throw Exception(failure)
             }
             let baseRepo = J.Text(J.Get(base, "repo"), "full_name")
@@ -93,148 +86,6 @@ internal class Publication {
             }
             Match(run, pulls[0], expectedReceipt)
             return pulls[0]
-        }
-
-        internal func Publish(directory string) {
-            using let lease = RunStorage.Lease(directory)
-            let run = Data.Load(directory)
-            if run.Number("version") == 2 {
-                throw Exception("Version-2 runs use submit and the owner-installed coordinator")
-            }
-            if File.Exists(Path.Combine(directory, "correction.json")) {
-                CorrectionPublication.PublishLocked(
-                    directory,
-                    run,
-                    Data.Read(Path.Combine(directory, "correction.json")),
-                    Correction.Authority(directory, run)
-                )
-                return
-            }
-            let record = ContributionClaim.Recheck(run)
-            if run.Text("state") != "generated" && run.Text("state") != "published" {
-                throw Exception("Only a successful saved run can be published")
-            }
-            let marker = "<!-- tokate-run:" + run.Text("id") + " -->"
-            let fields = ContributionReceipt.Native(run, run.Text("commit"))
-            let amendments = J.Items(J.Get(run.Element(), "amendments"))
-            if amendments.Count > 0 {
-                let latest = amendments[amendments.Count - 1]
-                let amendment = Data.Load(Path.Combine(directory, "amendments", run.Text("commit")))
-                let original = OriginalEvidence.Amended(directory, run, amendment)
-                if amendment.Text("state") != "published" || amendment.Text("commit") != run.Text("commit") || J.Text(
-                    latest,
-                    "head"
-                ) != run.Text("commit") || J.Text(latest, "id") != amendment.Text("id") {
-                    throw Exception("Saved published amendment differs from current contribution")
-                }
-                fields["original_head"] = original.Text("commit")
-                let publicAmendment = J.Parse(J.Write(Amendment.PublicRecord(amendment)))
-                Amendment.ValidateReceipt(publicAmendment, Policy(J.Write(J.Get(record, "policy"))), run.Text("commit"))
-                fields["amendment"] = publicAmendment
-                Synchronization.Keep(fields, Synchronization.History(amendment.Element()))
-            }
-            let expectedReceipt = J.Parse(J.Write(fields))
-            let existing = Find(run, expectedReceipt)
-            if existing.ValueKind != JsonValueKind.Undefined {
-                GitHubPathEvidence.Check(
-                    run.Text("repo"),
-                    J.Get(record, "policy"),
-                    J.Get(record, "approval"),
-                    run.Text("base"),
-                    run.Text("head_repo"),
-                    run.Text("commit")
-                )
-                SavePr(directory, run, existing)
-                return
-            }
-            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
-            if run.Text("commit") == "" {
-                if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
-                    throw Exception("Saved checkout HEAD changed")
-                }
-                Commands.Git(checkout, "add", "-A")
-                ProtectedPaths.Local(checkout, J.Get(record, "policy"), J.Get(record, "approval"), run.Text("base"))
-                Commands.Git(checkout, "diff", "--cached", "--check")
-                let patch = Commands.Git(checkout, "diff", "--cached", "--binary", run.Text("base"))
-                if patch == "" || patch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
-                    throw Exception("Saved patch changed. Inspect this run before publishing")
-                }
-                Commands.Git(
-                    checkout,
-                    "-c",
-                    "user.name=" + run.Text("donor"),
-                    "-c",
-                    "user.email=" + J.Get(run.Element(), "donor_id").ToString() + "+" + run.Text("donor") +
-                        "@users.noreply.github.com",
-                    "-c",
-                    "commit.gpgsign=false",
-                    "commit",
-                    "-m",
-                    J.Text(J.Get(record, "issue"), "title")
-                )
-                run.Fields["commit"] = Commands.Git(checkout, "rev-parse", "HEAD")
-                run.Save(directory)
-            }
-            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("commit") || Commands.Git(
-                checkout,
-                "status",
-                "--porcelain"
-            ) != "" {
-                throw Exception("Saved commit or checkout changed")
-            }
-            Commands.Git(checkout, "merge-base", "--is-ancestor", run.Text("base"), run.Text("commit"))
-            let committedPatch = Commands.Git(checkout, "diff", "--binary", run.Text("base"), run.Text("commit"))
-            if committedPatch + "\n" != File.ReadAllText(Path.Combine(directory, "changes.patch")) {
-                throw Exception("Canonical commit differs from the independently verified patch")
-            }
-            ProtectedPaths.Local(
-                checkout,
-                J.Get(record, "policy"),
-                J.Get(record, "approval"),
-                run.Text("base"),
-                run.Text("commit")
-            )
-            PublicSummary.Bind(run, committedPatch)
-            run.Save(directory)
-            let receipt = ContributionReceipt.Native(run, run.Text("commit"))
-            let values = map[string, string]{
-                "issue": run.Number("issue").ToString(),
-                "report": PrBody.Report(PrBody.ManagedReport(run, record)),
-                "donor": run.Text("donor"),
-                "model": PublicSummary.Identifier(run.Text("model")),
-                "effort": PublicSummary.Identifier(run.Text("effort")),
-                "seconds": run.Flag("recovered") ? "unknown (verification-only recovery: " + run.Number(
-                    "elapsed_seconds"
-                )
-                    .ToString() + ")": run.Number("elapsed_seconds").ToString(),
-                "base": run.Text("base"),
-                "policy": run.Text("policy_hash"),
-                "usage": PublicSummary.Usage(J.Get(run.Element(), "usage")),
-                "receipt": marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
-            }
-            var body = J.Text(record, "template")
-            body = PrBody.Render(body, values, J.Get(record, "policy"))
-            File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)
-            let publication = map[string, Object?]{
-                "title": J.Text(J.Get(record, "issue"), "title"),
-                "body": body,
-                "head": run.Text("donor") + ":" + run.Text("branch"),
-                "base": run.Text("base_branch"),
-                "draft": true,
-                "maintainer_can_modify": true
-            }
-            File.WriteAllText(Path.Combine(directory, "publication.json"), J.Write(publication) + "\n")
-            Terminal.Message("Publication content: " + Path.Combine(directory, "publication.json"))
-            let remote = GitHub.Api("repos/" + run.Text("head_repo") + "/git/ref/heads/" + run.Text("branch"))
-            let sha = J.Text(J.Get(remote, "object"), "sha")
-            if sha != run.Text("base") && sha != run.Text("commit") {
-                throw Exception("Remote claim changed. Refusing to overwrite it")
-            }
-            Publication.Push(checkout, run, run.Text("commit"))
-            ContributionClaim.Recheck(run)
-            let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
-            Match(run, pull, J.Parse(J.Write(receipt)))
-            SavePr(directory, run, pull)
         }
 
         internal func SavePr(directory string, run Data, pull JsonElement) {

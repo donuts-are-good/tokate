@@ -133,7 +133,7 @@ internal class TerminalOutput {
                 Path.Combine(saved, "run.json"),
                 Check.Map(
                     "version",
-                    1,
+                    2,
                     "repo",
                     "owner/project",
                     "issue",

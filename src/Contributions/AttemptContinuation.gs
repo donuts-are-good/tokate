@@ -6,8 +6,19 @@ import System.IO
 import System.Text.Json
 import System.Text.RegularExpressions
 
-internal class V2Continuation {
+internal class AttemptContinuation {
     shared {
+        internal func Has(run Data) bool -> run.Text("continuation_source") != ""
+
+        internal func Confirm(args Args, selection JsonElement) {
+            let confirmed = map[string, Object?]{}
+            for field in selection.EnumerateObject() {
+                confirmed[field.Name] = field.Value.Clone()
+            }
+            confirmed["source"] = "explicit continuation import"
+            DonorSelection.Confirm(args, J.Parse(J.Write(confirmed)))
+        }
+
         private func Id(value string) {
             var id Guid
             if !Guid.TryParseExact(value, "D", out id) || id.ToString("D") != value {
@@ -27,7 +38,7 @@ internal class V2Continuation {
         }
 
         internal func Location(directory string, run Data) {
-            if run.Number("version") == 2 && V1Continuation.Has(run) && Path.GetFullPath(directory) != Path.Combine(
+            if AttemptContinuation.Has(run) && Path.GetFullPath(directory) != Path.Combine(
                 Path.GetDirectoryName(run.Text("continuation_source")) ?? "",
                 run.Text("attempt")
             ) {
@@ -177,12 +188,14 @@ internal class V2Continuation {
 
         internal func Recheck(run Data, state CoordinationState) {
             let prior = J.Get(run.Element(), "continuation")
-            if !V1Continuation.Has(run) && prior.ValueKind == JsonValueKind.Undefined && !run.Fields.ContainsKey(
+            if !AttemptContinuation.Has(run) && prior.ValueKind == JsonValueKind.Undefined && !run.Fields.ContainsKey(
                 "continuation_manifest_sha256"
             ) {
                 return
             }
-            if !V1Continuation.Has(run) || run.Text("source") != "tokate" || run.Number("verification_reserve") < 1 ||
+            if !AttemptContinuation.Has(run) || run.Text("source") != "tokate" || run.Number(
+                "verification_reserve"
+            ) < 1 ||
                 !Regex
                 .IsMatch(run.Text("continuation_source_metadata_sha256"), "^[0-9a-f]{64}$") {
                 throw Exception("Saved continuation lost its explicit import identity or verification budget")
@@ -217,7 +230,7 @@ internal class V2Continuation {
         }
 
         internal func Source(directory string, run Data, record JsonElement) Data {
-            let source = Data.From(J.Parse(V1Continuation.Metadata(directory)))
+            let source = Data.From(J.Parse(ContinuationImport.Metadata(directory)))
             let state = source.Text("state")
             if source.Number("version") != 2 || source.Number("preparation_version") != 1 || source.Text(
                 "source"
@@ -287,7 +300,7 @@ internal class V2Continuation {
             }
             Predecessor(Provenance(source), run.Text("attempt"), J.Get(run.Element(), "tools"))
             Authority(live, Provenance(source))
-            Preparation.Source(Path.Combine(directory, "checkout"), source)
+            WorkspacePreparation.Source(Path.Combine(directory, "checkout"), source)
             let upstream = GitHub.Api("repos/" + run.Text("repo"))
             let head = GitHub.Api("repos/" + RepositoryIdentity.Repo(source.Text("head_repo")))
             let repoId = RepositoryIdentity.PositiveId(J.Get(upstream, "id"))

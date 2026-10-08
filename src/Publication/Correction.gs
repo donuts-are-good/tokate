@@ -62,9 +62,8 @@ internal class Correction {
         }
 
         internal func Completed(directory string, run Data) Dictionary[string, Object?] {
-            let version = run.Number("version")
-            if (version != 1 && version != 2) || (version == 2 && run.Text("source") != "tokate") {
-                throw Exception("Correction requires native v1 or managed v2 work; external work is excluded")
+            if run.Number("version") != 2 || run.Text("source") != "tokate" {
+                throw Exception("Correction requires a current managed contribution")
             }
             let state = run.Text("state")
             if run.Number("pr") != 0 || state == "published" {
@@ -90,11 +89,9 @@ internal class Correction {
 
         internal func Authority(directory string, run Data, requireArchive bool = false) JsonElement {
             let record = ContributionClaim.Recheck(run)
-            if run.Number("version") == 2 {
-                let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
-                if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
-                    throw Exception("Contribution already published")
-                }
+            let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
+            if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
+                throw Exception("Contribution already published")
             }
             let archive = Path.Combine(directory, "original-evidence")
             if requireArchive || Directory.Exists(archive) {
@@ -304,15 +301,11 @@ internal class Correction {
                     }
                     Exact(directory, run, saved, record)
                     Activate(directory, run, saved)
-                    if run.Number("version") == 1 {
-                        CorrectionPublication.PublishLocked(directory, run, saved, record)
-                    } else {
-                        Terminal.Message(
-                            "Correction already verified. Use submit --run " +
-                                directory +
-                                "; checks and inference were not repeated."
-                        )
-                    }
+                    Terminal.Message(
+                        "Correction already verified. Use submit --run " +
+                            directory +
+                            "; checks and inference were not repeated."
+                    )
                     return
                 }
                 if J.Get(saved.Element(), "publication").ValueKind == JsonValueKind.Object {
@@ -415,13 +408,7 @@ internal class Correction {
                     correction.Text("failure_reason") + " (" + correction.Text("failure_stage") + "): " + error.Message
                 )
             }
-            if run.Number("version") == 1 {
-                CorrectionPublication.PublishLocked(directory, run, correction, record)
-            } else {
-                Terminal.Message(
-                    "Exact corrected commit passed every original owner check. Use submit --run " + directory
-                )
-            }
+            Terminal.Message("Exact corrected commit passed every original owner check. Use submit --run " + directory)
         }
     }
 }

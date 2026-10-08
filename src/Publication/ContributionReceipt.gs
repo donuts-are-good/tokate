@@ -5,29 +5,6 @@ import System.Text.Json
 
 internal class ContributionReceipt {
     shared {
-        internal func Native(run Data, head string, version int32 = 1) Dictionary[string, Object?] {
-            let receipt = map[string, Object?]{
-                "version": version,
-                "repo": run.Text("repo"),
-                "issue": run.Number("issue"),
-                "donor": run.Text("donor"),
-                "approval": run.Text("approval"),
-                "head": head
-            }
-            if version == 1 {
-                receipt["model"] = run.Text("model")
-                receipt["effort"] = run.Text("effort")
-                receipt["seconds"] = run.Number("seconds")
-                receipt["network"] = run.Flag("network")
-                receipt["policy"] = run.Text("policy_hash")
-                if V1Continuation.Has(run) {
-                    receipt["predecessor"] = J.Get(run.Element(), "continuation")
-                    receipt["import_manifest_sha256"] = run.Text("continuation_manifest_sha256")
-                }
-            }
-            return receipt
-        }
-
         internal func Coordinated(
             repo string,
             issue int32,
@@ -60,7 +37,7 @@ internal class ContributionReceipt {
                 J.Text(J.Get(current, "outcome"), "head")
             )
             let correction = J.Get(J.Get(original, "metadata"), "correction")
-            V2Continuation.Keep(fields, J.Get(original, "metadata"))
+            AttemptContinuation.Keep(fields, J.Get(original, "metadata"))
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
             }

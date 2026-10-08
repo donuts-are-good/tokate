@@ -6,7 +6,7 @@ import System.Collections.Generic
 import System.IO
 import System.Text.Json
 
-internal class Preparation {
+internal class WorkspacePreparation {
     shared {
         internal func RunDirectory(args Args, id string) string {
             let root = Path.GetFullPath(args.Get("runs", RunStorage.Root()))
@@ -39,7 +39,7 @@ internal class Preparation {
         }
 
         internal func CheckIdentity(run Data) {
-            if run.Number("preparation_version") == 1 && !Identified(run) {
+            if run.Number("preparation_version") != 1 || !Identified(run) {
                 throw Exception("Saved preparation identity changed; import provenance cannot be removed or rebound")
             }
         }
@@ -52,11 +52,12 @@ internal class Preparation {
             if run.Text("attempt") != "" {
                 identity = Data.Hash(identity + ":" + run.Text("attempt"))
             }
-            return V1Continuation.Has(run) ? Data.Hash(
+            return AttemptContinuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
                 ) +
-                    (run.Number("version") == 2 ? ":" + run.Text("continuation_source_metadata_sha256"): "")
+                    ":" +
+                    run.Text("continuation_source_metadata_sha256")
             ): identity
         }
 
@@ -135,7 +136,7 @@ internal class Preparation {
         }
 
         internal func Complete(directory string, run Data) {
-            V2Continuation.Location(directory, run)
+            AttemptContinuation.Location(directory, run)
             let savedState = run.Text("state")
             let fields = run.Fields
             let failure = "prepare --run requires recorded pre-inference preparation for this contribution; old runs and coding cannot be adopted"
@@ -154,8 +155,8 @@ internal class Preparation {
                 throw Exception(failure)
             }
             let record = ContributionClaim.Recheck(run)
-            if V1Continuation.Has(run) && run.Text("continuation_phase") == "" {
-                V1Continuation.Capture(directory, run, record)
+            if AttemptContinuation.Has(run) && run.Text("continuation_phase") == "" {
+                ContinuationImport.Capture(directory, run, record)
             }
             let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")))
             if run.Fields.ContainsKey("preparation_repo_id") && J.Get(upstream, "id").ToString() != J.Get(
@@ -173,9 +174,9 @@ internal class Preparation {
             ContributionClaim.Recheck(run)
             CheckFork(run, upstream)
             CheckBranch(run)
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 Source(checkout, run)
-                V1Continuation.Import(directory, run, record)
+                ContinuationImport.Import(directory, run, record)
             } else {
                 Clean(checkout, run)
             }
@@ -189,7 +190,7 @@ internal class Preparation {
         }
 
         internal func Ready(directory string, run Data) {
-            V2Continuation.Location(directory, run)
+            AttemptContinuation.Location(directory, run)
             if !run.Flag("preparation_complete") || !Identified(run) {
                 throw Exception("Preparation is incomplete; use prepare --run " + directory + " before work")
             }
@@ -200,12 +201,12 @@ internal class Preparation {
             CheckFork(run, upstream)
             CheckBranch(run)
             let checkout = Path.Combine(directory, run.Text("source") == "external" ? "coding": "checkout")
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 Source(checkout, run)
                 if run.Text("continuation_phase") != "imported" {
                     throw Exception("Continuation import is incomplete; use prepare --run " + directory)
                 }
-                V1Continuation.Check(directory, run, ContributionClaim.Recheck(run))
+                ContinuationImport.Check(directory, run, ContributionClaim.Recheck(run))
             } else {
                 Clean(checkout, run)
             }
@@ -407,7 +408,7 @@ internal class Preparation {
                     if run.Text("attempt") == "" {
                         Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
                     }
-                    ContributionClaim.RecheckV2(run)
+                    ContributionClaim.Recheck(run)
                     CheckBranch(run)
                     let pulls = J.Items(
                         GitHub.Api(
@@ -565,10 +566,10 @@ internal class Preparation {
             let checkout = Path.Combine(directory, name)
             let staging = Path.Combine(directory, name + ".staging")
             if Directory.Exists(checkout) || File.Exists(checkout) || FileInfo(checkout).LinkTarget != nil {
-                if V1Continuation.Has(run) &&
+                if AttemptContinuation.Has(run) &&
                     (run.Text("continuation_phase") == "importing" || run.Text("continuation_phase") == "imported") {
                     Source(checkout, run)
-                    V1Continuation.Check(
+                    ContinuationImport.Check(
                         directory,
                         run,
                         ContributionClaim.Recheck(run),

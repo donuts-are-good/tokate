@@ -56,7 +56,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "EffortDeclarations",
                 "ManagedModelPolicy",
                 "ModelPolicyAuthority",
-                "Compatibility",
                 "ProtectedExternal",
                 "ProtectedCoordinator",
                 "ProtectedManaged",
@@ -119,11 +118,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                     }
                     case "ModelPolicyAuthority" {
                         ModelPolicyAuthority(binary)
-                        Console.WriteLine("PASS V2 " + name)
-                        continue
-                    }
-                    case "Compatibility" {
-                        Compatibility(binary)
                         Console.WriteLine("PASS V2 " + name)
                         continue
                     }
