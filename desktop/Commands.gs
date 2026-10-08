@@ -124,7 +124,7 @@ class CommandRunner {
                     if finished {
                         break
                     }
-                    if elapsed.Elapsed.TotalSeconds >= seconds && result.Error == "" {
+                    if seconds > 0 && elapsed.Elapsed.TotalSeconds >= seconds && result.Error == "" {
                         result.Error = "Command timed out. Effects may have occurred. Inspect status before repeating it."
                         Stop()
                     }

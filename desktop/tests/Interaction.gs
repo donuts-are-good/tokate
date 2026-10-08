@@ -65,6 +65,21 @@ func Settle(host TestHost) {
     }
 }
 
+func FindText(node AccessibilityNode?, text string) bool {
+    guard let item = node else {
+        return false
+    }
+    if item.Role == AccessibilityRole.Text && (item.Name.Contains(text) || item.Value.Contains(text)) {
+        return true
+    }
+    for child in item.Children {
+        if FindText(child, text) {
+            return true
+        }
+    }
+    return false
+}
+
 func Press(window Window, key Key, ctrl bool = false) {
     window.PlatformInput.KeyPress(key, KeyModifiers{Ctrl: ctrl})
     window.PlatformInput.KeyRelease(key, KeyModifiers{Ctrl: ctrl})
@@ -115,17 +130,19 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         Script(
             fixture,
             "tokate",
-            "case \"$1\" in\npolicy) data='{\"policy\":{}}';;\ndefaults) data='{\"profiles\":{},\"default\":{\"harness\":\"codex\",\"model\":\"obsolete-default\",\"effort\":\"low\"}}';;\nselect) data='{\"harness\":\"codex\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}';;\n*) exit 1;;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"status\":\"success\",\"exit_code\":0,\"data\":%s}' \"$1\" \"$$data\"\n"
+            "case \"$1\" in\npolicy) data='{\"policy\":{\"version\":2,\"allow_unlimited\":true,\"max_seconds\":3600}}';;\ndefaults) data='{\"profiles\":{},\"default\":{\"harness\":\"codex\",\"model\":\"obsolete-default\",\"effort\":\"low\"}}';;\nselect) data='{\"harness\":\"codex\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}';;\n*) exit 1;;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"status\":\"success\",\"exit_code\":0,\"data\":%s}' \"$1\" \"$$data\"\n"
         )
         let commandPath = Path.Combine(fixture, "tokate")
-        let claim = "claim) printf 'Waiting for coordinator\\n' >&2; for i in $$(seq 1 200); do [ -e '" +
+        let claim = "claim) printf '%s\\n' \"$$@\" > '" +
+            fixture +
+            "/claim-args'; printf 'Waiting for coordinator\\n' >&2; for i in $$(seq 1 200); do [ -e '" +
             fixture +
             "/release-claim' ] && break; sleep .05; done; data='{\"run\":\"" +
             fixture +
             "/run\"}';;\n"
         let status = "status) data='{\"run\":\"" +
             fixture +
-            "/run\",\"state\":\"claimed\",\"repo\":\"owner/repo\",\"issue\":278,\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"seconds\":60}';;\n"
+            "/run\",\"state\":\"claimed\",\"repo\":\"owner/repo\",\"issue\":278,\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"seconds\":1800,\"verification_reserve\":1800,\"unlimited\":true,\"coding_seconds\":null}';;\n"
         let work = "work) trap 'touch \"" +
             fixture +
             "/cancelled\"; exit 0' INT; printf 'Preparing checkout\\n' >&2; for i in $$(seq 1 200); do sleep .05; done;;\n"
@@ -189,6 +206,20 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             Find(adapter.Root, AccessibilityRole.Text, "Command completed.") == nil,
             "Routine completion text remains"
         )
+        Activate(window, adapter, "Change details")
+        Settle(host)
+        Activate(window, adapter, "Unlimited coding time", AccessibilityRole.Checkbox)
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Coding minutes") == nil,
+            "Unlimited still requests coding minutes"
+        )
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Verification minutes") != nil,
+            "Unlimited lost its verification limit"
+        )
+        Activate(window, adapter, "Check selection & review")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Review")
         Activate(window, adapter, "Reserve contribution")
         Settle(host)
         Activate(window, adapter, "Confirm")
@@ -210,10 +241,18 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             Find(adapter.Root, AccessibilityRole.Button, "Switch to daylight") != nil,
             "Theme control is blocked during reservation"
         )
+        let claimed = File.ReadAllText(Path.Combine(fixture, "claim-args"))
+        Require(
+            claimed.Contains("--unlimited\n") && !claimed.Contains("--seconds\n") && claimed.Contains(
+                "--verification-reserve\n1800\n"
+            ),
+            "Unlimited claim arguments do not match the CLI"
+        )
         File.WriteAllText(Path.Combine(fixture, "release-claim"), "release")
         AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation")
         Activate(window, adapter, "Start donation")
         Settle(host)
+        Require(FindText(adapter.Root, "Coding: Unlimited"), "Saved work lost the unlimited coding choice")
         Activate(window, adapter, "Confirm")
         AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
         AwaitControl(host, adapter, AccessibilityRole.Text, "Command output", "Preparing checkout")
@@ -312,6 +351,8 @@ func Main() {
         literal.Error == "" && TextOf(literal.Value, "value") == "$(literal); *",
         "Command arguments were not literal"
     )
+    let unlimitedResult = CommandRunner().Run([]string{"-c", "sleep .2; printf '{}'"}, "/bin/sh", seconds: 0)
+    Require(unlimitedResult.Error == "" && unlimitedResult.ExitCode == 0, "Unlimited command expired")
     let large = CommandRunner().Run([]string{"-c", "1048577", "/dev/zero"}, "/usr/bin/head")
     Require(large.Error.Contains("display limit"), "Oversized command output was not rejected")
     let marker = Path.Combine(Path.GetTempPath(), "tokate-gui-cancel-" + Guid.NewGuid().ToString("N"))

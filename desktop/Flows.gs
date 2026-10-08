@@ -24,6 +24,7 @@ partial class Desktop {
     private var profile string = ""
     private var profiles JsonElement
     private var coding string = "30"
+    private var unlimited bool
     private var verification string = "30"
     private var network bool
     private var selection JsonElement
@@ -52,6 +53,7 @@ partial class Desktop {
     private func LoadProject() {
         try {
             selectedRepository = Repository(repository)
+            unlimited = false
             let parts = repository.Trim().TrimEnd('/').Split('/')
             let requested = parts.Length > 2 && parts[parts.Length - 2] == "issues" ? parts[parts.Length - 1]: ""
             if requested != "" && (!int32.TryParse(requested, out var number) || number <= 0) {
@@ -207,20 +209,30 @@ partial class Desktop {
         return result
     }
 
+    private func AllowsUnlimited() bool -> Number(policy, "version") == 2 && Field(
+        policy,
+        "allow_unlimited"
+    ).ValueKind == JsonValueKind.True
+
     private func BudgetSeconds() int32 {
         var minutes int32
         var reserve int32
-        if !int32.TryParse(coding, out minutes) || !int32.TryParse(verification, out reserve) ||
-            minutes < 1 ||
-            reserve < 1 ||
-            minutes > 1440 ||
-            reserve > 1440 {
-            throw Exception("Use whole minutes from 1 to 1440 for both time limits.")
+        if !int32.TryParse(verification, out reserve) || reserve < 1 || reserve > 1440 {
+            throw Exception("Use whole verification minutes from 1 to 1440.")
         }
-        let total = (minutes + reserve) * 60
+        if unlimited && !AllowsUnlimited() {
+            throw Exception("The owner does not allow unlimited coding.")
+        }
+        if !unlimited && (!int32.TryParse(coding, out minutes) || minutes < 1 || minutes > 1440) {
+            throw Exception("Use whole coding minutes from 1 to 1440.")
+        }
+        let total = (unlimited ? reserve: minutes + reserve) * 60
         let maximum = Number(policy, "max_seconds")
-        if maximum > 0 && total > maximum {
-            throw Exception("The combined time exceeds the owner's limit of " + (maximum / 60).ToString() + " minutes.")
+        if total > 86400 || (maximum > 0 && total > maximum) {
+            throw Exception(
+                "The time budget exceeds the limit of " +
+                    (maximum > 0 ? Math.Min(maximum, 86400) / 60: 1440).ToString() + " minutes."
+            )
         }
         return total
     }
@@ -250,11 +262,16 @@ partial class Desktop {
     private func Reserve() {
         try {
             let args = SelectionArguments("claim")
+            let seconds = BudgetSeconds()
+            if unlimited {
+                args.Add("--unlimited")
+            } else {
+                args.Add("--seconds")
+                args.Add(seconds.ToString())
+            }
             for argument in[]string{
                 "--issue",
                 issue,
-                "--seconds",
-                BudgetSeconds().ToString(),
                 "--verification-reserve",
                 (int32.Parse(verification) * 60).ToString()
             } {
@@ -301,8 +318,8 @@ partial class Desktop {
         " / " +
         effort +
         "\nCoding: " +
-        coding +
-        " minutes\nVerification: " +
+        (unlimited ? "Unlimited": coding + " minutes") +
+        "\nVerification: " +
         verification +
         " minutes\nProject network: " +
         (network ? "allowed": "offline")
@@ -483,28 +500,41 @@ partial class Desktop {
                     )
                 )
             }
-            body.Children.Add(
-                Row(
-                    []Blob{
-                        Entry(
-                            "Coding minutes",
-                            coding,
-                            value -> {
-                                coding = value
-                            },
-                            width: 250
-                        ),
-                        Entry(
-                            "Verification minutes",
-                            verification,
-                            value -> {
-                                verification = value
-                            },
-                            width: 270
-                        ),
-                    }
+            if AllowsUnlimited() {
+                body.Children.Add(
+                    Check(
+                        "Unlimited coding time",
+                        unlimited,
+                        value -> {
+                            unlimited = value
+                        }
+                    )
+                )
+            }
+            let budgets = List[Blob]()
+            if !unlimited {
+                budgets.Add(
+                    Entry(
+                        "Coding minutes",
+                        coding,
+                        value -> {
+                            coding = value
+                        },
+                        width: 250
+                    )
+                )
+            }
+            budgets.Add(
+                Entry(
+                    "Verification minutes",
+                    verification,
+                    value -> {
+                        verification = value
+                    },
+                    width: 270
                 )
             )
+            body.Children.Add(Row(budgets.ToArray()))
             body.Children.Add(
                 Check(
                     "Allow project commands to use the network",
@@ -644,14 +674,15 @@ partial class Desktop {
         var description = "Run " + command + " for this saved contribution."
         if command == "work" {
             args.Add("--yes")
-            seconds = Math.Clamp(Number(run, "seconds") + 600, 600, 87000)
+            let unbounded = Field(run, "unlimited").ValueKind == JsonValueKind.True
+            seconds = unbounded ? 0: Math.Clamp(Number(run, "seconds") + 600, 600, 87000)
             description = "Start inference with the recorded model and permissions.\nModel: " +
                 TextOf(run, "model") +
                 " / " +
                 TextOf(run, "effort") +
                 "\nCoding: " +
-                (Number(run, "coding_seconds") / 60).ToString() +
-                " minutes\nVerification: " +
+                (unbounded ? "Unlimited": (Number(run, "coding_seconds") / 60).ToString() + " minutes") +
+                "\nVerification: " +
                 (Number(run, "verification_reserve") / 60).ToString() +
                 " minutes\nProject network: " +
                 (Field(run, "network").ValueKind == JsonValueKind.True ? "allowed": "offline")
