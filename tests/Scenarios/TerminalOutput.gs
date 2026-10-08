@@ -111,43 +111,37 @@ internal class TerminalOutput {
                 []string{},
                 flow.Temp,
                 20,
-                "repository\nowner/project\nhelp\nwork\nstatus\nissue\n0\nstatus\nissue\nhttps://github.com/owner/project/issues/1\n" +
-                    "status\nissue\nhttps://github.com/owner/project/issues/0\nstatus\nissue\n" +
-                    "https://github.com/owner/project/issues/999999999999\nstatus\nissue\n" +
-                    "https://github.com/other/project/issues/1\nstatus\nissue\nowner/project\nstatus\nrefresh\npolicy\nexit\n"
+                "?\n1\nhttps://github.com/owner/project/issues/0\nowner/project\nq\n"
             )
             Check.Success(result)
             Plain(result.Output)
+            Check.Contains(result.Output, "Donate AI time")
+            Check.Contains(result.Output, "Set up my project")
+            Check.Contains(result.Output, "Continue existing work")
             Check.Contains(result.Output, "[inferred/project]")
-            Check.Contains(result.Output, "tokate> ")
-            Check.Contains(result.Output, "owner/project #1")
-            Check.Contains(result.Output, "other/project #1")
             Check.Contains(result.Output, "positive number")
+            Check.Contains(result.Output, "[red]literal[/]control")
             Check.That(!result.Output.Contains('\ufffd'), "Terminal summary split a Unicode surrogate pair")
             flow.Reload()
             var reads int32
-            var corrected int32
             for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                 Check.That(Check.Text(call["method"]) == "GET", "Interactive menu wrote to GitHub")
                 let path = Check.Text(call["path"])
                 Check.That(!path.Contains("inferred/project"), "Inferred repository was used before confirmation")
-                if path == "repos/owner/project" {
-                    reads++
-                }
-                if path == "repos/other/project" {
-                    corrected++
-                }
+                Check.That(
+                    !path.Contains("/pulls") && !path.Contains("/check-runs"),
+                    "Issue selection fetched unrelated PR or check histories"
+                )
+                reads++
             }
-            Check.That(reads == 5 && corrected == 1, "Cached status/help or invalid context performed remote reads")
+            Check.That(reads == 1, "Issue selection should read only the approved issue index")
             flow.NoInference()
             Save("20-interactive", result.Output)
             flow.Git("-C", flow.Temp.Root, "remote", "add", "upstream", "https://github.com/other/project.git")
             flow.ResetTraffic()
-            let canceled = Pty(binary, []string{}, flow.Temp, 40, "repository\nexit\nexit\n")
+            let canceled = Pty(binary, []string{}, flow.Temp, 40, "1\nq\n")
             Check.Success(canceled)
-            Check.Contains(canceled.Output, "Ambiguous local remotes")
-            Check.Contains(canceled.Output, "repo> ")
-            Check.That(!canceled.Output.Contains("tokate> "), "Canceled repository selection entered the menu")
+            Check.That(!canceled.Output.Contains("Ambiguous"), "Optional inference displayed a command-line error")
             flow.Reload()
             Check.That((flow.State["api_calls"]?.AsArray().Count ?? 0) == 0, "Canceled selection read GitHub")
             flow.NoInference()

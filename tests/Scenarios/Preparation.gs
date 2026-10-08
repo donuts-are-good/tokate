@@ -852,17 +852,18 @@ internal class PreparationChecks {
             flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
             let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
             let args = []string{"work", "owner/project"}
-            let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "\n")
+            let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "q\n")
             Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
-            Check.Contains(cancelled.Output, "Issue number")
+            Check.Contains(cancelled.Output, "Choose an issue")
             Check.Contains(cancelled.Output, "Cancelled")
-            let declined = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\nready\n60\n20\nn\nn\n")
+            let declined = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
             Check.That(declined.Code == 1, declined.Output + declined.Error)
-            Check.Contains(declined.Output, "Task: owner/project #1")
-            Check.Contains(declined.Output, "60 seconds total; 20 reserved for verification")
-            Check.Contains(declined.Output, "Command network: denied")
-            Check.Contains(declined.Output, "Donation was not confirmed")
-            Check.That(!declined.Output.Contains("rejected:"), "Guided menu offered an owner-rejected profile")
+            Check.Contains(declined.Output, "Review donation")
+            Check.Contains(declined.Output, "owner/project #1")
+            Check.Contains(declined.Output, "1 minutes")
+            Check.Contains(declined.Output, "Project commands offline")
+            Check.Contains(declined.Output, "Cancelled")
+            Check.That(!declined.Output.Contains("rejected |"), "Guided menu offered an owner-rejected profile")
             flow.Reload()
             Check.That(
                 flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,
@@ -870,16 +871,16 @@ internal class PreparationChecks {
             )
             Check.That(!Directory.Exists(runRoot), "Cancelled wizard created a run")
             flow.NoInference()
-            let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "owner\nexit\nexit\n")
+            let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
             Check.Success(owner)
-            Check.Contains(owner.Output, "repo> ")
+            Check.Contains(owner.Output, "Project")
             Check.That(
                 !Directory.Exists(Path.Combine(flow.Temp.Root, ".github")),
                 "Cancelled owner setup wrote configuration"
             )
             flow.Call([]string{"work", "owner/project", "--non-interactive"}, 1)
             flow.Call([]string{"work", "owner/project", "--json"}, 1)
-            let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\nready\n60\n20\nn\ny\n")
+            let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
             Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
             let runs = Directory.GetDirectories(runRoot)
             Check.That(runs.Length == 1, "Guided claim did not use the selected state root")
@@ -887,7 +888,7 @@ internal class PreparationChecks {
             let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(pending["state"]) == "claim_pending", "Guided work lost pending state")
             Check.That(
-                Check.Text(pending["seconds"]) == "60" && Check.Text(pending["verification_reserve"]) == "20",
+                Check.Text(pending["seconds"]) == "120" && Check.Text(pending["verification_reserve"]) == "60",
                 "Guided budget changed"
             )
             flow.Reload()
@@ -895,9 +896,12 @@ internal class PreparationChecks {
             Check.That(Check.Text(flow.State["request_count"]) == "1", "Guided work posted more than once")
             flow.NoInference()
             test.Coordinate(PostedEvent(test, comment))
-            let unavailable = TerminalOutput.Pty(binary, args, flow.Temp, 40, "\n")
+            let unavailable = TerminalOutput.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
             Check.That(unavailable.Code == 1, unavailable.Output + unavailable.Error)
-            Check.Contains(unavailable.Output.Replace("\r\n", " ").Replace("\n", " "), "No available approved issues")
+            Check.Contains(
+                unavailable.Output.Replace("\r\n", " ").Replace("\n", " "),
+                "An unexpired reservation already owns"
+            )
             flow.NoInference()
             flow.NoPr()
         }

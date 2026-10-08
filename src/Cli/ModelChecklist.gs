@@ -20,7 +20,7 @@ internal class ModelChoice {
     internal init(model string, effort string, label string, suggested bool = false) {
         Model = model
         Effort = effort
-        Label = label + " | " + model + " / " + effort
+        Label = effort == "" ? label: label + " | " + model + " / " + effort
         Suggested = suggested
     }
 }
@@ -35,6 +35,8 @@ internal class ModelChecklist {
     private var Cursor int32
     private var Focus int32
     private var Redraw bool = true
+    private var Single bool
+    private var SelectedIndex int32 = -1
 
     private func Add(model string, effort string, label string, suggested bool = false) {
         for choice in Choices {
@@ -126,6 +128,14 @@ internal class ModelChecklist {
     }
 
     private func Plain() string {
+        if Single {
+            SelectedIndex = WizardScreen.Choose(
+                "Your coding tool",
+                "Choose one profile. Availability is unknown.",
+                Choices.ConvertAll(choice -> choice.Label).ToArray()
+            ) - 1
+            return ""
+        }
         while true {
             Terminal.Message("Allowed models (availability unknown):", error: true)
             var index int32
@@ -238,15 +248,19 @@ internal class ModelChecklist {
                     rows.Add("Enlarge terminal; Esc cancels")
                     cursorColumn = 1
                 } else {
-                    rows.Add("--< tokate | Allowed models")
-                    rows.Add(count.ToString() + " selected | availability unknown")
+                    rows.Add(Single ? "tokate / Your coding tool": "tokate / Allowed models")
+                    rows.Add(
+                        (Single ? "Choose one profile": count.ToString() + " selected") + " | availability unknown"
+                    )
                     rows.Add("Search: " + Search.Substring(start))
-                    rows.Add("Arrows move; Space toggles; Enter accepts")
-                    rows.Add("F2 adds a model; Esc cancels; Ctrl+L redraws")
-                    for index in Focus ... visible.Count {
+                    rows.Add(Single ? "Arrows move; Enter selects": "Arrows move; Space toggles; Enter accepts")
+                    rows.Add(
+                        Single ? "Esc Home; Ctrl+C Quit; Ctrl+L redraw": "F2 adds a model; Esc Home; Ctrl+L redraw"
+                    )
+                    for index in Math.Max(0, Focus - Math.Max(0, (height - 7) / 2)) ... visible.Count {
                         let choice = visible[index]
                         var remaining = (index == Focus ? "> ": "  ") +
-                            (choice.Selected ? "[x] ": "[ ] ") +
+                            (Single ? "": choice.Selected ? "[x] ": "[ ] ") +
                             choice.Label +
                             (choice.Suggested ? " (suggested)": "")
                         while remaining != "" && rows.Count < height - 1 {
@@ -262,14 +276,25 @@ internal class ModelChecklist {
                         }
                     }
                     if visible.Count == 0 {
-                        rows.Add("No matching models. F2 adds one.")
+                        rows.Add(
+                            Single ? "No matching profiles. Change your search.": "No matching models. F2 adds one."
+                        )
                     }
                 }
-                let update = StringBuilder(full ? "\x1b[0m\x1b[2J": "")
+                let update = StringBuilder(full ? WizardScreen.Color("paper") + "\x1b[2J": "")
                 for index in 0 ... Math.Min(height, Math.Max(rows.Count, full ? 0: previous.Length)) {
                     let line = index < rows.Count ? Crop(rows[index], width - 1): ""
                     if full || index >= previous.Length || line != previous[index] {
-                        update.Append("\x1b[" + (index + 1).ToString() + ";1H\x1b[0m\x1b[2K" + line)
+                        update.Append(
+                            "\x1b[" + (index + 1).ToString() + ";1H" + WizardScreen.Color("paper") +
+                                "\x1b[2K" +
+                                WizardScreen.Color(
+                                index == 0 ? "gold": index == 1 || index == 3 || index == 4 ? "muted": line.StartsWith(
+                                    "> "
+                                ) ? "sage": "ink"
+                            ) +
+                                line
+                        )
                     }
                     if index < rows.Count {
                         rows[index] = line
@@ -291,16 +316,25 @@ internal class ModelChecklist {
                 }
                 let key = Console.ReadKey(true)
                 let control = (key.Modifiers & ConsoleModifiers.Control) != 0
-                if key.Key == ConsoleKey.Escape || (control && key.Key == ConsoleKey.C) {
-                    throw Exception("Setup cancelled")
+                if key.Key == ConsoleKey.Escape {
+                    throw WizardHome()
+                }
+                if control && (key.Key == ConsoleKey.C || key.Key == ConsoleKey.D) {
+                    throw OperationCanceledException("Cancelled")
                 }
                 if small {
                     continue
                 }
                 if key.Key == ConsoleKey.Enter {
+                    if Single {
+                        if visible.Count == 0 {
+                            continue
+                        }
+                        SelectedIndex = Choices.IndexOf(visible[Focus])
+                    }
                     return false
                 }
-                if key.Key == ConsoleKey.F2 {
+                if key.Key == ConsoleKey.F2 && !Single {
                     return true
                 }
                 if control && key.Key == ConsoleKey.L {
@@ -309,7 +343,7 @@ internal class ModelChecklist {
                     Focus = Math.Max(0, Focus - 1)
                 } else if key.Key == ConsoleKey.DownArrow {
                     Focus = Math.Min(visible.Count - 1, Focus + 1)
-                } else if key.Key == ConsoleKey.Spacebar && visible.Count > 0 {
+                } else if key.Key == ConsoleKey.Spacebar && visible.Count > 0 && !Single {
                     visible[Focus].Selected = !visible[Focus].Selected
                 } else if key.Key == ConsoleKey.LeftArrow {
                     Cursor = Before(Cursor)
@@ -342,8 +376,21 @@ internal class ModelChecklist {
         }
     }
 
+    shared {
+        internal func Pick(labels[]string) int32 {
+            let picker = ModelChecklist{Single: true}
+            for i in 0 ... labels.Length {
+                picker.Choices.Add(ModelChoice(i.ToString(), "", labels[i]))
+            }
+            picker.Run()
+            return picker.SelectedIndex
+        }
+    }
+
     internal func Run() string {
-        Discover()
+        if !Single {
+            Discover()
+        }
         if Terminal.Plain || Environment.GetEnvironmentVariable("TERM") == "dumb" ||
             Console.IsInputRedirected ||
             Console.IsErrorRedirected ||

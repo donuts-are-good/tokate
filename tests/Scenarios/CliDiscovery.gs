@@ -331,6 +331,28 @@ internal class CliDiscovery {
             )
             Check.Success(picker)
             Console.Write(picker.Output)
+            let previousToken = flow.Temp.Env["GH_TOKEN"]
+            flow.Temp.Env["GH_TOKEN"] = "fixture-owner"
+            let guided = TerminalOutput.Pty(
+                binary,
+                []string{},
+                flow.Temp,
+                80,
+                "2\nowner/project\n1\n1\n/usr/bin/true\n\nverify\n2\n2\n10\n1\nq\n"
+            )
+            flow.Temp.Env["GH_TOKEN"] = previousToken
+            Check.Success(guided)
+            Check.Contains(guided.Output, "Review project setup")
+            Check.That(File.Exists(Path.Combine(flow.Temp.Root, ".github/tokate.json")), guided.Output + guided.Error)
+            let guidedPolicy = Check.Json(File.ReadAllText(Path.Combine(flow.Temp.Root, ".github/tokate.json")))
+            Check.That(
+                Check.Text(guidedPolicy["max_seconds"]) == "600" && Check.Text(
+                    guidedPolicy["eligibility"]
+                ) == "trusted" &&
+                    Check.Text(guidedPolicy["model_policy"]) == "unrestricted" &&
+                    guidedPolicy["verification"]?.ToJsonString() == "[[\"/bin/sh\",\"-c\",\"/usr/bin/true\"]]",
+                "Accepted owner workflow changed the reviewed policy"
+            )
             flow.NoInference()
             flow.NoPr()
             Console.WriteLine(
@@ -804,21 +826,16 @@ internal class CliDiscovery {
             File.WriteAllText(Path.Combine(oversized, "run.json"), String('x', 1024 * 1024 + 1))
             Directory.CreateSymbolicLink(Path.Combine(root, "linked"), first)
             let command = []string{"-q", "-e", "-c", "exec '" + executable.Replace("'", "'\"'\"'") + "'", "/dev/null"}
-            let selected = TestProcess.Run(
-                "/usr/bin/script",
-                command,
-                temp.Env,
-                input: "saved\n99\n1\nsaved\n2\nexit\n"
-            )
+            let selected = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\n99\n1\n3\n3\n2\nq\n")
             Check.Success(selected)
             Check.Contains(selected.Output, "a first")
             Check.Contains(selected.Output, "b second")
-            Check.Contains(selected.Output, "Skipped unreadable or invalid entries: 3")
-            Check.Contains(selected.Output, "Choose one of the listed numbers.")
-            Check.Contains(selected.Output, "tokate work")
-            let last = selected.Output.Substring(selected.Output.LastIndexOf("Donor run"))
-            Check.Contains(last, "tokate submit")
-            Check.That(!last.Contains("tokate work"), "Saved selection retained the previous run action")
+            Check.Contains(selected.Output, "Unreadable entries skipped: 3")
+            Check.Contains(selected.Output, "Choose a number from 1 to 2.")
+            Check.Contains(selected.Output, "Start reserved donation")
+            let last = selected.Output.Substring(selected.Output.LastIndexOf("Continue contribution"))
+            Check.Contains(last, "Submit verified work")
+            Check.That(!last.Contains("Start reserved donation"), "Saved selection retained the previous run action")
             Check.That(!selected.Output.Contains("\u001b[31m"), "Saved metadata injected terminal controls")
             Check.That(
                 !selected.Output.Contains("repo> ") && !selected.Output.Contains("Missing tools"),
@@ -835,7 +852,7 @@ internal class CliDiscovery {
                 "Saved inspection created execution artifacts"
             )
             Directory.Delete(second, true)
-            let cancelled = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\n\nexit\n")
+            let cancelled = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\nh\nq\n")
             Check.Success(cancelled)
             Check.That(!cancelled.Output.Contains("Donor run"), "Only remaining contribution was selected implicitly")
             let stateHome = Path.Combine(temp.Root, "new state")
@@ -843,25 +860,25 @@ internal class CliDiscovery {
             Directory.CreateDirectory(current)
             File.WriteAllText(Path.Combine(current, "run.json"), record.ToJsonString())
             temp.Env["XDG_STATE_HOME"] = stateHome
-            let combined = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\n\nexit\n")
+            let combined = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\nh\nq\n")
             Check.Success(combined)
-            Check.Contains(combined.Output, "1)")
-            Check.Contains(combined.Output, "2)")
+            Check.Contains(combined.Output, "1  ")
+            Check.Contains(combined.Output, "2  ")
             Check.Contains(combined.Output.Replace("\r\n", " ").Replace("\n", " "), "previous storage")
             Check.That(Check.Hash(Path.Combine(first, "run.json")) == firstBytes, "XDG discovery migrated old work")
             temp.Env.Remove("XDG_STATE_HOME")
             record["model"] = JsonValue.Create(String('x', 257))
             File.WriteAllText(Path.Combine(first, "run.json"), record.ToJsonString())
-            let empty = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\nexit\n")
+            let empty = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\nq\n")
             Check.Success(empty)
-            Check.Contains(empty.Output, "No readable saved contributions.")
+            Check.Contains(empty.Output, "No readable saved contributions were found.")
             Check.That(!empty.Output.Contains("Saved contribution number"), "Empty list requested a selection")
             for index in 0 ... 130 {
                 Directory.CreateDirectory(Path.Combine(root, "extra-" + index.ToString()))
             }
-            let bounded = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "saved\n\nexit\n")
+            let bounded = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\nh\nq\n")
             Check.Success(bounded)
-            Check.Contains(bounded.Output, "Only the first 128 entries were inspected")
+            Check.Contains(bounded.Output, "Showing the first 128 inspected entries.")
             Console.WriteLine(
                 "PASS offline saved contribution selection, cancellation, invalid and linked metadata, bounded discovery, private state preservation and action reset"
             )

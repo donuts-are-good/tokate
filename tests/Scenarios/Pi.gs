@@ -123,6 +123,21 @@ internal class PiChecks {
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
             Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            File.Delete(Path.Combine(flow.Bin, "pi"))
+            File.WriteAllText(Path.Combine(flow.Bin, "pi"), "#!/bin/sh\nexit 77\n")
+            File.SetUnixFileMode(
+                Path.Combine(flow.Bin, "pi"),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            let npm = Path.Combine(flow.Bin, "npm")
+            File.WriteAllText(
+                npm,
+                "#!/bin/sh\n[ \"$$1\" = root ] && [ \"$$2\" = --global ] || exit 78\nprintf '%s\\n' '" + root + "'\n"
+            )
+            File.SetUnixFileMode(npm, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            File.WriteAllText(npm, "#!/bin/sh\nexit 79\n")
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Cannot locate the Pi SDK")
             flow.NoInference()
             flow.NoPr()
             Console.WriteLine(

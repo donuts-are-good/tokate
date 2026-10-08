@@ -13,11 +13,24 @@ internal class PiHarness {
     shared {
         private func ManagedRuntime(cli string, args Args) string {
             let agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
-            if cli != Path.Combine(agent, "bin/pi") {
-                throw Exception("Unsupported pi executable layout; provide --pi-root and --node explicitly")
+            let markerPath = Path.Combine(agent, "install/managed-install.json")
+            if cli != Path.Combine(agent, "bin/pi") ||
+                (!File.Exists(markerPath) && FileInfo(markerPath).LinkTarget == nil) {
+                let npm = Startup.Find("npm")
+                if npm != "" {
+                    let result = Commands.Run(npm, []string{"root", "--global"}, seconds: 5)
+                    let root = result.Output.Trim()
+                    if result.Code == 0 && !result.Truncated && Path.IsPathFullyQualified(root) && File.Exists(
+                        Path.Combine(root, "@earendil-works/pi-coding-agent/package.json")
+                    ) {
+                        return root
+                    }
+                }
+                throw Exception(
+                    "Cannot locate the Pi SDK from this launcher. Select its installed node_modules directory with --pi-root."
+                )
             }
             let install = LocalPaths.DirectoryPath(Path.Combine(agent, "install"))
-            let markerPath = Path.Combine(install, "managed-install.json")
             let versionPath = Path.Combine(install, "current-version")
             if FileInfo(markerPath).LinkTarget != nil || FileInfo(versionPath).LinkTarget != nil {
                 throw Exception("Pi installation metadata must be regular files")
