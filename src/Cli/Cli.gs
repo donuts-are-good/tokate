@@ -20,6 +20,12 @@ internal class CliOption {
     }
 
     internal func Describe(command string) string {
+        if (command == "init" || command == "coordinator-setup") && Name == "yes" {
+            return "Apply the reviewed configuration files; no inference"
+        }
+        if (command == "init" || command == "coordinator-setup") && Name == "non-interactive" {
+            return "Never prompt; supply missing choices explicitly; preview unless --yes is given"
+        }
         if command == "external" && Name == "seconds" {
             return "Separate positive verification budget, at most the owner limit; required only for correction"
         }
@@ -119,7 +125,7 @@ internal class Cli {
                 "Whitelist map of exact models to effort arrays; absent declares no effort control"
             ),
             CliOption(
-                "tools",
+                "allowed-tools",
                 "TOOLS",
                 "Allowed managed tools, comma-separated: codex (Subscription), pi (Local); omitted preserves policy"
             ),
@@ -179,7 +185,11 @@ internal class Cli {
                 "Managed verification reserve in seconds; positive and smaller than total; default: 0"
             ),
             CliOption("fork", "LOGIN/REPO", "Explicit donor fork; otherwise discover one or create it once"),
-            CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
+            CliOption(
+                "runs",
+                "DIR",
+                "Run storage; default: tokate/runs under XDG_STATE_HOME, or ~/.local/state/tokate/runs"
+            ),
             CliOption("run", "DIR", "Saved run directory"),
             CliOption(
                 "continue-from",
@@ -268,7 +278,7 @@ internal class Cli {
             ),
             CliCommand(
                 "init",
-                "repo,path,model-policy,models,tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
+                "repo,path,model-policy,models,allowed-tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
                 "repo",
                 "Preview and confirm owner policy and a pinned shared workflow; preserve existing customization.",
                 "[--repo OWNER/REPO] [--path DIR] [options]",

@@ -25,7 +25,7 @@ It can close PRs without current owner authorization. Review that behavior befor
 enabling the workflow.
 
 New setup uses Trusted access. Select Codex (Subscription), Pi (Local), or both
-at the allowed-tools prompt. Scripts can use `--tools codex,pi`. Omission preserves
+at the allowed-tools prompt. Scripts can use `--allowed-tools codex,pi`. Omission preserves
 existing tools; new noninteractive setup defaults to Codex.
 
 The model checklist searches as you type. Space selects, Enter accepts, and F2

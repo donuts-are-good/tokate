@@ -243,16 +243,23 @@ internal class ModelChecklist {
                     rows.Add("Search: " + Search.Substring(start))
                     rows.Add("Arrows move; Space toggles; Enter accepts")
                     rows.Add("F2 adds a model; Esc cancels; Ctrl+L redraws")
-                    let page = height - 7
-                    let offset = Focus / page * page
-                    for index in offset ... Math.Min(visible.Count, offset + page) {
+                    for index in Focus ... visible.Count {
                         let choice = visible[index]
-                        rows.Add(
-                            (index == Focus ? "> ": "  ") +
-                                (choice.Selected ? "[x] ": "[ ] ") +
-                                choice.Label +
-                                (choice.Suggested ? " (suggested)": "")
-                        )
+                        var remaining = (index == Focus ? "> ": "  ") +
+                            (choice.Selected ? "[x] ": "[ ] ") +
+                            choice.Label +
+                            (choice.Suggested ? " (suggested)": "")
+                        while remaining != "" && rows.Count < height - 1 {
+                            let line = Crop(remaining, width - 1)
+                            rows.Add(line)
+                            remaining = remaining.Substring(line.Length)
+                        }
+                        if remaining != "" && index == Focus {
+                            rows[rows.Count - 1] = "Enlarge terminal to view this entry"
+                        }
+                        if rows.Count >= height - 1 {
+                            break
+                        }
                     }
                     if visible.Count == 0 {
                         rows.Add("No matching models. F2 adds one.")

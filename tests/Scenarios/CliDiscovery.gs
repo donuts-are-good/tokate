@@ -315,7 +315,7 @@ internal class CliDiscovery {
                     "--harness",
                     "pi",
                     "--model",
-                    "local-model",
+                    "local-" + String('x', 120),
                     "--effort",
                     "absent",
                     "--endpoint",
@@ -367,6 +367,10 @@ internal class CliDiscovery {
                 "Metadata omits public commands"
             )
             for command in metadata["data"]?["commands"]?.AsArray() ?? JsonArray() {
+                let names = HashSet[string](StringComparer.Ordinal)
+                for option in command["arguments"]?.AsArray() ?? JsonArray() {
+                    Check.That(names.Add(Check.Text(option["name"])), "CLI metadata repeated an option")
+                }
                 Check.That(Check.Text(command["noninteractive"]) == "true", "Hidden interactive command")
                 Check.That(
                     Check.Text(command["inference"]) == (Check.Text(command["command"]) == "work" ? "true": "false"),
