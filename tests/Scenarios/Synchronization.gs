@@ -281,6 +281,7 @@ internal class SynchronizationChecks {
             let target = selected ? "release/review": ""
             let run = preparation.Run
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let verification = File.ReadAllText(Path.Combine(run, "verification.json"))
             let h = Check.Text(Saved(run)["commit"])
             let stateBefore = v2 ? Check.Text(coordination.State()["sha"]): ""
             if selected {
@@ -376,7 +377,61 @@ internal class SynchronizationChecks {
                 )
                 return
             }
-            if mode == "revoked" {
+            if mode.StartsWith("grant-", StringComparison.Ordinal) {
+                let value = Check.Json(flow.Git("-C", flow.Upstream, "show", grant + ":synchronization.json"))
+                let receipt = value["receipt"] ?? throw Exception("Missing historical receipt")
+                switch mode {
+                    case "grant-donor" {
+                        receipt["donor"] = JsonValue.Create("other")
+                    }
+                    case "grant-receipt" {
+                        receipt["approval"] = JsonValue.Create(String('a', v2 ? 64: 40))
+                    }
+                    case "grant-history" {
+                        receipt["synchronizations"] = Check.Json(
+                            "[{\"grant\":\"" +
+                                grant +
+                                "\",\"candidate\":\"" +
+                                candidate +
+                                "\",\"upstream\":\"" +
+                                upstream +
+                                "\"}]"
+                        )
+                    }
+                    case "grant-fork" {
+                        value["fork"] = JsonValue.Create("donor/other")
+                    }
+                    case "grant-branch" {
+                        value["branch"] = JsonValue.Create("tokate/substituted")
+                    }
+                    case "grant-previous" {
+                        value["previous"] = JsonValue.Create(Check.Text(Saved(run)["base"]))
+                    }
+                    case "grant-state" {
+                        value["expected"] = JsonValue.Create(String('a', 40))
+                    }
+                }
+                flow.Reload()
+                flow.State["synchronization_override"] = JsonValue.Create(value.ToJsonString())
+                flow.Save()
+            } else if mode == "wrong-donor" || mode == "wrong-actor" || mode == "fork-owner" {
+                flow.Reload()
+                flow.State[
+                    mode == "wrong-donor" ? "viewer_login": mode == "wrong-actor" ? "viewer_id":
+                    "fork_owner_id"
+                ] = mode == "wrong-donor" ? JsonValue.Create("other"): JsonValue.Create(124)
+                flow.Save()
+            } else if mode == "access-denied" {
+                flow.Call(
+                    []string{"access", "--repo", "owner/project", "--operation", "deny", "--donor", "donor"},
+                    owner: true
+                )
+            } else if mode == "approval" {
+                flow.Reload()
+                let issue = flow.State["issue"] ?? throw Exception("Missing issue")
+                issue["title"] = JsonValue.Create("Changed approved task")
+                flow.Save()
+            } else if mode == "revoked" {
                 Revoke(flow, grant)
             } else if mode == "deleted" || mode == "donor-ref" || mode == "moved-ref" {
                 let value = Check.Json(flow.Git("-C", flow.Upstream, "show", grant + ":synchronization.json"))
@@ -424,7 +479,8 @@ internal class SynchronizationChecks {
                 mode == "selected-target" ||
                 mode == "decree-after-sync" ||
                 mode == "after-coordinate" ||
-                mode == "state-mismatch"
+                mode == "state-mismatch" ||
+                mode == "wrong-request-actor"
             var requests int32
             var records int32
             var jobs int32
@@ -443,6 +499,14 @@ internal class SynchronizationChecks {
                 TreeTraffic(flow, h, 1, false, true)
             }
             if !success {
+                if mode.StartsWith("grant-", StringComparison.Ordinal) {
+                    Check.Contains(
+                        result.Output + result.Error,
+                        mode == "grant-state" ?
+                        "Synchronization candidate, previous head or expected state differs from exact owner grant":
+                        "Synchronization differs from original approval, PR or historical receipt"
+                    )
+                }
                 if mode.StartsWith("local-tree-") {
                     Check.Contains(
                         result.Output + result.Error,
@@ -456,6 +520,23 @@ internal class SynchronizationChecks {
                     Check.Text(Saved(run)["commit"]) == h,
                     "Rejected synchronization rewrote original saved head"
                 )
+                Check.That(
+                    File.ReadAllText(Path.Combine(run, "run.json")) == original && File.ReadAllText(
+                        Path.Combine(run, "verification.json")
+                    ) == verification &&
+                        flow.Git("-C", Path.Combine(run, "checkout"), "rev-parse", "HEAD") == candidate,
+                    "Refusal changed saved work or original verification evidence"
+                )
+                if Directory.Exists(Path.Combine(run, "original-evidence")) {
+                    Check.That(
+                        File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
+                        "Refusal changed immutable original evidence"
+                    )
+                }
+                if v2 {
+                    flow.NoInference()
+                    Check.That(Check.Text(coordination.State()["sha"]) == stateBefore, "Refusal changed authority")
+                }
                 if mode.StartsWith("ancestor", StringComparison.Ordinal) {
                     Check.Contains(
                         result.Output + result.Error,
@@ -491,6 +572,29 @@ internal class SynchronizationChecks {
             if v2 {
                 flow.Reload()
                 let request = Check.PostedRequest(flow.State)
+                if mode == "wrong-request-actor" {
+                    flow.Call(
+                        []string{"access", "--repo", "owner/project", "--operation", "trust", "--donor", "other"},
+                        owner: true
+                    )
+                    let body = Check.Text(flow.State["pulls"]?[0]?["body"])
+                    coordination.Coordinate(coordination.Event(request, 124, "other"), 1)
+                    flow.Reload()
+                    Check.That(
+                        Check.Text(coordination.State()["sha"]) == stateBefore && Check.Text(
+                            flow.State["pulls"]?[0]?["body"]
+                        ) == body &&
+                            File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original && flow.Git(
+                            "-C",
+                            Path.Combine(run, "checkout"),
+                            "rev-parse",
+                            "HEAD"
+                        ) == candidate,
+                        "Wrong coordinator actor changed publication authority or saved work"
+                    )
+                    flow.NoInference()
+                    return
+                }
                 if mode == "timeout" {
                     let path = Path.Combine(run, "amendments", candidate, "request.json")
                     let savedRequest = File.ReadAllText(path)
@@ -960,7 +1064,7 @@ internal class SynchronizationChecks {
             var matched bool
             let preparations = Dictionary[string, PublishedContribution]()
             try {
-                for version in[]string{"v1", "v2"} {
+                for version in[]string{"v1", "v2", "v2-task"} {
                     var index int32
                     for mode in[]string{
                         "timeout",
@@ -1029,11 +1133,28 @@ internal class SynchronizationChecks {
                         "reconcile-moving-approval",
                         "reconcile-conflict",
                         "reconcile-interruption",
-                        "reconcile-protected"
+                        "reconcile-protected",
+                        "wrong-donor",
+                        "wrong-actor",
+                        "fork-owner",
+                        "grant-donor",
+                        "grant-receipt",
+                        "grant-history",
+                        "grant-fork",
+                        "grant-branch",
+                        "grant-previous",
+                        "grant-state",
+                        "approval",
+                        "access-denied",
+                        "wrong-request-actor"
                     } {
                         index++
                         if (mode == "after-coordinate" || mode == "state-mismatch" || mode == "decree-coordinator") &&
-                            version != "v2" {
+                            version == "v1" {
+                            continue
+                        }
+                        if (mode == "grant-state" && version == "v1") ||
+                            ((mode == "access-denied" || mode == "wrong-request-actor") && version != "v2-task") {
                             continue
                         }
                         if only != "" && !selectors.Contains(version) && !selectors.Contains(mode) &&
@@ -1057,12 +1178,13 @@ internal class SynchronizationChecks {
                         if !preparations.ContainsKey(key) {
                             preparations[key] = PublishedContribution.Create(
                                 binary,
-                                version == "v2",
+                                version != "v1",
                                 synchronization: true,
-                                baseBranch: target
+                                baseBranch: target,
+                                taskScoped: version == "v2-task"
                             )
                         }
-                        Run(preparations[key], version == "v2", mode)
+                        Run(preparations[key], version != "v1", mode)
                         Console.WriteLine("PASS synchronization " + version + "/" + mode)
                     }
                 }

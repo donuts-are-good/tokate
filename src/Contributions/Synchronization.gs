@@ -171,14 +171,19 @@ internal class Synchronization {
             sync string = "",
             expected string = "",
             previous string = "",
-            ready bool = true
+            ready bool = true,
+            contribution JsonElement = default(JsonElement)
         ) {
             let approved = J.Get(record, "approval")
             let issue = J.Number(J.Get(record, "issue"), "number")
             let approvalVersion = J.Number(approved, "version")
             let approvedBase = J.Text(approved, "base")
             let target = J.Text(approved, "base_branch")
-            let donor = J.Text(approved, "donor")
+            var donor = J.Text(approved, "donor")
+            if AccessState.Task(approved) {
+                RepositoryIdentity.PositiveId(J.Get(contribution, "actor"))
+                donor = RepositoryIdentity.Login(J.Text(contribution, "donor"))
+            }
             let failure = "Synchronization differs from original approval, PR or historical receipt"
             let prefix = List[Object]()
             var last JsonElement
