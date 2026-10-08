@@ -30,7 +30,10 @@ internal class CliOption {
             return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
         }
         if command == "repair" && Name == "path" {
-            return "Clean, self-contained candidate checkout; required and separate from repair evidence"
+            return "Clean, self-contained candidate checkout; default current directory; separate from repair evidence"
+        }
+        if command == "repair" && Name == "commit" {
+            return "Exact candidate; default from the selected owner synchronization grant; conflicts are refused"
         }
         if (command == "work" || command == "claim") && Name == "seconds" {
             return "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
@@ -357,10 +360,10 @@ internal class Cli {
             CliCommand(
                 "repair",
                 "repo,pr,run,path,commit,sync,seconds,allow-network",
-                "repo,pr,run,path,commit,sync,seconds",
+                "repo,pr,run,sync,seconds",
                 "Verify and repair a v1 draft PR when original private state is unavailable; no inference.",
-                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --path CHECKOUT --commit SHA --sync GRANT --seconds N [--allow-network]",
-                "repair --repo owner/project --pr 10 --run /path/to/repair --path /path/to/checkout --commit C --sync G --seconds 300",
+                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --sync GRANT --seconds N\n       [--path CHECKOUT] [--commit SHA] [--allow-network]",
+                "repair --repo owner/project --pr 10 --run /path/to/repair --sync G --seconds 300",
                 effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
