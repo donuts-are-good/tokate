@@ -9,6 +9,19 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
+        internal func Push(checkout string, run Data, commit string) {
+            Commands.Git(
+                checkout,
+                "-c",
+                "credential.helper=",
+                "-c",
+                "credential.helper=!gh auth git-credential",
+                "push",
+                "https://github.com/" + run.Text("head_repo") + ".git",
+                commit + ":refs/heads/" + run.Text("branch")
+            )
+        }
+
         internal func Pulls(run Data) List[JsonElement] {
             let pulls = List[JsonElement]()
             for page in 1 ... 21 {
@@ -217,16 +230,7 @@ internal class Publication {
             if sha != run.Text("base") && sha != run.Text("commit") {
                 throw Exception("Remote claim changed. Refusing to overwrite it")
             }
-            Commands.Git(
-                checkout,
-                "-c",
-                "credential.helper=",
-                "-c",
-                "credential.helper=!gh auth git-credential",
-                "push",
-                "https://github.com/" + run.Text("head_repo") + ".git",
-                run.Text("commit") + ":refs/heads/" + run.Text("branch")
-            )
+            Publication.Push(checkout, run, run.Text("commit"))
             ContributionClaim.Recheck(run)
             let pull = GitHub.Api("repos/" + run.Text("repo") + "/pulls", publication)
             Match(run, pull, J.Parse(J.Write(receipt)))

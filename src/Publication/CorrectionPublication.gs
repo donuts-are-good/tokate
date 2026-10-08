@@ -62,19 +62,6 @@ internal class CorrectionPublication {
             return record
         }
 
-        private func Push(directory string, run Data, correction Data) {
-            Commands.Git(
-                Path.Combine(directory, "checkout"),
-                "-c",
-                "credential.helper=",
-                "-c",
-                "credential.helper=!gh auth git-credential",
-                "push",
-                "https://github.com/" + run.Text("head_repo") + ".git",
-                correction.Text("commit") + ":refs/heads/" + run.Text("branch")
-            )
-        }
-
         private func Failure(directory string, correction Data, error Exception) {
             correction.Fields["failure_stage"] = "interrupted_publication"
             correction.Fields["failure_reason"] = "publication_interrupted"
@@ -183,7 +170,7 @@ internal class CorrectionPublication {
                 }
                 if remote != correction.Text("commit") {
                     SetStage(directory, correction, "push_pending")
-                    Push(directory, run, correction)
+                    Publication.Push(Path.Combine(directory, "checkout"), run, correction.Text("commit"))
                     remote = Remote(run, correction)
                     if remote != correction.Text("commit") {
                         throw Exception("Push did not produce the exact corrected branch")
@@ -369,7 +356,7 @@ internal class CorrectionPublication {
                         J.Get(record, "approval"),
                         J.Get(run.Element(), "donor_id")
                     )
-                    Push(directory, run, correction)
+                    Publication.Push(Path.Combine(directory, "checkout"), run, correction.Text("commit"))
                     remote = Remote(run, correction)
                     if remote != correction.Text("commit") {
                         throw Exception("Corrected remote commit missing after push")

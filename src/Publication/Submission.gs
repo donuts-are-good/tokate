@@ -371,16 +371,7 @@ internal class Submission {
                     J.Get(record, "approval"),
                     J.Get(run.Element(), "donor_id")
                 )
-                Commands.Git(
-                    checkout,
-                    "-c",
-                    "credential.helper=",
-                    "-c",
-                    "credential.helper=!gh auth git-credential",
-                    "push",
-                    "https://github.com/" + run.Text("head_repo") + ".git",
-                    run.Text("commit") + ":refs/heads/" + run.Text("branch")
-                )
+                Publication.Push(checkout, run, run.Text("commit"))
                 ContributionClaim.RecheckV2(run)
             }
             if run.Text("publication_uuid") == "" {
