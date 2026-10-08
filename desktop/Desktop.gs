@@ -9,6 +9,7 @@ import Goo.Widgets.Inputs
 import Goo.Widgets.Layout
 import System
 import System.Collections.Generic
+import System.Diagnostics
 import System.IO
 import System.Numerics
 import System.Text.Json
@@ -30,6 +31,11 @@ partial class Desktop : Cell {
     private var oilPaint bool = true
     private var busy bool
     private var runner CommandRunner?
+    private var activityTimer WindowTimer?
+    private var activityTitle string = ""
+    private var activityElapsed int32
+    private var activityOutput string = ""
+    private var stopping bool
     private var message string = ""
     private var report string = ""
     private var confirmation Action?
@@ -192,11 +198,14 @@ partial class Desktop : Cell {
             EntryHeight: 44,
             BackgroundColor: Surface(),
             TextColor: Ink(),
+            DisabledBackgroundColor: Surface(),
+            DisabledTextColor: Muted(),
             MutedTextColor: Muted(),
             BorderColor: Line(),
             FocusColor: Accent(),
             ShowFocusHighlight: keyboardFocus,
             Disabled: busy,
+            TransitionMs: 0,
         }.Build()
         field.MaxWidth = Percent(100)
         field.FlexShrink = 1
@@ -286,9 +295,6 @@ partial class Desktop : Cell {
     }
 
     private func Navigate(next string) {
-        if busy {
-            return
-        }
         page = next
         report = ""
         message = ""
@@ -316,7 +322,39 @@ partial class Desktop : Cell {
         let next = CommandRunner()
         runner = next
         let window = host ?? throw InvalidOperationException("The desktop window is not attached.")
+        activityTitle = switch arguments[0] {
+            case "claim": "Reserving donation"
+            case "work": "Donation running"
+            case "prepare": "Preparing donation"
+            case "select": "Checking model selection"
+            case "status": "Loading saved work"
+            case "init": "Preparing project setup"
+            case "doctor": "Checking prerequisites"
+            case "recover": "Verifying contribution"
+            case "submit": "Submitting contribution"
+            case "publish": "Publishing draft PR"
+            case "checks": "Checking pull request"
+            default: "Loading contribution details"
+        }
+        activityElapsed = 0
+        activityOutput = ""
+        stopping = false
+        let elapsed = Stopwatch.StartNew()
+        activityTimer = window.SetInterval(
+            () -> {
+                let seconds = int32(elapsed.Elapsed.TotalSeconds)
+                let output = next.RecentOutput()
+                if activityElapsed != seconds || activityOutput != output {
+                    activityElapsed = seconds
+                    activityOutput = output
+                    Rebuild()
+                }
+            },
+            250
+        )
         let callback = (result CommandResult) -> {
+            activityTimer?.Dispose()
+            activityTimer = nil
             busy = false
             runner = nil
             message = result.Error != "" ? result.Error: TextOf(result.Value, "status") == "pending" ?
@@ -329,6 +367,65 @@ partial class Desktop : Cell {
         }
         go RunCommand(next, window, arguments, tool, directory, seconds, callback)
         Rebuild()
+    }
+
+    private func Activity() Blob {
+        let panel = Container{
+            Display: busy ? Display.Flex: Display.None,
+            FlexShrink: 0,
+            Margin: Edges{Left: 28, Right: 28, Top: 12, Bottom: 8},
+            Padding: 14,
+            Gap: 10,
+            BackgroundColor: Surface(),
+            BorderWidth: 1,
+            BorderColor: Line(),
+            BorderRadius: 5,
+            Container{
+                FlexDirection: FlexDirection.Row,
+                AlignItems: AlignItems.Center,
+                Gap: 16,
+                Container{
+                    FlexGrow: 1,
+                    MinWidth: 0,
+                    Gap: 4,
+                    Accessibility: Accessibility{Role: AccessibilityRole.Status, Name: activityTitle, Busy: busy},
+                    Label(stopping ? "Stopping command": activityTitle, 20),
+                    Label("Elapsed " + TimeSpan.FromSeconds(activityElapsed).ToString("hh\\:mm\\:ss"), 16, true),
+                },
+                Keyboard(
+                    Button{
+                        Padding: Edges{Left: 14, Right: 14, Top: 8, Bottom: 8},
+                        BorderWidth: 1,
+                        BorderColor: Line(),
+                        BorderRadius: 4,
+                        Disabled: stopping,
+                        Focusable: true,
+                        Focus: FocusStyle(),
+                        Hover: Style{BackgroundColor: Paper()},
+                        Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: "Cancel command"},
+                        OnClick: () -> {
+                            stopping = true
+                            runner?.Stop()
+                        },
+                        Label(stopping ? "Stopping": "Cancel", 17),
+                    }
+                ),
+            },
+        }
+        if activityOutput != "" {
+            panel.Children.Add(
+                Text{
+                    Content: activityOutput,
+                    FontFamily: "monospace",
+                    FontSize: 13,
+                    Color: Muted(),
+                    MaxHeight: 110,
+                    OverflowY: Overflow.Scroll,
+                    Accessibility: Accessibility{Role: AccessibilityRole.Text, Name: "Command output"},
+                }
+            )
+        }
+        return panel
     }
 
     private func ShowResult(result CommandResult) {
@@ -363,7 +460,6 @@ partial class Desktop : Cell {
             BorderWidth: 0,
             BorderColor: Color.Transparent,
             OnClick: () -> Navigate(label),
-            Disabled: busy,
             Focusable: true,
             Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: label},
             Hover: Style{BackgroundColor: Surface()},
@@ -434,7 +530,6 @@ partial class Desktop : Cell {
             BorderWidth: 0,
             BackgroundColor: Color.Transparent,
             OnClick: () -> Navigate(target),
-            Disabled: busy,
             Focusable: true,
             Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: title},
             Hover: Style{Opacity: 0.92},
@@ -703,6 +798,7 @@ partial class Desktop : Cell {
                         FocusOutlineColor: Accent(),
                     }.Build(),
                 }.Build(),
+                Activity(),
                 Container{
                     FlexGrow: 1,
                     FlexShrink: 1,
@@ -715,25 +811,6 @@ partial class Desktop : Cell {
                     body,
                 },
             },
-        }
-        if busy {
-            root.Children.Add(
-                Container{
-                    Position: PositionType.Absolute,
-                    Right: 28,
-                    Top: 50,
-                    Keyboard(
-                        Button{
-                            Padding: 10,
-                            BackgroundColor: Surface(),
-                            OnClick: () -> runner?.Stop(),
-                            Focusable: true,
-                            Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: "Cancel command"},
-                            Label("Cancel command", 16)
-                        }
-                    ),
-                }
-            )
         }
         root.Children.Add(Container{Width: 0, Height: 0, Dialog()})
         return root

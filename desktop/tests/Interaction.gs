@@ -117,6 +117,21 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "tokate",
             "case \"$1\" in\npolicy) data='{\"policy\":{}}';;\ndefaults) data='{\"profiles\":{},\"default\":{\"harness\":\"codex\",\"model\":\"obsolete-default\",\"effort\":\"low\"}}';;\nselect) data='{\"harness\":\"codex\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}';;\n*) exit 1;;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"status\":\"success\",\"exit_code\":0,\"data\":%s}' \"$1\" \"$$data\"\n"
         )
+        let commandPath = Path.Combine(fixture, "tokate")
+        let claim = "claim) printf 'Waiting for coordinator\\n' >&2; for i in $$(seq 1 200); do [ -e '" +
+            fixture +
+            "/release-claim' ] && break; sleep .05; done; data='{\"run\":\"" +
+            fixture +
+            "/run\"}';;\n"
+        let status = "status) data='{\"run\":\"" +
+            fixture +
+            "/run\",\"state\":\"claimed\",\"repo\":\"owner/repo\",\"issue\":278,\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"seconds\":60}';;\n"
+        let work = "work) trap 'touch \"" +
+            fixture +
+            "/cancelled\"; exit 0' INT; printf 'Preparing checkout\\n' >&2; for i in $$(seq 1 200); do sleep .05; done;;\n"
+        var script = File.ReadAllText(commandPath).Replace("*) exit 1;;", claim + status + work + "*) exit 1;;")
+        script = script.Replace("\"data\":%s}", "\"data\":%s,\"next_actions\":[[\"tokate\",\"work\"]]}")
+        File.WriteAllText(commandPath, script)
         Script(
             fixture,
             "codex",
@@ -174,13 +189,61 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             Find(adapter.Root, AccessibilityRole.Text, "Command completed.") == nil,
             "Routine completion text remains"
         )
+        Activate(window, adapter, "Reserve contribution")
+        Settle(host)
+        Activate(window, adapter, "Confirm")
+        AwaitControl(host, adapter, AccessibilityRole.Status, "Reserving donation")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Command output", "Waiting for coordinator")
+        Activate(window, adapter, "Welcome")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.Text, "a purpose.") != nil,
+            "Navigation is blocked during reservation"
+        )
+        Require(
+            Find(adapter.Root, AccessibilityRole.Status, "Reserving donation") != nil,
+            "Activity disappeared after navigation"
+        )
+        Activate(window, adapter, "Switch to moonlight")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Switch to daylight") != nil,
+            "Theme control is blocked during reservation"
+        )
+        File.WriteAllText(Path.Combine(fixture, "release-claim"), "release")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation")
+        Activate(window, adapter, "Start donation")
+        Settle(host)
+        Activate(window, adapter, "Confirm")
+        AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Command output", "Preparing checkout")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Elapsed 00:00:01")
+        Activate(window, adapter, "My project")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.Text, "Make room for good work.") != nil,
+            "Navigation is blocked during work"
+        )
+        Activate(window, adapter, "Cancel command")
+        let cancelled = Stopwatch.StartNew()
+        while cancelled
+            .Elapsed
+            .TotalSeconds < 10 &&
+            Find(adapter.Root, AccessibilityRole.Status, "Donation running") != nil {
+            Settle(host)
+        }
+        Require(
+            Find(adapter.Root, AccessibilityRole.Status, "Donation running") == nil,
+            "Running state survived cancellation"
+        )
+        Require(File.Exists(Path.Combine(fixture, "cancelled")), "Cancel did not interrupt the worker gracefully")
     } finally {
         Environment.SetEnvironmentVariable("PATH", previous)
         Directory.Delete(fixture, true)
     }
 }
 
-func Main() {
+func TestDesktop() {
     using let body = FontSource("Newsreader", 400, false, File.ReadAllBytes(Asset("newsreader.ttf")))
     using let heading = FontSource("Cormorant", 500, false, File.ReadAllBytes(Asset("cormorant.ttf")))
     body.Register()
@@ -240,6 +303,10 @@ func Main() {
     Settle(host)
     Require(Find(adapter.Root, AccessibilityRole.TextInput)?.Value == "", "The empty input was not retained")
     DonateFlow(host, window, adapter)
+}
+
+func Main() {
+    TestDesktop()
     let literal = CommandRunner().Run([]string{"%s", "{\"value\":\"$(literal); *\"}"}, "/usr/bin/printf")
     Require(
         literal.Error == "" && TextOf(literal.Value, "value") == "$(literal); *",
@@ -266,5 +333,7 @@ func Main() {
     } finally {
         File.Delete(marker)
     }
-    Console.WriteLine("PASS: responsive home, field editing, literal commands, output limits and graceful interruption")
+    Console.WriteLine(
+        "PASS: responsive home, field editing, donation progress, navigation during work, output limits and graceful interruption"
+    )
 }

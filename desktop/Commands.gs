@@ -21,8 +21,18 @@ func SignalCommand(pid int32, signal int32) int32;
 
 class CommandRunner {
     private let gate Object = Object()
+    private let diagnostics StringBuilder = StringBuilder()
     private var active Process?
     private var stopped bool
+
+    func RecentOutput() string {
+        lock diagnostics {
+            let count = Math.Min(4096, diagnostics.Length)
+            let lines = diagnostics.ToString(diagnostics.Length - count, count).Trim().Split('\n')
+            let first = Math.Max(0, lines.Length - 6)
+            return String.Join("\n", lines, first, lines.Length - first)
+        }
+    }
 
     func Stop() {
         lock gate {
@@ -94,15 +104,26 @@ class CommandRunner {
             }
             process.StandardInput.Close()
             let output = StringBuilder()
-            let diagnostics = StringBuilder()
             let elapsed = Stopwatch.StartNew()
             var interruptedAt int64 = -1
+            let exited = process.WaitForExitAsync()
+            using let pulse = tick(TimeSpan.FromMilliseconds(100))
             scope {
                 let stdout = process.StandardOutput
                 let stderr = process.StandardError
                 go ReadCommandStream(stdout, output)
                 go ReadCommandStream(stderr, diagnostics)
-                while !process.WaitForExit(100) {
+                var finished = false
+                while !finished {
+                    select {
+                        case await exited {
+                            finished = true
+                        }
+                        case <- pulse { }
+                    }
+                    if finished {
+                        break
+                    }
                     if elapsed.Elapsed.TotalSeconds >= seconds && result.Error == "" {
                         result.Error = "Command timed out. Effects may have occurred. Inspect status before repeating it."
                         Stop()
@@ -114,7 +135,7 @@ class CommandRunner {
                     }
                     if interruptedAt >= 0 && elapsed.ElapsedMilliseconds - interruptedAt >= 5000 {
                         process.Kill(true)
-                        process.WaitForExit()
+                        await exited
                         break
                     }
                 }
@@ -162,10 +183,12 @@ class CommandRunner {
 func ReadCommandStream(reader StreamReader, output StringBuilder) {
     try {
         let buffer = [4096]char
-        var count = reader.Read(buffer, 0, buffer.Length)
+        var count = await reader.ReadAsync(buffer, 0, buffer.Length)
         while count > 0 {
-            output.Append(buffer, 0, Math.Min(count, Math.Max(0, 1048577 - output.Length)))
-            count = reader.Read(buffer, 0, buffer.Length)
+            lock output {
+                output.Append(buffer, 0, Math.Min(count, Math.Max(0, 1048577 - output.Length)))
+            }
+            count = await reader.ReadAsync(buffer, 0, buffer.Length)
         }
     } catch (error IOException) { }
 }
