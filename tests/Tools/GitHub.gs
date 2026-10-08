@@ -472,6 +472,8 @@ internal partial class Fixture {
                 if effect == "head" {
                     let head = pull["head"] ?? throw Exception("Missing head")
                     head["sha"] = JsonValue.Create(String('a', 40))
+                } else if effect == "reopen" {
+                    pull["state"] = JsonValue.Create("open")
                 } else if effect == "merged" {
                     pull["state"] = JsonValue.Create("closed")
                     pull["merged"] = JsonValue.Create(true)
@@ -510,9 +512,12 @@ internal partial class Fixture {
             } else if effect == "approval" {
                 let issue = State["issue"] ?? throw Exception("Missing issue")
                 issue["labels"] = JsonArray()
-            } else if effect == "closed" || effect.StartsWith("merged") {
+            } else if effect.StartsWith("closed") || effect.StartsWith("merged") {
                 let pull = State["pulls"]?[0] ?? throw Exception("Missing PR")
                 pull["state"] = JsonValue.Create("closed")
+                if effect == "closed-reopen" {
+                    State["compare_read_effect"] = JsonValue.Create("reopen")
+                }
                 if effect.StartsWith("merged") {
                     pull["merged"] = JsonValue.Create(true)
                     pull["merged_at"] = JsonValue.Create("2026-01-01T00:00:00Z")

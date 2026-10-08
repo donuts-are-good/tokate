@@ -29,6 +29,8 @@ internal class Checks {
                 .ValueKind == JsonValueKind.String {
                 facts["owner_review"] = "historical"
                 facts["required_owner_actions"] = []string{}
+            } else {
+                facts["owner_review"] = "required"
             }
         }
 

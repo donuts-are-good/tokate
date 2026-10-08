@@ -296,6 +296,7 @@ internal class CheckGates {
                 "retarget",
                 "draft",
                 "closed",
+                "closed-reopen",
                 "merged",
                 "merged-issue",
                 "merged-branch",
@@ -336,6 +337,12 @@ internal class CheckGates {
                             result["required_owner_actions"]
                             ?.AsArray().Count == 0,
                         "Closed PR awaits new acceptance"
+                    )
+                } else {
+                    Check.That(
+                        Check.Text(result["owner_review"]) == "required" && result["required_owner_actions"]?.AsArray()
+                            .Count > 0,
+                        "Open PR lost required owner review after movement"
                     )
                 }
             }
