@@ -876,6 +876,11 @@ internal partial class NativeFlow : NativeFixture {
             let run = Claim()
             Temp.Env["HOME"] = home
             Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "must be outside /tmp")
+            Check.That(!File.Exists(Path.Combine(run, "private-probe")), "Failed startup retained private probe marker")
+            Check.That(
+                File.Exists(Path.Combine(run, "run.json")) && Directory.Exists(Path.Combine(run, "checkout")),
+                "Failed startup removed recovery evidence or donor checkout"
+            )
             NoInference()
             NoPr()
         } finally {

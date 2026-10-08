@@ -116,33 +116,47 @@ internal class Worker {
 
         internal func Probe(directory string, checkout string) {
             let sentinel = Path.Combine(directory, "private-probe")
-            File.WriteAllText(sentinel, "private")
             let args = List[string]{"sandbox", "-P", "tokate", "--include-managed-config", "-C", checkout}
-            Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
-            Config(args, "permissions.tokate.network.enabled", "false")
-            args.AddRange(
-                []string{
-                    "--",
-                    "/usr/bin/env",
-                    "-i",
-                    "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=/tmp/tokate-home",
-                    "TMPDIR=/tmp/tokate-home",
-                    "/bin/sh",
-                    "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
-                    "probe",
-                    sentinel,
-                    CodexPath()
-                }
-            )
-            let result = Run(directory, args.ToArray())
-            File.Delete(sentinel)
-            if result.Code != 0 || result.Truncated || result.ReadFailed {
-                throw CliFailure(
-                    "verification_failed",
-                    "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
+            var failure Exception? = nil
+            try {
+                File.WriteAllText(sentinel, "private")
+                Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
+                Config(args, "permissions.tokate.network.enabled", "false")
+                args.AddRange(
+                    []string{
+                        "--",
+                        "/usr/bin/env",
+                        "-i",
+                        "PATH=/usr/local/bin:/usr/bin:/bin",
+                        "HOME=/tmp/tokate-home",
+                        "TMPDIR=/tmp/tokate-home",
+                        "/bin/sh",
+                        "-c",
+                        "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
+                        "probe",
+                        sentinel,
+                        CodexPath()
+                    }
                 )
+                let result = Run(directory, args.ToArray())
+                if result.Code != 0 || result.Truncated || result.ReadFailed {
+                    throw CliFailure(
+                        "verification_failed",
+                        "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
+                    )
+                }
+            } catch (error Exception) {
+                failure = error
+            }
+            try {
+                File.Delete(sentinel)
+            } catch (error Exception) {
+                if failure == nil {
+                    failure = error
+                }
+            }
+            if let error = failure {
+                throw error
             }
             if File.Exists(Path.Combine(checkout, "global.json")) {
                 args[args.Count - 4] = "dotnet msbuild -nologo -version"
