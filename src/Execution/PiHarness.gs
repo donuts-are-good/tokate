@@ -68,6 +68,7 @@ internal class PiHarness {
             Runtime(args)
             PiBoundary.Probe(args.Need("pi-root"), args.Need("node"))
             let limits = PiBoundary.ModelLimits(args.Need("pi-root"), args.Need("node"), model, endpoint)
+            let catalog = PiCatalog.Read(args.Need("node"), model, endpoint)
             return J.Parse(
                 J.Write(
                     map[string, Object?]{
@@ -79,8 +80,9 @@ internal class PiHarness {
                         "policy_hash": policy.Digest,
                         "policy_eligible": true,
                         "capability": "pi SDK import and isolated noninteractive session probe; absent effort only",
-                        "availability": "unknown",
-                        "availability_evidence": "Exact donor-selected model; no endpoint or inference probe",
+                        "availability": "advertised",
+                        "availability_evidence": "Selected endpoint advertises the exact model ID; weights and coding capability are unverified",
+                        "endpoint_catalog": catalog,
                         "context_window": J.Number(limits, "contextWindow"),
                         "max_tokens": J.Number(limits, "maxTokens")
                     }
@@ -142,26 +144,34 @@ internal class PiHarness {
                 )
                 ContributionClaim.Recheck(run)
                 Preparation.Ready(directory, run)
-                run.Fields["state"] = "running"
-                run.Fields["failure_stage"] = "inference"
-                run.Fields["failure_reason"] = "inference_failed"
-                run.Fields["pi_version"] = J.Text(runtime, "version")
-                run.Fields["observed_invocation"] = map[string, Object?]{
-                    "harness": "pi",
-                    "sdk_version": J.Text(runtime, "version"),
-                    "node_version": J.Text(runtime, "node"),
-                    "provider": "local-chat-completions",
-                    "model": run.Text("model"),
-                    "effort": "absent",
-                    "context_window": J.Number(limits, "contextWindow"),
-                    "max_tokens": J.Number(limits, "maxTokens"),
-                    "length_continuation_limit": continuationLimit
-                }
-                run.Save(directory)
-                if continueTruncated {
-                    Terminal.Step("Pi may continue one truncated response within the original coding budget.")
-                }
                 try {
+                    run.Fields["failure_stage"] = "endpoint_check"
+                    run.Fields["failure_reason"] = "endpoint_unavailable"
+                    run.Fields["endpoint_catalog"] = PiCatalog.Read(
+                        run.Text("pi_node"),
+                        run.Text("model"),
+                        endpoint,
+                        coding
+                    )
+                    run.Fields["state"] = "running"
+                    run.Fields["failure_stage"] = "inference"
+                    run.Fields["failure_reason"] = "inference_failed"
+                    run.Fields["pi_version"] = J.Text(runtime, "version")
+                    run.Fields["observed_invocation"] = map[string, Object?]{
+                        "harness": "pi",
+                        "sdk_version": J.Text(runtime, "version"),
+                        "node_version": J.Text(runtime, "node"),
+                        "provider": "local-chat-completions",
+                        "model": run.Text("model"),
+                        "effort": "absent",
+                        "context_window": J.Number(limits, "contextWindow"),
+                        "max_tokens": J.Number(limits, "maxTokens"),
+                        "length_continuation_limit": continuationLimit
+                    }
+                    run.Save(directory)
+                    if continueTruncated {
+                        Terminal.Step("Pi may continue one truncated response within the original coding budget.")
+                    }
                     PublicOutput.FailureCode = "inference_failed"
                     var result CommandResult
                     {

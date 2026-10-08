@@ -30,9 +30,16 @@ harness, provider, model, effort, endpoint and optional runtime flags. Then use
 consent. Only explicit runtime overrides are saved. `defaults read` and `list`
 show tool/model summaries without endpoint or runtime paths.
 Endpoint and runtime paths stay in private local state.
+Before claim/preparation and immediately before coding, Tokate makes one no-auth
+GET of the selected endpoint's `/v1/models`, capped at 10 seconds and 1 MiB.
+The exact model ID must be advertised. Invalid, missing, oversized, redirected or
+unreachable metadata stops work without inference, retry or fallback. An advertised
+ID does not attest weights or coding capability. Optional version, digest,
+quantization, context and tool capability remain unknown when absent.
 Configure the exact model and endpoint in Pi. Tokate reads their context and output
 limits through Pi's SDK with credentials and network access disabled, then rechecks
-them before work. The coding session receives generated model settings and an empty
+them before work. Endpoint metadata never sets these limits.
+The coding session receives generated model settings and an empty
 authentication profile. Its API-key placeholder is the public value `tokate-no-auth`.
 Donor credentials and repository customization are not loaded into the coding session.
 

@@ -9,6 +9,9 @@ internal class PiChecks {
     shared {
         internal func Run(binary string, root string, node string, directory string, endpoint string, mode string) {
             let flow = CoordinationFixture(binary)
+            let catalogRejected = mode.StartsWith("catalog-") && mode != "catalog-metadata" && !mode.StartsWith(
+                "catalog-recheck-"
+            )
             let interrupted = mode == "cancel" || mode == "length-cancel"
             let continuation = mode == "continued" ||
                 mode == "repeated" ||
@@ -39,7 +42,9 @@ internal class PiChecks {
             )
             flow.Flow.Commit("Pi policy and untrusted customization fixture")
             flow.Flow.Approve()
-            flow.Claim()
+            if !catalogRejected {
+                flow.Claim()
+            }
             let agentDir = Path.Combine(flow.Flow.Temp.Root, "pi-agent")
             Directory.CreateDirectory(agentDir)
             flow.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = agentDir
@@ -89,6 +94,27 @@ internal class PiChecks {
             }
             if mode != "off" {
                 args.AddRange([]string{"--pi-root", root})
+            }
+            if catalogRejected {
+                args[0] = "claim"
+                for option in[]string{"--state", "--source"} {
+                    let position = args.IndexOf(option)
+                    args.RemoveAt(position + 1)
+                    args.RemoveAt(position)
+                }
+                args.Add("--json")
+                let rejected = flow.Flow.Call(args.ToArray(), 1)
+                Check.Envelope(rejected, "claim", "error", "endpoint_unavailable")
+                PrivateCatalog(rejected.Output + rejected.Error, endpoint)
+                flow.Flow.Reload()
+                Check.That(flow.Flow.State["posted_request"] == nil, "Unavailable model posted a claim request")
+                Check.That(
+                    !Directory.Exists(Path.Combine(flow.Flow.Temp.Root, "runs")),
+                    "Unavailable model created a run"
+                )
+                flow.Flow.NoInference()
+                Console.WriteLine("PASS native Pi workflow " + mode)
+                return
             }
             if mode == "off" {
                 for option in[]string{"--effort", "--model", "--endpoint"} {
@@ -197,7 +223,11 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "off" || mode == "on" || mode == "compact" || mode == "continued"
+            let success = mode == "off" ||
+                mode == "on" ||
+                mode == "compact" ||
+                mode == "continued" ||
+                mode == "catalog-metadata"
             let work = List[string]{"work", "--run", run, "--non-interactive"}
             if mode != "off" {
                 work.Add("--yes")
@@ -205,8 +235,52 @@ internal class PiChecks {
             if continuation {
                 work.Add("--continue-truncated")
             }
-            flow.Flow.Call(work.ToArray(), success ? 0: 1)
+            let worked = flow.Flow.Call(work.ToArray(), success ? 0: 1)
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            if mode.StartsWith("catalog-recheck-") {
+                PrivateCatalog(worked.Output + worked.Error + Check.Text(saved["error"]), endpoint)
+                Check.That(
+                    Check.Text(saved["state"]) == "failed" && Check.Text(
+                        saved["failure_reason"]
+                    ) == "endpoint_unavailable",
+                    "Changed endpoint did not fail before inference"
+                )
+                Check.That(
+                    saved["turn_completed"] == nil &&
+                        saved["observed_invocation"] == nil &&
+                        saved["verification"] == nil &&
+                        saved["commit"] == nil &&
+                        !File.Exists(Path.Combine(run, "events.jsonl")),
+                    "Changed endpoint reached inference or verification"
+                )
+                let status = Check.Envelope(flow.Flow.Call([]string{"status", "--run", run, "--json"}), "status", "ok")
+                Check.That(
+                    Check.Text(status["data"]?["error"]?["code"]) == "endpoint_unavailable",
+                    "Endpoint failure status lost its safe diagnostic"
+                )
+                flow.Flow.NoInference()
+                Console.WriteLine("PASS native Pi workflow " + mode)
+                return
+            }
+            Check.That(
+                Check.Text(saved["selection"]?["endpoint_catalog"]?["advertised_model"]) == "synthetic/model:exact" &&
+                    Check.Text(saved["endpoint_catalog"]?["advertised_model"]) == "synthetic/model:exact",
+                "Pi did not record exact endpoint selection and launch evidence"
+            )
+            let metadata = Check.Json(
+                "{\"runtime_version\":\"1.2.3\",\"digest\":\"sha256:abc123\",\"quantization\":\"Q4_K_M\",\"context_window\":7,\"supports_tools\":false}"
+            )
+            for name in[]string{"runtime_version", "digest", "quantization", "context_window", "supports_tools"} {
+                let expected = mode == "catalog-metadata" ? Check.Text(metadata[name]): "unknown"
+                Check.That(
+                    Check.Text(saved["endpoint_catalog"]?[name]) == expected,
+                    "Pi lost optional metadata or invented absent identity"
+                )
+            }
+            Check.That(
+                !saved.ToJsonString().Contains("PRIVATE_CATALOG_SENTINEL"),
+                "Pi retained unsupported raw endpoint metadata"
+            )
             File.WriteAllText(
                 Path.Combine(directory, "result.json"),
                 Check.Map(
@@ -293,6 +367,13 @@ internal class PiChecks {
             Check.That(File.ReadAllText(gitPath) == git, "Pi changed Git metadata")
             flow.Flow.NoInference()
             Console.WriteLine("PASS native Pi workflow " + mode)
+        }
+
+        private func PrivateCatalog(output string, endpoint string) {
+            Check.That(
+                !output.Contains(endpoint) && !output.Contains("PRIVATE_CATALOG_SENTINEL"),
+                "Pi endpoint diagnostic exposed private data"
+            )
         }
     }
 }
