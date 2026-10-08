@@ -73,7 +73,7 @@ internal class ModelChecklist {
             Terminal.Message("Saved profiles unavailable; manual model entry remains available.", "yellow", true)
         }
         try {
-            for entry in DonorSelection.Capabilities() {
+            for entry in CodexRuntime.Capabilities() {
                 for effort in entry.Value {
                     Add(entry.Key, effort, "openai / codex [Subscription]")
                 }
@@ -194,26 +194,6 @@ internal class ModelChecklist {
         return text.ToString()
     }
 
-    private func Before(position int32) int32 {
-        var previous int32
-        for boundary in StringInfo.ParseCombiningCharacters(Search) {
-            if boundary >= position {
-                break
-            }
-            previous = boundary
-        }
-        return previous
-    }
-
-    private func After(position int32) int32 {
-        for boundary in StringInfo.ParseCombiningCharacters(Search) {
-            if boundary > position {
-                return boundary
-            }
-        }
-        return Search.Length
-    }
-
     private func Screen() bool {
         let oldControl = Console.TreatControlCAsInput
         Console.TreatControlCAsInput = true
@@ -242,8 +222,11 @@ internal class ModelChecklist {
                 let small = width < 32 || height < 8
                 let rows = List[string]()
                 var start = Cursor
-                while start > 0 && Cells(Search.Substring(Before(start), Cursor - Before(start))) < width - 10 {
-                    start = Before(start)
+                while start > 0 &&
+                    Cells(
+                    Search.Substring(WizardScreen.Before(Search, start), Cursor - WizardScreen.Before(Search, start))
+                ) < width - 10 {
+                    start = WizardScreen.Before(Search, start)
                 }
                 var cursorColumn = 9 + Cells(Search.Substring(start, Cursor - start))
                 if small {
@@ -348,20 +331,20 @@ internal class ModelChecklist {
                 } else if key.Key == ConsoleKey.Spacebar && visible.Count > 0 && !Single {
                     visible[Focus].Selected = !visible[Focus].Selected
                 } else if key.Key == ConsoleKey.LeftArrow {
-                    Cursor = Before(Cursor)
+                    Cursor = WizardScreen.Before(Search, Cursor)
                 } else if key.Key == ConsoleKey.RightArrow {
-                    Cursor = After(Cursor)
+                    Cursor = WizardScreen.After(Search, Cursor)
                 } else if key.Key == ConsoleKey.Home || (control && key.Key == ConsoleKey.A) {
                     Cursor = 0
                 } else if key.Key == ConsoleKey.End || (control && key.Key == ConsoleKey.E) {
                     Cursor = Search.Length
                 } else if key.Key == ConsoleKey.Backspace && Cursor > 0 {
-                    let before = Before(Cursor)
+                    let before = WizardScreen.Before(Search, Cursor)
                     Search = Search.Remove(before, Cursor - before)
                     Cursor = before
                     Focus = 0
                 } else if key.Key == ConsoleKey.Delete && Cursor < Search.Length {
-                    Search = Search.Remove(Cursor, After(Cursor) - Cursor)
+                    Search = Search.Remove(Cursor, WizardScreen.After(Search, Cursor) - Cursor)
                     Focus = 0
                 } else if control && key.Key == ConsoleKey.U {
                     Search = ""

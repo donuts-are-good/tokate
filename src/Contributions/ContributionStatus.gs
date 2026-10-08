@@ -137,7 +137,7 @@ internal class ContributionStatus {
             )
             return row
         }
-        row["approval"] = PublicOutput.Select(
+        row["approval"] = J.Select(
             approval,
             "version,approval_scope,eligibility,donor,base,base_branch,authority_branch"
         )
@@ -316,7 +316,7 @@ internal class ContributionStatus {
             row["reservation"] = nil
             return
         }
-        let displayed = PublicOutput.Select(reservation, "reservation,lease,donor,actor,created,expires,status,attempt")
+        let displayed = J.Select(reservation, "reservation,lease,donor,actor,created,expires,status,attempt")
         row["reservation"] = displayed
         let expires = CoordinationState.Unix(reservation, "expires")
         displayed["expired"] = expires <= DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -957,7 +957,7 @@ internal class ContributionStatus {
                 Result["requests_truncated"] = true
                 break
             }
-            let row = PublicOutput.Select(request, "comment,actor,donor,issue,scope")
+            let row = J.Select(request, "comment,actor,donor,issue,scope")
             row["next"] = AccessReview(repo, J.Number(request, "issue").ToString())
             displayed.Add(row)
         }

@@ -99,7 +99,7 @@ internal class DonorDefaults {
         }
 
         private func Summary(value JsonElement) Object? -> value.ValueKind == JsonValueKind.Undefined ? nil:
-        PublicOutput.Select(value, "harness,provider,model,effort")
+        J.Select(value, "harness,provider,model,effort")
 
         internal func Run(args Args) JsonElement {
             let profile = args.Get("profile")

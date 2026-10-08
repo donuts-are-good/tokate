@@ -1,10 +1,7 @@
 package TokateTests
 
-import Gsharp.Concurrency
 import System
-import System.Diagnostics
 import System.IO
-import System.Text
 import System.Text.Json.Nodes
 
 internal class ContributionStatusChecks {
@@ -765,7 +762,7 @@ internal class ContributionStatusChecks {
             let raw = Check.Json(legacy.Output)
             Check.That(raw.ToJsonString() == structured["data"]?.ToJsonString(), "Terminal and structured facts differ")
             test.Flow.Temp.Env["TERM"] = "xterm-256color"
-            let narrow = TerminalOutput.Pty(
+            let narrow = TestTerminal.Pty(
                 binary,
                 []string{"status", "--repo", "owner/project", "--issue", "1", "--plain"},
                 test.Flow.Temp,
@@ -797,43 +794,6 @@ internal class ContributionStatusChecks {
             )
         }
 
-        private func Frames(reader StreamReader, frames Chan[string], completed Chan[Exception?]) {
-            var failure Exception? = nil
-            try {
-                let prompt = "tokate> "
-                let text = StringBuilder()
-                var matched int32
-                while true {
-                    let next = reader.Read()
-                    if next < 0 {
-                        break
-                    }
-                    let value = Convert.ToChar(next)
-                    text.Append(value)
-                    matched = value == prompt[matched]? matched + 1: (value == prompt[0]? 1: 0)
-                    if matched == prompt.Length {
-                        frames <- text.ToString()
-                        text.Clear()
-                        matched = 0
-                    }
-                }
-            } catch (error Exception) {
-                failure = error
-            }
-            completed <- failure
-        }
-
-        private func Frame(frames Chan[string]) string {
-            select {
-                case let value = <- frames {
-                    return value
-                }
-                case <- after(TimeSpan.FromSeconds(30)) {
-                    throw Exception("Interactive status did not reach its next prompt")
-                }
-            }
-        }
-
         private func RepeatedReads(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -858,94 +818,47 @@ internal class ContributionStatusChecks {
             test.Flow.Save()
             test.Flow.ResetTraffic()
             test.Flow.Temp.Env["TERM"] = "dumb"
-            let start = ProcessStartInfo("/usr/bin/script")
-            start.UseShellExecute = false
-            start.RedirectStandardInput = true
-            start.RedirectStandardOutput = true
-            start.RedirectStandardError = true
-            start.WorkingDirectory = test.Flow.Temp.Root
-            start.Environment.Clear()
-            for entry in test.Flow.Temp.Env {
-                start.Environment[entry.Key] = entry.Value
+            let args = []string{"status", "--repo", "owner/project", "--plain"}
+            let truncated = Check.Success(TestTerminal.Pty(binary, args, test.Flow.Temp, 120))
+            TestTerminal.Save("status-truncated", truncated)
+            Check.Contains(truncated, "Bounded snapshot: some data was omitted.")
+            Check.Contains(truncated, "Review donor access and grant eligibility if appropriate.")
+            Check.Contains(truncated, "Command: tokate access --repo owner/project --operation list --issue 1")
+            test.Flow.Reload()
+            let current = test.Flow.State["issue"] ?? throw Exception("Missing issue")
+            current["title"] = JsonValue.Create(title)
+            test.Flow.State["fault_path"] = JsonValue.Create("user")
+            test.Flow.State["faults"] = Check.Json("[{\"status\":403}]")
+            test.Flow.State["fault_index"] = JsonValue.Create(0)
+            test.Flow.Save()
+            let failure = TestTerminal.Pty(binary, args, test.Flow.Temp, 120)
+            Check.That(failure.Code == 1, "Failed status read did not report failure")
+            let failed = failure.Output
+            TestTerminal.Save("status-failed", failed)
+            Check.Contains(failed, "unavailable; partial facts only")
+            Check.Contains(failed, "GitHub read failed (HTTP 403).")
+            Check.Contains(failed, "Issue: #1 " + title)
+            Check.That(!failed.Contains("Bounded snapshot:"), "Failed status read retained earlier truncation")
+            test.Flow.Reload()
+            test.Flow.State["fault_path"] = nil
+            test.Flow.State["comments"] = Check.Json("{}")
+            test.Flow.Save()
+            let healthy = Check.Success(TestTerminal.Pty(binary, args, test.Flow.Temp, 120))
+            TestTerminal.Save("status-healthy", healthy)
+            Check.Contains(healthy, "State: reservation needed")
+            Check.Contains(healthy, "Role: donor")
+            Check.That(
+                !healthy.Contains("unavailable") && !healthy.Contains("Bounded snapshot:") && !healthy.Contains(
+                    "Review donor access"
+                ) &&
+                    !healthy.Contains("Oversized title"),
+                "Healthy status read retained failed or truncated facts or actions"
+            )
+            test.Flow.Reload()
+            for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "Repeated status reads wrote to GitHub")
             }
-            for arg in[]string{
-                "-q",
-                "-e",
-                "-c",
-                "stty cols 120 rows 24; exec '" + binary.Replace("'", "'\"'\"'") + "'",
-                "/dev/null"
-            } {
-                start.ArgumentList.Add(arg)
-            }
-            using let process = Process.Start(start) ?? throw Exception("Cannot start interactive status")
-            let frames = Chan[string](4)
-            let completed = Chan[Exception?](1)
-            let stderr = Chan[string](1)
-            go Frames(process.StandardOutput, frames, completed)
-            go TestProcess.Read(process.StandardError, stderr)
-            var readFailure Exception? = nil
-            var diagnostics = ""
-            try {
-                process.StandardInput.WriteLine("owner/project")
-                process.StandardInput.Flush()
-                let truncated = Frame(frames)
-                TerminalOutput.Save("interactive-status-truncated", truncated)
-                Check.Contains(truncated, "Bounded snapshot: some data was omitted.")
-                Check.Contains(truncated, "Review donor access and grant eligibility if appropriate.")
-                Check.Contains(truncated, "Command: tokate access --repo owner/project --operation list --issue 1")
-                test.Flow.Reload()
-                let current = test.Flow.State["issue"] ?? throw Exception("Missing issue")
-                current["title"] = JsonValue.Create(title)
-                test.Flow.State["fault_path"] = JsonValue.Create("user")
-                test.Flow.State["faults"] = Check.Json("[{\"status\":403}]")
-                test.Flow.State["fault_index"] = JsonValue.Create(0)
-                test.Flow.Save()
-                process.StandardInput.WriteLine("refresh")
-                process.StandardInput.Flush()
-                let failed = Frame(frames)
-                TerminalOutput.Save("interactive-status-failed", failed)
-                Check.Contains(failed, "unavailable; partial facts only")
-                Check.Contains(failed, "GitHub read failed (HTTP 403).")
-                Check.Contains(failed, "Issue: #1 " + title)
-                Check.That(!failed.Contains("Bounded snapshot:"), "Failed refresh retained earlier truncation")
-                test.Flow.Reload()
-                test.Flow.State["fault_path"] = nil
-                test.Flow.State["comments"] = Check.Json("{}")
-                test.Flow.Save()
-                process.StandardInput.WriteLine("refresh")
-                process.StandardInput.Flush()
-                let healthy = Frame(frames)
-                TerminalOutput.Save("interactive-status-healthy", healthy)
-                Check.Contains(healthy, "State: reservation needed")
-                Check.Contains(healthy, "Role: donor")
-                Check.That(
-                    !healthy.Contains("unavailable") && !healthy.Contains("Bounded snapshot:") && !healthy.Contains(
-                        "Review donor access"
-                    ) &&
-                        !healthy.Contains("Oversized title"),
-                    "Healthy refresh retained failed or truncated status facts or actions"
-                )
-                process.StandardInput.WriteLine("exit")
-                process.StandardInput.Flush()
-                process.StandardInput.Close()
-                Check.That(process.WaitForExit(10000), "Interactive status did not exit")
-                test.Flow.Reload()
-                for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                    Check.That(Check.Text(call["method"]) == "GET", "Interactive status wrote to GitHub")
-                }
-                test.Flow.NoInference()
-            } finally {
-                if !process.HasExited {
-                    process.Kill(true)
-                    process.WaitForExit()
-                }
-                readFailure = <-completed
-                diagnostics = <-stderr
-            }
-            if let failure = readFailure {
-                throw failure
-            }
-            Check.That(process.ExitCode == 0, diagnostics)
+            test.Flow.NoInference()
         }
 
         internal func All(binary string) {
@@ -958,7 +871,7 @@ internal class ContributionStatusChecks {
             LegacyAndTerminal(binary)
             RepeatedReads(binary)
             Console.WriteLine(
-                "PASS remote status access, discovery, leases, drafts, checks, historical lifecycle, stale authority, API failures, repeated reads, roles, narrow terminals and JSON"
+                "PASS remote status access, discovery, leases, drafts, checks, historical lifecycle, stale authority, API failures, repeated status invocations, roles, narrow terminals and JSON"
             )
         }
     }

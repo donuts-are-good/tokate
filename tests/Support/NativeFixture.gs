@@ -9,7 +9,6 @@ import System.Globalization
 import System.IO
 import System.Net
 import System.Net.Sockets
-import System.Reflection
 import System.Text.Json.Nodes
 
 internal open class NativeFixture : IDisposable {
@@ -48,25 +47,12 @@ internal open class NativeFixture : IDisposable {
         Save()
     }
 
-    shared {
-        internal func Template(name string) string {
-            using let stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(
-                "TokateTests.templates." + name
-            )
-            if stream == nil {
-                throw Exception("Missing fixture template")
-            }
-            using let reader = StreamReader(stream)
-            return reader.ReadToEnd()
-        }
-    }
-
     internal func Initialize() {
         Git("init", "-b", "main", Upstream)
         Git("-C", Upstream, "config", "maintenance.autoDetach", "false")
         Directory.CreateDirectory(Path.Combine(Upstream, ".github"))
-        File.WriteAllText(Path.Combine(Upstream, ".github/tokate.json"), Template("tokate.json"))
-        File.WriteAllText(Path.Combine(Upstream, ".github/tokate-pr.md"), Template("tokate-pr.md"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate.json"), TestResources.Template("tokate.json"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate-pr.md"), TestResources.Template("tokate-pr.md"))
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
         Check.That(Check.Text(policy["max_seconds"]) == "3600", "New policy budget must be 3600 seconds")
@@ -122,6 +108,12 @@ internal open class NativeFixture : IDisposable {
             env.Remove(key)
         }
         return Check.Success(TestProcess.Run("/usr/bin/git", args, env))
+    }
+
+    internal func DonorGit(checkout string, args ...string) string {
+        let command = List[string]{"-C", checkout, "-c", "user.name=Donor", "-c", "user.email=donor@example.test"}
+        command.AddRange(args)
+        return Git(command.ToArray())
     }
 
     internal func Commit(message string) {
@@ -281,6 +273,56 @@ internal open class NativeFixture : IDisposable {
             Commit("Owner selects model policy")
         }
         Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func StartTreeTraffic() {
+        ResetTraffic()
+        File.WriteAllText(Path.Combine(Bin, "local-tree-heads.txt"), "")
+    }
+
+    internal func TreeTraffic(previous string, grants int32, later bool, local bool) {
+        Reload()
+        let heads = File.ReadAllLines(Path.Combine(Bin, "local-tree-heads.txt"))
+        let previousTree = Git("-C", Path.Combine(Bin, "fork"), "rev-parse", previous + "^{tree}")
+        var localPasses int32
+        for head in heads {
+            if head == previous {
+                localPasses++
+            }
+        }
+        var remotePasses int32
+        var upstreamTrees int32
+        var forkTrees int32
+        for call in State["api_calls"]?.AsArray() ?? JsonArray() {
+            let path = Check.Text(call["path"])
+            if !path.Contains("/git/trees/") || !path.EndsWith("?recursive=1", StringComparison.Ordinal) {
+                continue
+            }
+            if path.StartsWith("repos/owner/project/", StringComparison.Ordinal) {
+                upstreamTrees++
+            } else {
+                forkTrees++
+            }
+            if path == "repos/donor/project/git/trees/" + previousTree + "?recursive=1" {
+                remotePasses++
+            }
+        }
+        let candidateTrees = 2 * grants + (later ? 1: 0)
+        if local {
+            Check.That(localPasses > 0, "Missing local synchronization pass")
+            Check.That(heads.Length == localPasses * candidateTrees, "Repeated local tree materialization")
+        } else {
+            Check.That(heads.Length == 0 && remotePasses == 1, "Missing isolated remote synchronization pass")
+            Check.That(forkTrees == candidateTrees, "Repeated remote candidate tree materialization")
+            Check.That(upstreamTrees == grants + 1, "Repeated repository baseline tree materialization")
+        }
+        Console.WriteLine(
+            "Tree traffic: grants=" + grants.ToString() + " later=" + later.ToString() +
+                " local_passes=" +
+                localPasses.ToString() + " local_trees=" + heads.Length.ToString() +
+                " upstream_trees=" +
+                upstreamTrees.ToString() + " fork_trees=" + forkTrees.ToString()
+        )
     }
 
     internal func ResetTraffic() {

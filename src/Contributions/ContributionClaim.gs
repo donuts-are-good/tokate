@@ -24,6 +24,9 @@ internal class ContributionClaim {
             let selection = DonorSelection.Resolve(args, policy)
             let model = J.Text(selection, "model")
             let effort = J.Text(selection, "effort")
+            if args.Get("unlimited") == "true" {
+                throw Exception("Unlimited coding requires managed version-2 work")
+            }
             let seconds = args.Number(
                 "seconds",
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
@@ -49,24 +52,27 @@ internal class ContributionClaim {
                     DonorSelection.Confirm(args, selection)
                 }
             }
-            let run = Data()
-            run.Fields["version"] = 1
-            run.Fields["id"] = Guid.NewGuid().ToString("N")
-            run.Fields["repo"] = repo
-            run.Fields["issue"] = number
-            run.Fields["donor"] = donor
-            run.Fields["donor_id"] = J.Get(viewer, "id")
-            run.Fields["head_repo"] = RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
-            run.Fields["approval"] = J.Text(record, "sha")
-            run.Fields["base"] = J.Text(approval, "base")
-            run.Fields["base_branch"] = J.Text(approval, "base_branch")
-            run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
-            run.Fields["model"] = model
-            run.Fields["effort"] = effort
-            run.Fields["harness"] = J.Text(selection, "harness")
-            run.Fields["provider"] = J.Text(selection, "provider")
-            run.Fields["selection"] = selection
-            run.Fields["seconds"] = seconds
+            let run = Data(
+                map[string, Object?]{
+                    "version": 1,
+                    "id": Guid.NewGuid().ToString("N"),
+                    "repo": repo,
+                    "issue": number,
+                    "donor": donor,
+                    "donor_id": J.Get(viewer, "id"),
+                    "head_repo": RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1])),
+                    "approval": J.Text(record, "sha"),
+                    "base": J.Text(approval, "base"),
+                    "base_branch": J.Text(approval, "base_branch"),
+                    "policy_hash": J.Text(approval, "policy_hash"),
+                    "model": model,
+                    "effort": effort,
+                    "harness": J.Text(selection, "harness"),
+                    "provider": J.Text(selection, "provider"),
+                    "selection": selection,
+                    "seconds": seconds
+                }
+            )
             if args.Get("verification-reserve") != "" {
                 run.Fields["verification_reserve"] = reserve
             }
@@ -103,7 +109,7 @@ internal class ContributionClaim {
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
             Terminal.Step(RuntimeBudget.Description(run))
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             Terminal.Step("Preparing contribution. Run: " + directory)
             Preparation.Initialize(directory, run, args.Get("fork"))
             if V1Continuation.Has(run) {
@@ -226,7 +232,8 @@ internal class ContributionClaim {
             if run.Number("preparation_version") == 0 || run.Text("state") != "preparing" {
                 RepositoryAccess.ValidateRun(run)
             }
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            RuntimeBudget.Validate(run)
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             V2Continuation.Recheck(run, state)
             return record
         }

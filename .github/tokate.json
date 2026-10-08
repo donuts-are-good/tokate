@@ -8,6 +8,9 @@
     "gpt-6-astra": [
       "xhigh"
     ],
+    "flash": [
+      "low"
+    ],
     "glm-5.3-flash": [
       "minimal",
       "low",
@@ -17,6 +20,7 @@
   },
   "max_seconds": 14400,
   "allow_network": true,
+  "allow_unlimited": true,
   "required_checks": [
     "verify"
   ],

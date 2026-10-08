@@ -8,6 +8,25 @@ import System.Text.RegularExpressions
 
 internal class PrBody {
     shared {
+        internal func ValidateTemplate(text string) {
+            for key in[]string{
+                "issue",
+                "report",
+                "donor",
+                "model",
+                "effort",
+                "seconds",
+                "base",
+                "policy",
+                "usage",
+                "receipt"
+            } {
+                if !text.Contains("{{" + key + "}}") {
+                    throw Exception("PR template must contain {{" + key + "}}")
+                }
+            }
+        }
+
         internal func Template(repo string, revision string, policy Policy) string {
             let custom = GitHub.Api(
                 "repos/" + repo + "/contents/.github/tokate-pr.md?ref=" + Uri.EscapeDataString(revision),
@@ -19,7 +38,7 @@ internal class PrBody {
                     throw Exception("Expected a small repository PR template")
                 }
                 text = Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(custom, "content")))
-                OwnerApproval.ValidateTemplate(text)
+                ValidateTemplate(text)
             }
             return text + (J.Text(policy.Value, "pr_text") == "" ? "": "\n\n{{pr_text}}\n")
         }
@@ -35,9 +54,7 @@ internal class PrBody {
             let correction = J.Get(metadata, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
                 let tools = J.Get(correction, "tools")
-                let editing = J.Items(tools).Count == 0 ? "manual/unknown editing": "donor-reported tools " + J.Write(
-                    tools
-                )
+                let editing = J.Count(tools) == 0 ? "manual/unknown editing": "donor-reported tools " + J.Write(tools)
                 let seconds = J.Number(correction, "seconds").ToString()
                 report += " Explicit correction " + J.Text(correction, "uuid") +
                     ": " +
@@ -71,7 +88,7 @@ internal class PrBody {
                 return report
             }
             let tools = J.Get(correction, "tools")
-            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
+            let editing = J.Count(tools) == 0 ? "manual/unknown editing (no tools declared)":
             "donor-reported correction tools: " + J.Write(tools)
             return "Explicit donor correction " + J.Text(correction, "uuid") +
                 ": " +

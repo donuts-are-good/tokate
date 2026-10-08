@@ -55,17 +55,7 @@ internal class PublicDescriptions {
             let checkout = Path.Combine(run, "checkout")
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final reviewed text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review result")
             let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
             let path = Path.Combine(flow.Temp.Root, "summary.json")
             File.WriteAllText(
@@ -94,10 +84,17 @@ internal class PublicDescriptions {
             let run = flow.Prepare()
             let head = flow.Candidate(claim)
             let path = Path.Combine(flow.Flow.Temp.Root, "summary.json")
-            File.WriteAllText(
-                path,
-                Summary("Add a result containing the external contribution text.", head).ToJsonString()
-            )
+            let ordinary = []string{
+                "Infer change-summary wording from the final diff.",
+                "Extend result text to name the verified behavior.",
+                "Check the published report for the final result sentence.",
+                "Require owner review before the candidate is merged."
+            }
+            let accepted = Summary("Add a result containing the external contribution text.", head)
+            for bullet in ordinary {
+                accepted["changes"]?.AsArray().Add(JsonValue.Create(bullet) as JsonNode)
+            }
+            File.WriteAllText(path, accepted.ToJsonString())
             let usable = File.ReadAllText(path)
             for invalid in[]string{
                 "{\"head\":\"" +
@@ -106,7 +103,19 @@ internal class PublicDescriptions {
                 Summary("Add final result content.", head).ToJsonString().Replace(
                     "Browser behavior was not checked.",
                     "Private log at https://internal.example.test"
-                )
+                ),
+                "{\"head\":\"" + head + "\",\"changes\":[],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"Add final result content.\",7],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"Fix the result using credential material.\"],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"" +
+                    String('x', 201) +
+                    "\"],\"verification\":[],\"limitations\":[]}"
             } {
                 File.WriteAllText(path, invalid)
                 flow.Flow.Call([]string{"external", "--run", run, "--commit", head, "--summary", path}, 1)
@@ -138,6 +147,9 @@ internal class PublicDescriptions {
             flow.Coordinate(event)
             let body = Body(flow.Flow)
             Check.Contains(body, "- Add a result containing the external contribution text.")
+            for bullet in ordinary {
+                Check.Contains(body, "- " + bullet)
+            }
             Check.Contains(body, "coordinator did not observe execution")
             Check.Contains(body, "Original donor-reported tools")
             Check.That(!body.Contains("\"harness\""), "Raw tool JSON in public report")
@@ -150,17 +162,7 @@ internal class PublicDescriptions {
             let checkout = Path.Combine(run, "checkout")
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final external review text\n")
             flow.Flow.Git("-C", checkout, "add", "-A")
-            flow.Flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review external result"
-            )
+            flow.Flow.DonorGit(checkout, "commit", "-m", "Review external result")
             let amended = flow.Flow.Git("-C", checkout, "rev-parse", "HEAD")
             File.WriteAllText(
                 path,
@@ -209,17 +211,7 @@ internal class PublicDescriptions {
             File.Delete(Path.Combine(checkout, "other.txt"))
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final corrected result text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Correct result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Correct result")
             let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
             let path = Path.Combine(flow.Temp.Root, "summary.json")
             File.WriteAllText(path, Summary("Add final corrected result text.", head).ToJsonString())
@@ -251,8 +243,11 @@ internal class PublicDescriptions {
             let receiptPrefix = "<!-- tokate-receipt:"
             let receiptStart = body.IndexOf(receiptPrefix, StringComparison.Ordinal) + receiptPrefix.Length
             let receiptEnd = body.IndexOf(" -->", receiptStart, StringComparison.Ordinal)
-            let correction = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))["correction"] ??
+            guard let correction = Check.Json(body.Substring(receiptStart, receiptEnd - receiptStart))[
+                "correction"
+            ] else {
                 throw Exception("Missing correction receipt")
+            }
             let legacy = "Explicit donor correction " + Check.Text(correction["uuid"]) +
                 ": donor-reported correction tools: " +
                 tools +
@@ -275,17 +270,7 @@ internal class PublicDescriptions {
             flow.Save()
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final amended result text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review corrected result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review corrected result")
             let amended = flow.Git("-C", checkout, "rev-parse", "HEAD")
             File.WriteAllText(path, Summary("Update final result text after review.", amended).ToJsonString())
             let args = []string{"amend", "--run", run, "--commit", amended, "--seconds", "30", "--summary", path}
@@ -327,6 +312,69 @@ internal class PublicDescriptions {
                 } else {
                     flow.NoPr()
                 }
+            }
+        }
+
+        private func Readiness(binary string) {
+            using let flow = NativeFixture(binary)
+            let run = PublishedContribution.Original(flow)
+            let body = Body(flow)
+            flow.Reload()
+            flow.State.AsObject().Remove("exec_count")
+            flow.Save()
+            Check.Contains(body, "- Add a result containing the fixture completion text.")
+            Check.Contains(body, "Verification:")
+            Check.Contains(body, "Tokate observed locally")
+            flow.Reload()
+            flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+            flow.Save()
+            guard let ready = Check.Json(flow.Call([]string{"checks", "--run", run, "--json"}).Output)["data"] else {
+                throw Exception("Missing readiness result")
+            }
+            Check.That(
+                Check.Text(ready["gates"]?["report"]?["status"]) == "passed" && Check.Text(
+                    ready["machine_status"]
+                ) == "passed",
+                "Current public report did not compose machine success: " + ready.ToJsonString()
+            )
+            Check.That(Check.Text(ready["owner_review"]) == "required", "Report readiness removed owner review")
+            for kind in[]string{"missing", "altered"} {
+                flow.Reload()
+                let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let current = Check.Text(pull["body"])
+                let start = current.IndexOf("<!-- tokate-report:start -->", StringComparison.Ordinal)
+                let end = current.IndexOf("<!-- tokate-report:end -->", StringComparison.Ordinal) +
+                    "<!-- tokate-report:end -->".Length
+                Check.That(start >= 0 && end > start, "Managed contribution lost its report region")
+                pull["body"] = JsonValue.Create(
+                    current.Remove(start, end - start).Insert(
+                        start,
+                        kind == "missing" ?
+                        "<!-- tokate-report:start --><!-- tokate-report:end -->":
+                        "<!-- tokate-report:start -->\nOwner note without a change or verification report.\n<!-- tokate-report:end -->"
+                    )
+                )
+                flow.Save()
+                let refusal = flow.Call([]string{"checks", "--run", run, "--json"}, 1)
+                Check.Envelope(refusal, "checks", "error", "invalid_state")
+                let refused = Check.Json(refusal.Output)["data"] ?? throw Exception("Missing refusal result")
+                Check.That(
+                    Check.Text(refused["gates"]?["report"]?["status"]) == "failed" && Check.Text(
+                        refused["machine_status"]
+                    ) == "failed",
+                    "Missing or altered public report returned machine success: " + refused.ToJsonString()
+                )
+                Check.That(
+                    Check.Text(refused["gates"]?["receipt"]?["status"]) == "passed" && Check.Text(
+                        refused["gates"]?["checks"]?["status"]
+                    ) == "passed",
+                    "Report refusal discarded current receipt or CI evidence"
+                )
+                Check.Contains(
+                    refused["required_owner_actions"]?.ToJsonString() ?? "",
+                    "public change and verification report"
+                )
+                flow.NoInference()
             }
         }
 
@@ -441,6 +489,10 @@ internal class PublicDescriptions {
                 (selected == "" && CiShard.Include("PublicDescriptions/MissingAndUnsafe")) {
                 MissingAndUnsafe(binary)
                 Console.WriteLine("PASS missing summary fallback and unsafe publication refusal")
+            }
+            if selected == "Readiness" || (selected == "" && CiShard.Include("PublicDescriptions/Readiness")) {
+                Readiness(binary)
+                Console.WriteLine("PASS current public report readiness with missing and altered report refusal")
             }
             if selected == "ManagedBounds" || (selected == "" && CiShard.Include("PublicDescriptions/ManagedBounds")) {
                 ManagedBounds(binary)

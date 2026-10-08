@@ -276,17 +276,7 @@ internal class ContinuationChecks {
                 let checkout = Path.Combine(fresh, "checkout")
                 File.WriteAllText(Path.Combine(checkout, "result.txt"), "Review amendment " + attempt.ToString() + "\n")
                 flow.Git("-C", checkout, "add", "result.txt")
-                flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "commit",
-                    "-m",
-                    "Review seeded contribution"
-                )
+                flow.DonorGit(checkout, "commit", "-m", "Review seeded contribution")
                 let commit = flow.Git("-C", checkout, "rev-parse", "HEAD")
                 let args = []string{"amend", "--run", fresh, "--commit", commit, "--seconds", "30"}
                 if attempt == 1 {
@@ -376,6 +366,9 @@ internal class ContinuationChecks {
         }
 
         private func Owner(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "advanced",
                 "revoked",
@@ -389,8 +382,8 @@ internal class ContinuationChecks {
                 "numeric-repo",
                 "numeric-valid"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 var prior = Check.Text(Read(source)["approval"])
                 let oldBase = Check.Text(Read(source)["base"])
                 if mode.StartsWith("numeric-", StringComparison.Ordinal) {
@@ -485,6 +478,9 @@ internal class ContinuationChecks {
         }
 
         private func Refusals(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "ordinary-grant",
                 "wrong-donor",
@@ -514,8 +510,8 @@ internal class ContinuationChecks {
                 "hooks",
                 "revoked"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Grant(flow, source)
                 let checkout = Path.Combine(source, "checkout")
                 let saved = Read(source)
@@ -634,6 +630,9 @@ internal class ContinuationChecks {
         }
 
         private func Interruptions(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "capture",
                 "init",
@@ -649,8 +648,8 @@ internal class ContinuationChecks {
                 "write",
                 "capture-hardlink"
             } {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Directory.CreateSymbolicLink(
                     Path.Combine(source, "checkout/.verification-data"),
                     Path.Combine(flow.Temp.Root, "home")
@@ -762,9 +761,12 @@ internal class ContinuationChecks {
         }
 
         private func Cache(binary string) {
+            using let flow = NativeFixture(binary)
+            let source = Setup(flow)
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
             for tracked in[]bool{false, true} {
-                using let flow = NativeFixture(binary)
-                let source = Setup(flow)
+                baseline.Restore()
+                flow.Reload()
                 Grant(flow, source)
                 let checkout = Path.Combine(source, "checkout")
                 let folder = Path.Combine(checkout, ".verification-data")
@@ -819,36 +821,23 @@ internal class ContinuationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{"Flow", "Owner", "Refusals", "Interruptions", "Cache", "Amendment", "Budget"} {
+            for test in[]TestCase[string]{
+                TestCase[string]("Flow", async (value string) -> Flow(value)),
+                TestCase[string]("Owner", async (value string) -> Owner(value)),
+                TestCase[string]("Refusals", async (value string) -> Refusals(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("Cache", async (value string) -> Cache(value)),
+                TestCase[string]("Amendment", async (value string) -> Amendment(value)),
+                TestCase[string]("Budget", async (value string) -> Budget(value))
+            } {
+                let name = test.Name
                 if selected != "" && name != selected {
                     continue
                 }
                 if selected == "" && !CiShard.Include("Continuation/" + name) {
                     continue
                 }
-                switch name {
-                    case "Flow" {
-                        Flow(binary)
-                    }
-                    case "Owner" {
-                        Owner(binary)
-                    }
-                    case "Refusals" {
-                        Refusals(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "Cache" {
-                        Cache(binary)
-                    }
-                    case "Amendment" {
-                        Amendment(binary)
-                    }
-                    case "Budget" {
-                        Budget(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS v1 continuation " + name)
             }
         }

@@ -188,10 +188,7 @@ internal class Reconciliation {
                     "Local candidate changed during inspection; preserve and inspect before resume."
                 )
             }
-            let saved = Data()
-            for field in intent.EnumerateObject() {
-                saved.Fields[field.Name] = field.Value.Clone()
-            }
+            let saved = Data.From(intent)
             saved.Fields["phase"] = "complete"
             saved.Fields["candidate"] = candidate
             run.Fields["reconciliation"] = saved.Element()
@@ -226,7 +223,7 @@ internal class Reconciliation {
         internal func Run(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
             PublicOutput.RunDirectory = directory
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             let checkout = Path.Combine(directory, "checkout")
             Preparation.PublishedSource(checkout, run)

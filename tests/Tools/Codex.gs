@@ -176,7 +176,9 @@ internal partial class Fixture {
             let deadline = DateTime.UtcNow.AddSeconds(60)
             while !File.Exists(Path.Combine(Root, "continue-execution")) {
                 Check.That(DateTime.UtcNow < deadline, "Lifecycle execution rendezvous timed out")
-                System.Threading.Thread.Sleep(20)
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(20)) { }
+                }
             }
         }
         if mode == "capture_write_failure" {

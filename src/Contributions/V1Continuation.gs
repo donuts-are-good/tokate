@@ -119,7 +119,7 @@ internal class V1Continuation {
                 throw Exception("Unsupported source lease state; source is preserved")
             }
             try {
-                return Preparation.Lease(directory)
+                return RunStorage.Lease(directory)
             } catch (error IOException) {
                 throw Exception(
                     "Source attempt is active or leased; stop it and explicitly retry this command after its lease is released",
@@ -132,10 +132,7 @@ internal class V1Continuation {
             if run.Number("version") == 2 {
                 return V2Continuation.Source(directory, run, record)
             }
-            let source = Data()
-            for field in J.Parse(Metadata(directory)).EnumerateObject() {
-                source.Fields[field.Name] = field.Value.Clone()
-            }
+            let source = Data.From(J.Parse(Metadata(directory)))
             let state = source.Text("state")
             if source.Number("version") != 1 || source.Number("preparation_version") != 1 ||
                 (source.Text("source") != "" && source.Text("source") != "tokate") ||

@@ -109,14 +109,12 @@ internal class TestProcess {
             result <- reader.ReadToEnd()
         }
 
-        internal func Run(
+        internal func StartInfo(
             exe string,
             args[]string,
             env Dictionary[string, string],
-            input string? = nil,
-            cwd string = "",
-            seconds int32 = 120
-        ) Result {
+            cwd string = ""
+        ) ProcessStartInfo {
             let info = ProcessStartInfo(exe)
             info.UseShellExecute = false
             info.RedirectStandardInput = true
@@ -132,6 +130,18 @@ internal class TestProcess {
             if cwd != "" {
                 info.WorkingDirectory = cwd
             }
+            return info
+        }
+
+        internal func Run(
+            exe string,
+            args[]string,
+            env Dictionary[string, string],
+            input string? = nil,
+            cwd string = "",
+            seconds int32 = 120
+        ) Result {
+            let info = StartInfo(exe, args, env, cwd)
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
             using let outputReader = StreamReader(process.StandardOutput.BaseStream, UTF8Encoding(false), false)
             let output = Chan[string](1)

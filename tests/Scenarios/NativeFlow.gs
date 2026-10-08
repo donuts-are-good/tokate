@@ -174,31 +174,21 @@ internal partial class NativeFlow : NativeFixture {
     }
 
     internal func StructuredFailures() {
-        for scenario in[]string{"authentication", "inference"} {
-            using let flow = NativeFlow(Binary)
-            flow.Initialize()
-            flow.Approve()
-            let run = flow.Claim(seconds: "1")
-            if scenario == "authentication" {
-                File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
-                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                let value = Check.Envelope(failure, "work", "error", "authentication_required")
-                Check.That(
-                    Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
-                        value["next_actions"]?[0]?[1]
-                    ) == "login",
-                    "Missing complete authentication action"
-                )
-                flow.NoInference()
-            } else {
-                flow.Mode("timeout")
-                let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
-                Check.Envelope(failure, "work", "error", "inference_failed")
-                flow.Reload()
-                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Inference failure retried")
-            }
-            flow.NoPr()
-        }
+        using let flow = NativeFlow(Binary)
+        flow.Initialize()
+        flow.Approve()
+        let run = flow.Claim(seconds: "1")
+        File.WriteAllText(Path.Combine(flow.Temp.Env["CODEX_HOME"], "identity"), "No active login")
+        let failure = flow.Call([]string{"work", "--run", run, "--json"}, 1)
+        let value = Check.Envelope(failure, "work", "error", "authentication_required")
+        Check.That(
+            Check.Text(value["next_actions"]?[0]?[0]) == "codex" && Check.Text(
+                value["next_actions"]?[0]?[1]
+            ) == "login",
+            "Missing complete authentication action"
+        )
+        flow.NoInference()
+        flow.NoPr()
         EventDelimiters()
     }
 
@@ -515,25 +505,18 @@ internal partial class NativeFlow : NativeFixture {
         let run = Claim(seconds: "30")
         Mode("timeout")
         File.Copy(Binary, Path.Combine(Temp.Root, "tokate-runner"))
-        let info = ProcessStartInfo("/usr/bin/script")
-        info.WorkingDirectory = Temp.Root
-        info.UseShellExecute = false
-        info.RedirectStandardInput = true
-        info.RedirectStandardOutput = true
-        info.RedirectStandardError = true
-        info.Environment.Clear()
-        for entry in Temp.Env {
-            info.Environment[entry.Key] = entry.Value
-        }
-        for arg in[]string{
-            "-q",
-            "-e",
-            "-c",
-            "echo $$$$ > runner.pid; exec ./tokate-runner work --run '" + run + "'",
-            "/dev/null"
-        } {
-            info.ArgumentList.Add(arg)
-        }
+        let info = TestProcess.StartInfo(
+            "/usr/bin/script",
+            []string{
+                "-q",
+                "-e",
+                "-c",
+                "echo $$$$ > runner.pid; exec ./tokate-runner work --run '" + run + "'",
+                "/dev/null"
+            },
+            Temp.Env,
+            Temp.Root
+        )
         using let terminal = Process.Start(info) ?? throw Exception("Cannot start managed cancellation fixture")
         try {
             terminal.StandardInput.Close()
@@ -595,7 +578,8 @@ internal partial class NativeFlow : NativeFixture {
         Approve()
         let run = Claim(seconds: "1")
         Mode("timeout")
-        let failure = Call([]string{"work", "--run", run}, 1)
+        let failure = Call([]string{"work", "--run", run, "--json"}, 1)
+        Check.Envelope(failure, "work", "error", "inference_failed")
         Check.That(!(failure.Output + failure.Error).Contains("partial-secret"), "Raw output escaped timeout")
         Check.Contains(File.ReadAllText(Path.Combine(run, "events.jsonl")), "partial-secret")
         Check.Contains(File.ReadAllText(Path.Combine(run, "stderr.log")), "synthetic-partial-stderr-secret")
@@ -892,6 +876,11 @@ internal partial class NativeFlow : NativeFixture {
             let run = Claim()
             Temp.Env["HOME"] = home
             Check.Contains(Call([]string{"work", "--run", run}, 1).Error, "must be outside /tmp")
+            Check.That(!File.Exists(Path.Combine(run, "private-probe")), "Failed startup retained private probe marker")
+            Check.That(
+                File.Exists(Path.Combine(run, "run.json")) && Directory.Exists(Path.Combine(run, "checkout")),
+                "Failed startup removed recovery evidence or donor checkout"
+            )
             NoInference()
             NoPr()
         } finally {

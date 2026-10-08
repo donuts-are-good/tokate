@@ -655,17 +655,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let work = Path.Combine(Flow.Temp.Root, "donor-work")
         File.WriteAllText(Path.Combine(work, "result.txt"), "failed\n")
         Flow.Git("-C", work, "add", "result.txt")
-        Flow.Git(
-            "-C",
-            work,
-            "-c",
-            "user.name=Donor",
-            "-c",
-            "user.email=donor@example.test",
-            "commit",
-            "-m",
-            "External correction"
-        )
+        Flow.DonorGit(work, "commit", "-m", "External correction")
         let second = Flow.Git("-C", work, "rev-parse", "HEAD")
         let branch = "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
         Flow.Git("-C", work, "push", Path.Combine(Flow.Bin, "fork"), branch)
@@ -776,17 +766,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         )
         File.WriteAllText(Path.Combine(work, "result.txt"), "corrected\n")
         Flow.Git("-C", work, "add", "result.txt")
-        Flow.Git(
-            "-C",
-            work,
-            "-c",
-            "user.name=Donor",
-            "-c",
-            "user.email=donor@example.test",
-            "commit",
-            "-m",
-            "Correct external result"
-        )
+        Flow.DonorGit(work, "commit", "-m", "Correct external result")
         let final = Flow.Git("-C", work, "rev-parse", "HEAD")
         Flow.Git("-C", work, "push", Path.Combine(Flow.Bin, "fork"), branch)
         let finalArgs = []string{"external", "--run", run, "--commit", final, "--seconds", "30", "--tools", Tools}

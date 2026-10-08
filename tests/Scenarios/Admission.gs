@@ -256,17 +256,7 @@ internal class AdmissionChecks {
             let work = Path.Combine(test.Flow.Temp.Root, "donor-work")
             File.AppendAllText(Path.Combine(work, "result.txt"), "Amended\n")
             test.Flow.Git("-C", work, "add", "result.txt")
-            test.Flow.Git(
-                "-C",
-                work,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Amend result"
-            )
+            test.Flow.DonorGit(work, "commit", "-m", "Amend result")
             let amended = test.Flow.Git("-C", work, "rev-parse", "HEAD")
             test.Flow.Git("-C", work, "push", Path.Combine(test.Flow.Bin, "fork"), "HEAD:refs/heads/" + branch)
             test.Flow.Reload()
@@ -517,7 +507,7 @@ internal class AdmissionChecks {
                 owner: true
             )
             Check.That(!File.Exists(output), "Missing event policy enabled automatic closure")
-            let central = NativeFixture.Template("coordinator.yml")
+            let central = TestResources.Template("coordinator.yml")
             Check.Contains(central, "contents: read")
             Check.Contains(central, "admit --repo")
             Check.That(

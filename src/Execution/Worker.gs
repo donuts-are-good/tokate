@@ -116,33 +116,47 @@ internal class Worker {
 
         internal func Probe(directory string, checkout string) {
             let sentinel = Path.Combine(directory, "private-probe")
-            File.WriteAllText(sentinel, "private")
             let args = List[string]{"sandbox", "-P", "tokate", "--include-managed-config", "-C", checkout}
-            Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
-            Config(args, "permissions.tokate.network.enabled", "false")
-            args.AddRange(
-                []string{
-                    "--",
-                    "/usr/bin/env",
-                    "-i",
-                    "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=/tmp/tokate-home",
-                    "TMPDIR=/tmp/tokate-home",
-                    "/bin/sh",
-                    "-c",
-                    "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
-                    "probe",
-                    sentinel,
-                    CodexPath()
-                }
-            )
-            let result = Run(directory, args.ToArray())
-            File.Delete(sentinel)
-            if result.Code != 0 || result.Truncated || result.ReadFailed {
-                throw CliFailure(
-                    "verification_failed",
-                    "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
+            var failure Exception? = nil
+            try {
+                File.WriteAllText(sentinel, "private")
+                Config(args, "permissions.tokate.filesystem", Filesystem(checkout))
+                Config(args, "permissions.tokate.network.enabled", "false")
+                args.AddRange(
+                    []string{
+                        "--",
+                        "/usr/bin/env",
+                        "-i",
+                        "PATH=/usr/local/bin:/usr/bin:/bin",
+                        "HOME=/tmp/tokate-home",
+                        "TMPDIR=/tmp/tokate-home",
+                        "/bin/sh",
+                        "-c",
+                        "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
+                        "probe",
+                        sentinel,
+                        CodexPath()
+                    }
                 )
+                let result = Run(directory, args.ToArray())
+                if result.Code != 0 || result.Truncated || result.ReadFailed {
+                    throw CliFailure(
+                        "verification_failed",
+                        "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
+                    )
+                }
+            } catch (error Exception) {
+                failure = error
+            }
+            try {
+                File.Delete(sentinel)
+            } catch (error Exception) {
+                if failure == nil {
+                    failure = error
+                }
+            }
+            if let error = failure {
+                throw error
             }
             if File.Exists(Path.Combine(checkout, "global.json")) {
                 args[args.Count - 4] = "dotnet msbuild -nologo -version"
@@ -197,7 +211,7 @@ internal class Worker {
         }
 
         internal func Execute(directory string, options Args) {
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Number("version") == 2 && run.Text("source") != "tokate" {
                 throw Exception("External work uses external --run; inference is never launched")
@@ -363,9 +377,16 @@ internal class Worker {
                     using let progress = TerminalProgress(
                         "Inference",
                         coding,
-                        RuntimeBudget(timer, run.Number("seconds"))
+                        RuntimeBudget(timer, run.Flag("unlimited") ? 0: run.Number("seconds"))
                     )
-                    result = Run(directory, args.ToArray(), prompt, run.Number("seconds"), true, coding)
+                    result = Run(
+                        directory,
+                        args.ToArray(),
+                        prompt,
+                        run.Flag("unlimited") ? 0: run.Number("seconds"),
+                        true,
+                        coding
+                    )
                 }
                 run.Fields["output_truncated"] = result.OutputTruncated
                 run.Fields["error_truncated"] = result.ErrorTruncated
@@ -380,7 +401,7 @@ internal class Worker {
                 if result.Truncated {
                     throw Exception("Codex output was truncated; no complete turn evidence")
                 }
-                let usage = CompletedUsage(directory, result.Output)
+                let usage = CodexEvidence.CompletedUsage(directory, result.Output)
                 run.Fields["turn_completed"] = true
                 run.Fields["usage"] = usage
                 run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
@@ -397,15 +418,10 @@ internal class Worker {
                 )
             } catch (error Exception) {
                 if run.Text("failure_stage") == "inference" {
-                    if error is CommandInterrupted interrupted {
+                    if let result = Commands.InterruptedResult(error) {
                         run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
-                    }
-                    if error is CommandInputInterrupted interruptedInput {
-                        run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
+                        run.Fields["output_truncated"] = result.OutputTruncated
+                        run.Fields["error_truncated"] = result.ErrorTruncated
                     }
                 }
                 run.Fields["state"] = "failed"
@@ -416,38 +432,6 @@ internal class Worker {
                 run.Save(directory)
                 throw error
             }
-        }
-
-        internal func CompletedUsage(directory string, output string) Dictionary[string, Object?] {
-            var completed bool
-            var completions int32
-            let usage = Dictionary[string, Object?]()
-            let events = output.AsSpan()
-            for bounds in events.Split('\n') {
-                let line = events[bounds]
-                if line.IsWhiteSpace() {
-                    continue
-                }
-                let item = J.Parse(line.ToString())
-                if J.Text(item, "type") == "turn.started" {
-                    completed = false
-                }
-                if J.Text(item, "type") == "turn.failed" {
-                    throw CliFailure("inference_failed", "Codex reported a failed turn")
-                }
-                if J.Text(item, "type") == "turn.completed" {
-                    completed = true
-                    completions++
-                    for field in J.Get(item, "usage").EnumerateObject() {
-                        usage[field.Name] = field.Value.Clone()
-                    }
-                }
-            }
-            let report = File.ReadAllText(Path.Combine(directory, "report.md"))
-            if !completed || completions != 1 || String.IsNullOrWhiteSpace(report) {
-                throw CliFailure("inference_failed", "Codex did not produce a completed turn and report")
-            }
-            return usage
         }
     }
 }

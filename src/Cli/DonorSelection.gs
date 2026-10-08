@@ -7,49 +7,6 @@ import System.Text.Json
 
 internal class DonorSelection {
     shared {
-        internal func Capabilities() Dictionary[string, HashSet[string]] {
-            let executable = CodexRuntime.Resolve()
-            let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
-            try {
-                let prefix = List[string]{
-                    "-i",
-                    "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=" + home,
-                    "CODEX_HOME=" + home,
-                    executable
-                }
-                let help = List[string](prefix)
-                help.AddRange([]string{"exec", "--help"})
-                let controls = Commands.Run("/usr/bin/env", help.ToArray(), home, seconds: 10, isolated: true)
-                for flag in[]string{"--model", "--config", "--ignore-user-config", "--strict-config"} {
-                    if controls.Code != 0 || !controls.Output.Contains(flag) {
-                        throw Exception(
-                            "Native Codex does not expose the required explicit controls; no compatible pair"
-                        )
-                    }
-                }
-                let catalog = List[string](prefix)
-                catalog.AddRange([]string{"debug", "models", "--bundled"})
-                let result = Commands.Run("/usr/bin/env", catalog.ToArray(), home, seconds: 10, isolated: true)
-                if result.Code != 0 {
-                    throw Exception("Cannot verify offline Codex model/effort capabilities; availability is unknown")
-                }
-                let models = Dictionary[string, HashSet[string]](StringComparer.Ordinal)
-                let value = RequestData.Parse(result.Output, 4 * 1024 * 1024)
-                for model in J.Items(J.Get(value, "models")) {
-                    let efforts = HashSet[string](StringComparer.Ordinal)
-                    for level in J.Items(J.Get(model, "supported_reasoning_levels")) {
-                        efforts.Add(J.Text(level, "effort"))
-                    }
-                    models[J.Text(model, "slug")] = efforts
-                }
-                return models
-            } finally {
-                Directory.Delete(home, true)
-            }
-        }
-
         internal func Interactive(args Args) bool -> !PublicOutput.Enabled && args.Get("non-interactive") != "true" &&
             !Console.IsInputRedirected &&
             !Console.IsOutputRedirected &&
@@ -102,6 +59,7 @@ internal class DonorSelection {
         }
 
         internal func Resolve(args Args, policy Policy) JsonElement {
+            DonorDefaults.NormalizePair(args)
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
             if args.Get("continue-truncated") == "true" && harness != "pi" {
@@ -143,7 +101,7 @@ internal class DonorSelection {
                 }
                 return PiHarness.Select(args, policy, source)
             }
-            let capabilities = Capabilities()
+            let capabilities = CodexRuntime.Capabilities()
             var availability = args.Get("availability", "unknown")
             let unavailable = availability == "unavailable" ? model: ""
             let choices = SortedDictionary[string, JsonElement](StringComparer.Ordinal)
@@ -240,8 +198,11 @@ internal class DonorSelection {
                 Terminal.Row("Model", J.Text(selection, "model") + " / " + J.Text(selection, "effort"))
                 Terminal.Row(
                     "Budget",
-                    args.Need("seconds") + " seconds total; " + args.Get("verification-reserve", "0") +
-                        " reserved for verification"
+                    (
+                        args.Get("unlimited") == "true" ? "Unlimited coding; ": args.Need("seconds") +
+                            " seconds total; "
+                    ) +
+                        args.Get("verification-reserve", "0") + " reserved for verification"
                 )
                 Terminal.Row("Command network", args.Get("allow-network") == "true" ? "allowed": "denied")
                 Terminal.Row("Availability", J.Text(selection, "availability"))
@@ -313,7 +274,7 @@ internal class DonorSelection {
                 throw Exception(failure)
             }
             policy.Validate(run.Text("model"), run.Text("effort"), run.Number("seconds"), run.Flag("network"))
-            let capabilities = Capabilities()
+            let capabilities = CodexRuntime.Capabilities()
             var supported HashSet[string]
             if !capabilities.TryGetValue(run.Text("model"), out supported) || !supported.Contains(run.Text("effort")) {
                 throw Exception("Saved model/effort is no longer compatible with native Codex. No retry or fallback.")

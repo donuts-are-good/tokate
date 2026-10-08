@@ -148,7 +148,7 @@ internal class TargetBranches {
         }
 
         private func V2(binary string, branch string, external bool) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             test.Initialize()
             let flow = test.Flow
             let base = Target(flow, branch)
@@ -174,17 +174,7 @@ internal class TargetBranches {
                 flow.Git("-C", checkout, "checkout", "--detach", base)
                 File.WriteAllText(Path.Combine(checkout, "result.txt"), "External contribution\n")
                 flow.Git("-C", checkout, "add", ".")
-                flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "commit",
-                    "-m",
-                    "Result"
-                )
+                flow.DonorGit(checkout, "commit", "-m", "Result")
                 let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
                 flow.Git(
                     "-C",
@@ -193,7 +183,21 @@ internal class TargetBranches {
                     Path.Combine(flow.Bin, "fork"),
                     "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
                 )
-                let result = flow.Call([]string{"external", "--run", run, "--commit", head})
+                let result = flow.Call(
+                    []string{
+                        "external",
+                        "--run",
+                        run,
+                        "--commit",
+                        head,
+                        "--summary",
+                        PublishedContribution.Summary(
+                            flow,
+                            head,
+                            "Add a result containing the external contribution text."
+                        )
+                    }
+                )
                 Check.Contains(result.Error, base)
                 Check.Contains(result.Error, moved)
                 flow.NoInference()
@@ -212,7 +216,7 @@ internal class TargetBranches {
         }
 
         private func Freshness(binary string, version int32, change string) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             let flow = test.Flow
             if version == 2 {
                 test.Initialize()
@@ -300,7 +304,7 @@ internal class TargetBranches {
         }
 
         private func Legacy(binary string, version int32) {
-            using let test = CoordinationFlow(binary)
+            using let test = CoordinationFixture(binary)
             let flow = test.Flow
             if version == 2 {
                 test.Initialize()

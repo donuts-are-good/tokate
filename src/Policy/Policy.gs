@@ -129,6 +129,13 @@ internal class Policy {
         if networkKind != JsonValueKind.True && networkKind != JsonValueKind.False {
             throw Exception("allow_network must be boolean")
         }
+        let unlimited = J.Get(Value, "allow_unlimited").ValueKind
+        if unlimited != JsonValueKind.Undefined && unlimited != JsonValueKind.True && unlimited != JsonValueKind.False {
+            throw Exception("allow_unlimited must be boolean")
+        }
+        if unlimited != JsonValueKind.Undefined {
+            RequestData.Parse(text, 1024 * 1024)
+        }
         let commands = J.Items(J.Get(Value, "verification"))
         if commands.Count == 0 {
             throw Exception("At least one verification command is required")
@@ -243,7 +250,10 @@ internal class Policy {
         ValidateBudget(seconds, network)
     }
 
-    internal func ValidateBudget(seconds int32, network bool) {
+    internal func ValidateBudget(seconds int32, network bool, unlimited bool = false) {
+        if unlimited && (J.Number(Value, "version") != 2 || !J.Bool(Value, "allow_unlimited")) {
+            throw Exception("Repository policy does not allow unlimited coding")
+        }
         if seconds < 1 || seconds > J.Number(Value, "max_seconds") {
             throw Exception("Runtime exceeds repository policy")
         }

@@ -297,17 +297,7 @@ internal class EligibilityChecks {
                     let checkout = Path.Combine(test.Flow.Temp.Root, "donor-work")
                     File.AppendAllText(Path.Combine(checkout, "result.txt"), "Reviewed change\n")
                     test.Flow.Git("-C", checkout, "add", ".")
-                    test.Flow.Git(
-                        "-C",
-                        checkout,
-                        "-c",
-                        "user.name=Donor",
-                        "-c",
-                        "user.email=donor@example.test",
-                        "commit",
-                        "-m",
-                        "Review correction"
-                    )
+                    test.Flow.DonorGit(checkout, "commit", "-m", "Review correction")
                     let head = test.Flow.Git("-C", checkout, "rev-parse", "HEAD")
                     test.Flow.Git(
                         "-C",

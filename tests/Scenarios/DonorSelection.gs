@@ -597,6 +597,7 @@ internal class DonorSelectionChecks {
                 []string{"--provider=anthropic", "--model=gpt-6.1-sol", "--effort=high"},
                 []string{"--harness=pi", "--model=gpt-6.1-sol", "--effort=absent"},
                 []string{
+                    "--harness=codex",
                     "--provider=local-chat-completions",
                     "--model=gpt-6.1-sol",
                     "--effort=high",

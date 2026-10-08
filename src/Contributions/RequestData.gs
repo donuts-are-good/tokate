@@ -203,7 +203,7 @@ internal class RequestData {
             if tools.ValueKind != JsonValueKind.Array {
                 throw Exception("Correction tools must be an array; [] declares manual editing")
             }
-            if J.Items(tools).Count > 0 {
+            if J.Count(tools) > 0 {
                 Tools(tools)
             }
             if policy.ValueKind != JsonValueKind.Undefined {
@@ -218,7 +218,7 @@ internal class RequestData {
             if tools.ValueKind != JsonValueKind.Array {
                 throw Exception("Correction tools must be an array; [] declares manual editing")
             }
-            if J.Items(tools).Count > 0 {
+            if J.Count(tools) > 0 {
                 RequestData.Tools(tools)
                 let owner = Policy(J.Write(policy))
                 owner.ValidateEditingTools(tools, "Version-1 owner policy permits only codex/openai correction tools")
@@ -310,7 +310,7 @@ internal class RequestData {
                 if tools.ValueKind != JsonValueKind.Array {
                     throw Exception("Amendment tools must be an array")
                 }
-                if J.Items(tools).Count > 0 {
+                if J.Count(tools) > 0 {
                     Tools(tools)
                 }
             } else {

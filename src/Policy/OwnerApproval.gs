@@ -55,7 +55,7 @@ internal class OwnerApproval {
                 donor = RepositoryIdentity.Login(donorArg == "@me" ? J.Text(GitHub.Api("user"), "login"): donorArg)
             }
             let template = PrBody.Template(repo, authorityBase, policy)
-            ValidateTemplate(template)
+            PrBody.ValidateTemplate(template)
             let commit = GitHub.Api("repos/" + repo + "/git/commits/" + RepositoryIdentity.CommitSha(revision))
             let decree = Decree.CaptureTree(repo, RepositoryIdentity.CommitSha(J.Text(J.Get(commit, "tree"), "sha")))
             Terminal.Step(
@@ -204,25 +204,6 @@ internal class OwnerApproval {
                 GitHub.Api(issuePath + "/labels", map[string, Object?]{"labels": []string{"tokate:approved"}})
             }
             Terminal.Message("Approved https://github.com/" + repo + "/issues/" + number.ToString() + " for @" + donor)
-        }
-
-        internal func ValidateTemplate(text string) {
-            for key in[]string{
-                "issue",
-                "report",
-                "donor",
-                "model",
-                "effort",
-                "seconds",
-                "base",
-                "policy",
-                "usage",
-                "receipt"
-            } {
-                if !text.Contains("{{" + key + "}}") {
-                    throw Exception("PR template must contain {{" + key + "}}")
-                }
-            }
         }
 
         internal func Revoke(args Args) {

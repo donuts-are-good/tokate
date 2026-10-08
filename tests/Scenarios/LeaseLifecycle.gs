@@ -163,17 +163,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         let checkout = Path.Combine(run, "checkout")
         File.AppendAllText(Path.Combine(checkout, "result.txt"), "Reviewed amendment\n")
         Flow.Git("-C", checkout, "add", "result.txt")
-        Flow.Git(
-            "-C",
-            checkout,
-            "-c",
-            "user.name=Donor",
-            "-c",
-            "user.email=donor@example.test",
-            "commit",
-            "-m",
-            "Reviewed amendment"
-        )
+        Flow.DonorGit(checkout, "commit", "-m", "Reviewed amendment")
         let amendedHead = Flow.Git("-C", checkout, "rev-parse", "HEAD")
         Flow.Call([]string{"amend", "--run", run, "--commit", amendedHead, "--seconds", "30", "--tools", Tools})
         Flow.Reload()

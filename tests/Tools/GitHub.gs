@@ -248,7 +248,7 @@ internal partial class Fixture {
                     "encoding",
                     "base64",
                     "content",
-                    Convert.ToBase64String(Encoding.UTF8.GetBytes(NativeFixture.Template("coordinator.yml")))
+                    Convert.ToBase64String(Encoding.UTF8.GetBytes(TestResources.Template("coordinator.yml")))
                 )
             )
         }

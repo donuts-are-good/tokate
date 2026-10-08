@@ -14,71 +14,27 @@ internal class ToolCheck {
 
 internal class Startup {
     shared {
-        internal func Executable(path string) bool {
-            try {
-                return File.Exists(path) &&
-                    (
-                    File.GetUnixFileMode(path) & (
-                        UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
-                    )
-                ) != 0
-            } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
-            return false
-        }
-
-        internal func Find(name string) string {
-            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
-                if !Path.IsPathFullyQualified(entry) {
-                    continue
-                }
-                let path = Path.Combine(entry, name)
-                if Executable(path) {
-                    return path
-                }
-            }
-            return ""
-        }
-
         internal func Scan(names[]string) List[ToolCheck] {
             let tools = List[ToolCheck]()
             for name in names {
-                let tool = ToolCheck{Name: name}
-                switch name {
-                    case "git" {
-                        tool.Hint = "Install Git and add git to PATH."
-                    }
-                    case "gh" {
-                        tool.Hint = "Install GitHub CLI and add gh to PATH."
-                    }
-                    case "codex" {
-                        tool.Hint = "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported."
-                    }
-                    case "setsid" {
-                        tool.Hint = "Install util-linux and add setsid to PATH."
-                    }
-                    case "/usr/bin/setsid" {
-                        tool.Hint = "Install util-linux at /usr/bin/setsid for catalog probes and independent verification."
-                    }
-                    case "/usr/bin/env" {
-                        tool.Hint = "Install coreutils at /usr/bin/env for command cleanup and managed sandbox probes."
-                    }
-                    case "/usr/bin/unshare" {
-                        tool.Hint = "Install util-linux at /usr/bin/unshare and ensure user namespaces are supported for command cleanup."
-                    }
-                    case "bwrap" {
-                        tool.Hint = "Install bubblewrap and add bwrap to PATH."
-                    }
-                    case "/usr/bin/bwrap" {
-                        tool.Hint = "Install bubblewrap at /usr/bin/bwrap for independent verification."
-                    }
-                    case "curl" {
-                        tool.Hint = "Install curl and add curl to PATH."
-                    }
-                    case "tar" {
-                        tool.Hint = "Install tar and add tar to PATH."
+                let tool = ToolCheck{
+                    Name: name,
+                    Hint: switch name {
+                        case "git": "Install Git and add git to PATH."
+                        case "gh": "Install GitHub CLI and add gh to PATH."
+                        case "codex": "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported."
+                        case "setsid": "Install util-linux and add setsid to PATH."
+                        case "/usr/bin/setsid": "Install util-linux at /usr/bin/setsid for catalog probes and independent verification."
+                        case "/usr/bin/env": "Install coreutils at /usr/bin/env for command cleanup and managed sandbox probes."
+                        case "/usr/bin/unshare": "Install util-linux at /usr/bin/unshare and ensure user namespaces are supported for command cleanup."
+                        case "bwrap": "Install bubblewrap and add bwrap to PATH."
+                        case "/usr/bin/bwrap": "Install bubblewrap at /usr/bin/bwrap for independent verification."
+                        case "curl": "Install curl and add curl to PATH."
+                        case "tar": "Install tar and add tar to PATH."
+                        default: ""
                     }
                 }
-                tool.Path = name.StartsWith("/") ? (File.Exists(name) ? name: ""): Find(name)
+                tool.Path = name.StartsWith("/") ? (File.Exists(name) ? name: ""): LocalPaths.Find(name)
                 if tool.Path != "" {
                     tool.Status = "found"
                     tool.Detail = name.StartsWith("/") ?
@@ -87,7 +43,7 @@ internal class Startup {
                 } else {
                     tool.Detail = tool.Hint
                 }
-                if tool.Path != "" && name.StartsWith("/") && !Executable(tool.Path) {
+                if tool.Path != "" && name.StartsWith("/") && !LocalPaths.Executable(tool.Path) {
                     tool.Status = "failed"
                     tool.Detail = "Required helper is not executable. " + tool.Hint
                 }

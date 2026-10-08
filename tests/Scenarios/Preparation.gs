@@ -181,13 +181,8 @@ internal class PreparationChecks {
             File.WriteAllText(Path.Combine(flow.Upstream, "donor-dirty.txt"), "private donor work")
             let base = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             let tree = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD^{tree}")
-            let unrelated = flow.Git(
-                "-C",
+            let unrelated = flow.DonorGit(
                 flow.Upstream,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
                 "commit-tree",
                 tree,
                 "-p",
@@ -852,11 +847,11 @@ internal class PreparationChecks {
             flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
             let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
             let args = []string{"work", "owner/project"}
-            let cancelled = TerminalOutput.Pty(binary, args, flow.Temp, 80, "q\n")
+            let cancelled = TestTerminal.Pty(binary, args, flow.Temp, 80, "q\n")
             Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
             Check.Contains(cancelled.Output, "Choose an issue")
             Check.Contains(cancelled.Output, "Cancelled")
-            let declined = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
+            let declined = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
             Check.That(declined.Code == 1, declined.Output + declined.Error)
             Check.Contains(declined.Output, "Review donation")
             Check.Contains(declined.Output, "owner/project #1")
@@ -871,7 +866,7 @@ internal class PreparationChecks {
             )
             Check.That(!Directory.Exists(runRoot), "Cancelled wizard created a run")
             flow.NoInference()
-            let owner = TerminalOutput.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
+            let owner = TestTerminal.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
             Check.Success(owner)
             Check.Contains(owner.Output, "Project")
             Check.That(
@@ -880,7 +875,7 @@ internal class PreparationChecks {
             )
             flow.Call([]string{"work", "owner/project", "--non-interactive"}, 1)
             flow.Call([]string{"work", "owner/project", "--json"}, 1)
-            let accepted = TerminalOutput.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
+            let accepted = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
             Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
             let runs = Directory.GetDirectories(runRoot)
             Check.That(runs.Length == 1, "Guided claim did not use the selected state root")
@@ -896,7 +891,7 @@ internal class PreparationChecks {
             Check.That(Check.Text(flow.State["request_count"]) == "1", "Guided work posted more than once")
             flow.NoInference()
             test.Coordinate(PostedEvent(test, comment))
-            let unavailable = TerminalOutput.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
+            let unavailable = TestTerminal.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
             Check.That(unavailable.Code == 1, unavailable.Output + unavailable.Error)
             Check.Contains(
                 unavailable.Output.Replace("\r\n", " ").Replace("\n", " "),
@@ -907,69 +902,27 @@ internal class PreparationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "Guided",
-                "Acquisition",
-                "PendingClaim",
-                "ClaimGates",
-                "PendingAuthority",
-                "ClaimRecovery",
-                "Creation",
-                "Selection",
-                "Interruptions",
-                "Preservation",
-                "External",
-                "Ownership",
-                "Authority",
-                "LinkedControls"
+            for test in[]TestCase[string]{
+                TestCase[string]("Guided", async (value string) -> Guided(value)),
+                TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
+                TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
+                TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),
+                TestCase[string]("PendingAuthority", async (value string) -> PendingAuthority(value)),
+                TestCase[string]("ClaimRecovery", async (value string) -> ClaimRecovery(value)),
+                TestCase[string]("Creation", async (value string) -> Creation(value)),
+                TestCase[string]("Selection", async (value string) -> Selection(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("Preservation", async (value string) -> Preservation(value)),
+                TestCase[string]("External", async (value string) -> External(value)),
+                TestCase[string]("Ownership", async (value string) -> Ownership(value)),
+                TestCase[string]("Authority", async (value string) -> Authority(value)),
+                TestCase[string]("LinkedControls", async (value string) -> LinkedControls(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
-                switch name {
-                    case "Guided" {
-                        Guided(binary)
-                    }
-                    case "Acquisition" {
-                        Acquisition(binary)
-                    }
-                    case "PendingClaim" {
-                        PendingClaim(binary)
-                    }
-                    case "ClaimGates" {
-                        ClaimGates(binary)
-                    }
-                    case "PendingAuthority" {
-                        PendingAuthority(binary)
-                    }
-                    case "ClaimRecovery" {
-                        ClaimRecovery(binary)
-                    }
-                    case "Creation" {
-                        Creation(binary)
-                    }
-                    case "Selection" {
-                        Selection(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "Preservation" {
-                        Preservation(binary)
-                    }
-                    case "External" {
-                        External(binary)
-                    }
-                    case "Ownership" {
-                        Ownership(binary)
-                    }
-                    case "LinkedControls" {
-                        LinkedControls(binary)
-                    }
-                    case "Authority" {
-                        Authority(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS preparation " + name)
             }
         }

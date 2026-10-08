@@ -20,7 +20,7 @@ internal class Contribution {
             run.Fields["failure_stage"] = "candidate_validation"
             run.Fields["failure_reason"] = "candidate_invalid"
             let coding = RuntimeBudget(timer, seconds - reserve)
-            let total = RuntimeBudget(timer, seconds)
+            var total = RuntimeBudget(timer, run.Flag("unlimited") ? 0: seconds)
             var checkout string
             var candidate string
             {
@@ -51,6 +51,9 @@ internal class Contribution {
                 coding.Remaining()
             }
             Terminal.Step("Running independent owner verification...")
+            if run.Flag("unlimited") {
+                total = RuntimeBudget(Stopwatch.StartNew(), reserve)
+            }
             PublicOutput.FailureCode = "verification_failed"
             run.Fields["failure_stage"] = "owner_verification"
             run.Fields["failure_reason"] = "verification_failed"

@@ -64,7 +64,15 @@ internal class PiBoundary {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
             }
-            for path in[]string{"/etc/ld.so.cache", "/etc/nsswitch.conf", "/etc/hosts", "/etc/resolv.conf"} {
+            for path in[]string{
+                "/etc/ld.so.cache",
+                "/etc/nsswitch.conf",
+                "/etc/hosts",
+                "/etc/resolv.conf",
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/ssl/cert.pem",
+                "/etc/pki/tls/certs/ca-bundle.crt"
+            } {
                 if File.Exists(path) {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }

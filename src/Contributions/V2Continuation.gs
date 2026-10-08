@@ -217,10 +217,7 @@ internal class V2Continuation {
         }
 
         internal func Source(directory string, run Data, record JsonElement) Data {
-            let source = Data()
-            for field in J.Parse(V1Continuation.Metadata(directory)).EnumerateObject() {
-                source.Fields[field.Name] = field.Value.Clone()
-            }
+            let source = Data.From(J.Parse(V1Continuation.Metadata(directory)))
             let state = source.Text("state")
             if source.Number("version") != 2 || source.Number("preparation_version") != 1 || source.Text(
                 "source"

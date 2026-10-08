@@ -8,11 +8,11 @@ import System.Text.Json.Nodes
 
 internal class DecreeFlow : IDisposable {
     internal let Flow NativeFixture
-    internal let V2 CoordinationFlow?
+    internal let V2 CoordinationFixture?
 
     internal init(binary string, version int32) {
         if version == 2 {
-            let coordination = CoordinationFlow(binary)
+            let coordination = CoordinationFixture(binary)
             V2 = coordination
             Flow = coordination.Flow
         } else {
@@ -558,17 +558,7 @@ internal class DecreeFlow : IDisposable {
 
         internal func DonorCommit(flow NativeFixture, checkout string) string {
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Donor instruction edit"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Donor instruction edit")
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
@@ -674,18 +664,19 @@ internal class DecreeFlow : IDisposable {
 
         internal func All(binary string, selected string = "") {
             var matched bool
-            for name in[]string{
-                "Delivery",
-                "Replacement",
-                "Freshness",
-                "Unsupported",
-                "LegacyDelivery",
-                "InvalidSnapshot",
-                "ManagedProtection",
-                "LegacyRecovery",
-                "ExternalProtection",
-                "PublicationProtection"
+            for test in[]TestCase[int32]{
+                TestCase[int32]("Delivery", async (value int32) -> Delivery(binary, value)),
+                TestCase[int32]("Replacement", async (value int32) -> Replacement(binary, value)),
+                TestCase[int32]("Freshness", async (value int32) -> Freshness(binary, value)),
+                TestCase[int32]("Unsupported", async (value int32) -> Unsupported(binary, value)),
+                TestCase[int32]("LegacyDelivery", async (value int32) -> LegacyDelivery(binary, value)),
+                TestCase[int32]("InvalidSnapshot", async (value int32) -> InvalidSnapshot(binary, value)),
+                TestCase[int32]("ManagedProtection", async (value int32) -> ManagedProtection(binary, value)),
+                TestCase[int32]("LegacyRecovery", async (value int32) -> LegacyRecovery(binary)),
+                TestCase[int32]("ExternalProtection", async (value int32) -> ExternalProtection(binary)),
+                TestCase[int32]("PublicationProtection", async (value int32) -> PublicationProtection(binary))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
@@ -698,38 +689,7 @@ internal class DecreeFlow : IDisposable {
                         ((name == "LegacyRecovery" || name == "PublicationProtection") && version != 1) {
                         continue
                     }
-                    switch name {
-                        case "Delivery" {
-                            Delivery(binary, version)
-                        }
-                        case "Replacement" {
-                            Replacement(binary, version)
-                        }
-                        case "Freshness" {
-                            Freshness(binary, version)
-                        }
-                        case "Unsupported" {
-                            Unsupported(binary, version)
-                        }
-                        case "LegacyDelivery" {
-                            LegacyDelivery(binary, version)
-                        }
-                        case "InvalidSnapshot" {
-                            InvalidSnapshot(binary, version)
-                        }
-                        case "ManagedProtection" {
-                            ManagedProtection(binary, version)
-                        }
-                        case "LegacyRecovery" {
-                            LegacyRecovery(binary)
-                        }
-                        case "ExternalProtection" {
-                            ExternalProtection(binary)
-                        }
-                        case "PublicationProtection" {
-                            PublicationProtection(binary)
-                        }
-                    }
+                    test.Run(version)
                     if name != "Freshness" {
                         Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
                     }

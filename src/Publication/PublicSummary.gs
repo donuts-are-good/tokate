@@ -9,6 +9,12 @@ import System.Text.RegularExpressions
 internal class PublicSummary {
     shared {
         internal let Artifact string = "tokate-public-summary.json"
+        private let Unavailable string = "Change summary unavailable for this candidate; review the diff."
+        private let Section string = "\nVerification:\n"
+        private let CiNote string = "- GitHub CI: not assessed here; missing or pending checks are not success."
+        private let Missing string = "PR report has no change summary for this candidate. Supply a current public summary and republish."
+        private let Incomplete string = "PR report omits the public change or verification report region. Restore the Tokate report before acceptance."
+        private let Altered string = "PR report differs from the authoritative public summary for this exact candidate. Restore it or amend with a current summary."
 
         internal func Validate(value JsonElement, head string = "") {
             let limit = J.Get(value, "head").ValueKind == JsonValueKind.Undefined ? 4046: 4096
@@ -29,12 +35,6 @@ internal class PublicSummary {
                 for item in list.EnumerateArray() {
                     if item.ValueKind != JsonValueKind.String || !Safe(item.GetString() ?? "") {
                         throw Exception("Public summary contains invalid public text")
-                    }
-                    if key == "changes" && !Regex.IsMatch(
-                        item.GetString() ?? "",
-                        "^(Add(s|ed)?|Update(s|d)?|Remove(s|d)?|Fix(es|ed)?|Allow(s|ed)?|Prevent(s|ed)?|Preserve(s|d)?|Replace(s|d)?|Reject(s|ed)?|Show(s|ed)?|Keep(s)?|Support(s|ed)?|Make(s)?|Refresh(es|ed)?|Validate(s|d)?|Render(s|ed)?) [A-Za-z0-9]+ .+"
-                    ) {
-                        throw Exception("Public changes must describe concrete final behavior")
                     }
                 }
             }
@@ -134,23 +134,59 @@ internal class PublicSummary {
             return metadata
         }
 
+        private func Changes(summary JsonElement) string {
+            var result = ""
+            for item in J.Items(J.Get(summary, "changes")) {
+                result += "- " + (item.GetString() ?? "") + "\n"
+            }
+            return result
+        }
+
+        internal func Current(report string, summary JsonElement, head string, expected string = "") {
+            if expected != "" && report != expected {
+                throw CliFailure("invalid_state", Altered)
+            }
+            let split = report.IndexOf(Section, StringComparison.Ordinal)
+            if report == "" || split < 0 || !report.Contains(CiNote) {
+                throw CliFailure("invalid_state", Incomplete)
+            }
+            var useful bool
+            for line in report.Substring(0, split).Split('\n') {
+                if !line.StartsWith("- ") {
+                    continue
+                }
+                if !Safe(line.Substring(2).Trim()) {
+                    throw CliFailure("invalid_state", Incomplete)
+                }
+                useful = true
+            }
+            if !useful || report.Contains(Unavailable) {
+                throw CliFailure("invalid_state", Missing)
+            }
+            if summary.ValueKind == JsonValueKind.Undefined {
+                return
+            }
+            Validate(summary, head)
+            if !report.Contains(Changes(summary)) {
+                throw CliFailure("invalid_state", Altered)
+            }
+        }
+
         internal func Report(summary JsonElement, observed string) string {
             var result = ""
             if summary.ValueKind == JsonValueKind.Undefined {
-                result = "- Change summary unavailable for this candidate; review the diff.\n"
+                result = "- " + Unavailable + "\n"
             } else {
                 Validate(summary)
-                for item in J.Items(J.Get(summary, "changes")) {
-                    result += "- " + (item.GetString() ?? "") + "\n"
-                }
+                result = Changes(summary)
             }
-            result += "\nVerification:\n\n- " + observed + "\n"
+            result += Section + "\n- " + observed + "\n"
             if summary.ValueKind != JsonValueKind.Undefined {
                 for item in J.Items(J.Get(summary, "verification")) {
                     result += "- Donor-reported: " + (item.GetString() ?? "") + "\n"
                 }
             }
-            result += "- GitHub CI: not assessed here; missing or pending checks are not success."
+            result += CiNote
             if summary.ValueKind != JsonValueKind.Undefined && J.Items(J.Get(summary, "limitations")).Count > 0 {
                 result += "\n\nLimits:\n"
                 for item in J.Items(J.Get(summary, "limitations")) {

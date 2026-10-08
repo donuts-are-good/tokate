@@ -42,7 +42,7 @@ internal class PiHarness {
             let markerPath = Path.Combine(agent, "install/managed-install.json")
             if cli != Path.Combine(agent, "bin/pi") ||
                 (!File.Exists(markerPath) && FileInfo(markerPath).LinkTarget == nil) {
-                let npm = Startup.Find("npm")
+                let npm = LocalPaths.Find("npm")
                 if npm != "" {
                     let result = Commands.Run(npm, []string{"root", "--global"}, seconds: 5)
                     let root = result.Output.Trim()
@@ -89,7 +89,7 @@ internal class PiHarness {
                     )
                 }
                 let node = Path.Combine(data, "pi-node/current/bin/node")
-                if Path.IsPathFullyQualified(data) && Startup.Executable(node) {
+                if Path.IsPathFullyQualified(data) && LocalPaths.Executable(node) {
                     args.Values["--node"] = node
                 }
             }
@@ -104,7 +104,7 @@ internal class PiHarness {
             }
             var root = args.Get("pi-root")
             if root == "" {
-                let executable = Startup.Find("pi")
+                let executable = LocalPaths.Find("pi")
                 if executable == "" {
                     throw Exception("Install pi or supply --pi-root pointing to its existing node_modules directory")
                 }
@@ -129,7 +129,7 @@ internal class PiHarness {
                 .Exists(Path.Combine(packagePath, "dist/index.js")) {
                 throw Exception("The installed pi SDK package layout is required")
             }
-            let node = LocalPaths.CanonicalPath(args.Get("node") == "" ? Startup.Find("node"): args.Need("node"))
+            let node = LocalPaths.CanonicalPath(args.Get("node") == "" ? LocalPaths.Find("node"): args.Need("node"))
             if !File.Exists(node) || !Path.IsPathFullyQualified(node) {
                 throw Exception("An existing Node runtime is required; Tokate never installs one")
             }
@@ -258,7 +258,7 @@ internal class PiHarness {
                         using let progress = TerminalProgress(
                             "Pi inference",
                             coding,
-                            RuntimeBudget(timer, run.Number("seconds"))
+                            RuntimeBudget(timer, run.Flag("unlimited") ? 0: run.Number("seconds"))
                         )
                         var activity Action[string]? = nil
                         if DonationView.Active() {
@@ -269,7 +269,7 @@ internal class PiHarness {
                             args.ToArray(),
                             checkout,
                             prompt,
-                            run.Number("seconds"),
+                            run.Flag("unlimited") ? 0: run.Number("seconds"),
                             isolated: true,
                             cancellation: Chan[bool](1),
                             strictOutput: true,
@@ -312,15 +312,10 @@ internal class PiHarness {
                     )
                 } catch (error Exception) {
                     if run.Text("failure_stage") == "inference" {
-                        if error is CommandInterrupted interrupted {
+                        if let result = Commands.InterruptedResult(error) {
                             run.Fields["failure_reason"] = "inference_interrupted"
-                            run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
-                            run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
-                        }
-                        if error is CommandInputInterrupted interruptedInput {
-                            run.Fields["failure_reason"] = "inference_interrupted"
-                            run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
-                            run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
+                            run.Fields["output_truncated"] = result.OutputTruncated
+                            run.Fields["error_truncated"] = result.ErrorTruncated
                         }
                     }
                     run.Fields["state"] = "failed"

@@ -35,7 +35,7 @@ internal class PiChecks {
                 )
                 File.WriteAllText(
                     Path.Combine(installed, "dist/index.js"),
-                    NativeFixture.Template("PiContinuation.mjs")
+                    TestResources.Template("PiContinuation.mjs")
                 )
                 File.WriteAllText(
                     Path.Combine(installed, "dist/bundle/cli.js"),
@@ -94,10 +94,45 @@ internal class PiChecks {
                 "absent",
                 "--endpoint",
                 catalog.Endpoint,
-                "--non-interactive",
-                "--plain"
+                "--non-interactive"
             }
-            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
+            let explicitSelection = Check.Json(flow.Call(args.ToArray()).Output)
+            let providerIndex = args.IndexOf("--provider")
+            args.RemoveRange(providerIndex, 2)
+            let inferredSelection = Check.Json(flow.Call(args.ToArray()).Output)
+            Check.That(
+                JsonNode.DeepEquals(explicitSelection, inferredSelection),
+                "Omitted Pi provider changed the explicit selection"
+            )
+            args.AddRange([]string{"--provider", "openai"})
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Unsupported pi provider")
+            args.RemoveRange(args.Count - 2, 2)
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "local",
+                    "--harness",
+                    "pi",
+                    "--model",
+                    "fixture-model",
+                    "--effort",
+                    "absent",
+                    "--endpoint",
+                    catalog.Endpoint
+                }
+            )
+            let profiled = Check.Json(
+                flow.Call([]string{"select", "--repo", "owner/project", "--profile", "local", "--non-interactive"})
+                    .Output
+            )
+            let expectedProfile = explicitSelection.DeepClone()
+            expectedProfile["source"] = JsonValue.Create("saved donor profile local")
+            Check.That(JsonNode.DeepEquals(expectedProfile, profiled), "Saved Pi profile lost selection precedence")
+            args.AddRange([]string{"--profile", "local", "--provider", "openai"})
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Named donor profile conflicts")
+            args.RemoveRange(args.Count - 4, 4)
             args.AddRange([]string{"--node", pathNode})
             flow.Call(args.ToArray(), 1)
             args[args.Count - 1] = actualNode
@@ -140,8 +175,9 @@ internal class PiChecks {
             Check.Contains(flow.Call(args.ToArray(), 1).Error, "Cannot locate the Pi SDK")
             flow.NoInference()
             flow.NoPr()
+            Check.That(flow.State["posted_request"] == nil, "Pi selection posted a claim request")
             Console.WriteLine(
-                "PASS Pi npm and managed runtime discovery, private Node, explicit overrides and malformed metadata refusal without inference"
+                "PASS Pi provider inference, profile precedence, conflict refusal and runtime discovery without claims or inference"
             )
         }
 
@@ -150,7 +186,8 @@ internal class PiChecks {
             let catalogRejected = mode.StartsWith("catalog-") && mode != "catalog-metadata" && !mode.StartsWith(
                 "catalog-recheck-"
             )
-            let interrupted = mode == "cancel" || mode == "length-cancel"
+            let interrupted = mode == "cancel" || mode == "length-cancel" || mode == "unlimited-cancel"
+            let unlimited = mode.StartsWith("unlimited")
             let continuation = mode == "continued" ||
                 mode == "repeated" ||
                 mode == "identity" ||
@@ -165,6 +202,9 @@ internal class PiChecks {
             policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\",\"minimal\",\"high\",\"xhigh\"]}")
             policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
             policy["allow_network"] = JsonValue.Create(true)
+            if unlimited {
+                policy["allow_unlimited"] = JsonValue.Create(true)
+            }
             policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test \\\"$$(cat result.txt)\\\" = final\"]]")
             File.WriteAllText(policyPath, policy.ToJsonString())
             let custom = Path.Combine(flow.Flow.Upstream, ".pi")
@@ -203,6 +243,7 @@ internal class PiChecks {
                 Path.Combine(flow.Flow.Bin, "pi"),
                 Path.Combine(root, "@earendil-works/pi-coding-agent/dist/bundle/cli.js")
             )
+            File.CreateSymbolicLink(Path.Combine(flow.Flow.Bin, "node"), node)
             let args = List[string]{
                 "prepare",
                 "--repo",
@@ -236,6 +277,11 @@ internal class PiChecks {
             if mode == "on" {
                 args.Add("--allow-network")
             }
+            if unlimited {
+                args.RemoveRange(args.IndexOf("--seconds"), 2)
+                args.Add("--unlimited")
+                args[args.IndexOf("--verification-reserve") + 1] = "8"
+            }
             if mode != "off" {
                 args.AddRange([]string{"--pi-root", root})
             }
@@ -268,7 +314,7 @@ internal class PiChecks {
                 }
                 flow.Flow.Temp.Env["TERM"] = "dumb"
                 flow.Flow.Temp.Env["NO_COLOR"] = "1"
-                let guided = TerminalOutput.Pty(
+                let guided = TestTerminal.Pty(
                     binary,
                     []string{"work", "owner/project"},
                     flow.Flow.Temp,
@@ -407,7 +453,8 @@ internal class PiChecks {
                 )
                     .ToJsonString()
             )
-            let success = mode == "reasoning" ||
+            let success = mode == "unlimited" ||
+                mode == "reasoning" ||
                 mode == "off" ||
                 mode == "on" ||
                 mode == "compact" ||
@@ -423,7 +470,7 @@ internal class PiChecks {
             var worked Result
             if mode == "on" {
                 flow.Flow.Temp.Env["TERM"] = "xterm-256color"
-                worked = TerminalOutput.Pty(binary, work.ToArray(), flow.Flow.Temp, 100)
+                worked = TestTerminal.Pty(binary, work.ToArray(), flow.Flow.Temp, 100)
                 Check.Success(worked)
                 Check.Contains(worked.Output, "tokate / Donation")
                 Check.Contains(worked.Output, "bash: setsid sh")
