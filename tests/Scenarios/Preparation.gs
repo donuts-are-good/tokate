@@ -181,13 +181,8 @@ internal class PreparationChecks {
             File.WriteAllText(Path.Combine(flow.Upstream, "donor-dirty.txt"), "private donor work")
             let base = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             let tree = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD^{tree}")
-            let unrelated = flow.Git(
-                "-C",
+            let unrelated = flow.DonorGit(
                 flow.Upstream,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
                 "commit-tree",
                 tree,
                 "-p",

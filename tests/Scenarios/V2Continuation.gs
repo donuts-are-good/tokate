@@ -175,18 +175,11 @@ internal class V2ContinuationChecks {
         }
 
         private func Stop(test CoordinationFlow, source string, mode string) {
-            let info = ProcessStartInfo(test.Flow.Binary)
-            info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.Environment.Clear()
-            for pair in test.Flow.Temp.Env {
-                info.Environment[pair.Key] = pair.Value
-            }
-            for arg in[]string{"work", "--run", source, "--yes"} {
-                info.ArgumentList.Add(arg)
-            }
+            let info = TestProcess.StartInfo(
+                test.Flow.Binary,
+                []string{"work", "--run", source, "--yes"},
+                test.Flow.Temp.Env
+            )
             using let process = Process.Start(info) ?? throw Exception("Cannot start stopped-run fixture")
             process.StandardInput.Close()
             let output = Chan[string](1)

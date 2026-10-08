@@ -515,25 +515,18 @@ internal partial class NativeFlow : NativeFixture {
         let run = Claim(seconds: "30")
         Mode("timeout")
         File.Copy(Binary, Path.Combine(Temp.Root, "tokate-runner"))
-        let info = ProcessStartInfo("/usr/bin/script")
-        info.WorkingDirectory = Temp.Root
-        info.UseShellExecute = false
-        info.RedirectStandardInput = true
-        info.RedirectStandardOutput = true
-        info.RedirectStandardError = true
-        info.Environment.Clear()
-        for entry in Temp.Env {
-            info.Environment[entry.Key] = entry.Value
-        }
-        for arg in[]string{
-            "-q",
-            "-e",
-            "-c",
-            "echo $$$$ > runner.pid; exec ./tokate-runner work --run '" + run + "'",
-            "/dev/null"
-        } {
-            info.ArgumentList.Add(arg)
-        }
+        let info = TestProcess.StartInfo(
+            "/usr/bin/script",
+            []string{
+                "-q",
+                "-e",
+                "-c",
+                "echo $$$$ > runner.pid; exec ./tokate-runner work --run '" + run + "'",
+                "/dev/null"
+            },
+            Temp.Env,
+            Temp.Root
+        )
         using let terminal = Process.Start(info) ?? throw Exception("Cannot start managed cancellation fixture")
         try {
             terminal.StandardInput.Close()

@@ -55,17 +55,7 @@ internal class PublicDescriptions {
             let checkout = Path.Combine(run, "checkout")
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final reviewed text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review result")
             let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
             let path = Path.Combine(flow.Temp.Root, "summary.json")
             File.WriteAllText(
@@ -172,17 +162,7 @@ internal class PublicDescriptions {
             let checkout = Path.Combine(run, "checkout")
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final external review text\n")
             flow.Flow.Git("-C", checkout, "add", "-A")
-            flow.Flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review external result"
-            )
+            flow.Flow.DonorGit(checkout, "commit", "-m", "Review external result")
             let amended = flow.Flow.Git("-C", checkout, "rev-parse", "HEAD")
             File.WriteAllText(
                 path,
@@ -231,17 +211,7 @@ internal class PublicDescriptions {
             File.Delete(Path.Combine(checkout, "other.txt"))
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final corrected result text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Correct result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Correct result")
             let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
             let path = Path.Combine(flow.Temp.Root, "summary.json")
             File.WriteAllText(path, Summary("Add final corrected result text.", head).ToJsonString())
@@ -300,17 +270,7 @@ internal class PublicDescriptions {
             flow.Save()
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Final amended result text\n")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review corrected result"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review corrected result")
             let amended = flow.Git("-C", checkout, "rev-parse", "HEAD")
             File.WriteAllText(path, Summary("Update final result text after review.", amended).ToJsonString())
             let args = []string{"amend", "--run", run, "--commit", amended, "--seconds", "30", "--summary", path}

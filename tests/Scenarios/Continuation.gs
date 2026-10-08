@@ -276,17 +276,7 @@ internal class ContinuationChecks {
                 let checkout = Path.Combine(fresh, "checkout")
                 File.WriteAllText(Path.Combine(checkout, "result.txt"), "Review amendment " + attempt.ToString() + "\n")
                 flow.Git("-C", checkout, "add", "result.txt")
-                flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "commit",
-                    "-m",
-                    "Review seeded contribution"
-                )
+                flow.DonorGit(checkout, "commit", "-m", "Review seeded contribution")
                 let commit = flow.Git("-C", checkout, "rev-parse", "HEAD")
                 let args = []string{"amend", "--run", fresh, "--commit", commit, "--seconds", "30"}
                 if attempt == 1 {

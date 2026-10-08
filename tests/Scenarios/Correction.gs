@@ -25,18 +25,7 @@ internal class CorrectionChecks {
         private func Commit(flow NativeFixture, run string, message string = "Explicit correction") string {
             let checkout = Path.Combine(run, "checkout")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                message
-            )
+            flow.DonorGit(checkout, "commit", "--allow-empty", "-m", message)
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 

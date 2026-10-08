@@ -67,18 +67,11 @@ internal class ProgressChecks {
             cancel bool = false,
             unlimited bool = false
         ) Result {
-            let info = ProcessStartInfo(flow.Binary)
-            info.UseShellExecute = false
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.RedirectStandardInput = true
-            info.Environment.Clear()
-            for entry in flow.Temp.Env {
-                info.Environment[entry.Key] = entry.Value
-            }
-            for arg in[]string{"work", "--run", run, "--json", "--plain", "--traffic"} {
-                info.ArgumentList.Add(arg)
-            }
+            let info = TestProcess.StartInfo(
+                flow.Binary,
+                []string{"work", "--run", run, "--json", "--plain", "--traffic"},
+                flow.Temp.Env
+            )
             using let process = Process.Start(info) ?? throw Exception("Cannot start progress fixture")
             process.StandardInput.Close()
             let stdout = Chan[string](1)

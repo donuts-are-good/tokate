@@ -247,17 +247,7 @@ internal class DisposableVerificationChecks {
             Check.That(!Directory.Exists(Path.Combine(checkout, "build-output")), "Initial output retained")
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Reviewed correction\n")
             flow.Git("-C", checkout, "add", "result.txt")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review correction"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review correction")
             let commit = flow.Git("-C", checkout, "rev-parse", "HEAD")
             flow.Call([]string{"amend", "--run", run, "--commit", commit, "--seconds", "30"})
             Check.That(!Directory.Exists(Path.Combine(checkout, "build-output")), "Amendment output retained")

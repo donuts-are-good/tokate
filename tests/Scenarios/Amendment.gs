@@ -48,17 +48,7 @@ internal class AmendmentFlow {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(checkout, file)) ?? checkout)
             File.WriteAllText(Path.Combine(checkout, file), text)
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Review correction"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Review correction")
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 

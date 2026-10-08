@@ -105,17 +105,7 @@ internal class OverlapFlow : IDisposable {
                 )
             }
             Flow.Git("-C", checkout, "add", ".")
-            Flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Candidate"
-            )
+            Flow.DonorGit(checkout, "commit", "-m", "Candidate")
             let head = Flow.Git("-C", checkout, "rev-parse", "HEAD")
             Heads.Add(head)
             Flow.Git("-C", checkout, "push", Path.Combine(Flow.Bin, "fork"), "HEAD:refs/heads/" + branch)
@@ -211,18 +201,7 @@ internal class OverlapFlow : IDisposable {
                 Test.Issue = issue
                 let checkout = Path.Combine(Flow.Temp.Root, "candidate-" + issue.ToString())
                 Flow.Git("-C", checkout, "fetch", Flow.Upstream, upstream)
-                Flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "merge",
-                    "--no-ff",
-                    "--no-edit",
-                    upstream
-                )
+                Flow.DonorGit(checkout, "merge", "--no-ff", "--no-edit", upstream)
                 let candidate = Flow.Git("-C", checkout, "rev-parse", "HEAD")
                 let grant = Check.Text(
                     Check

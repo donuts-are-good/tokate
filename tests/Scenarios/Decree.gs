@@ -558,17 +558,7 @@ internal class DecreeFlow : IDisposable {
 
         internal func DonorCommit(flow NativeFixture, checkout string) string {
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Donor instruction edit"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Donor instruction edit")
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 

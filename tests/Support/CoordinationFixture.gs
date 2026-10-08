@@ -275,17 +275,7 @@ internal open class CoordinationFixture : IDisposable {
             }
         }
         Flow.Git("-C", checkout, "add", ".")
-        Flow.Git(
-            "-C",
-            checkout,
-            "-c",
-            "user.name=Donor",
-            "-c",
-            "user.email=donor@example.test",
-            "commit",
-            "-m",
-            "External result"
-        )
+        Flow.DonorGit(checkout, "commit", "-m", "External result")
         let commit = Flow.Git("-C", checkout, "rev-parse", "HEAD")
         Flow.Git(
             "-C",

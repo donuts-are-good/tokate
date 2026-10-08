@@ -174,17 +174,7 @@ internal class TargetBranches {
                 flow.Git("-C", checkout, "checkout", "--detach", base)
                 File.WriteAllText(Path.Combine(checkout, "result.txt"), "External contribution\n")
                 flow.Git("-C", checkout, "add", ".")
-                flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "commit",
-                    "-m",
-                    "Result"
-                )
+                flow.DonorGit(checkout, "commit", "-m", "Result")
                 let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
                 flow.Git(
                     "-C",

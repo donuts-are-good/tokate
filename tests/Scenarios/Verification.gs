@@ -104,25 +104,18 @@ internal class VerificationChecks {
 
         private func Interrupt(flow NativeFixture, run string) Result {
             File.Copy(flow.Binary, Path.Combine(flow.Temp.Root, "tokate-verifier"))
-            let info = ProcessStartInfo("/usr/bin/script")
-            info.WorkingDirectory = flow.Temp.Root
-            info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.Environment.Clear()
-            for entry in flow.Temp.Env {
-                info.Environment[entry.Key] = entry.Value
-            }
-            for arg in[]string{
-                "-q",
-                "-e",
-                "-c",
-                "echo $$$$ > verifier.pid; exec ./tokate-verifier work --run '" + run + "'",
-                "/dev/null"
-            } {
-                info.ArgumentList.Add(arg)
-            }
+            let info = TestProcess.StartInfo(
+                "/usr/bin/script",
+                []string{
+                    "-q",
+                    "-e",
+                    "-c",
+                    "echo $$$$ > verifier.pid; exec ./tokate-verifier work --run '" + run + "'",
+                    "/dev/null"
+                },
+                flow.Temp.Env,
+                flow.Temp.Root
+            )
             using let terminal = Process.Start(info) ?? throw Exception("Cannot start verifier terminal")
             try {
                 terminal.StandardInput.Close()

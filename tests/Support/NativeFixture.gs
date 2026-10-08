@@ -110,6 +110,12 @@ internal open class NativeFixture : IDisposable {
         return Check.Success(TestProcess.Run("/usr/bin/git", args, env))
     }
 
+    internal func DonorGit(checkout string, args ...string) string {
+        let command = List[string]{"-C", checkout, "-c", "user.name=Donor", "-c", "user.email=donor@example.test"}
+        command.AddRange(args)
+        return Git(command.ToArray())
+    }
+
     internal func Commit(message string) {
         Git("-C", Upstream, "add", ".")
         Git("-C", Upstream, "-c", "user.name=Fixture", "-c", "user.email=test@example.test", "commit", "-m", message)
