@@ -527,8 +527,38 @@ tokate checks --repo OWNER/REPO --pr 10 --watch --timeout 1200
 These read-only GitHub checks validate approval, receipt and exact head; they do
 not execute PR code or attest model usage. Remote comparison requires fewer than
 300 files. For a saved run that records its PR, `checks --run DIR` also saves local results. Exit 0 means passed,
-8 pending/watch timeout, 1 failure. **Pending, missing, cancelled or skipped required
-checks are not success.**
+8 pending/watch timeout, 1 failure. **Every required check must succeed on the exact
+head; missing, pending, skipped, neutral, cancelled, failed, unknown or conflicting
+evidence cannot pass.**
+
+The existing structured fields `repo`, `pr`, `pr_url`, `commit`, `checks_status`,
+`checks` and `check_count` remain. `machine_status` composes `gates` for lifecycle,
+receipt/policy/protected paths, checks, native dependencies and freshness. Gate
+status is `passed`, `failed`, `pending`, `unread`, `unavailable` or `stale`;
+`observed_status` retains an earlier assessment when evidence is invalidated.
+`checks_status` describes CI evidence, including `unread`, `unavailable` and `stale`,
+and `checks_observed_status` retains its earlier assessment after invalidation.
+`required_checks` and `required_check_count` summarize required-name evidence;
+`dependency_evidence` preserves the bounded native dependency observations.
+Later blocking gates retain earlier observations without granting machine success.
+After a later watch poll fails, `previous_observation.result` retains the last
+completed poll's bounded evidence with `current: false`.
+`binding`, `observed_head`, `pr_observation`, `target_branch` and `target_revision`
+bind the result to the observed PR, receipt, approval/lineage and current authority.
+Corresponding `_after` fields retain rechecked observations separately.
+Receipt authority, head, lifecycle and target are rechecked before success; movement
+invalidates the result. Deadline exit 8 retains evidence read before the deadline.
+
+`owner_review` is `required` for an open contribution, `historical` for a closed or
+merged PR, or `unavailable` when lifecycle cannot be read. Historical PRs cannot
+pass as open contributions awaiting new acceptance. `required_owner_actions`
+explicitly retain scope, acceptance criteria, semantic compatibility, limitations
+and final acceptance/merge as owner decisions. `owner_inspection_required` flags
+`action_required`; `action_required_cause` is `unknown` because check conclusions
+alone do not establish fork-workflow approval. Inspect the PR and linked Actions
+runs before any separately authorized approval. No workflow is automatically
+approved. `local_verification` labels donor-reported local checks as not remotely
+attested. Lists retain the existing output bounds and truncation signal.
 
 Owners review acceptance criteria and limitations, approve first-time fork
 workflows after inspecting the diff, and accept/merge changes themselves. Use
