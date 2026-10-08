@@ -7,9 +7,56 @@ import System.Diagnostics
 import System.IO
 import System.Runtime.InteropServices
 import System.Text.Json
+import System.Text.RegularExpressions
 
 internal class PiHarness {
     shared {
+        private func ManagedRuntime(cli string, args Args) string {
+            let agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
+            if cli != Path.Combine(agent, "bin/pi") {
+                throw Exception("Unsupported pi executable layout; provide --pi-root and --node explicitly")
+            }
+            let install = LocalPaths.DirectoryPath(Path.Combine(agent, "install"))
+            let markerPath = Path.Combine(install, "managed-install.json")
+            let versionPath = Path.Combine(install, "current-version")
+            if FileInfo(markerPath).LinkTarget != nil || FileInfo(versionPath).LinkTarget != nil {
+                throw Exception("Pi installation metadata must be regular files")
+            }
+            let marker = RequestData.FileData(markerPath, 16384)
+            let entrypoint = J.Get(marker, "entrypoint")
+            let entryPath = J.Text(entrypoint, "path")
+            if J.Text(marker, "kind") != "pi-managed-install" || J.Number(marker, "schemaVersion") != 1 || J.Text(
+                marker,
+                "layout"
+            ) != "releases-v1" ||
+                (J.Text(entrypoint, "type") != "script" && J.Text(entrypoint, "type") != "symlink") ||
+                !Path.IsPathFullyQualified(entryPath) || LocalPaths.CanonicalPath(entryPath) != cli {
+                throw Exception("Unsupported Pi installation metadata; provide --pi-root and --node explicitly")
+            }
+            if FileInfo(versionPath).Length < 1 || FileInfo(versionPath).Length > 128 {
+                throw Exception("Invalid managed Pi version file")
+            }
+            let version = File.ReadAllText(versionPath)
+            if !Regex.IsMatch(version, "^[A-Za-z0-9._+-]+\\r?\\n?\\z") || version.Trim() == "." ||
+                version.Trim() == ".." {
+                throw Exception("Invalid managed Pi version file")
+            }
+            if args.Get("node") == "" {
+                var data = Environment.GetEnvironmentVariable("XDG_DATA_HOME") ?? ""
+                if data == "" {
+                    data = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        ".local/share"
+                    )
+                }
+                let node = Path.Combine(data, "pi-node/current/bin/node")
+                if Path.IsPathFullyQualified(data) && Startup.Executable(node) {
+                    args.Values["--node"] = node
+                }
+            }
+            return Path.Combine(install, "releases", version.Trim(), "node_modules")
+        }
+
         internal func Runtime(args Args) {
             if !OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64 || !File.Exists(
                 "/usr/bin/bwrap"
@@ -24,15 +71,12 @@ internal class PiHarness {
                 }
                 let cli = LocalPaths.CanonicalPath(executable)
                 let installedPackage = Directory.GetParent(cli)?.Parent?.Parent?.FullName ?? ""
-                if cli != Path.Combine(installedPackage, "dist/bundle/cli.js") || Path.GetFileName(
+                root = cli == Path.Combine(installedPackage, "dist/bundle/cli.js") && Path.GetFileName(
                     installedPackage
-                ) != "pi-coding-agent" ||
-                    Path.GetFileName(Path.GetDirectoryName(installedPackage) ?? "") != "@earendil-works" {
-                    throw Exception(
-                        "Unsupported pi executable layout; provide the installed node_modules directory explicitly"
-                    )
-                }
-                root = Path.GetDirectoryName(Path.GetDirectoryName(installedPackage) ?? "") ?? ""
+                ) == "pi-coding-agent" &&
+                    Path.GetFileName(Path.GetDirectoryName(installedPackage) ?? "") == "@earendil-works" ?
+                Path.GetDirectoryName(Path.GetDirectoryName(installedPackage) ?? "") ?? "":
+                ManagedRuntime(cli, args)
             }
             root = LocalPaths.DirectoryPath(root)
             if Path.GetFileName(root) != "node_modules" {

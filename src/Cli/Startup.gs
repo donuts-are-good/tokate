@@ -14,7 +14,7 @@ internal class ToolCheck {
 
 internal class Startup {
     shared {
-        private func Executable(path string) bool {
+        internal func Executable(path string) bool {
             try {
                 return File.Exists(path) &&
                     (

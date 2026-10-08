@@ -15,11 +15,14 @@ import time
 
 parser = argparse.ArgumentParser(description='Real installed pi against a synthetic server; no inference')
 parser.add_argument('--pi-root', required=True, type=Path)
-parser.add_argument('--node', default='/usr/bin/node')
+parser.add_argument('--node', default=shutil.which('node'))
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
 parser.add_argument('--binary', default='artifacts/linux-x64/tokate')
 parser.add_argument('--catalog-only', action='store_true')
 args = parser.parse_args()
+if not args.node:
+    parser.error('Node is not on PATH; supply --node with the installed executable')
+args.node = str(Path(args.node).resolve(strict=True))
 package = args.pi_root / '@earendil-works/pi-coding-agent/package.json'
 if not package.is_file():
     parser.error('Real pi installation is required; this probe never installs packages')
