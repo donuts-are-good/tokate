@@ -336,7 +336,14 @@ internal class Repair {
 
         internal func Run(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            let checkout = Verification.Validate(args.Need("path"))
+            let checkout = Verification.Validate(args.Get("path", "."))
+            if args.Get("commit") == "" {
+                let grant = Synchronization.Load(args.Need("repo"), args.Need("sync"))
+                if J.Number(grant, "pr") != args.Number("pr") {
+                    throw Exception("Selected synchronization grant belongs to another PR")
+                }
+                args.Values["--commit"] = J.Text(grant, "candidate")
+            }
             if directory == checkout || directory.StartsWith(checkout + "/") || checkout.StartsWith(directory + "/") {
                 throw Exception("Repair evidence and candidate checkout must be separate directories")
             }

@@ -52,7 +52,9 @@ If upstream moved, `reconcile --run DIR` merges the current target without infer
 Resolve conflicts and use `--resume`. The owner then issues `authorize-sync` for the
 exact candidate and upstream commits. Pass that grant to `amend --sync GRANT`.
 If the original local run is unavailable, `repair` uses separate evidence storage
-and an explicit owner grant. It cannot reconstruct private execution evidence.
+and an explicit owner grant. Run it from the clean candidate checkout; the grant
+supplies the exact commit. Explicit `--path` and `--commit` remain available.
+It cannot reconstruct private execution evidence.
 
 ## Continue stopped work
 

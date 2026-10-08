@@ -55,6 +55,10 @@ internal class DonorSelection {
             !Console.IsOutputRedirected &&
             !Console.IsErrorRedirected
 
+        internal func Supported(value JsonElement) bool ->
+        (J.Text(value, "harness") == "codex" && J.Text(value, "provider") == "openai") ||
+            (J.Text(value, "harness") == "pi" && J.Text(value, "provider") == "local-chat-completions")
+
         internal func ApplyDefaults(args Args) {
             if args.Get("run") != "" ||
                 (
@@ -80,11 +84,9 @@ internal class DonorSelection {
             args.SavedDefaults = saved
             let harness = J.Text(saved, "harness")
             let provider = J.Text(saved, "provider")
-            let supported = (harness == "codex" && provider == "openai") ||
-                (harness == "pi" && provider == "local-chat-completions")
             let compatible = (args.Get("harness") == "" || args.Get("harness") == harness) &&
                 (args.Get("provider") == "" || args.Get("provider") == provider)
-            if !supported || !compatible {
+            if !Supported(saved) || !compatible {
                 if profile != "" {
                     throw Exception(
                         "Named donor profile conflicts with the selected managed harness/provider. No inference started."

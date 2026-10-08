@@ -65,12 +65,15 @@ internal class GuidedWork {
                 return
             }
             let saved = DonorDefaults.Run(Args([]string{"defaults", "list"}))
-            if J.Get(saved, "default").ValueKind == JsonValueKind.Object {
+            if DonorSelection.Supported(J.Get(saved, "default")) {
                 return
             }
             let profiles = J.Get(saved, "profiles")
             let names = HashSet[string](StringComparer.Ordinal)
             for entry in profiles.EnumerateObject() {
+                if !DonorSelection.Supported(entry.Value) {
+                    continue
+                }
                 let harness = J.Text(entry.Value, "harness")
                 names.Add(entry.Name)
                 Terminal.Message(

@@ -218,6 +218,34 @@ internal class RepairChecks {
             }
         }
 
+        private func Inferred(test RepairCase) {
+            test.Call(1, candidate: test.Previous)
+            test.Unpublished()
+            let args = []string{
+                "repair",
+                "--repo",
+                "owner/project",
+                "--pr",
+                "10",
+                "--run",
+                test.Evidence,
+                "--sync",
+                test.Grant,
+                "--seconds",
+                "30",
+                "--json"
+            }
+            let result = TestProcess.Run(test.Flow.Binary, args, test.Flow.Temp.Env, cwd: test.Checkout)
+            Check.Envelope(result, "repair", "ok")
+            Check.That(
+                Check.Text(test.Saved()["commit"]) == test.Candidate && Check.Text(
+                    test.Saved()["checkout"]
+                ) == test.Checkout,
+                "Repair inference changed the selected grant or checkout"
+            )
+            Valid(test)
+        }
+
         private func Valid(test RepairCase, measure bool = false) {
             if measure {
                 SynchronizationChecks.StartTreeTraffic(test.Flow)
@@ -592,6 +620,7 @@ internal class RepairChecks {
             let flow = prepared.Coordination.Flow
             var matched bool
             for name in[]string{
+                "inferred",
                 "valid",
                 "legacy-valid",
                 "legacy-ambiguous",
@@ -646,7 +675,9 @@ internal class RepairChecks {
                 }
                 prepared.Restore()
                 let test = RepairCase.Create(flow, prepared.Run, name, name == "target-sync")
-                if name == "legacy-valid" {
+                if name == "inferred" {
+                    Inferred(test)
+                } else if name == "legacy-valid" {
                     LegacyValid(test)
                 } else if name == "legacy-ambiguous" {
                     LegacyAmbiguous(test)
