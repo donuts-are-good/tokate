@@ -100,6 +100,10 @@ internal class Coordinator {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
+                V2Continuation.Declaration(metadata)
+                if J.Get(metadata, "predecessor").ValueKind != JsonValueKind.Undefined {
+                    V2Continuation.Authority(state, J.Get(metadata, "predecessor"))
+                }
                 Policy(J.Write(J.Get(record, "policy"))).ValidateTools(
                     J.Get(metadata, "tools"),
                     J.Text(metadata, "source")
@@ -127,6 +131,7 @@ internal class Coordinator {
                 if correction.ValueKind != JsonValueKind.Undefined {
                     receipt["correction"] = correction
                 }
+                V2Continuation.Keep(receipt, metadata)
                 let pulls = J.Items(
                     GitHub.Api(
                         "repos/" + repo + "/pulls?state=all&head=" + Uri.EscapeDataString(
@@ -345,6 +350,7 @@ internal class Coordinator {
                 J.Text(metadata, "head")
             )
             fields["amendment"] = Amendment.PublicRecord(amendment)
+            V2Continuation.Keep(fields, old)
             let correction = J.Get(old, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction

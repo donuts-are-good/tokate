@@ -86,6 +86,10 @@ internal class SuiteCatalog {
                 }
                 case "Continuation" {
                     ContinuationChecks.All(binary)
+                    V2ContinuationChecks.All(binary)
+                }
+                case "ContinuationV2" {
+                    V2ContinuationChecks.All(binary)
                 }
                 case "Targets" {
                     if CiShard.Include("Targets") {
@@ -111,6 +115,7 @@ internal class SuiteCatalog {
                     Environment.ProcessPath ?? throw Exception("Missing test executable"),
                     Path.Combine(published, "artifacts/tests/tokate-tests")
                 )
+                File.Copy(TestProcess.Node(), Path.Combine(published, "artifacts/tests/node"))
                 File.Copy(Path.Combine(project, "global.json"), Path.Combine(published, "global.json"))
                 let jobs = []SuiteJob{
                     Job("Environment"),

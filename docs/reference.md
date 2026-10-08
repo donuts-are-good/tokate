@@ -312,7 +312,8 @@ Inspect `status` and private evidence first. No recovery command starts inferenc
 
 | Situation | Explicit next action |
 | --- | --- |
-| Failed/incomplete inference | Inspect logs; request fresh approval before another inference attempt. |
+| Failed/incomplete v1 inference | Inspect logs; request fresh approval before another inference attempt. |
+| Stopped unpublished v2 coding | Obtain a fresh active attempt through lease transitions, then explicitly prepare a continuation below. |
 | Completed v1 turn, verification failed | Fix the cause; `tokate recover --run DIR --seconds 300` reruns all checks under unchanged approval. |
 | Successful v1 work, publication failed | `tokate publish --run DIR` inspects existing publication and resumes without inference. |
 | Stale approval or expired reservation | Return to the owner. |
@@ -341,9 +342,9 @@ tokate work --repo OWNER/REPO --issue 42 --continue-from PRIOR_RUN_DIR --model M
 
 `claim` accepts the same import options to prepare without inference. This first
 bridge supports only stopped, unpublished same-donor v1 managed runs with the
-recorded preparation protections and explicit owner-instruction snapshot. V2
-lease continuation, published-PR handoff and unsupported legacy layouts are
-excluded. The source's exclusive lease must be free. Its checkout, branch,
+recorded preparation protections and explicit owner-instruction snapshot.
+Published-PR handoff and unsupported legacy layouts are excluded.
+The source's exclusive lease must be free. Its checkout, branch,
 metadata, logs, failure and attribution remain preserved; no missing completion,
 usage, report or verification is reconstructed.
 
@@ -367,6 +368,29 @@ untrusted task input: a new completed turn, every independent owner check on the
 complete final diff from the original base, exact-head receipt validation and
 owner review are still required. Private state and public provenance retain the
 interrupted predecessor; the fresh attempt does not make it retroactively successful.
+
+For **stopped unpublished managed v2 coding**, use an existing fresh active attempt
+from explicit pause/resume or release/reclaim under the unchanged approval:
+
+```sh
+tokate prepare --repo OWNER/REPO --issue 42 --state CURRENT_STATE_SHA --source tokate \
+  --continue-from PRIOR_RUN_DIR --model MODEL --effort EFFORT \
+  --seconds 3600 --verification-reserve 1200 --yes
+tokate work --run NEW_RUN_DIR --yes
+tokate submit --run NEW_RUN_DIR
+```
+
+Codex and Pi retain the same numeric donor, repository, issue, contribution,
+approval, base and tool selection; Pi also requires its original runtime and
+endpoint options. Preparation never claims, renews or starts inference. Network
+permission requires a new explicit `--allow-network`. Reuse `prepare --run` for
+interrupted imports; changed source evidence and unrelated target edits are refused.
+The new attempt stays in the source run store; copied or moved destinations cannot execute.
+Active, completed, external, published and publication-pending sources are excluded.
+The receipt binds the predecessor attempt and import manifest; after review and
+release, the owner must upgrade the pinned coordinator before continued submissions.
+Incomplete drafts, published-work recovery and cross-donor handoff remain outside
+this increment of #14.
 
 For an explicit correction **before first publication**:
 

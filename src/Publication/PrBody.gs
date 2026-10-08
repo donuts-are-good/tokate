@@ -47,7 +47,8 @@ internal class PrBody {
                     seconds +
                     " seconds."
             }
-            return report
+            let prior = J.Get(metadata, "predecessor")
+            return report + (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + ContinuationReport(prior).Trim())
         }
 
         internal func VerificationReport(run Data, record JsonElement) string {
@@ -120,15 +121,19 @@ internal class PrBody {
                     " second verification budget; original declarations cover only the original completed turn." +
                     PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
             }
-            return report
+            let prior = J.Get(metadata, "predecessor")
+            return report + (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + ContinuationReport(prior).Trim())
         }
 
-        internal func ContinuationReport(
-            prior JsonElement
-        ) string -> "Fresh v1 attempt seeded from unpublished interrupted attempt " +
-            J.Text(prior, "id") + " under predecessor approval " + J.Text(prior, "approval") +
-            ". Preserved origin state: " +
-            J.Text(prior, "state") + "; failure: " + J.Text(prior, "failure_reason") +
+        internal func ContinuationReport(prior JsonElement) string -> "Fresh v" +
+            (J.Number(prior, "version") == 2 ? "2": "1") +
+            " attempt seeded from unpublished interrupted attempt " +
+            (J.Number(prior, "version") == 2 ? J.Text(prior, "attempt"): J.Text(prior, "id")) +
+            " under predecessor approval " +
+            J.Text(prior, "approval") + ". Preserved origin state: " + J.Text(prior, "state") + "; failure: " + J.Text(
+            prior,
+            "failure_reason"
+        ) +
             ". Prior donor-reported tool: " +
             J.Text(prior, "harness") + "/" + J.Text(prior, "provider") + ", " + J.Text(prior, "model") + " / " + J.Text(
             prior,

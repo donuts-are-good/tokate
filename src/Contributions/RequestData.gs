@@ -233,7 +233,10 @@ internal class RequestData {
             if J.Text(value, "action") == "claim" || LeaseLifecycle.Transition(J.Text(value, "action")) {
                 Keys(metadata, "")
             } else if J.Text(value, "action") == "publish" {
-                Keys(metadata, "fork,branch,head,source,tools,verification,correction,summary,attempt")
+                Keys(
+                    metadata,
+                    "fork,branch,head,source,tools,verification,correction,summary,attempt,predecessor,import_manifest_sha256"
+                )
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
@@ -242,6 +245,7 @@ internal class RequestData {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
+                V2Continuation.Declaration(metadata)
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {
                     if J.Text(metadata, "source") != "tokate" {

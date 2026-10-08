@@ -178,6 +178,15 @@ internal class Worker {
                     "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
                 )
             }
+            if run.Number("version") == 2 &&
+                (
+                run.Fields.ContainsKey("codex_version") || run.Fields.ContainsKey("pi_version") || File.Exists(
+                    Path.Combine(directory, "events.jsonl")
+                ) ||
+                    File.Exists(Path.Combine(directory, "report.md"))
+            ) {
+                throw Exception("This destination attempt already started execution; no second inference is allowed")
+            }
             if options.Get("continue-truncated") == "true" && run.Text("harness") != "pi" {
                 throw Exception("--continue-truncated requires managed Pi. No inference started.")
             }

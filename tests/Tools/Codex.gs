@@ -253,6 +253,10 @@ internal partial class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        if mode == "incomplete_turn" && Check.Text(State["continuation_timeout"]) == "true" {
+            File.WriteAllText(Path.Combine(checkout, "tracked.txt"), "preserved\n")
+            File.WriteAllText(Path.Combine(checkout, "imported.txt"), "untracked\n")
+        }
         if State["verify_outcome"] != nil {
             File.WriteAllText(Path.Combine(checkout, "verify-outcome"), Check.Text(State["verify_outcome"]))
             Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))

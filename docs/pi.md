@@ -63,6 +63,9 @@ Tokate records the selected invocation separately from harness-reported usage.
 Failed, malformed, truncated, empty or incomplete turns cannot publish. Completed
 work passes candidate capture, protected-path checks and independent verification
 before the coordinator opens a draft PR.
+Stopped unpublished coding can seed an explicitly budgeted fresh same-donor attempt;
+see [continuation](reference.md#recover-or-correct-work). Keep the original Pi
+selection, runtime and endpoint, and upgrade the pinned coordinator before submission.
 
 The native proof uses the installed Pi SDK and a deterministic local server without
 model inference. From a source checkout built with `bash scripts/build.sh`, run:

@@ -240,8 +240,14 @@ Release and expiry preserve saved work and publication evidence. Same-donor
 reacquisition keeps contribution identity with a fresh attempt. A different donor
 gets a new identity referencing the predecessor's immutable revision.
 Fresh preparation uses an attempt-specific directory and preserves previous runs.
-The stable branch can be reused only at the approved base without publication;
-otherwise saved-work continuation remains unsupported. Legacy v2 leases remain
+The stable branch can be reused only at the approved base without publication.
+Stopped unpublished Codex or Pi coding can seed a fresh same-donor attempt through
+explicit `prepare --continue-from DIR --seconds N --verification-reserve N --yes`
+with the current `--state` and unchanged selection. See [continuation](reference.md#recover-or-correct-work).
+Predecessor attempt and import evidence are required publication metadata and receipt
+fields; upgrade the pinned coordinator after release before submitting continued work.
+Incomplete drafts, published work and cross-donor handoff remain outside this increment.
+Legacy v2 leases remain
 readable, but new lifecycle transitions require fresh owner approval.
 
 ## External or Tokate-launched work

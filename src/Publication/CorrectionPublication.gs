@@ -37,6 +37,9 @@ internal class CorrectionPublication {
                 correction.Text("commit")
             ): ContributionReceipt.Native(run, correction.Text("commit"), run.Number("version"))
             receipt["correction"] = Correction.Provenance(correction)
+            if run.Number("version") == 2 && V1Continuation.Has(run) {
+                V2Continuation.Keep(receipt, V2Continuation.Metadata(run))
+            }
             return receipt
         }
 
