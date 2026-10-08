@@ -132,7 +132,9 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         Script(
             fixture,
             "gh",
-            "if [ \"$2\" = user ]; then printf '%s' '{\"login\":\"fixture\"}'; else printf '%s' '{\"number\":278,\"title\":\"Improve the desktop\",\"state\":\"open\",\"labels\":[{\"name\":\"tokate:approved\"}]}'; fi\n"
+            "if [ \"$2\" = user ]; then for i in $$(seq 1 200); do [ -e '" +
+                fixture +
+                "/release-lookup' ] && break; sleep .05; done; printf '%s' '{\"login\":\"fixture\"}'; else printf '%s' '{\"number\":278,\"title\":\"Improve the desktop\",\"state\":\"open\",\"labels\":[{\"name\":\"tokate:approved\"}]}'; fi\n"
         )
         Script(
             fixture,
@@ -181,7 +183,30 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         )
         Environment.SetEnvironmentVariable("PATH", fixture + ":" + previous)
         Require(window.PlatformInput.CommitText("https://github.com/owner/repo/issues/278"), "Cannot enter issue URL")
+        guard let lookup = Find(adapter.Root, AccessibilityRole.Button, "Find approved issues") else {
+            throw Exception("Missing lookup button")
+        }
+        guard let heading = Find(adapter.Root, AccessibilityRole.Text, "Choose an issue") else {
+            throw Exception("Missing issue heading")
+        }
+        let lookupBounds = lookup.Bounds
+        let headingBounds = heading.Bounds
         Activate(window, adapter, "Find approved issues")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Cancel command")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Cancel command")?.Bounds == lookupBounds,
+            "Loading changed the action button bounds"
+        )
+        Require(
+            Find(adapter.Root, AccessibilityRole.Text, "Choose an issue")?.Bounds == headingBounds,
+            "Loading shifted the page"
+        )
+        Require(
+            Find(adapter.Root, AccessibilityRole.Text, "Command output") == nil &&
+                Find(adapter.Root, AccessibilityRole.Generic, "Donation output") == nil,
+            "Loading displayed a donation output panel"
+        )
+        File.WriteAllText(Path.Combine(fixture, "release-lookup"), "release")
         AwaitControl(host, adapter, AccessibilityRole.ComboBox, "Model", "GPT-6.1-Sol")
         Require(Find(adapter.Root, AccessibilityRole.Text, "Set your limits") != nil, "Step II heading missing")
         Require(Find(adapter.Root, AccessibilityRole.Text, "II") != nil, "Step II numeral missing")
@@ -248,8 +273,12 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         Activate(window, adapter, "Reserve contribution")
         Settle(host)
         Activate(window, adapter, "Confirm")
-        AwaitControl(host, adapter, AccessibilityRole.Status, "Reserving donation")
-        AwaitControl(host, adapter, AccessibilityRole.Text, "Command output", "Waiting for coordinator")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Reserving donation")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Text, "Command output") == nil &&
+                Find(adapter.Root, AccessibilityRole.Generic, "Donation output") == nil,
+            "Reservation displayed a donation output panel"
+        )
         Activate(window, adapter, "Welcome")
         Settle(host)
         Require(
@@ -257,7 +286,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Navigation is blocked during reservation"
         )
         Require(
-            Find(adapter.Root, AccessibilityRole.Status, "Reserving donation") == nil,
+            Find(adapter.Root, AccessibilityRole.Text, "Reserving donation") == nil,
             "Reservation activity leaked to another view"
         )
         Activate(window, adapter, "Switch to moonlight")

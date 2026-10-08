@@ -24,6 +24,7 @@ partial class Desktop : Cell {
     private var windowWidth float64 = 1280
     private let art Artwork
     private let twilight Anim[float64]
+    private let loadingPulse Anim[float64]
     private var host Window?
     private var page string = "Welcome"
     private var night bool
@@ -36,7 +37,8 @@ partial class Desktop : Cell {
     private var activityElapsed int32
     private var activityOutput string = ""
     private var activityPage string = ""
-    private var activityIsDonation bool
+    private var activityAction string = ""
+    private var activityVisible bool
     private var stopping bool
     private var message string = ""
     private var report string = ""
@@ -47,6 +49,7 @@ partial class Desktop : Cell {
     init(assets Artwork) {
         art = assets
         twilight = Animate(0.0)
+        loadingPulse = Animate(1.0)
         viewport.MetricsChanged += metrics -> {
             let next = metrics.BorderBox.Width < 1120
             if Math.Abs(windowWidth - metrics.BorderBox.Width) > 0.5 {
@@ -164,10 +167,27 @@ partial class Desktop : Cell {
     }
 
     private func Action(label string, click Action, primary bool = false, disabled bool = false) Blob {
-        let unavailable = disabled || busy
+        let loading = busy && activityVisible && page == activityPage && activityAction == label && !donationRunning
+        let unavailable = disabled || (busy && !loading) || (loading && stopping)
         let button = ActionButton{
             Content: label,
-            OnClick: click,
+            AccessibilityName: loading ? "Cancel command": label,
+            OnClick: () -> {
+                if loading {
+                    stopping = true
+                    runner?.Stop()
+                } else {
+                    activityAction = label
+                    click()
+                }
+            },
+            CreateText: (options) -> Text{
+                Content: label,
+                FontFamily: "Newsreader",
+                FontSize: 18,
+                FontWeight: 400,
+                Opacity: loading ? 0: 1,
+            },
             Disabled: unavailable,
             BackgroundColor: primary ? Ink(): Surface(),
             TextColor: primary ? Paper(): Ink(),
@@ -183,12 +203,44 @@ partial class Desktop : Cell {
             FontSize: 18,
             Height: 44,
             BorderRadius: 5,
-            TransitionMs: motion && !unavailable ? 180: 0,
+            TransitionMs: motion && !unavailable && !loading ? 180: 0,
         }.Build()
         button.MaxWidth = Percent(100)
         button.MinHeight = 44
         button.Height = Length.Auto
         button.Padding = Edges{Left: 16, Right: 16, Top: 10, Bottom: 10}
+        if loading && button is Button {
+            button.Accessibility = Accessibility{
+                Role: AccessibilityRole.Button,
+                Name: "Cancel command",
+                Description: activityTitle,
+                Busy: true,
+            }
+            button.Children.Add(
+                Container{
+                    Position: PositionType.Absolute,
+                    Left: 0,
+                    Right: 0,
+                    Top: 0,
+                    Bottom: 0,
+                    AlignItems: AlignItems.Center,
+                    JustifyContent: JustifyContent.Center,
+                    Text{Content: stopping ? "Stopping": "Cancel", FontFamily: "Newsreader", FontSize: 18},
+                }
+            )
+            button.Children.Add(
+                Container{
+                    Position: PositionType.Absolute,
+                    Left: 10,
+                    Right: 10,
+                    Bottom: 3,
+                    Height: 2,
+                    BorderRadius: 1,
+                    BackgroundColor: primary ? Paper(): Accent(),
+                    Opacity: motion ? loadingPulse.Value: 1,
+                }
+            )
+        }
         return button
     }
 
@@ -332,8 +384,10 @@ partial class Desktop : Cell {
             return
         }
         busy = true
-        activityPage = page
-        activityIsDonation = arguments[0] == "work"
+        if runner == nil {
+            activityPage = page
+            activityVisible = false
+        }
         message = ""
         report = ""
         let next = CommandRunner()
@@ -356,12 +410,19 @@ partial class Desktop : Cell {
         activityElapsed = 0
         activityOutput = ""
         stopping = false
+        if !activityVisible {
+            loadingPulse.Set(1.0)
+        }
         let elapsed = Stopwatch.StartNew()
         activityTimer = window.SetInterval(
             () -> {
                 let seconds = int32(elapsed.Elapsed.TotalSeconds)
-                let output = next.RecentOutput()
-                if activityElapsed != seconds || activityOutput != output {
+                let output = donationRunning ? next.RecentOutput(): ""
+                if !donationRunning && page == activityPage && activityElapsed != seconds {
+                    loadingPulse.To(seconds % 2 == 0 ? 1.0: 0.35, Cubic.Tween(motion ? 0.8: 0.0))
+                }
+                if !activityVisible || activityElapsed != seconds || activityOutput != output {
+                    activityVisible = true
                     activityElapsed = seconds
                     activityOutput = output
                     if donationRunning {
@@ -389,59 +450,20 @@ partial class Desktop : Cell {
             activityTimer?.Dispose()
             activityTimer = nil
             busy = false
-            runner = nil
             message = result.Error != "" ? result.Error: TextOf(result.Value, "status") == "pending" ?
             "Pending. Another person or the coordinator needs to act.": result.ExitCode != 0 ?
             "This action needs attention.": ""
             if result.Error == "" {
                 completed(result)
             }
+            if !busy {
+                runner = nil
+                loadingPulse.Set(1.0)
+            }
             Rebuild()
         }
         go RunCommand(next, window, arguments, tool, directory, seconds, callback)
         Rebuild()
-    }
-
-    private func Activity() Blob {
-        let panel = Container{
-            Display: busy && page == activityPage && !activityIsDonation ? Display.Flex: Display.None,
-            FlexShrink: 0,
-            Margin: Edges{Left: 28, Right: 28, Top: 12, Bottom: 8},
-            Padding: 14,
-            Gap: 10,
-            BackgroundColor: Surface(),
-            BorderWidth: 1,
-            BorderColor: Line(),
-            BorderRadius: 5,
-            Container{
-                FlexDirection: FlexDirection.Row,
-                AlignItems: AlignItems.Center,
-                Gap: 16,
-                Container{
-                    FlexGrow: 1,
-                    MinWidth: 0,
-                    Gap: 4,
-                    Accessibility: Accessibility{Role: AccessibilityRole.Status, Name: activityTitle, Busy: busy},
-                    Label(stopping ? "Stopping command": activityTitle, 20),
-                    Label("Elapsed " + Elapsed(activityElapsed), 16, true),
-                },
-                CancelCommand(),
-            },
-        }
-        if activityOutput != "" {
-            panel.Children.Add(
-                Text{
-                    Content: activityOutput,
-                    FontFamily: "monospace",
-                    FontSize: 13,
-                    Color: Muted(),
-                    MaxHeight: 110,
-                    OverflowY: Overflow.Scroll,
-                    Accessibility: Accessibility{Role: AccessibilityRole.Text, Name: "Command output"},
-                }
-            )
-        }
-        return panel
     }
 
     private func CancelCommand() Blob -> Keyboard(
@@ -838,7 +860,6 @@ partial class Desktop : Cell {
                         FocusOutlineColor: Accent(),
                     }.Build(),
                 }.Build(),
-                Activity(),
                 Container{
                     FlexGrow: 1,
                     FlexShrink: 1,

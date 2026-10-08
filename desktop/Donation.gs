@@ -155,6 +155,9 @@ partial class Desktop {
                 body.Children.Add(Label(message, 17, true))
             }
             body.Children.Add(Row([]Blob{Action("Start donation", () -> StartDonation(), true, !donationReady)}))
+            if busy && page == activityPage {
+                body.Children.Add(Row([]Blob{CancelCommand()}))
+            }
             if !busy && donationPath == "" {
                 body.Children.Add(Row([]Blob{Action("Inspect saved work", () -> Navigate("Saved work"))}))
             }
