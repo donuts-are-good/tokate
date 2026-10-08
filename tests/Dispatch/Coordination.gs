@@ -124,7 +124,8 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 }
                 using let test = CoordinationFlow(binary)
                 test.Initialize(
-                    approve: name != "ProtectedExternal" &&
+                    approve: name != "LeaseTakeover" &&
+                        name != "ProtectedExternal" &&
                         name != "ProtectedManaged" &&
                         name != "ReceiptEvidence" &&
                         name != "InterruptedVerification"

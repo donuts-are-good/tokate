@@ -11,7 +11,7 @@ internal class Submission {
         internal func Commit(directory string) {
             using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             if run.Text("source") != "tokate" || run.Text("state") != "generated" {
                 throw Exception("Expected successfully verified Tokate execution")
             }
@@ -337,11 +337,27 @@ internal class Submission {
                         run.Text("donor"),
                         J.Get(viewer, "id")
                     )
+                    let repo = RepositoryIdentity.Repo(run.Text("repo"))
+                    let number = J.Number(outcome, "pr")
+                    let pull = GitHub.Api("repos/" + repo + "/pulls/" + number.ToString())
+                    let published = ReceiptVerification.Verify(repo, number, pull)
+                    if published.Text("commit") != run.Text("commit") || published.Text("approval") != run.Text(
+                        "approval"
+                    ) ||
+                        published.Text("reservation") != run.Text("id") {
+                        throw CliFailure("stale_approval", "Published receipt differs from this saved contribution")
+                    }
+                    if run.Text("state") != "published" || run.Number("pr") != number || run.Text("pr_url") != J.Text(
+                        pull,
+                        "html_url"
+                    ) {
+                        Publication.SavePr(directory, run, pull)
+                    }
                     Terminal.Json(outcome, "Recorded publication outcome; no comment posted")
                     return
                 }
             }
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             if run.Text("state") != "generated" || run.Text("commit") == "" {
                 throw Exception("Only an independently verified exact commit can be submitted")
             }
@@ -372,7 +388,7 @@ internal class Submission {
                     J.Get(run.Element(), "donor_id")
                 )
                 Publication.Push(checkout, run, run.Text("commit"))
-                ContributionClaim.Recheck(run)
+                ContributionAuthority.Recheck(run)
             }
             if run.Text("publication_uuid") == "" {
                 let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))

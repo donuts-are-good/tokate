@@ -720,7 +720,6 @@ internal class ContributionStatusChecks {
         private func RepeatedReads(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
-            test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
             test.Flow.Reload()
             let title = Check.Text(test.Flow.State["issue"]?["title"])
             let issue = test.Flow.State["issue"] ?? throw Exception("Missing issue")

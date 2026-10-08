@@ -399,7 +399,7 @@ internal class AttemptContinuationChecks {
             let body = Check.Text(test.Flow.State["pulls"]?[0]?["body"])
             Check.Contains(
                 body,
-                "Fresh v2 attempt seeded from unpublished interrupted attempt " + Check.Text(Read(source)["attempt"])
+                "Fresh attempt seeded from unpublished interrupted attempt " + Check.Text(Read(source)["attempt"])
             )
             Check.Contains(body, "not retroactively successful")
             for key in[]string{"predecessor", "import_manifest_sha256", "attempt"} {

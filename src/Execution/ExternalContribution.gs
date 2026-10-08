@@ -206,7 +206,7 @@ internal class ExternalContribution {
             if !retry && (args.Get("seconds") != "" || args.Get("tools") != "") {
                 throw Exception("--seconds and --tools require a failed external verification")
             }
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             var seconds = run.Number("seconds")
@@ -358,7 +358,7 @@ internal class ExternalContribution {
                 ) != "" {
                     throw Exception("Independent verification changed the declared commit or checkout")
                 }
-                ContributionClaim.Recheck(run)
+                ContributionAuthority.Recheck(run)
                 if retry {
                     RepositoryAccess.ValidateFork(run.Text("repo"), metadata, J.Get(run.Element(), "donor_id"))
                     Unpublished(directory, run)

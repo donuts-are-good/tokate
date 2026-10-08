@@ -245,7 +245,7 @@ internal class Worker {
                     DonorSelection.Confirm(options, selected)
                 }
             }
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
                 let policy = Policy(J.Write(J.Get(record, "policy")))
                 policy.Digest = run.Text("policy_hash")
@@ -324,7 +324,7 @@ internal class Worker {
                 Config(args, "features." + feature, "false")
             }
             args.Add("-")
-            ContributionClaim.Recheck(run)
+            ContributionAuthority.Recheck(run)
             WorkspacePreparation.Ready(directory, run)
             run.Fields["state"] = "running"
             run.Fields["failure_stage"] = "inference"

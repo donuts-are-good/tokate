@@ -88,7 +88,7 @@ internal class Correction {
         }
 
         internal func Authority(directory string, run Data, requireArchive bool = false) JsonElement {
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
             if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
                 throw Exception("Contribution already published")

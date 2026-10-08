@@ -230,7 +230,7 @@ internal class PiHarness {
                         run.Text("effort")
                     }
                 )
-                ContributionClaim.Recheck(run)
+                ContributionAuthority.Recheck(run)
                 WorkspacePreparation.Ready(directory, run)
                 try {
                     run.Fields["failure_stage"] = "endpoint_check"

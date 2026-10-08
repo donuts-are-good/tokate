@@ -189,7 +189,7 @@ internal class CorrectionPublication {
                 if intent.ValueKind == JsonValueKind.Undefined {
                     Correction.Authority(directory, run)
                     let live = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
-                    ContributionClaim.Recheck(run)
+                    ContributionAuthority.Recheck(run)
                     run.Fields["publication_expected"] = live.Sha
                     run.Save(directory)
                     correction.Fields["publication_uuid"] = Guid.NewGuid().ToString("D")

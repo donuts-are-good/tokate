@@ -1129,6 +1129,19 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
         Flow.Traffic(34, 4, 22, 0, result)
+        Flow.Call([]string{"submit", "--run", run})
+        let published = File.ReadAllText(Path.Combine(run, "run.json"))
+        let saved = Check.Json(published)
+        Check.That(
+            Check.Text(saved["state"]) == "published" && Check.Text(saved["pr"]) == "10",
+            "Submit did not adopt the coordinated publication"
+        )
+        Flow.Call([]string{"checks", "--run", run}, 8)
+        Flow.Call([]string{"submit", "--run", run})
+        Check.That(
+            File.ReadAllText(Path.Combine(run, "run.json")) == published,
+            "Repeated submit rewrote published metadata"
+        )
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.Reload()
         Check.That(Check.Text(Flow.State["exec_count"]) == "1", "Tokate path did not execute exactly once")

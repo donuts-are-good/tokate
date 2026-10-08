@@ -154,7 +154,7 @@ internal class WorkspacePreparation {
             if File.Exists(eventsPath) || File.Exists(reportPath) {
                 throw Exception(failure)
             }
-            let record = ContributionClaim.Recheck(run)
+            let record = ContributionAuthority.Recheck(run)
             if AttemptContinuation.Has(run) && run.Text("continuation_phase") == "" {
                 ContinuationImport.Capture(directory, run, record)
             }
@@ -171,7 +171,7 @@ internal class WorkspacePreparation {
             Fork(directory, run, upstream)
             Branch(directory, run)
             let checkout = Checkout(directory, run)
-            ContributionClaim.Recheck(run)
+            ContributionAuthority.Recheck(run)
             CheckFork(run, upstream)
             CheckBranch(run)
             if AttemptContinuation.Has(run) {
@@ -206,7 +206,7 @@ internal class WorkspacePreparation {
                 if run.Text("continuation_phase") != "imported" {
                     throw Exception("Continuation import is incomplete; use prepare --run " + directory)
                 }
-                ContinuationImport.Check(directory, run, ContributionClaim.Recheck(run))
+                ContinuationImport.Check(directory, run, ContributionAuthority.Recheck(run))
             } else {
                 Clean(checkout, run)
             }
@@ -408,7 +408,7 @@ internal class WorkspacePreparation {
                     if run.Text("attempt") == "" {
                         Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
                     }
-                    ContributionClaim.Recheck(run)
+                    ContributionAuthority.Recheck(run)
                     CheckBranch(run)
                     let pulls = J.Items(
                         GitHub.Api(
@@ -572,7 +572,7 @@ internal class WorkspacePreparation {
                     ContinuationImport.Check(
                         directory,
                         run,
-                        ContributionClaim.Recheck(run),
+                        ContributionAuthority.Recheck(run),
                         run.Text("continuation_phase") == "importing"
                     )
                 } else {

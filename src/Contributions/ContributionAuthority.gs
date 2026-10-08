@@ -3,7 +3,7 @@ package Tokate
 import System
 import System.Text.Json
 
-internal class ContributionClaim {
+internal class ContributionAuthority {
     shared {
         internal func Recheck(run Data) JsonElement {
             if run.Number("version") != 2 {
