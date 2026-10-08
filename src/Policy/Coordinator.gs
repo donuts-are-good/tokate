@@ -510,7 +510,8 @@ internal class Coordinator {
                 J.Text(metadata, "head"),
                 J.Text(metadata, "sync"),
                 expected,
-                J.Text(metadata, "previous")
+                J.Text(metadata, "previous"),
+                contribution: J.Get(state, "contribution")
             )
             if history.GetArrayLength() > 0 {
                 Synchronization.Remote(
@@ -544,7 +545,8 @@ internal class Coordinator {
                 J.Text(metadata, "head"),
                 J.Text(metadata, "sync"),
                 expected,
-                J.Text(metadata, "previous")
+                J.Text(metadata, "previous"),
+                contribution: J.Get(state, "contribution")
             )
         }
 
