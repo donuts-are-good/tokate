@@ -285,14 +285,28 @@ partial class Desktop {
                 DonationSummary() +
                     "\n\nThis posts a claim on GitHub. It does not start inference. Starting work is a separate action.",
                 () -> {
+                    step = 3
+                    donationStarted = false
+                    donationReady = false
+                    donationPath = ""
+                    donationState = "Reserving donation"
                     Execute(
                         args.ToArray(),
                         result -> {
-                            ShowResult(result)
-                            if runDirectory != "" {
-                                page = "Saved work"
-                                run = Field(result.Value, "data")
-                                LoadRun()
+                            let directory = TextOf(Field(result.Value, "data"), "run")
+                            if directory != "" && (result.ExitCode == 0 || result.ExitCode == 8) {
+                                Execute(
+                                    []string{"status", "--run", directory},
+                                    status -> {
+                                        if !Error(status) {
+                                            OpenDonation(Field(status.Value, "data"), directory, false)
+                                        }
+                                    }
+                                )
+                            } else {
+                                donationState = "Reservation needs attention"
+                                step = 2
+                                ShowResult(result)
                             }
                         },
                         seconds: 600
@@ -325,6 +339,9 @@ partial class Desktop {
         (network ? "allowed": "offline")
 
     private func Donate() Blob {
+        if step == 3 {
+            return Donation()
+        }
         let body = Container{Gap: 20}
         let numeral = Heading(step == 0 ? "I": step == 1 ? "II": "III")
         numeral.Color = Accent()
@@ -666,27 +683,17 @@ partial class Desktop {
     }
 
     private func RunAction(command string) {
+        if command == "work" {
+            OpenDonation(run, runDirectory)
+            StartDonation()
+            return
+        }
         let args = List[string]()
         for argument in[]string{command, "--run", runDirectory} {
             args.Add(argument)
         }
         var seconds = 600
         var description = "Run " + command + " for this saved contribution."
-        if command == "work" {
-            args.Add("--yes")
-            let unbounded = Field(run, "unlimited").ValueKind == JsonValueKind.True
-            seconds = unbounded ? 0: Math.Clamp(Number(run, "seconds") + 600, 600, 87000)
-            description = "Start inference with the recorded model and permissions.\nModel: " +
-                TextOf(run, "model") +
-                " / " +
-                TextOf(run, "effort") +
-                "\nCoding: " +
-                (unbounded ? "Unlimited": (Number(run, "coding_seconds") / 60).ToString() + " minutes") +
-                "\nVerification: " +
-                (Number(run, "verification_reserve") / 60).ToString() +
-                " minutes\nProject network: " +
-                (Field(run, "network").ValueKind == JsonValueKind.True ? "allowed": "offline")
-        }
         if command == "submit" || command == "publish" {
             description = "Push verified work and request a draft pull request on GitHub. The owner still reviews and merges it."
         }

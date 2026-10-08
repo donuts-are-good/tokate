@@ -98,12 +98,19 @@ func Activate(
     )
 }
 
-func AwaitControl(host TestHost, adapter TestAccessibility, role AccessibilityRole, name string, value string = "") {
+func AwaitControl(
+    host TestHost,
+    adapter TestAccessibility,
+    role AccessibilityRole,
+    name string,
+    value string = "",
+    enabled bool = false
+) {
     let clock = Stopwatch.StartNew()
     while clock.Elapsed.TotalSeconds < 10 {
         Settle(host)
         if let node = Find(adapter.Root, role, name) {
-            if value == "" || node.Value == value {
+            if (value == "" || node.Value == value) && (!enabled || !node.Disabled) {
                 return
             }
         }
@@ -132,6 +139,12 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "tokate",
             "case \"$1\" in\npolicy) data='{\"policy\":{\"version\":2,\"allow_unlimited\":true,\"max_seconds\":3600}}';;\ndefaults) data='{\"profiles\":{},\"default\":{\"harness\":\"codex\",\"model\":\"obsolete-default\",\"effort\":\"low\"}}';;\nselect) data='{\"harness\":\"codex\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}';;\n*) exit 1;;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"status\":\"success\",\"exit_code\":0,\"data\":%s}' \"$1\" \"$$data\"\n"
         )
+        Directory.CreateDirectory(Path.Combine(fixture, "run"))
+        let request = Guid.NewGuid().ToString("D")
+        File.WriteAllText(
+            Path.Combine(fixture, "run", "run.json"),
+            "{\"claim_request\":{\"uuid\":\"" + request + "\"}}"
+        )
         let commandPath = Path.Combine(fixture, "tokate")
         let claim = "claim) printf '%s\\n' \"$$@\" > '" +
             fixture +
@@ -142,11 +155,23 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "/run\"}';;\n"
         let status = "status) data='{\"run\":\"" +
             fixture +
-            "/run\",\"state\":\"claimed\",\"repo\":\"owner/repo\",\"issue\":278,\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"seconds\":1800,\"verification_reserve\":1800,\"unlimited\":true,\"coding_seconds\":null}';;\n"
-        let work = "work) trap 'touch \"" +
+            "/run\",\"state\":\"claim_pending\",\"approval\":\"approval-fixture\",\"donor_id\":7,\"repo\":\"owner/repo\",\"issue\":278,\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"seconds\":1800,\"verification_reserve\":1800,\"unlimited\":true,\"coding_seconds\":null}';;\n"
+        let coordination = "coordination) touch '" +
             fixture +
-            "/cancelled\"; exit 0' INT; printf 'Preparing checkout\\n' >&2; for i in $$(seq 1 200); do sleep .05; done;;\n"
-        var script = File.ReadAllText(commandPath).Replace("*) exit 1;;", claim + status + work + "*) exit 1;;")
+            "/approval-checked'; claim=unrelated; [ -e '" +
+            fixture +
+            "/approve' ] && claim='" +
+            request +
+            "'; data='{\"approval_id\":\"approval-fixture\",\"revoked\":false,\"reservation\":{\"lease\":\"'\"$$claim\"'\",\"attempt\":\"'\"$$claim\"'\",\"actor\":7,\"status\":\"active\",\"expires\":4102444800}}';;\n"
+        let work = "work) touch '" +
+            fixture +
+            "/work-started'; trap 'touch \"" +
+            fixture +
+            "/cancelled\"; exit 0' INT; printf 'Preparing checkout\\n' >&2; for j in $$(seq 1 50); do printf 'Output line %s\\n' \"$$j\" >&2; done; for i in $$(seq 1 200); do sleep .05; done;;\n"
+        var script = File.ReadAllText(commandPath).Replace(
+            "*) exit 1;;",
+            claim + status + coordination + work + "*) exit 1;;"
+        )
         script = script.Replace("\"data\":%s}", "\"data\":%s,\"next_actions\":[[\"tokate\",\"work\"]]}")
         File.WriteAllText(commandPath, script)
         Script(
@@ -232,8 +257,8 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Navigation is blocked during reservation"
         )
         Require(
-            Find(adapter.Root, AccessibilityRole.Status, "Reserving donation") != nil,
-            "Activity disappeared after navigation"
+            Find(adapter.Root, AccessibilityRole.Status, "Reserving donation") == nil,
+            "Reservation activity leaked to another view"
         )
         Activate(window, adapter, "Switch to moonlight")
         Settle(host)
@@ -248,21 +273,64 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             ),
             "Unlimited claim arguments do not match the CLI"
         )
+        Activate(window, adapter, "Donate")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Start donation")?.Disabled == true,
+            "Start enabled before reservation completed"
+        )
         File.WriteAllText(Path.Combine(fixture, "release-claim"), "release")
-        AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Waiting for approval")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Start donation")?.Disabled == true,
+            "Start enabled before approval"
+        )
+        let observed = Stopwatch.StartNew()
+        while !File.Exists(Path.Combine(fixture, "approval-checked")) && observed.Elapsed.TotalSeconds < 8 {
+            Settle(host)
+        }
+        Require(File.Exists(Path.Combine(fixture, "approval-checked")), "Approval was not checked")
+        Settle(host)
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Start donation")?.Disabled == true,
+            "An unrelated reservation enabled Start"
+        )
+        Require(!File.Exists(Path.Combine(fixture, "work-started")), "Inference started without consent")
+        File.WriteAllText(Path.Combine(fixture, "approve"), "approved")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation", enabled: true)
         Activate(window, adapter, "Start donation")
         Settle(host)
-        Require(FindText(adapter.Root, "Coding: Unlimited"), "Saved work lost the unlimited coding choice")
+        Require(FindText(adapter.Root, "Coding: Unlimited"), "Donation lost the unlimited coding choice")
         Activate(window, adapter, "Confirm")
         AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
-        AwaitControl(host, adapter, AccessibilityRole.Text, "Command output", "Preparing checkout")
+        AwaitControl(host, adapter, AccessibilityRole.Text, "Command output")
+        let transcript = Stopwatch.StartNew()
+        while !FindText(adapter.Root, "Output line 50") && transcript.Elapsed.TotalSeconds < 5 {
+            Settle(host)
+        }
+        Require(
+            FindText(adapter.Root, "Preparing checkout") && FindText(adapter.Root, "Output line 50"),
+            "The output panel lost transcript lines"
+        )
         AwaitControl(host, adapter, AccessibilityRole.Text, "Elapsed 00:00:01")
+        guard let footer = Find(adapter.Root, AccessibilityRole.Text, "Elapsed 00:00:01") else {
+            throw Exception("Missing elapsed footer")
+        }
+        Require(footer.Bounds.Y + footer.Bounds.Height <= window.Height, "Elapsed footer overflowed the window")
         Activate(window, adapter, "My project")
         Settle(host)
         Require(
             Find(adapter.Root, AccessibilityRole.Text, "Make room for good work.") != nil,
             "Navigation is blocked during work"
         )
+        Require(
+            Find(adapter.Root, AccessibilityRole.Status, "Donation running") == nil &&
+                Find(adapter.Root, AccessibilityRole.Text, "Command output") == nil,
+            "Donation output leaked to another view"
+        )
+        Activate(window, adapter, "Donate")
+        AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
+        Require(FindText(adapter.Root, "Preparing checkout"), "Donation output was lost after navigation")
         Activate(window, adapter, "Cancel command")
         let cancelled = Stopwatch.StartNew()
         while cancelled
@@ -276,6 +344,15 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Running state survived cancellation"
         )
         Require(File.Exists(Path.Combine(fixture, "cancelled")), "Cancel did not interrupt the worker gracefully")
+        File.WriteAllText(commandPath, File.ReadAllText(commandPath).Replace("claim_pending", "claimed"))
+        Activate(window, adapter, "View saved work")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Start donation", enabled: true)
+        Activate(window, adapter, "Start donation")
+        Settle(host)
+        Require(FindText(adapter.Root, "Coding: Unlimited"), "Saved work did not confirm its Unlimited budget")
+        Activate(window, adapter, "Go back")
+        Settle(host)
+        Require(Find(adapter.Root, AccessibilityRole.Text, "Donation") != nil, "Saved work did not open Donate")
     } finally {
         Environment.SetEnvironmentVariable("PATH", previous)
         Directory.Delete(fixture, true)
@@ -355,6 +432,15 @@ func Main() {
     Require(unlimitedResult.Error == "" && unlimitedResult.ExitCode == 0, "Unlimited command expired")
     let large = CommandRunner().Run([]string{"-c", "1048577", "/dev/zero"}, "/usr/bin/head")
     Require(large.Error.Contains("display limit"), "Oversized command output was not rejected")
+    let noisyRunner = CommandRunner()
+    let noisy = noisyRunner.Run(
+        []string{"-c", "head -c 1048577 /dev/zero >&2; printf finished >&2; printf '{}'"},
+        "/bin/sh"
+    )
+    Require(
+        noisy.Error == "" && noisy.ExitCode == 0 && noisyRunner.RecentOutput().EndsWith("finished"),
+        "Long-running diagnostic output was lost or failed the command"
+    )
     let marker = Path.Combine(Path.GetTempPath(), "tokate-gui-cancel-" + Guid.NewGuid().ToString("N"))
     try {
         let interrupted = CommandRunner().Run(

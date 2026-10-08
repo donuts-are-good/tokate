@@ -5,7 +5,7 @@ import System
 import System.IO
 
 func Main() {
-    Window.ConfigureApplication("Tokate", "0.2.97", "dev.tokate.desktop")
+    Window.ConfigureApplication("Tokate", "0.2.101", "dev.tokate.desktop")
     using let body = FontSource("Newsreader", 400, false, File.ReadAllBytes(Asset("newsreader.ttf")))
     using let heading = FontSource("Cormorant", 500, false, File.ReadAllBytes(Asset("cormorant.ttf")))
     using let italic = FontSource("Cormorant", 500, true, File.ReadAllBytes(Asset("cormorant-italic.ttf")))

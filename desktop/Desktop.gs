@@ -35,6 +35,8 @@ partial class Desktop : Cell {
     private var activityTitle string = ""
     private var activityElapsed int32
     private var activityOutput string = ""
+    private var activityPage string = ""
+    private var activityIsDonation bool
     private var stopping bool
     private var message string = ""
     private var report string = ""
@@ -59,12 +61,25 @@ partial class Desktop : Cell {
                 Rebuild()
             }
         }
+        outputViewport.MetricsChanged += metrics -> {
+            let follow = outputRange - outputOffset <= 2
+            let changed = metrics.ScrollRange.Y != outputRange
+            outputRange = metrics.ScrollRange.Y
+            outputOffset = metrics.ScrollOffset.Y
+            if changed && follow {
+                outputViewport.ScrollTo(0, outputRange)
+            }
+        }
     }
 
     func Attach(window Window) {
         host = window
+        window.SmoothScrolling = true
+        window.WheelScrollScale = 2.0F
         window.OnClosing = () -> {
             if !busy {
+                approvalTimer?.Dispose()
+                approvalRunner?.Stop()
                 return true
             }
             message = "A command is active. Cancel it before closing, then inspect the saved run."
@@ -317,6 +332,8 @@ partial class Desktop : Cell {
             return
         }
         busy = true
+        activityPage = page
+        activityIsDonation = arguments[0] == "work"
         message = ""
         report = ""
         let next = CommandRunner()
@@ -347,12 +364,28 @@ partial class Desktop : Cell {
                 if activityElapsed != seconds || activityOutput != output {
                     activityElapsed = seconds
                     activityOutput = output
+                    if donationRunning {
+                        donationElapsed = seconds
+                        donationOutput = output
+                    }
                     Rebuild()
                 }
             },
             250
         )
         let callback = (result CommandResult) -> {
+            if donationRunning {
+                donationOutput = next.RecentOutput()
+                donationElapsed = int32(elapsed.Elapsed.TotalSeconds)
+                donationRunning = false
+                donationState = stopping ? "Donation stopped": result.Error != "" ||
+                    result.ExitCode != 0 ? "Donation needs attention": "Donation finished"
+                if result.Error != "" {
+                    donationOutput += "\n" + result.Error
+                }
+            } else if step == 3 && donationPath == "" && result.Error != "" {
+                donationState = "Reservation needs attention"
+            }
             activityTimer?.Dispose()
             activityTimer = nil
             busy = false
@@ -371,7 +404,7 @@ partial class Desktop : Cell {
 
     private func Activity() Blob {
         let panel = Container{
-            Display: busy ? Display.Flex: Display.None,
+            Display: busy && page == activityPage && !activityIsDonation ? Display.Flex: Display.None,
             FlexShrink: 0,
             Margin: Edges{Left: 28, Right: 28, Top: 12, Bottom: 8},
             Padding: 14,
@@ -390,26 +423,9 @@ partial class Desktop : Cell {
                     Gap: 4,
                     Accessibility: Accessibility{Role: AccessibilityRole.Status, Name: activityTitle, Busy: busy},
                     Label(stopping ? "Stopping command": activityTitle, 20),
-                    Label("Elapsed " + TimeSpan.FromSeconds(activityElapsed).ToString("hh\\:mm\\:ss"), 16, true),
+                    Label("Elapsed " + Elapsed(activityElapsed), 16, true),
                 },
-                Keyboard(
-                    Button{
-                        Padding: Edges{Left: 14, Right: 14, Top: 8, Bottom: 8},
-                        BorderWidth: 1,
-                        BorderColor: Line(),
-                        BorderRadius: 4,
-                        Disabled: stopping,
-                        Focusable: true,
-                        Focus: FocusStyle(),
-                        Hover: Style{BackgroundColor: Paper()},
-                        Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: "Cancel command"},
-                        OnClick: () -> {
-                            stopping = true
-                            runner?.Stop()
-                        },
-                        Label(stopping ? "Stopping": "Cancel", 17),
-                    }
-                ),
+                CancelCommand(),
             },
         }
         if activityOutput != "" {
@@ -427,6 +443,25 @@ partial class Desktop : Cell {
         }
         return panel
     }
+
+    private func CancelCommand() Blob -> Keyboard(
+        Button{
+            Padding: Edges{Left: 14, Right: 14, Top: 8, Bottom: 8},
+            BorderWidth: 1,
+            BorderColor: Line(),
+            BorderRadius: 4,
+            Disabled: stopping,
+            Focusable: true,
+            Focus: FocusStyle(),
+            Hover: Style{BackgroundColor: Paper()},
+            Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: "Cancel command"},
+            OnClick: () -> {
+                stopping = true
+                runner?.Stop()
+            },
+            Label(stopping ? "Stopping": "Cancel", 17),
+        }
+    )
 
     private func ShowResult(result CommandResult) {
         let data = Field(result.Value, "data")
@@ -677,6 +712,9 @@ partial class Desktop : Cell {
     )
 
     override func Build() Blob {
+        if let window = host {
+            window.Background = Paper()
+        }
         art.Effect.SetParameter(0, Vector4(float32(twilight.Value), oilPaint ? 1.0F: 0.0F, 0.0F, 0.04F))
         art.Effect.Playing = false
         let content = switch page {
@@ -687,20 +725,22 @@ partial class Desktop : Cell {
             default: Home()
         }
         let welcome = page == "Welcome"
+        let donating = page == "Donate" && step == 3
         let body = Container{
             Key: page == "Donate" ? page + step.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
-            Height: welcome ? Percent(100): Length.Auto,
+            Height: welcome || donating ? Percent(100): Length.Auto,
+            MinHeight: 0,
             MaxWidth: welcome ? Percent(100): Length(1050),
             AlignSelf: AlignSelf.Center,
             Gap: 18,
             content,
         }
-        if message != "" {
+        if message != "" && !donating {
             body.Children.Add(Label(message, 16, true))
         }
-        if report != "" {
+        if report != "" && !donating {
             body.Children.Add(
                 Text{
                     Content: report,
@@ -806,7 +846,7 @@ partial class Desktop : Cell {
                     MinWidth: 0,
                     MinHeight: 0,
                     OverflowX: Overflow.Hidden,
-                    OverflowY: welcome ? Overflow.Hidden: Overflow.Scroll,
+                    OverflowY: welcome || donating ? Overflow.Hidden: Overflow.Scroll,
                     Padding: welcome ? 0: 28,
                     body,
                 },

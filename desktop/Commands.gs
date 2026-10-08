@@ -27,10 +27,7 @@ class CommandRunner {
 
     func RecentOutput() string {
         lock diagnostics {
-            let count = Math.Min(4096, diagnostics.Length)
-            let lines = diagnostics.ToString(diagnostics.Length - count, count).Trim().Split('\n')
-            let first = Math.Max(0, lines.Length - 6)
-            return String.Join("\n", lines, first, lines.Length - first)
+            return diagnostics.ToString().Trim()
         }
     }
 
@@ -112,7 +109,7 @@ class CommandRunner {
                 let stdout = process.StandardOutput
                 let stderr = process.StandardError
                 go ReadCommandStream(stdout, output)
-                go ReadCommandStream(stderr, diagnostics)
+                go ReadCommandStream(stderr, diagnostics, true)
                 var finished = false
                 while !finished {
                     select {
@@ -147,7 +144,7 @@ class CommandRunner {
                     result.Error = "Command cancelled. Inspect saved state before trying again."
                 }
             }
-            if output.Length > 1048576 || diagnostics.Length > 1048576 {
+            if output.Length > 1048576 {
                 throw Exception(
                     "Command output exceeded the display limit. Inspect saved state before repeating this action."
                 )
@@ -180,12 +177,15 @@ class CommandRunner {
     }
 }
 
-func ReadCommandStream(reader StreamReader, output StringBuilder) {
+func ReadCommandStream(reader StreamReader, output StringBuilder, tail bool = false) {
     try {
         let buffer = [4096]char
         var count = await reader.ReadAsync(buffer, 0, buffer.Length)
         while count > 0 {
             lock output {
+                if tail && output.Length + count > 262144 {
+                    output.Remove(0, output.Length + count - 262144)
+                }
                 output.Append(buffer, 0, Math.Min(count, Math.Max(0, 1048577 - output.Length)))
             }
             count = await reader.ReadAsync(buffer, 0, buffer.Length)
