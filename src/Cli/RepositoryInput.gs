@@ -24,44 +24,59 @@ internal class RepositoryInput {
             return RepositoryIdentity.Repo(normalized)
         }
 
-        internal func ApplyIssue(args Args, value string) {
+        private func ApplyTask(args Args, value string, key string, segment string) {
             let uri = Uri(value)
             let match = Regex.Match(
                 uri.AbsolutePath,
-                "^/([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)/issues/([0-9]+)/?$"
+                "^/([A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)/" + segment + "/([0-9]+)/?$"
             )
             if uri.Scheme != "https" || !String.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase) ||
                 !uri.IsDefaultPort ||
                 uri.UserInfo != "" ||
                 !match.Success {
-                throw Exception("Use a GitHub issue URL: https://github.com/OWNER/REPO/issues/N")
+                throw Exception("Use a GitHub " + key + " URL: https://github.com/OWNER/REPO/" + segment + "/N")
             }
             let repo = RepositoryIdentity.Repo(match.Groups[1].Value)
             let number = match.Groups[2].Value
             var parsed int32
             if !int32.TryParse(number, out parsed) || parsed < 1 {
-                throw Exception("Invalid positive number in issue URL")
+                throw Exception("Invalid positive number in task URL")
             }
             if args.Get("repo") != "" && !String.Equals(args.Get("repo"), repo, StringComparison.OrdinalIgnoreCase) {
-                throw Exception("Issue URL conflicts with --repo")
+                throw Exception("Task URL conflicts with --repo")
             }
-            if args.Get("issue") != "" && args.Number("issue") != parsed {
-                throw Exception("Issue URL conflicts with --issue")
+            if args.Get(key) != "" && args.Number(key) != parsed {
+                throw Exception("Task URL conflicts with --" + key)
             }
             args.Values["--repo"] = repo
-            args.Values["--issue"] = number
+            args.Values["--" + key] = number
         }
 
         internal func Issue(args Args) {
             let issue = args.Get("issue")
             if issue.Contains("://") {
                 args.Values.Remove("--issue")
-                ApplyIssue(args, issue)
+                ApplyTask(args, issue, "issue", "issues")
             } else if issue != "" {
                 args.Number("issue")
             }
-            if args.IssueUrl != "" {
-                ApplyIssue(args, args.IssueUrl)
+            if args.Target != "" {
+                let command = Cli.Find(args.Command)
+                if args.Target.Contains("/issues/") && command.Has("issue") {
+                    ApplyTask(args, args.Target, "issue", "issues")
+                } else if args.Target.Contains("/pull/") && command.Has("pr") {
+                    ApplyTask(args, args.Target, "pr", "pull")
+                } else {
+                    let repo = Repo(args.Target)
+                    if args.Get("repo") != "" && !String.Equals(
+                        args.Get("repo"),
+                        repo,
+                        StringComparison.OrdinalIgnoreCase
+                    ) {
+                        throw Exception("Repository argument conflicts with --repo")
+                    }
+                    args.Values["--repo"] = repo
+                }
             }
         }
 

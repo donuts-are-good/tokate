@@ -5,6 +5,21 @@ import System.IO
 
 internal class LocalPaths {
     shared {
+        internal func StateDirectory(legacy bool = false) string {
+            let configured = legacy ? "": Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? ""
+            let root = Path.IsPathFullyQualified(configured) ? configured: Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".local/state"
+            )
+            return Path.Combine(Path.GetFullPath(root), "tokate")
+        }
+
+        internal func StateDirectories()[]string {
+            let current = StateDirectory()
+            let previous = StateDirectory(true)
+            return current == previous ? []string{current}: []string{current, previous}
+        }
+
         internal func DirectoryPath(path string) string {
             let absolute = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))
             var current = Path.GetPathRoot(absolute) ?? "/"

@@ -29,9 +29,9 @@ Owners need neither harness nor an AI subscription.
 - **Before running:** [Understand data access and isolation](docs/security.md).
 - **Source builders:** [Build, test and package Tokate](docs/development.md).
 
-Run `tokate` in a terminal for repository status and saved contributions.
-Use `tokate help COMMAND` for exact options. Issue URLs supply repository and issue
-context. Scripts and assistants can use `--json` without prompts.
+Run `tokate` for guided donation, owner setup, repository status and saved work.
+`tokate work OWNER/REPO` offers available issues. Issue and PR links supply context.
+Use `tokate help COMMAND` for exact options. Scripts can use `--json` without prompts.
 
 To get help from your coding assistant:
 

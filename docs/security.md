@@ -52,7 +52,11 @@ or billing limits. Abrupt termination can leave incomplete evidence.
 
 ## Local state
 
-Runs live under `~/.local/state/tokate/runs` or an explicit `--runs` directory.
+Runs live under `$XDG_STATE_HOME/tokate/runs`, falling back to
+`~/.local/state/tokate/runs`, or an explicit `--runs` directory. Empty or relative
+state overrides use the fallback. Saved discovery still finds previous runs.
+Profiles prefer the current state directory and read previous profiles when absent.
+Nothing is migrated automatically. Explicit profile removal clears both locations.
 They contain checkouts, metadata, private logs, patches and publication evidence.
 Logs are bounded and can be truncated. They can contain sensitive tool output.
 There is no automatic expiry or general redaction. Keep them private and preserve

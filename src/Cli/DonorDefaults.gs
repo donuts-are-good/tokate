@@ -28,13 +28,8 @@ internal class DonorDefaults {
             return value
         }
 
-        internal func Location(profile string = "") string {
-            let directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".local",
-                "state",
-                "tokate"
-            )
+        internal func Location(profile string = "", storage string = "") string {
+            let directory = storage == "" ? LocalPaths.StateDirectory(): storage
             let path = profile == "" ? Path.Combine(directory, "donor-defaults.json"):
             Path.Combine(directory, "donor-profiles", Name(profile) + ".json")
             var current = path
@@ -48,8 +43,15 @@ internal class DonorDefaults {
         }
 
         internal func Read(profile string = "") JsonElement {
-            let path = Location(profile)
-            if !File.Exists(path) {
+            var value JsonElement
+            for directory in LocalPaths.StateDirectories() {
+                let path = Location(profile, directory)
+                if File.Exists(path) {
+                    value = RequestData.FileData(path, 16 * 1024)
+                    break
+                }
+            }
+            if value.ValueKind == JsonValueKind.Undefined {
                 if profile != "" {
                     throw Exception(
                         "Named donor profile is missing; use defaults set --profile NAME. No inference started."
@@ -57,7 +59,6 @@ internal class DonorDefaults {
                 }
                 return JsonElement{}
             }
-            let value = RequestData.FileData(path, 16 * 1024)
             RequestData.Keys(value, "harness,provider,model,effort,endpoint,pi-root,node")
             for field in value.EnumerateObject() {
                 if field.Value.ValueKind != JsonValueKind.String {
@@ -104,14 +105,20 @@ internal class DonorDefaults {
             let profile = args.Get("profile")
             if args.Subject == "list" {
                 let profiles = SortedDictionary[string, Object?](StringComparer.Ordinal)
-                let directory = Path.GetDirectoryName(Location("list")) ?? ""
-                if Directory.Exists(directory) {
-                    for path in Directory.EnumerateFiles(directory, "*.json") {
-                        if profiles.Count >= 128 {
-                            throw Exception("Donor profile list exceeds 128 entries")
+                var scanned int32
+                for storage in LocalPaths.StateDirectories() {
+                    let directory = Path.GetDirectoryName(Location("list", storage)) ?? ""
+                    if Directory.Exists(directory) {
+                        for path in Directory.EnumerateFiles(directory, "*.json") {
+                            scanned++
+                            if scanned > 128 {
+                                throw Exception("Donor profile list exceeds 128 entries")
+                            }
+                            let name = Name(Path.GetFileNameWithoutExtension(path))
+                            if !profiles.ContainsKey(name) {
+                                profiles.Add(name, Summary(Read(name)))
+                            }
                         }
-                        let name = Name(Path.GetFileNameWithoutExtension(path))
-                        profiles.Add(name, Summary(Read(name)))
                     }
                 }
                 return J.Parse(
@@ -128,8 +135,15 @@ internal class DonorDefaults {
             }
             let path = Location(profile)
             if args.Subject == "remove" {
-                let existed = File.Exists(path)
-                File.Delete(path)
+                let paths = List[string]()
+                for storage in LocalPaths.StateDirectories() {
+                    paths.Add(Location(profile, storage))
+                }
+                var existed bool
+                for candidate in paths {
+                    existed = existed || File.Exists(candidate)
+                    File.Delete(candidate)
+                }
                 return J.Parse(J.Write(map[string, Object?]{"profile": profile, "removed": existed}))
             }
             let choice = map[string, Object?]{}

@@ -718,9 +718,77 @@ internal class DonorSelectionChecks {
             flow.NoInference()
         }
 
+        private func StateLocation(binary string) {
+            using let temp = Temp()
+            temp.Env["PATH"] = "/empty"
+            for profile in[]string{"", "shared"} {
+                let args = List[string]{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high"}
+                if profile != "" {
+                    args.AddRange([]string{"--profile", profile})
+                }
+                CliDiscovery.Call(binary, args.ToArray(), temp)
+            }
+            let previous = Path.Combine(temp.Env["HOME"], ".local/state/tokate")
+            let oldHash = Check.Hash(Path.Combine(previous, "donor-defaults.json"))
+            let stateHome = Path.Combine(temp.Root, "new state")
+            temp.Env["XDG_STATE_HOME"] = stateHome
+            Check.Contains(
+                CliDiscovery.Call(binary, []string{"defaults", "read", "--profile", "shared"}, temp).Output,
+                "high"
+            )
+            for profile in[]string{"", "shared"} {
+                let args = List[string]{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "xhigh"}
+                if profile != "" {
+                    args.AddRange([]string{"--profile", profile})
+                }
+                CliDiscovery.Call(binary, args.ToArray(), temp)
+            }
+            let current = Path.Combine(stateHome, "tokate")
+            Check.That(File.Exists(Path.Combine(current, "donor-defaults.json")), "State override was ignored")
+            Check.That(
+                Check.Hash(Path.Combine(previous, "donor-defaults.json")) == oldHash,
+                "Old defaults were migrated"
+            )
+            let listed = Check.Json(CliDiscovery.Call(binary, []string{"defaults", "list"}, temp).Output)
+            Check.That(listed["profiles"]?.AsObject().Count == 1, "Duplicate profile names were listed")
+            Check.That(
+                Check.Text(listed["profiles"]?["shared"]?["effort"]) == "xhigh",
+                "Old profile overrode current choice"
+            )
+            for invalid in[]string{"", "relative-state"} {
+                temp.Env["XDG_STATE_HOME"] = invalid
+                let read = Check.Json(CliDiscovery.Call(binary, []string{"defaults", "read"}, temp).Output)
+                Check.That(
+                    Check.Text(read["default"]?["effort"]) == "high",
+                    "Empty or relative state override changed lookup"
+                )
+            }
+            temp.Env["XDG_STATE_HOME"] = stateHome
+            CliDiscovery.Call(binary, []string{"defaults", "remove", "--profile", "shared"}, temp)
+            Check.That(
+                !File.Exists(Path.Combine(current, "donor-profiles/shared.json")) && !File.Exists(
+                    Path.Combine(previous, "donor-profiles/shared.json")
+                ),
+                "Removed profile reappeared from previous storage"
+            )
+            let path = Path.Combine(current, "donor-defaults.json")
+            File.Delete(path)
+            File.CreateSymbolicLink(path, Path.Combine(previous, "donor-defaults.json"))
+            CliDiscovery.Call(binary, []string{"defaults", "read"}, temp, 1)
+            Check.That(
+                Check.Hash(Path.Combine(previous, "donor-defaults.json")) == oldHash,
+                "Linked defaults were changed"
+            )
+            Console.WriteLine(
+                "PASS state directory override, previous profile lookup, precedence, explicit removal and link refusal"
+            )
+        }
+
         internal func All(binary string, selected string = "") {
             if selected != "" {
-                if selected == "Structured" {
+                if selected == "StateLocation" {
+                    StateLocation(binary)
+                } else if selected == "Structured" {
                     Structured(binary)
                     Console.WriteLine(
                         "PASS structured defaults/selection, availability and terminal no-prompt contract"
@@ -737,6 +805,7 @@ internal class DonorSelectionChecks {
             }
 
             Structured(binary)
+            StateLocation(binary)
             Console.WriteLine("PASS structured defaults/selection, availability and terminal no-prompt contract")
             LocalSettings(binary)
             Console.WriteLine("PASS donor defaults set/read/remove and nonsecret storage")

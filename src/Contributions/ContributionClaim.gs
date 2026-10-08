@@ -42,7 +42,7 @@ internal class ContributionClaim {
                     "; current policy permits it and native Codex advertises the controls. Availability: " +
                     J.Text(selection, "availability") + "."
             )
-            if args.Command == "work" {
+            if args.Command == "work" || args.Guided {
                 if args.Get("continue-from") != "" {
                     V1Continuation.Confirm(args, selection)
                 } else {
