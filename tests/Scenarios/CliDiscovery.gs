@@ -315,20 +315,18 @@ internal class CliDiscovery {
                     "--harness",
                     "pi",
                     "--model",
-                    "local-model",
+                    "local-" + String('x', 120),
                     "--effort",
                     "absent",
                     "--endpoint",
                     "http://127.0.0.1:12345/v1"
                 }
             )
+            let pickerScript = Path.Combine(flow.Temp.Root, "model-checklist.py")
+            File.WriteAllText(pickerScript, NativeFixture.Template("model-checklist.py"))
             let picker = TestProcess.Run(
                 "python3",
-                []string{
-                    Path.Combine(Directory.GetCurrentDirectory(), "tests/Tools/model-checklist.py"),
-                    binary,
-                    Path.Combine(flow.Temp.Root, "checklist")
-                },
+                []string{pickerScript, binary, Path.Combine(flow.Temp.Root, "checklist")},
                 env
             )
             Check.Success(picker)
@@ -367,6 +365,10 @@ internal class CliDiscovery {
                 "Metadata omits public commands"
             )
             for command in metadata["data"]?["commands"]?.AsArray() ?? JsonArray() {
+                let names = HashSet[string](StringComparer.Ordinal)
+                for option in command["arguments"]?.AsArray() ?? JsonArray() {
+                    Check.That(names.Add(Check.Text(option["name"])), "CLI metadata repeated an option")
+                }
                 Check.That(Check.Text(command["noninteractive"]) == "true", "Hidden interactive command")
                 Check.That(
                     Check.Text(command["inference"]) == (Check.Text(command["command"]) == "work" ? "true": "false"),

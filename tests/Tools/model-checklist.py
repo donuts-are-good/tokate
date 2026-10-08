@@ -2,6 +2,7 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -10,6 +11,7 @@ import termios
 import time
 
 binary, root = sys.argv[1:]
+local_model = "local-" + "x" * 120
 os.environ["TERM"] = "xterm-256color"
 os.environ["NO_COLOR"] = "1"
 
@@ -19,7 +21,7 @@ def start(path):
     if pid == 0:
         os.execv(binary, [
             binary, "init", "--repo", "owner/project", "--path", path,
-            "--model-policy", "whitelist", "--tools", "codex,pi", "--verification", '[["/usr/bin/true"]]',
+            "--model-policy", "whitelist", "--allowed-tools", "codex,pi", "--verification", '[["/usr/bin/true"]]',
             "--required-checks", '["verify"]', "--eligibility", "trusted",
             "--base-branch", "main", "--network", "deny", "--seconds", "60",
             "--reservation-seconds", "300", "--pr-text", "Owner notes", "--yes",
@@ -79,6 +81,7 @@ for cancelled in (False, True):
         initial = expect(fd, b"0 selected")
         assert b"(suggested)" in initial, initial
         assert b"[Local]" in initial and b"[Subscription]" in initial, initial
+        assert local_model.encode() in re.sub(rb"\x1b\[[0-?]*[ -/]*[@-~]", b"", initial), "Long model ID was cut off"
         assert b"\x1b[?25l" not in initial, "Picker changed cursor visibility"
         if cancelled:
             os.write(fd, b"\x1b")
@@ -121,7 +124,7 @@ for cancelled in (False, True):
             policy = json.load(file)
         models = policy["models"]
         assert models == {
-            "gpt-6.1-sol": ["high"], "local-model": ["absent"], "remote-model": ["absent"],
+            "gpt-6.1-sol": ["high"], local_model: ["absent"], "remote-model": ["absent"],
         }, models
         assert policy["allowed_tools"] == [
             {"harness": "codex", "provider": "openai"},

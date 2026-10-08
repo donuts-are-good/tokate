@@ -111,7 +111,7 @@ internal class OwnerSetup {
 
         private func Tools(args Args, fields map[string, Object?], interactive bool) {
             let value = J.Parse(J.Write(fields))
-            var requested = args.Get("tools")
+            var requested = args.Get("allowed-tools")
             if requested == "" && interactive && J.Number(value, "version") == 2 {
                 let current = List[string]()
                 for tool in J.Items(J.Get(value, "allowed_tools")) {
