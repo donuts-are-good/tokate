@@ -661,68 +661,29 @@ internal class CommandTrafficChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "RequestReuse",
-                "JournalSafety",
-                "SameFileRequest",
-                "LostRequest",
-                "CanonicalRequest",
-                "SubmitReuse",
-                "WatchDeadline",
-                "MovedDecreeDeadline",
-                "WatchStructured",
-                "ComposedChecks",
-                "WatchTraffic",
-                "WatchChanges",
-                "CacheRetention"
+            for test in[]TestCase[string]{
+                TestCase[string]("RequestReuse", async (value string) -> RequestReuse(value)),
+                TestCase[string]("JournalSafety", async (value string) -> JournalSafety(value)),
+                TestCase[string]("SameFileRequest", async (value string) -> SameFileRequest(value)),
+                TestCase[string]("LostRequest", async (value string) -> LostRequest(value)),
+                TestCase[string]("CanonicalRequest", async (value string) -> CanonicalRequest(value)),
+                TestCase[string]("SubmitReuse", async (value string) -> SubmitReuse(value)),
+                TestCase[string]("WatchDeadline", async (value string) -> WatchDeadline(value)),
+                TestCase[string]("MovedDecreeDeadline", async (value string) -> MovedDecreeDeadline(value)),
+                TestCase[string]("WatchStructured", async (value string) -> WatchStructured(value)),
+                TestCase[string]("ComposedChecks", async (value string) -> CheckGates.All(value)),
+                TestCase[string]("WatchTraffic", async (value string) -> WatchTraffic(value)),
+                TestCase[string]("WatchChanges", async (value string) -> WatchChanges(value)),
+                TestCase[string]("CacheRetention", async (value string) -> CacheRetention(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
                 if !CiShard.Include("Traffic/" + name) {
                     continue
                 }
-                switch name {
-                    case "RequestReuse" {
-                        RequestReuse(binary)
-                    }
-                    case "JournalSafety" {
-                        JournalSafety(binary)
-                    }
-                    case "SameFileRequest" {
-                        SameFileRequest(binary)
-                    }
-                    case "LostRequest" {
-                        LostRequest(binary)
-                    }
-                    case "CanonicalRequest" {
-                        CanonicalRequest(binary)
-                    }
-                    case "SubmitReuse" {
-                        SubmitReuse(binary)
-                    }
-                    case "WatchDeadline" {
-                        WatchDeadline(binary)
-                    }
-                    case "MovedDecreeDeadline" {
-                        MovedDecreeDeadline(binary)
-                    }
-                    case "WatchStructured" {
-                        WatchStructured(binary)
-                    }
-                    case "ComposedChecks" {
-                        CheckGates.All(binary)
-                    }
-                    case "WatchTraffic" {
-                        WatchTraffic(binary)
-                    }
-                    case "WatchChanges" {
-                        WatchChanges(binary)
-                    }
-                    case "CacheRetention" {
-                        CacheRetention(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS command traffic " + name)
             }
         }

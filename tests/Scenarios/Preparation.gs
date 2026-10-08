@@ -902,69 +902,27 @@ internal class PreparationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "Guided",
-                "Acquisition",
-                "PendingClaim",
-                "ClaimGates",
-                "PendingAuthority",
-                "ClaimRecovery",
-                "Creation",
-                "Selection",
-                "Interruptions",
-                "Preservation",
-                "External",
-                "Ownership",
-                "Authority",
-                "LinkedControls"
+            for test in[]TestCase[string]{
+                TestCase[string]("Guided", async (value string) -> Guided(value)),
+                TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
+                TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
+                TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),
+                TestCase[string]("PendingAuthority", async (value string) -> PendingAuthority(value)),
+                TestCase[string]("ClaimRecovery", async (value string) -> ClaimRecovery(value)),
+                TestCase[string]("Creation", async (value string) -> Creation(value)),
+                TestCase[string]("Selection", async (value string) -> Selection(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("Preservation", async (value string) -> Preservation(value)),
+                TestCase[string]("External", async (value string) -> External(value)),
+                TestCase[string]("Ownership", async (value string) -> Ownership(value)),
+                TestCase[string]("Authority", async (value string) -> Authority(value)),
+                TestCase[string]("LinkedControls", async (value string) -> LinkedControls(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
-                switch name {
-                    case "Guided" {
-                        Guided(binary)
-                    }
-                    case "Acquisition" {
-                        Acquisition(binary)
-                    }
-                    case "PendingClaim" {
-                        PendingClaim(binary)
-                    }
-                    case "ClaimGates" {
-                        ClaimGates(binary)
-                    }
-                    case "PendingAuthority" {
-                        PendingAuthority(binary)
-                    }
-                    case "ClaimRecovery" {
-                        ClaimRecovery(binary)
-                    }
-                    case "Creation" {
-                        Creation(binary)
-                    }
-                    case "Selection" {
-                        Selection(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "Preservation" {
-                        Preservation(binary)
-                    }
-                    case "External" {
-                        External(binary)
-                    }
-                    case "Ownership" {
-                        Ownership(binary)
-                    }
-                    case "LinkedControls" {
-                        LinkedControls(binary)
-                    }
-                    case "Authority" {
-                        Authority(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS preparation " + name)
             }
         }

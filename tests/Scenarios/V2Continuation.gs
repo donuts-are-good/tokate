@@ -822,49 +822,22 @@ internal class V2ContinuationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "Timeout",
-                "Crash",
-                "Cancel",
-                "Failure",
-                "Pi",
-                "Refusals",
-                "Budget",
-                "Interruptions",
-                "ImportBoundary"
+            for test in[]TestCase[string]{
+                TestCase[string]("Timeout", async (value string) -> Flow(value, "timeout")),
+                TestCase[string]("Crash", async (value string) -> Flow(value, "crash")),
+                TestCase[string]("Cancel", async (value string) -> Flow(value, "cancel")),
+                TestCase[string]("Failure", async (value string) -> Flow(value, "incomplete_turn")),
+                TestCase[string]("Pi", async (value string) -> Flow(value, "timeout", "pi")),
+                TestCase[string]("Refusals", async (value string) -> Refusals(value)),
+                TestCase[string]("Budget", async (value string) -> Budget(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("ImportBoundary", async (value string) -> ImportBoundary(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name || selected == "" && !CiShard.Include("ContinuationV2/" + name) {
                     continue
                 }
-                switch name {
-                    case "Timeout" {
-                        Flow(binary, "timeout")
-                    }
-                    case "Crash" {
-                        Flow(binary, "crash")
-                    }
-                    case "Cancel" {
-                        Flow(binary, "cancel")
-                    }
-                    case "Failure" {
-                        Flow(binary, "incomplete_turn")
-                    }
-                    case "Pi" {
-                        Flow(binary, "timeout", "pi")
-                    }
-                    case "Refusals" {
-                        Refusals(binary)
-                    }
-                    case "Budget" {
-                        Budget(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "ImportBoundary" {
-                        ImportBoundary(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS v2 continuation " + name)
             }
         }

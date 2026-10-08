@@ -821,36 +821,23 @@ internal class ContinuationChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{"Flow", "Owner", "Refusals", "Interruptions", "Cache", "Amendment", "Budget"} {
+            for test in[]TestCase[string]{
+                TestCase[string]("Flow", async (value string) -> Flow(value)),
+                TestCase[string]("Owner", async (value string) -> Owner(value)),
+                TestCase[string]("Refusals", async (value string) -> Refusals(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("Cache", async (value string) -> Cache(value)),
+                TestCase[string]("Amendment", async (value string) -> Amendment(value)),
+                TestCase[string]("Budget", async (value string) -> Budget(value))
+            } {
+                let name = test.Name
                 if selected != "" && name != selected {
                     continue
                 }
                 if selected == "" && !CiShard.Include("Continuation/" + name) {
                     continue
                 }
-                switch name {
-                    case "Flow" {
-                        Flow(binary)
-                    }
-                    case "Owner" {
-                        Owner(binary)
-                    }
-                    case "Refusals" {
-                        Refusals(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "Cache" {
-                        Cache(binary)
-                    }
-                    case "Amendment" {
-                        Amendment(binary)
-                    }
-                    case "Budget" {
-                        Budget(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS v1 continuation " + name)
             }
         }
