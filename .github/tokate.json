@@ -9,7 +9,10 @@
       "xhigh"
     ],
     "glm-5.3-flash": [
-      "absent"
+      "minimal",
+      "low",
+      "medium",
+      "high"
     ]
   },
   "max_seconds": 14400,
