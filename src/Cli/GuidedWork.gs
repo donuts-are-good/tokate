@@ -58,6 +58,13 @@ internal class GuidedWork {
             }
         }
 
+        private func Eligible(value JsonElement, policy Policy) bool ->
+        DonorSelection.Supported(value) && policy.Allows(J.Text(value, "model"), J.Text(value, "effort")) &&
+            (
+            J.Number(policy.Value, "version") == 1 ? J.Text(value, "harness") == "codex":
+            policy.AllowsTool(J.Text(value, "harness"), J.Text(value, "provider"))
+        )
+
         private func Profile(args Args) {
             if args.Get("profile") != "" || args.Get("harness") != "" || args.Get("provider") != "" || args.Get(
                 "model"
@@ -65,13 +72,16 @@ internal class GuidedWork {
                 return
             }
             let saved = DonorDefaults.Run(Args([]string{"defaults", "list"}))
-            if DonorSelection.Supported(J.Get(saved, "default")) {
+            let repo = args.Need("repo")
+            let info = GitHub.Api("repos/" + repo)
+            let policy = Policy.Load(repo, J.Text(info, "default_branch"))
+            if Eligible(J.Get(saved, "default"), policy) {
                 return
             }
             let profiles = J.Get(saved, "profiles")
             let names = HashSet[string](StringComparer.Ordinal)
             for entry in profiles.EnumerateObject() {
-                if !DonorSelection.Supported(entry.Value) {
+                if !Eligible(entry.Value, policy) {
                     continue
                 }
                 let harness = J.Text(entry.Value, "harness")
