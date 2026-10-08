@@ -1,0 +1,22 @@
+<Project Sdk="Gsharp.NET.Sdk/0.4.1150">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>TokateDesktop</RootNamespace>
+    <AssemblyName>tokate-desktop</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>0.2.97</Version>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.gs" />
+    <PackageReference Include="Goo" Version="0.7.16" />
+    <PackageReference Include="Goo.Widgets" Version="0.2.13" />
+    <PackageReference Include="Goo.Animations" Version="0.2.5" />
+    <GooShaderEffect Include="Shaders/fresco.slang" />
+    <Content Include="../branding/artwork/backdrop.png;../branding/artwork/hands-smooth.png;../branding/artwork/sun.png;../branding/artwork/moon.png;../branding/artwork/stone-olive.png" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../branding/fonts/newsreader.ttf;../branding/fonts/cormorant.ttf;../branding/fonts/cormorant-italic.ttf;../branding/fonts/Newsreader-LICENSE.txt;../branding/fonts/Cormorant-LICENSE.txt" Link="Assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets/*.svg" CopyToOutputDirectory="PreserveNewest" />
+    <Watch Include="**/*.gs" Exclude="bin/**;obj/**" />
+  </ItemGroup>
+</Project>

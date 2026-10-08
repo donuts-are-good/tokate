@@ -10,10 +10,11 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-    <Version>0.2.96</Version>
+    <Version>0.2.97</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.gs" />
+    <Compile Remove="desktop/**/*.gs" />
     <EmbeddedResource Include="templates/*" />
     <EmbeddedResource Include=".github/workflows/tokate-shared.yml" LogicalName="Tokate.templates.coordinator.yml" />
     <EmbeddedResource Include="site/install.sh" LogicalName="Tokate.templates.install.sh" />
