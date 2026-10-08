@@ -98,38 +98,42 @@ internal class CorrectionPublication {
 
         private func NativeBody(run Data, correction Data, record JsonElement, receipt JsonElement) string {
             let prior = J.Get(receipt, "predecessor")
-            let values = Dictionary[string, string]()
-            values["issue"] = run.Number("issue").ToString()
-            values["report"] = PrBody.Report(
-                PublicSummary.Report(
-                    PublicSummary.ForHead(correction, correction.Text("commit")),
-                    "Tokate observed locally: " + Verification.Results(correction, record).ToString() +
-                        " original owner checks passed on this corrected candidate."
-                ) +
-                    "\n\n- Correction: separate " +
-                    correction
-                    .Number("seconds").ToString() +
-                    " second verification budget; original declarations cover only the original completed turn." +
-                    PublicSummary.Tools(J.Get(correction.Element(), "tools"), "Donor-reported correction tools") +
-                    (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + PrBody.ContinuationReport(prior).Trim())
-            )
-            values["donor"] = run.Text("donor")
-            values["model"] = PublicSummary.Identifier(run.Text("model"))
-            values["effort"] = PublicSummary.Identifier(run.Text("effort"))
-            values["seconds"] = if run.Flag("recovered") {
-                "unknown (original runtime not recorded)"
-            } else if run.Fields.ContainsKey("execution_seconds") {
-                run.Number("execution_seconds").ToString() + " (original execution only)"
-            } else if run.Fields.ContainsKey("elapsed_seconds") {
-                run.Number("elapsed_seconds").ToString() + " (original work including checks)"
-            } else {
-                "unknown (original runtime not recorded)"
+            let values = map[string, string]{
+                "issue": run.Number("issue").ToString(),
+                "report": PrBody.Report(
+                    PublicSummary.Report(
+                        PublicSummary.ForHead(correction, correction.Text("commit")),
+                        "Tokate observed locally: " + Verification.Results(correction, record).ToString() +
+                            " original owner checks passed on this corrected candidate."
+                    ) +
+                        "\n\n- Correction: separate " +
+                        correction
+                        .Number("seconds").ToString() +
+                        " second verification budget; original declarations cover only the original completed turn." +
+                        PublicSummary.Tools(J.Get(correction.Element(), "tools"), "Donor-reported correction tools") +
+                        (
+                        prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + PrBody.ContinuationReport(prior)
+                            .Trim()
+                    )
+                ),
+                "donor": run.Text("donor"),
+                "model": PublicSummary.Identifier(run.Text("model")),
+                "effort": PublicSummary.Identifier(run.Text("effort")),
+                "seconds": if run.Flag("recovered") {
+                    "unknown (original runtime not recorded)"
+                } else if run.Fields.ContainsKey("execution_seconds") {
+                    run.Number("execution_seconds").ToString() + " (original execution only)"
+                } else if run.Fields.ContainsKey("elapsed_seconds") {
+                    run.Number("elapsed_seconds").ToString() + " (original work including checks)"
+                } else {
+                    "unknown (original runtime not recorded)"
+                },
+                "base": run.Text("base"),
+                "policy": run.Text("policy_hash"),
+                "usage": PublicSummary.Usage(J.Get(run.Element(), "usage")),
+                "receipt": "<!-- tokate-run:" + run.Text("id") + " -->\n<!-- tokate-receipt:" + J.Write(receipt) +
+                    " -->"
             }
-            values["base"] = run.Text("base")
-            values["policy"] = run.Text("policy_hash")
-            values["usage"] = Publication.Usage(run)
-            values["receipt"] = "<!-- tokate-run:" + run.Text("id") + " -->\n<!-- tokate-receipt:" + J.Write(receipt) +
-                " -->"
             return PrBody.Render(J.Text(record, "template"), values, J.Get(record, "policy"))
         }
 

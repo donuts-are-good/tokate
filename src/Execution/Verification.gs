@@ -273,13 +273,9 @@ internal class Verification {
                 check.Remove("exit_code")
                 check["state"] = "failed"
                 check["failure"] = error.Message
-                if error is CommandInterrupted interrupted {
+                if let result = Commands.InterruptedResult(error) {
                     check["state"] = "interrupted"
-                    Evidence(check, interrupted.Result)
-                }
-                if error is CommandInputInterrupted interruptedInput {
-                    check["state"] = "interrupted"
-                    Evidence(check, interruptedInput.Result)
+                    Evidence(check, result)
                 }
                 File.WriteAllText(record, J.Write(results))
                 throw error

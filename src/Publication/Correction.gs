@@ -79,7 +79,10 @@ internal class Correction {
                 throw Exception("incomplete_turn: correction requires a completed successful inference turn")
             }
             try {
-                return Worker.CompletedUsage(directory, File.ReadAllText(Path.Combine(directory, "events.jsonl")))
+                return CodexEvidence.CompletedUsage(
+                    directory,
+                    File.ReadAllText(Path.Combine(directory, "events.jsonl"))
+                )
             } catch (error Exception) {
                 throw Exception("incomplete_turn: " + error.Message)
             }
@@ -262,7 +265,7 @@ internal class Correction {
 
         internal func Recover(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             Completed(directory, run)
             let record = Authority(directory, run, requireArchive: args.Get("prepare") != "true")

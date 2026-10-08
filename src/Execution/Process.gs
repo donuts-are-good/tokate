@@ -212,6 +212,12 @@ internal class RuntimeBudget {
 
 internal class Commands {
     shared {
+        internal func InterruptedResult(error Exception) CommandResult? -> switch error {
+            case interrupted is CommandInterrupted: interrupted.Result
+            case interrupted is CommandInputInterrupted: interrupted.Result
+            default: nil
+        }
+
         internal func Capture(path string) FileStream? {
             if path == "" {
                 return nil

@@ -90,7 +90,7 @@ internal class WizardScreen {
             return text.ToString()
         }
 
-        private func Before(value string, position int32) int32 {
+        internal func Before(value string, position int32) int32 {
             var previous int32
             for boundary in StringInfo.ParseCombiningCharacters(value) {
                 if boundary >= position {
@@ -101,7 +101,7 @@ internal class WizardScreen {
             return previous
         }
 
-        private func After(value string, position int32) int32 {
+        internal func After(value string, position int32) int32 {
             for boundary in StringInfo.ParseCombiningCharacters(value) {
                 if boundary > position {
                     return boundary

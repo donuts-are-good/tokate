@@ -84,6 +84,8 @@ internal class CliCommand {
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
 
+    internal prop SupportsSavedRun bool -> Name == "work" || Name == "checks" || Name == "prepare" || Name == "status"
+
     internal func ConflictsWithRun(name string) bool -> name != "run" &&
         name != "help" &&
         name != "traffic" &&
@@ -605,10 +607,7 @@ internal class Cli {
                     }
                 }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
-                if command.Name == "work" ||
-                    command.Name == "checks" ||
-                    command.Name == "prepare" ||
-                    command.Name == "status" {
+                if command.SupportsSavedRun {
                     inputs.Add([]string{"run"})
                 }
                 let effects = map[string, Object?]{}
@@ -784,7 +783,7 @@ internal class Cli {
                         "In a terminal, missing task, tool and budget choices are guided. Redirected input and --json never prompt."
                     )
                 }
-                if name == "work" || name == "checks" || name == "prepare" || name == "status" {
+                if command.SupportsSavedRun {
                     text.AppendLine(
                         name == "status" ? "Use --run DIR alone for offline status without GitHub or harness tools. Repository status is bounded and may report truncation; blocked work and failed CI still exit 0 after a successful read.":
                         name == "prepare" ? "Use --run DIR only for recorded preparation before coding; it never resumes coding.":
@@ -869,13 +868,7 @@ internal class Cli {
                     throw Exception("--tools requires an explicit corrected --commit")
                 }
             }
-            if args.Get("run") != "" &&
-                (
-                args.Command == "work" ||
-                    args.Command == "checks" ||
-                    args.Command == "prepare" ||
-                    args.Command == "status"
-            ) {
+            if args.Get("run") != "" && command.SupportsSavedRun {
                 for key in args.Values.Keys {
                     if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
@@ -996,13 +989,7 @@ internal class Cli {
                     }
                 }
             }
-            if args.Get("run") != "" &&
-                (
-                args.Command == "work" ||
-                    args.Command == "checks" ||
-                    args.Command == "prepare" ||
-                    args.Command == "status"
-            ) {
+            if args.Get("run") != "" && command.SupportsSavedRun {
                 return
             }
             if guided && (args.Command == "work" || args.Command == "claim") && args.Get("continue-from") == "" {

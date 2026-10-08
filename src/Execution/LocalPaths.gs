@@ -5,6 +5,31 @@ import System.IO
 
 internal class LocalPaths {
     shared {
+        internal func Executable(path string) bool {
+            try {
+                return File.Exists(path) &&
+                    (
+                    File.GetUnixFileMode(path) & (
+                        UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
+                    )
+                ) != 0
+            } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+            return false
+        }
+
+        internal func Find(name string) string {
+            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
+                if !Path.IsPathFullyQualified(entry) {
+                    continue
+                }
+                let path = Path.Combine(entry, name)
+                if Executable(path) {
+                    return path
+                }
+            }
+            return ""
+        }
+
         internal func StateDirectory(legacy bool = false) string {
             let configured = legacy ? "": Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? ""
             let root = Path.IsPathFullyQualified(configured) ? configured: Path.Combine(

@@ -9,8 +9,6 @@ import System.Text.RegularExpressions
 
 internal class Publication {
     shared {
-        internal func Usage(run Data) string -> PublicSummary.Usage(J.Get(run.Element(), "usage"))
-
         internal func Pulls(run Data) List[JsonElement] {
             let pulls = List[JsonElement]()
             for page in 1 ... 21 {
@@ -85,7 +83,7 @@ internal class Publication {
         }
 
         internal func Publish(directory string) {
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Number("version") == 2 {
                 throw Exception("Version-2 runs use submit and the owner-installed coordinator")
@@ -186,20 +184,21 @@ internal class Publication {
             PublicSummary.Bind(run, committedPatch)
             run.Save(directory)
             let receipt = ContributionReceipt.Native(run, run.Text("commit"))
-            let values = Dictionary[string, string]()
-            values["issue"] = run.Number("issue").ToString()
-            values["report"] = PrBody.Report(PrBody.ManagedReport(run, record))
-            values["donor"] = run.Text("donor")
-            values["model"] = PublicSummary.Identifier(run.Text("model"))
-            values["effort"] = PublicSummary.Identifier(run.Text("effort"))
-            values["seconds"] = run.Flag("recovered") ? "unknown (verification-only recovery: " + run.Number(
-                "elapsed_seconds"
-            )
-                .ToString() + ")": run.Number("elapsed_seconds").ToString()
-            values["base"] = run.Text("base")
-            values["policy"] = run.Text("policy_hash")
-            values["usage"] = Usage(run)
-            values["receipt"] = marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
+            let values = map[string, string]{
+                "issue": run.Number("issue").ToString(),
+                "report": PrBody.Report(PrBody.ManagedReport(run, record)),
+                "donor": run.Text("donor"),
+                "model": PublicSummary.Identifier(run.Text("model")),
+                "effort": PublicSummary.Identifier(run.Text("effort")),
+                "seconds": run.Flag("recovered") ? "unknown (verification-only recovery: " + run.Number(
+                    "elapsed_seconds"
+                )
+                    .ToString() + ")": run.Number("elapsed_seconds").ToString(),
+                "base": run.Text("base"),
+                "policy": run.Text("policy_hash"),
+                "usage": PublicSummary.Usage(J.Get(run.Element(), "usage")),
+                "receipt": marker + "\n<!-- tokate-receipt:" + J.Write(receipt) + " -->"
+            }
             var body = J.Text(record, "template")
             body = PrBody.Render(body, values, J.Get(record, "policy"))
             File.WriteAllText(Path.Combine(directory, "pr-body.md"), body)

@@ -196,7 +196,7 @@ internal class ExternalContribution {
 
         internal func External(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             let retry = run.Text("state") == "failed"
             if run.Number("version") != 2 || run.Text("source") != "external" ||
@@ -222,7 +222,7 @@ internal class ExternalContribution {
                 policy.ValidateBudget(seconds, run.Flag("network"))
                 policy.ValidateTools(tools, "external")
                 KeepTools(J.Get(run.Element(), "tools"), tools)
-                if J.Items(tools).Count == J.Items(J.Get(run.Element(), "tools")).Count {
+                if J.Count(tools) == J.Count(J.Get(run.Element(), "tools")) {
                     throw Exception("External correction must append at least one tool declaration")
                 }
                 Unpublished(directory, run)

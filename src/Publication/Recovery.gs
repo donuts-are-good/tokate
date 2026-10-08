@@ -7,7 +7,7 @@ import System.IO
 internal class Recovery {
     shared {
         internal func Run(directory string, seconds int32) {
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Number("version") != 1 {
                 throw Exception(

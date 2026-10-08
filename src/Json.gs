@@ -34,6 +34,24 @@ internal class J {
 
         internal func Bool(value JsonElement, key string) bool -> value.GetBoolOrNil(key) ?? false
 
+        internal func Select(value JsonElement, keys string) Dictionary[string, Object?] {
+            let result = map[string, Object?]{}
+            for key in keys.Split(',') {
+                let item = J.Get(value, key)
+                if item.ValueKind == JsonValueKind.String ||
+                    item.ValueKind == JsonValueKind.Number ||
+                    item.ValueKind == JsonValueKind.True ||
+                    item.ValueKind == JsonValueKind.False {
+                    result[key] = item
+                }
+            }
+            return result
+        }
+
+        internal func Count(
+            value JsonElement
+        ) int32 -> value.ValueKind == JsonValueKind.Array ? value.GetArrayLength(): 0
+
         internal func Items(value JsonElement) List[JsonElement] {
             let items = List[JsonElement]()
             if value.ValueKind == JsonValueKind.Array {

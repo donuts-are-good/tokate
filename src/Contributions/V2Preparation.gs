@@ -53,7 +53,7 @@ internal class V2Preparation {
             if run.Text("source") == "tokate" {
                 Terminal.Step(RuntimeBudget.Description(run))
             }
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             Terminal.Step("Preparing contribution. Run: " + directory)
             Preparation.Initialize(directory, run, args.Get("fork"))
             Preparation.Complete(directory, run)
@@ -116,19 +116,22 @@ internal class V2Preparation {
                     "Published work is preserved; saved-checkout continuation remains unsupported until #14"
                 )
             }
-            let run = Data()
-            run.Fields["version"] = 2
-            run.Fields["repo"] = repo
-            run.Fields["issue"] = issue
-            run.Fields["donor"] = donor
-            run.Fields["donor_id"] = J.Get(viewer, "id")
-            run.Fields["head_repo"] = RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
-            run.Fields["approval"] = J.Text(state.Value(), "approval_id")
-            run.Fields["base"] = J.Text(approval, "base")
-            run.Fields["base_branch"] = J.Text(approval, "base_branch")
-            run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
-            run.Fields["source"] = source
-            run.Fields["tools"] = tools
+            let run = Data(
+                map[string, Object?]{
+                    "version": 2,
+                    "repo": repo,
+                    "issue": issue,
+                    "donor": donor,
+                    "donor_id": J.Get(viewer, "id"),
+                    "head_repo": RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1])),
+                    "approval": J.Text(state.Value(), "approval_id"),
+                    "base": J.Text(approval, "base"),
+                    "base_branch": J.Text(approval, "base_branch"),
+                    "policy_hash": J.Text(approval, "policy_hash"),
+                    "source": source,
+                    "tools": tools
+                }
+            )
             if (args.Command == "work" || args.Command == "claim") && args.Get("unlimited") != "true" {
                 args.Need("seconds")
             }
@@ -227,14 +230,14 @@ internal class V2Preparation {
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             Preparation.Pending(directory, run)
             return Pending(directory, run, args)
         }
 
         internal func ResumePending(directory string, args Args) string {
             PublicOutput.RunDirectory = directory
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Text("state") != "claim_pending" {
                 if args.Command == "prepare" {

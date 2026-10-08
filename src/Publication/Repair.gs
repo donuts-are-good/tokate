@@ -362,7 +362,7 @@ internal class Repair {
             ).LinkTarget != nil {
                 throw Exception("Use a separate repair evidence directory without linked records")
             }
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             var intent Data
             if File.Exists(path) {
                 intent = Data.Read(path)

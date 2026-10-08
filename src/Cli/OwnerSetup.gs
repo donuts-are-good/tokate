@@ -386,6 +386,7 @@ internal class OwnerSetup {
                 }
             }
             Tools(args, fields, interactive)
+            let value = J.Parse(J.Write(fields))
             for key in[]string{
                 "eligibility",
                 "base-branch",
@@ -398,7 +399,6 @@ internal class OwnerSetup {
                 "close-message"
             } {
                 let field = key == "base-branch" ? "target_branch": key.Replace('-', '_')
-                let value = J.Parse(J.Write(fields))
                 let present = J.Get(value, field)
                 var fallback = present.ValueKind == JsonValueKind.Undefined ? "": present.ToString()
                 if key == "network" {

@@ -6,12 +6,14 @@ import System.Text.Json
 internal class ContributionReceipt {
     shared {
         internal func Native(run Data, head string, version int32 = 1) Dictionary[string, Object?] {
-            let receipt = map[string, Object?]{"version": version}
-            receipt["repo"] = run.Text("repo")
-            receipt["issue"] = run.Number("issue")
-            receipt["donor"] = run.Text("donor")
-            receipt["approval"] = run.Text("approval")
-            receipt["head"] = head
+            let receipt = map[string, Object?]{
+                "version": version,
+                "repo": run.Text("repo"),
+                "issue": run.Number("issue"),
+                "donor": run.Text("donor"),
+                "approval": run.Text("approval"),
+                "head": head
+            }
             if version == 1 {
                 receipt["model"] = run.Text("model")
                 receipt["effort"] = run.Text("effort")
@@ -34,16 +36,15 @@ internal class ContributionReceipt {
             reservation string,
             donor string,
             head string
-        ) Dictionary[string, Object?] {
-            let receipt = map[string, Object?]{"version": 2}
-            receipt["repo"] = repo
-            receipt["issue"] = issue
-            receipt["approval"] = approval
-            receipt["expected"] = expected
-            receipt["reservation"] = reservation
-            receipt["donor"] = donor
-            receipt["head"] = head
-            return receipt
+        ) Dictionary[string, Object?] -> map[string, Object?]{
+            "version": 2,
+            "repo": repo,
+            "issue": issue,
+            "approval": approval,
+            "expected": expected,
+            "reservation": reservation,
+            "donor": donor,
+            "head": head
         }
 
         internal func FromState(state JsonElement) JsonElement {
@@ -63,7 +64,7 @@ internal class ContributionReceipt {
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
             }
-            if J.Items(J.Get(state, "amendments")).Count > 0 {
+            if J.Count(J.Get(state, "amendments")) > 0 {
                 let amended = map[string, Object?]{
                     "id": J.Text(current, "request"),
                     "previous": J.Text(current, "previous"),

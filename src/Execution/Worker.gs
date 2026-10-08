@@ -197,7 +197,7 @@ internal class Worker {
         }
 
         internal func Execute(directory string, options Args) {
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Number("version") == 2 && run.Text("source") != "tokate" {
                 throw Exception("External work uses external --run; inference is never launched")
@@ -387,7 +387,7 @@ internal class Worker {
                 if result.Truncated {
                     throw Exception("Codex output was truncated; no complete turn evidence")
                 }
-                let usage = CompletedUsage(directory, result.Output)
+                let usage = CodexEvidence.CompletedUsage(directory, result.Output)
                 run.Fields["turn_completed"] = true
                 run.Fields["usage"] = usage
                 run.Fields["execution_seconds"] = Convert.ToInt32(timer.Elapsed.TotalSeconds)
@@ -404,15 +404,10 @@ internal class Worker {
                 )
             } catch (error Exception) {
                 if run.Text("failure_stage") == "inference" {
-                    if error is CommandInterrupted interrupted {
+                    if let result = Commands.InterruptedResult(error) {
                         run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
-                    }
-                    if error is CommandInputInterrupted interruptedInput {
-                        run.Fields["failure_reason"] = "inference_interrupted"
-                        run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
-                        run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
+                        run.Fields["output_truncated"] = result.OutputTruncated
+                        run.Fields["error_truncated"] = result.ErrorTruncated
                     }
                 }
                 run.Fields["state"] = "failed"
@@ -423,38 +418,6 @@ internal class Worker {
                 run.Save(directory)
                 throw error
             }
-        }
-
-        internal func CompletedUsage(directory string, output string) Dictionary[string, Object?] {
-            var completed bool
-            var completions int32
-            let usage = Dictionary[string, Object?]()
-            let events = output.AsSpan()
-            for bounds in events.Split('\n') {
-                let line = events[bounds]
-                if line.IsWhiteSpace() {
-                    continue
-                }
-                let item = J.Parse(line.ToString())
-                if J.Text(item, "type") == "turn.started" {
-                    completed = false
-                }
-                if J.Text(item, "type") == "turn.failed" {
-                    throw CliFailure("inference_failed", "Codex reported a failed turn")
-                }
-                if J.Text(item, "type") == "turn.completed" {
-                    completed = true
-                    completions++
-                    for field in J.Get(item, "usage").EnumerateObject() {
-                        usage[field.Name] = field.Value.Clone()
-                    }
-                }
-            }
-            let report = File.ReadAllText(Path.Combine(directory, "report.md"))
-            if !completed || completions != 1 || String.IsNullOrWhiteSpace(report) {
-                throw CliFailure("inference_failed", "Codex did not produce a completed turn and report")
-            }
-            return usage
         }
     }
 }

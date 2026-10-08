@@ -51,7 +51,7 @@ internal class Overlaps {
 
         private func Identity(pull JsonElement) string -> J.Write(
             map[string, Object?]{
-                "head": PublicOutput.Select(J.Get(pull, "head"), "sha,ref"),
+                "head": J.Select(J.Get(pull, "head"), "sha,ref"),
                 "head_repo": J.Text(J.Get(J.Get(pull, "head"), "repo"), "full_name"),
                 "target": J.Text(J.Get(pull, "base"), "ref"),
                 "target_repo": J.Text(J.Get(J.Get(pull, "base"), "repo"), "full_name"),
@@ -67,15 +67,15 @@ internal class Overlaps {
         }
 
         private func Resolution(issue JsonElement) Object {
-            let result = PublicOutput.Select(issue, "closed_at")
+            let result = J.Select(issue, "closed_at")
             let closer = J.Get(issue, "closed_by")
             if closer.ValueKind == JsonValueKind.Object {
-                result["closed_by"] = PublicOutput.Select(closer, "id,login")
+                result["closed_by"] = J.Select(closer, "id,login")
             }
             for key in[]string{"duplicate_of", "resolution"} {
                 let value = J.Get(issue, key)
                 if value.ValueKind == JsonValueKind.Object {
-                    result[key] = PublicOutput.Select(value, "id,number,url,html_url,type,reason,state,state_reason")
+                    result[key] = J.Select(value, "id,number,url,html_url,type,reason,state,state_reason")
                 } else if value.ValueKind == JsonValueKind.String || value.ValueKind == JsonValueKind.Number {
                     result[key] = value
                 }
@@ -146,7 +146,7 @@ internal class Overlaps {
                         )
                         blocked = blocked || gate == "blocking"
                         review = review || gate == "owner_review"
-                        let row = PublicOutput.Select(dependency, "id,number,url,html_url,state,state_reason")
+                        let row = J.Select(dependency, "id,number,url,html_url,state,state_reason")
                         row["resolution"] = resolution
                         row["gate"] = gate
                         Retain(rows, row)
@@ -227,7 +227,7 @@ internal class Overlaps {
                 let binding = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
                 item.Binding = binding
                 facts["binding_status"] = "validated"
-                facts["binding"] = PublicOutput.Select(
+                facts["binding"] = J.Select(
                     binding.Element(),
                     "version,issue,approval,authority_revision,donor,base,base_branch,commit"
                 )
@@ -252,7 +252,7 @@ internal class Overlaps {
                     let checks = CommitChecks.Read(repo, binding.Text("commit"))
                     let rows = List[Object]()
                     for check in J.Items(checks) {
-                        Retain(rows, PublicOutput.Select(check, "name,state,bucket,link,workflow"))
+                        Retain(rows, J.Select(check, "name,state,bucket,link,workflow"))
                     }
                     facts["checks"] = rows
                     facts["check_count"] = checks.GetArrayLength()
@@ -297,8 +297,8 @@ internal class Overlaps {
                     if let binding = item.Binding {
                         let live = ReceiptVerification.Verify(repo, item.Number, ready: false, paths: false)
                         let fields = "version,issue,approval,authority_revision,base,base_branch,commit,synchronizations"
-                        let current = J.Write(PublicOutput.Select(live.Element(), fields))
-                        let original = J.Write(PublicOutput.Select(binding.Element(), fields))
+                        let current = J.Write(J.Select(live.Element(), fields))
+                        let original = J.Write(J.Select(binding.Element(), fields))
                         if current != original {
                             throw Exception("Contribution binding changed during evidence collection")
                         }

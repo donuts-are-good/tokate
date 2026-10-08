@@ -2,6 +2,7 @@ package Tokate
 
 import Microsoft.Win32.SafeHandles
 import System
+import System.Collections.Generic
 import System.IO
 import System.Runtime.InteropServices
 import System.Text
@@ -15,6 +16,49 @@ func RuntimeMetadataOpen(path string, flags int32) int32;
 
 internal class CodexRuntime {
     shared {
+        internal func Capabilities() Dictionary[string, HashSet[string]] {
+            let executable = CodexRuntime.Resolve()
+            let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
+            Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            try {
+                let prefix = List[string]{
+                    "-i",
+                    "PATH=/usr/local/bin:/usr/bin:/bin",
+                    "HOME=" + home,
+                    "CODEX_HOME=" + home,
+                    executable
+                }
+                let help = List[string](prefix)
+                help.AddRange([]string{"exec", "--help"})
+                let controls = Commands.Run("/usr/bin/env", help.ToArray(), home, seconds: 10, isolated: true)
+                for flag in[]string{"--model", "--config", "--ignore-user-config", "--strict-config"} {
+                    if controls.Code != 0 || !controls.Output.Contains(flag) {
+                        throw Exception(
+                            "Native Codex does not expose the required explicit controls; no compatible pair"
+                        )
+                    }
+                }
+                let catalog = List[string](prefix)
+                catalog.AddRange([]string{"debug", "models", "--bundled"})
+                let result = Commands.Run("/usr/bin/env", catalog.ToArray(), home, seconds: 10, isolated: true)
+                if result.Code != 0 {
+                    throw Exception("Cannot verify offline Codex model/effort capabilities; availability is unknown")
+                }
+                let models = Dictionary[string, HashSet[string]](StringComparer.Ordinal)
+                let value = RequestData.Parse(result.Output, 4 * 1024 * 1024)
+                for model in J.Items(J.Get(value, "models")) {
+                    let efforts = HashSet[string](StringComparer.Ordinal)
+                    for level in J.Items(J.Get(model, "supported_reasoning_levels")) {
+                        efforts.Add(J.Text(level, "effort"))
+                    }
+                    models[J.Text(model, "slug")] = efforts
+                }
+                return models
+            } finally {
+                Directory.Delete(home, true)
+            }
+        }
+
         private func FileKind(path string, kind int32) {
             let status = [256]byte
             if RuntimeMetadataStat(-100, path, 256, 1, status) != 0 ||
@@ -70,7 +114,7 @@ internal class CodexRuntime {
         }
 
         internal func Resolve() string {
-            let selected = Startup.Find("codex")
+            let selected = LocalPaths.Find("codex")
             if selected == "" {
                 throw CliFailure("missing_tools", "Install Codex and add codex to PATH.")
             }

@@ -532,24 +532,24 @@ internal class AccessState {
                     let issue = args.Number("issue")
                     if operation == "grant" {
                         GitHub.Issue(repo, issue)
-                    }
-                    if operation == "grant" {
                         issues.Add(issue)
                     } else {
                         issues.Remove(issue)
                     }
                 }
-                if operation == "trust" {
-                    trusted = true
-                }
-                if operation == "untrust" {
-                    trusted = false
-                }
-                if operation == "deny" {
-                    denied = true
-                }
-                if operation == "restore" {
-                    denied = false
+                switch operation {
+                    case "trust" {
+                        trusted = true
+                    }
+                    case "untrust" {
+                        trusted = false
+                    }
+                    case "deny" {
+                        denied = true
+                    }
+                    case "restore" {
+                        denied = false
+                    }
                 }
                 if index >= 0 {
                     access.Members.RemoveAt(index)

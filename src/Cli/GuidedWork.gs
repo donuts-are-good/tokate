@@ -175,7 +175,7 @@ internal class GuidedWork {
                 let models = List[string]()
                 let efforts = List[string]()
                 labels.Clear()
-                for entry in DonorSelection.Capabilities() {
+                for entry in CodexRuntime.Capabilities() {
                     for effort in entry.Value {
                         if policy.Allows(entry.Key, effort) {
                             models.Add(entry.Key)

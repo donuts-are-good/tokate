@@ -12,7 +12,7 @@ internal class Amendment {
             if tools.ValueKind != JsonValueKind.Array {
                 throw Exception("Amendment tools must be an array; [] declares manual editing")
             }
-            if J.Items(tools).Count == 0 {
+            if J.Count(tools) == 0 {
                 return
             }
             RequestData.Tools(tools)
@@ -80,7 +80,7 @@ internal class Amendment {
             " second verification budget; no inference was launched by amend.\n\n" +
             "Original execution/model/effort/runtime/usage observations cover original work only. Amendment editing: " +
             (
-            J.Items(tools).Count == 0 ? "manual; coding time and usage unknown":
+            J.Count(tools) == 0 ? "manual; coding time and usage unknown":
             "donor-reported tools " + RequestData.Canonical(tools) +
                 "; identity, coding time and usage not independently attested"
         ) +
@@ -339,7 +339,7 @@ internal class Amendment {
 
         internal func Run(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let seconds = args.Number("seconds")

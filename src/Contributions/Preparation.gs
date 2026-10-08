@@ -131,39 +131,6 @@ internal class Preparation {
             )
         }
 
-        internal func ControlPaths(directory string) {
-            try {
-                LocalPaths.DirectoryPath(directory)
-            } catch (error Exception) {
-                throw Exception(error.Message + "; saved run directory: " + directory, error)
-            }
-            for name in[]string{".lock", "run.json", "run.json.tmp", "claim.posting.json"} {
-                let path = Path.Combine(directory, name)
-                if FileInfo(path).LinkTarget != nil {
-                    Reject(directory)
-                }
-                if File.Exists(path) || Directory.Exists(path) {
-                    let status = [256]byte
-                    if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
-                        (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
-                        (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
-                        BitConverter.ToUInt32(status, 16) != 1 {
-                        Reject(directory)
-                    }
-                }
-            }
-        }
-
-        internal func Lease(directory string) FileStream {
-            ControlPaths(directory)
-            return File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-        }
-
         internal func Complete(directory string, run Data) {
             V2Continuation.Location(directory, run)
             let savedState = run.Text("state")
