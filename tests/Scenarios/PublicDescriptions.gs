@@ -94,10 +94,17 @@ internal class PublicDescriptions {
             let run = flow.Prepare()
             let head = flow.Candidate(claim)
             let path = Path.Combine(flow.Flow.Temp.Root, "summary.json")
-            File.WriteAllText(
-                path,
-                Summary("Add a result containing the external contribution text.", head).ToJsonString()
-            )
+            let ordinary = []string{
+                "Infer change-summary wording from the final diff.",
+                "Extend result text to name the verified behavior.",
+                "Check the published report for the final result sentence.",
+                "Require owner review before the candidate is merged."
+            }
+            let accepted = Summary("Add a result containing the external contribution text.", head)
+            for bullet in ordinary {
+                accepted["changes"]?.AsArray().Add(JsonValue.Create(bullet) as JsonNode)
+            }
+            File.WriteAllText(path, accepted.ToJsonString())
             let usable = File.ReadAllText(path)
             for invalid in[]string{
                 "{\"head\":\"" +
@@ -106,7 +113,19 @@ internal class PublicDescriptions {
                 Summary("Add final result content.", head).ToJsonString().Replace(
                     "Browser behavior was not checked.",
                     "Private log at https://internal.example.test"
-                )
+                ),
+                "{\"head\":\"" + head + "\",\"changes\":[],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"Add final result content.\",7],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"Fix the result using credential material.\"],\"verification\":[],\"limitations\":[]}",
+                "{\"head\":\"" +
+                    head +
+                    "\",\"changes\":[\"" +
+                    String('x', 201) +
+                    "\"],\"verification\":[],\"limitations\":[]}"
             } {
                 File.WriteAllText(path, invalid)
                 flow.Flow.Call([]string{"external", "--run", run, "--commit", head, "--summary", path}, 1)
@@ -138,6 +157,9 @@ internal class PublicDescriptions {
             flow.Coordinate(event)
             let body = Body(flow.Flow)
             Check.Contains(body, "- Add a result containing the external contribution text.")
+            for bullet in ordinary {
+                Check.Contains(body, "- " + bullet)
+            }
             Check.Contains(body, "coordinator did not observe execution")
             Check.Contains(body, "Original donor-reported tools")
             Check.That(!body.Contains("\"harness\""), "Raw tool JSON in public report")

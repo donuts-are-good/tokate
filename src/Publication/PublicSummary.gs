@@ -36,12 +36,6 @@ internal class PublicSummary {
                     if item.ValueKind != JsonValueKind.String || !Safe(item.GetString() ?? "") {
                         throw Exception("Public summary contains invalid public text")
                     }
-                    if key == "changes" && !Regex.IsMatch(
-                        item.GetString() ?? "",
-                        "^(Add(s|ed)?|Update(s|d)?|Remove(s|d)?|Fix(es|ed)?|Allow(s|ed)?|Prevent(s|ed)?|Preserve(s|d)?|Replace(s|d)?|Reject(s|ed)?|Show(s|ed)?|Keep(s)?|Support(s|ed)?|Make(s)?|Refresh(es|ed)?|Validate(s|d)?|Render(s|ed)?) [A-Za-z0-9]+ .+"
-                    ) {
-                        throw Exception("Public changes must describe concrete final behavior")
-                    }
                 }
             }
         }
