@@ -88,7 +88,7 @@ internal class ClaudeCode {
                     "Claude requires loggedIn true, claude.ai, firstParty and personal pro or max status. No inference started."
                 )
             }
-            return J.Parse(J.Write(PublicOutput.Select(value, "loggedIn,authMethod,apiProvider,subscriptionType")))
+            return J.Parse(J.Write(J.Select(value, "loggedIn,authMethod,apiProvider,subscriptionType")))
         }
 
         internal func EnvironmentControls() Dictionary[string, string] -> map[string, string]{
