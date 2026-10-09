@@ -13,7 +13,7 @@ partial class Desktop {
     private var selectedRepository string = ""
     private var issue string = ""
     private var issueTitle string = ""
-    private var issues List[JsonElement] = List[JsonElement]()
+    private var donorIssues IssuePage = IssuePage{Filter: "approved"}
     private var policy JsonElement
     private var step int32
     private var harness string = "codex"
@@ -64,7 +64,7 @@ partial class Desktop {
         try {
             selectedRepository = Repository(repository)
             unlimited = false
-            issues.Clear()
+            donorIssues = IssuePage{Filter: "approved"}
             account = ""
             let parts = repository.Trim().TrimEnd('/').Split('/')
             let requested = parts.Length > 2 && parts[parts.Length - 2] == "issues" ? parts[parts.Length - 1]: ""
@@ -88,46 +88,27 @@ partial class Desktop {
                                 return
                             }
                             policy = Field(Field(response.Value, "data"), "policy")
+                            if requested == "" {
+                                FindIssues(selectedRepository, donorIssues, search: true)
+                                return
+                            }
                             Execute(
-                                []string{
-                                    "api",
-                                    "repos/" +
-                                        selectedRepository +
-                                        (
-                                        requested == "" ? "/issues?state=open&labels=tokate%3Aapproved&sort=updated&direction=desc&per_page=20": "/issues/" +
-                                            requested
-                                    )
-                                },
+                                []string{"api", "repos/" + selectedRepository + "/issues/" + requested},
                                 found -> {
                                     if Error(found) {
                                         return
                                     }
-                                    issues.Clear()
-                                    let candidates = requested == "" ? Items(found.Value): List[JsonElement]{
-                                        found.Value
+                                    let item = found.Value
+                                    if Field(item, "pull_request").ValueKind != JsonValueKind.Undefined {
+                                        message = "This is a pull request. Choose an issue."
+                                    } else if TextOf(item, "state") != "open" {
+                                        message = "Issue #" + requested + " is closed."
+                                    } else if !ApprovedIssue(item) {
+                                        message = "Issue #" + requested + " needs owner approval."
+                                    } else {
+                                        ChooseIssue(item)
                                     }
-                                    for item in candidates {
-                                        var approved = false
-                                        for label in Items(Field(item, "labels")) {
-                                            approved = approved || TextOf(label, "name") == "tokate:approved"
-                                        }
-                                        if !approved || TextOf(item, "state") != "open" {
-                                            continue
-                                        }
-                                        if Field(item, "pull_request").ValueKind == JsonValueKind.Undefined {
-                                            issues.Add(item)
-                                        }
-                                    }
-                                    message = issues.Count == 0 ? requested == "" ?
-                                    "No approved issues found.":
-                                    Field(found.Value, "pull_request").ValueKind != JsonValueKind.Undefined ?
-                                    "This is a pull request. Choose an issue.":
-                                    TextOf(found.Value, "state") != "open" ?
-                                    "Issue #" + requested + " is closed.":
-                                    "Issue #" + requested + " needs owner approval.": ""
-                                    if requested != "" && issues.Count == 1 {
-                                        ChooseIssue(issues[0])
-                                    }
+                                    return
                                 },
                                 "gh"
                             )

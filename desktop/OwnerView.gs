@@ -13,7 +13,8 @@ partial class Desktop {
     private var ownerPolicy JsonElement
     private let ownerWork Dictionary[string, JsonElement] = Dictionary[string, JsonElement]()
     private var ownerAccess JsonElement
-    private var ownerIssues List[JsonElement] = List[JsonElement]()
+    private var ownerIssues IssuePage = IssuePage()
+    private var ownerSelected JsonElement
     private var ownerCanWrite bool
     private var ownerBranch string = ""
     private var ownerDonor string = ""
@@ -81,6 +82,8 @@ partial class Desktop {
                     if Error(repo) {
                         return
                     }
+                    ownerIssues = IssuePage()
+                    ownerSelected = JsonElement{}
                     ownerOpen = true
                     activityAction = "Refresh project"
                     ownerCanWrite = Field(Field(repo.Value, "permissions"), "push").ValueKind == JsonValueKind.True
@@ -109,22 +112,13 @@ partial class Desktop {
     }
 
     private func RefreshOwner() {
-        Execute(
-            []string{"api", "repos/" + ownerRepository + "/issues?state=open&sort=updated&per_page=30"},
-            result -> {
-                if Error(result) {
-                    return
-                }
-                ownerWork.Clear()
-                ownerIssues.Clear()
-                for issue in Items(result.Value) {
-                    if Field(issue, "pull_request").ValueKind == JsonValueKind.Undefined {
-                        ownerIssues.Add(issue)
-                    }
-                }
-            },
-            "gh"
-        )
+        ownerWork.Clear()
+        SearchOwnerIssues(1, true)
+    }
+
+    private func SearchOwnerIssues(page int32 = 1, search bool = false) {
+        ownerSelected = JsonElement{}
+        FindIssues(ownerRepository, ownerIssues, page, search)
     }
 
     private func InspectOwnerIssue(number string) {
@@ -194,7 +188,7 @@ partial class Desktop {
             )
         )
         let actions = Row([]Blob{})
-        actions.Children.Add(Action("Inspect contribution #" + number, () -> InspectOwnerIssue(number)))
+        actions.Children.Add(Action("Refresh contribution", () -> InspectOwnerIssue(number)))
         actions.Children.Add(
             Action(
                 "Open issue #" + number,
@@ -839,11 +833,33 @@ partial class Desktop {
         } else if ownerTab == "Access" {
             body.Children.Add(OwnerAccessView())
         } else {
-            for issue in ownerIssues {
-                body.Children.Add(OwnerIssue(issue))
-            }
-            if ownerIssues.Count == 0 && !busy {
-                body.Children.Add(Label("No open issues", 24))
+            if ownerSelected.ValueKind == JsonValueKind.Object {
+                body.Children.Add(
+                    Row(
+                        []Blob{
+                            Action(
+                                "Back to issues",
+                                () -> {
+                                    ownerSelected = JsonElement{}
+                                }
+                            )
+                        }
+                    )
+                )
+                body.Children.Add(OwnerIssue(ownerSelected))
+            } else {
+                body.Children.Add(IssueSearch(ownerIssues, () -> SearchOwnerIssues(1, true), true))
+                body.Children.Add(
+                    IssueRows(
+                        ownerIssues,
+                        selected -> {
+                            ownerSelected = selected
+                            activityAction = "Refresh contribution"
+                            InspectOwnerIssue(TextOf(selected, "number"))
+                        }
+                    )
+                )
+                body.Children.Add(IssuePagination(ownerIssues, page -> SearchOwnerIssues(page)))
             }
         }
         return body

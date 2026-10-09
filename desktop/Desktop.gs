@@ -265,12 +265,14 @@ partial class Desktop : Cell {
         value string,
         change Action[string],
         placeholder string = "",
-        width float64 = 400
+        width float64 = 400,
+        submit Action? = nil
     ) Blob {
         let field = TextField{
             Label: label,
             Value: value,
             OnChange: change,
+            OnSubmit: _ -> submit?.Invoke(),
             Placeholder: placeholder,
             Width: width,
             FontFamily: "Newsreader",
@@ -823,13 +825,26 @@ partial class Desktop : Cell {
         let welcome = page == "Welcome"
         let donating = page == "Donate" && step == 3
         let live = donating && donationStarted
+        let browsing = (page == "Donate" && step == 0 && donorIssues.Loaded) ||
+            (
+            page == "My project" &&
+                ownerOpen &&
+                ownerTab == "Contributions" &&
+                ownerSelected.ValueKind != JsonValueKind.Object
+        )
+        if browsing {
+            content.FlexGrow = 1
+            content.FlexShrink = 1
+            content.FlexBasis = 0
+            content.MinHeight = 0
+        }
         let body = Container{
             Key: page == "Donate" ? page + step.ToString(): page == "My project" ? page +
                 ownerTab +
                 ownerStep.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
-            Height: welcome || live ? Percent(100): Length.Auto,
+            Height: welcome || live || browsing ? Percent(100): Length.Auto,
             MinHeight: 0,
             MaxWidth: welcome ? Percent(100): Length(1050),
             AlignSelf: AlignSelf.Center,
@@ -935,7 +950,7 @@ partial class Desktop : Cell {
                     MinWidth: 0,
                     MinHeight: 0,
                     OverflowX: Overflow.Hidden,
-                    OverflowY: welcome || live ? Overflow.Hidden: Overflow.Scroll,
+                    OverflowY: welcome || live || browsing ? Overflow.Hidden: Overflow.Scroll,
                     Padding: welcome ? 0: 28,
                     body,
                 },

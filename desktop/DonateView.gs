@@ -154,42 +154,61 @@ partial class Desktop {
             )
         }
         if step == 0 {
-            let project = DonatePanel()
-            project.Children.Add(
-                Entry(
-                    "GitHub repository or issue URL",
-                    repository,
-                    value -> {
-                        repository = value
-                        issues.Clear()
-                        account = ""
-                        message = ""
-                    },
-                    "owner/repository",
-                    540
-                )
-            )
-            project.Children.Add(
-                Row(
-                    []Blob{
-                        Action("Find approved issues", () -> LoadProject(), true, String.IsNullOrWhiteSpace(repository))
-                    }
-                )
-            )
-            if account != "" {
-                project.Children.Add(ReviewDetail("Account", account))
-            }
-            body.Children.Add(project)
-            for item in issues {
-                let current = item
-                body.Children.Add(
-                    ChoiceCard(
-                        "#" + TextOf(item, "number") + "   " + TextOf(item, "title"),
-                        "Approved by the maintainer. Choose this work to continue.",
-                        "task_alt",
-                        false,
-                        () -> ChooseIssue(current)
+            if !donorIssues.Loaded {
+                let project = DonatePanel()
+                project.Children.Add(
+                    Entry(
+                        "GitHub repository or issue URL",
+                        repository,
+                        value -> {
+                            repository = value
+                            donorIssues = IssuePage{Filter: "approved"}
+                            account = ""
+                            message = ""
+                        },
+                        "owner/repository",
+                        540
                     )
+                )
+                project.Children.Add(
+                    Row(
+                        []Blob{
+                            Action(
+                                "Find approved issues",
+                                () -> LoadProject(),
+                                true,
+                                String.IsNullOrWhiteSpace(repository)
+                            )
+                        }
+                    )
+                )
+                if account != "" {
+                    project.Children.Add(ReviewDetail("Account", account))
+                }
+                body.Children.Add(project)
+            } else {
+                body.Children.Add(
+                    Row(
+                        []Blob{
+                            Heading(selectedRepository, 27),
+                            Action(
+                                "Change repository",
+                                () -> {
+                                    donorIssues = IssuePage{Filter: "approved"}
+                                    account = ""
+                                }
+                            ),
+                        }
+                    )
+                )
+            }
+            if donorIssues.Loaded {
+                body.Children.Add(
+                    IssueSearch(donorIssues, () -> FindIssues(selectedRepository, donorIssues, search: true))
+                )
+                body.Children.Add(IssueRows(donorIssues, item -> ChooseIssue(item)))
+                body.Children.Add(
+                    IssuePagination(donorIssues, page -> FindIssues(selectedRepository, donorIssues, page))
                 )
             }
         } else if step == 1 {
