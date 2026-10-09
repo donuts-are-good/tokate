@@ -53,7 +53,7 @@ internal class TargetBranches {
             )
         }
 
-        private func Receipt(flow NativeFixture, branch string) {
+        private func Receipt(flow NativeFixture, branch string, base string) {
             flow.Reload()
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
             Check.That(Check.Text(pull["base"]?["ref"]) == branch, "Publication changed the target")
@@ -64,6 +64,16 @@ internal class TargetBranches {
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
             flow.Save()
+            let stale = Check.Json(
+                flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10", "--json"}, 1, owner: true).Output
+            )
+            Check.That(
+                Check.Text(stale["data"]?["reconciliation_required"]) == "true" && Check.Text(
+                    stale["data"]?["gates"]?["freshness"]?["status"]
+                ) == "stale",
+                "Advanced named target did not require reconciliation"
+            )
+            flow.Git("-C", flow.Upstream, "update-ref", "refs/heads/" + branch, base)
             flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, owner: true)
             flow.Reload()
             flow.State["check_change"] = JsonValue.Create("base")
@@ -156,7 +166,7 @@ internal class TargetBranches {
             flow.Call([]string{"submit", "--run", run})
             let request = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
             test.Coordinate(test.Event(request))
-            Receipt(flow, branch)
+            Receipt(flow, branch, base)
         }
 
         private func Freshness(binary string, version int32, change string) {
