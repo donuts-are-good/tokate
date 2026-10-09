@@ -54,6 +54,8 @@ jobs:
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/tokate-commands
           /usr/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
+      - name: Check proof script failure handling
+        run: python3 tests/Tools/proof-regressions.py
       - name: Build and check the selected system
         env:
           TOKATE_TEST_ARGS: ${{ inputs.tests }}

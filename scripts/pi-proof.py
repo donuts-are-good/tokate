@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import http.server
 import json
 import os
@@ -314,48 +315,54 @@ with Server(('127.0.0.1', 0), Handler) as server:
             command = [args.tests, '--pi-proof', str(args.pi_root.resolve()), args.node, directory, f'http://127.0.0.1:{port}/v1', case]
             if case in ['cancel', 'length-cancel', 'unlimited-cancel']:
                 process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
-                deadline = time.monotonic() + 45
-                fixture = None
-                ready = False
-                while time.monotonic() < deadline and process.poll() is None:
-                    if (root / 'fixture.json').exists():
-                        fixture = json.loads((root / 'fixture.json').read_text())
-                        ready = (Path(fixture['checkout']) / 'running').exists() if case in ['cancel', 'unlimited-cancel'] else server.length_waiting.is_set()
-                        if ready:
-                            break
-                    time.sleep(0.1)
-                assert fixture and ready, 'Pi never reached the cancellation boundary'
-                checkout = Path(fixture['checkout'])
-                git = (checkout / '.git/config').read_text()
-                children = set()
-                for task in Path(f'/proc/{process.pid}/task').iterdir():
-                    children.update((task / 'children').read_text().split())
-                targets = [int(pid) for pid in children if Path(f'/proc/{pid}/exe').resolve() == Path(args.binary).resolve()]
-                assert len(targets) == 1, 'Expected one owned Tokate work process'
-                descriptor = os.pidfd_open(targets[0])
                 try:
-                    signal.pidfd_send_signal(descriptor, signal.SIGINT)
-                finally:
-                    os.close(descriptor)
-                try:
-                    process.communicate(timeout=15)
+                    deadline = time.monotonic() + 45
+                    fixture = None
+                    ready = False
+                    while time.monotonic() < deadline and process.poll() is None:
+                        if (root / 'fixture.json').exists():
+                            fixture = json.loads((root / 'fixture.json').read_text())
+                            ready = (Path(fixture['checkout']) / 'running').exists() if case in ['cancel', 'unlimited-cancel'] else server.length_waiting.is_set()
+                            if ready:
+                                break
+                        time.sleep(0.1)
+                    assert fixture and ready, 'Pi never reached the cancellation boundary'
+                    checkout = Path(fixture['checkout'])
+                    git = (checkout / '.git/config').read_text()
+                    children = set()
+                    for task in Path(f'/proc/{process.pid}/task').iterdir():
+                        children.update((task / 'children').read_text().split())
+                    targets = [int(pid) for pid in children if Path(f'/proc/{pid}/exe').resolve() == Path(args.binary).resolve()]
+                    assert len(targets) == 1, 'Expected one owned Tokate work process'
+                    descriptor = os.pidfd_open(targets[0])
+                    try:
+                        signal.pidfd_send_signal(descriptor, signal.SIGINT)
+                    finally:
+                        os.close(descriptor)
+                    try:
+                        process.communicate(timeout=15)
+                    finally:
+                        server.release_length.set()
+                        if case == 'length-cancel':
+                            assert server.length_finished.wait(5), 'Cancelled length response did not settle'
+                    time.sleep(3)
+                    assert checkout.is_dir(), 'Cancellation evidence disappeared'
+                    assert not (checkout / 'cancel-escaped').exists(), 'Cancelled descendant survived'
+                    assert not Path(fixture['outside']).exists(), 'Outside write escaped'
+                    assert Path(fixture['private']).read_text() == 'PRIVATE_CREDENTIAL_SENTINEL'
+                    assert (checkout / '.git/config').read_text() == git
+                    saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
+                    assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', {key: saved.get(key) for key in ['state', 'failure_stage', 'failure_reason', 'error']}
+                    assert 'turn_completed' not in saved
+                    assert saved['pi_version'] == metadata['version'], 'Pi version evidence does not match the installed package'
+                    assert saved['observed_invocation']['sdk_version'] == metadata['version'], 'SDK version evidence is incorrect'
+                    assert saved['observed_invocation']['node_version'] == node_version, 'Node version evidence is incorrect'
+                    assert server.calls == 1, 'Cancellation scheduled another provider request'
                 finally:
                     server.release_length.set()
-                    if case == 'length-cancel':
-                        assert server.length_finished.wait(5), 'Cancelled length response did not settle'
-                time.sleep(3)
-                assert checkout.is_dir(), 'Cancellation evidence disappeared'
-                assert not (checkout / 'cancel-escaped').exists(), 'Cancelled descendant survived'
-                assert not Path(fixture['outside']).exists(), 'Outside write escaped'
-                assert Path(fixture['private']).read_text() == 'PRIVATE_CREDENTIAL_SENTINEL'
-                assert (checkout / '.git/config').read_text() == git
-                saved = json.loads((Path(fixture['run']) / 'run.json').read_text())
-                assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', {key: saved.get(key) for key in ['state', 'failure_stage', 'failure_reason', 'error']}
-                assert 'turn_completed' not in saved
-                assert saved['pi_version'] == metadata['version'], 'Pi version evidence does not match the installed package'
-                assert saved['observed_invocation']['sdk_version'] == metadata['version'], 'SDK version evidence is incorrect'
-                assert saved['observed_invocation']['node_version'] == node_version, 'Node version evidence is incorrect'
-                assert server.calls == 1, 'Cancellation scheduled another provider request'
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate(timeout=5)
             else:
                 started = time.monotonic()
                 try:
