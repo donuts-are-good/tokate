@@ -559,6 +559,7 @@ internal class Amendment {
                 updatedReceipt["head"] = amendment.Text("commit")
                 updatedReceipt["expected"] = amendment.Text("expected")
                 updatedReceipt["amendment"] = PublicRecord(amendment)
+                updatedReceipt.Remove("incomplete")
                 Synchronization.Keep(updatedReceipt, Synchronization.History(amendment.Element()))
                 let original = J.Get(J.Get(authority, "state"), "contribution")
                 amendment.Fields["body"] = PrBody.ReplaceBody(
