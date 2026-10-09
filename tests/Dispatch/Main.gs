@@ -34,6 +34,9 @@ func Main(args[]string) int32 {
             case "--claude" when args.Length == 1 {
                 ClaudeChecks.All(binary)
             }
+            case "--omp-boundary" when args.Length == 5 {
+                OmpProof.Boundary(args[1], args[2], args[3], args[4])
+            }
             case "--nix-runtime" when args.Length == 4 {
                 NixChecks.Run(binary, args[1], args[2], args[3])
             }

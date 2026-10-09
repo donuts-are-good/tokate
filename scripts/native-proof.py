@@ -70,12 +70,14 @@ def api_gate(account):
 
 
 class Owned:
-    def __init__(self, args, env, cwd, *, system=None):
+    def __init__(self, args, env, cwd, *, system=None, mounts=()):
         wrapper = ["/usr/bin/bwrap", "--die-with-parent", "--new-session",
                    "--bind", "/", "/", "--unshare-pid", "--as-pid-1", "--proc", "/proc",
                    "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/tmp/tokate-home"]
         if system is not None:
             wrapper += ["--ro-bind", str(system), "/etc/codex"]
+        for path in mounts:
+            wrapper += ["--ro-bind", str(path), str(path)]
         wrapper += ["--chdir", str(cwd), "--", *args]
         self.process = subprocess.Popen(wrapper, env=env, cwd=cwd, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
