@@ -131,6 +131,9 @@ internal class Coordinator {
                 if correction.ValueKind != JsonValueKind.Undefined {
                     receipt["correction"] = correction
                 }
+                if RequestData.Incomplete(metadata) {
+                    receipt["incomplete"] = true
+                }
                 AttemptContinuation.Keep(receipt, metadata)
                 let pulls = J.Items(
                     GitHub.Api(
@@ -166,7 +169,10 @@ internal class Coordinator {
                     pull = GitHub.Api(
                         "repos/" + repo + "/pulls",
                         map[string, Object?]{
-                            "title": J.Text(J.Get(record, "issue"), "title"),
+                            "title": (RequestData.Incomplete(metadata) ? "Incomplete: ": "") + J.Text(
+                                J.Get(record, "issue"),
+                                "title"
+                            ),
                             "body": Body(record, metadata, donor, receipt, marker),
                             "head": donor + ":" + J.Text(metadata, "branch"),
                             "base": J.Text(J.Get(record, "approval"), "base_branch"),

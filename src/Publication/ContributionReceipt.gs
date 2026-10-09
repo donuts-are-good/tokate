@@ -37,6 +37,9 @@ internal class ContributionReceipt {
                 J.Text(J.Get(current, "outcome"), "head")
             )
             let correction = J.Get(J.Get(original, "metadata"), "correction")
+            if J.Count(J.Get(state, "amendments")) == 0 && RequestData.Incomplete(J.Get(original, "metadata")) {
+                fields["incomplete"] = true
+            }
             AttemptContinuation.Keep(fields, J.Get(original, "metadata"))
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction

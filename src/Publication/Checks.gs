@@ -197,6 +197,14 @@ internal class Checks {
                     binding = currentBinding
                     identity = Identity(pull)
                     target = currentTarget
+                    if run.Flag("incomplete") {
+                        stage = "report"
+                        facts["incomplete"] = true
+                        throw CliFailure(
+                            "invalid_state",
+                            "Incomplete draft needs continued work and independent verification before readiness"
+                        )
+                    }
                     stage = "freshness"
                     let history = J.Items(J.Get(run.Element(), "synchronizations"))
                     let verifiedTarget = history.Count == 0 ? run.Text("base"): J.Text(

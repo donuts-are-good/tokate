@@ -365,6 +365,84 @@ internal class PreparationChecks {
             }
         }
 
+        private func Partial(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            File.WriteAllText(
+                test.Tools,
+                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+            )
+            test.Claim()
+            let run = test.Prepare("tokate", seconds: "4", reserve: "1")
+            flow.Mode("timeout")
+            flow.Call([]string{"work", "--run", run}, 1)
+            let checkout = Path.Combine(run, "checkout")
+            Check.That(File.Exists(Path.Combine(checkout, "partial.txt")), "Interrupted work was not retained")
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            let summary = "{\"changes\":[\"Preserve incomplete work for the next donor.\"],\"verification\":[],\"limitations\":[\"Independent verification has not passed.\"]}"
+            for mode in[]string{"empty", "protected", "missing-summary", "expired"} {
+                baseline.Restore()
+                flow.Reload()
+                if mode != "missing-summary" {
+                    File.WriteAllText(Path.Combine(checkout, "tokate-public-summary.json"), summary)
+                }
+                if mode == "empty" {
+                    File.Delete(Path.Combine(checkout, "partial.txt"))
+                } else if mode == "protected" {
+                    Directory.CreateDirectory(Path.Combine(checkout, ".github/workflows"))
+                    File.WriteAllText(Path.Combine(checkout, ".github/workflows/unsafe.yml"), "name: unsafe\n")
+                } else if mode == "expired" {
+                    test.Expire()
+                }
+                flow.Call([]string{"submit", "--run", run, "--incomplete"}, 1)
+                flow.NoPr()
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial refusal repeated inference")
+            }
+            baseline.Restore()
+            flow.Reload()
+            File.WriteAllText(Path.Combine(checkout, "tokate-public-summary.json"), summary)
+            flow.Call([]string{"submit", "--run", run, "--incomplete"}, 1, owner: true)
+            flow.Call([]string{"submit", "--run", run, "--incomplete"})
+            let path = Path.Combine(run, "run.json")
+            let saved = Check.Json(File.ReadAllText(path))
+            let commit = Check.Text(saved["commit"])
+            Check.That(
+                Check.Text(saved["incomplete"]) == "true" && Check.Text(saved["state"]) == "incomplete_generated",
+                "Partial publication fabricated a completed run"
+            )
+            let request = Check.Json(File.ReadAllText(Path.Combine(run, "request.json")))
+            Check.That(
+                Check.Text(request["metadata"]?["verification"]) == "not-passed" && Check.Text(
+                    request["metadata"]?["incomplete"]
+                ) == "true",
+                "Partial metadata claimed passing verification"
+            )
+            saved["commit"] = JsonValue.Create("")
+            File.WriteAllText(path, saved.ToJsonString())
+            flow.Call([]string{"submit", "--run", run, "--incomplete"})
+            Check.That(flow.Git("-C", checkout, "rev-parse", "HEAD") == commit, "Partial recovery made another commit")
+            test.Coordinate(test.Event(request))
+            flow.Call([]string{"submit", "--run", run})
+            flow.Call([]string{"work", "--run", run}, 1)
+            flow.Reload()
+            let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing incomplete draft")
+            Check.That(Check.Text(pull["draft"]) == "true", "Partial publication removed draft status")
+            Check.Contains(Check.Text(pull["title"]), "Incomplete:")
+            Check.Contains(Check.Text(pull["body"]), "independent owner verification has not passed")
+            let checked = Check.Json(
+                flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10", "--json"}, 1).Output
+            )
+            Check.That(
+                Check.Text(checked["data"]?["incomplete"]) == "true" && Check.Text(
+                    checked["data"]?["machine_status"]
+                ) != "passed",
+                "Incomplete draft became ready"
+            )
+            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial publication restarted inference")
+        }
+
         private func External(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -1044,6 +1122,7 @@ internal class PreparationChecks {
                 TestCase[string]("Guided", async (value string) -> Guided(value)),
                 TestCase[string]("ExternalClaim", async (value string) -> ExternalClaim(value)),
                 TestCase[string]("Reservation", async (value string) -> Reservation(value)),
+                TestCase[string]("Partial", async (value string) -> Partial(value)),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),

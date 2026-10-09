@@ -26,7 +26,7 @@ internal class ReceiptVerification {
         }
 
         internal func Binding(run Data, receipt JsonElement, approval JsonElement, revision string) {
-            for key in[]string{"version", "issue", "approval", "donor", "expected", "reservation"} {
+            for key in[]string{"version", "issue", "approval", "donor", "expected", "reservation", "incomplete"} {
                 if J.Get(receipt, key).ValueKind != JsonValueKind.Undefined {
                     run.Fields[key] = J.Get(receipt, key)
                 }
@@ -49,7 +49,7 @@ internal class ReceiptVerification {
         ) Data {
             RequestData.Keys(
                 receipt,
-                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations,predecessor,import_manifest_sha256,attempt"
+                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations,predecessor,import_manifest_sha256,attempt,incomplete"
             )
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let value = state.Value()
@@ -60,6 +60,10 @@ internal class ReceiptVerification {
             }
             let metadata = J.Get(contribution, "metadata")
             let current = CoordinationState.Current(value)
+            let incomplete = current.GetRawText() == contribution.GetRawText() && RequestData.Incomplete(metadata)
+            if J.Get(receipt, "incomplete").ValueKind != (incomplete ? JsonValueKind.True: JsonValueKind.Undefined) {
+                throw Exception("Receipt completion state differs from the current contribution")
+            }
             let outcome = J.Get(current, "outcome")
             let exactHead = J.Text(outcome, "head")
             let donor = RepositoryIdentity.Login(J.Text(receipt, "donor"))

@@ -373,7 +373,8 @@ internal class ContributionStatus {
                 complete = complete && J.Text(receipt, key) != ""
             }
             if complete && J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
-                draft["receipt"] = "unverified; completed-work readiness requires receipt verification and owner review"
+                draft["receipt"] = J.Get(receipt, "incomplete")
+                    .ValueKind == JsonValueKind.True ? "incomplete": "unverified; completed-work readiness requires receipt verification and owner review"
             }
         } catch { }
         if policy.ValueKind == JsonValueKind.Object {

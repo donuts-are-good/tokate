@@ -154,6 +154,11 @@ internal class Cli {
             CliOption("non-interactive", "", "Never prompt; require an eligible default or explicit choice"),
             CliOption("yes", "", "Confirm inference with the selected pair; never accept a substitute"),
             CliOption(
+                "incomplete",
+                "",
+                "Publish stopped work as an incomplete draft without claiming verification passed"
+            ),
+            CliOption(
                 "continue-truncated",
                 "",
                 "Continue one truncated Pi response in this session and budget; default: off"
@@ -372,10 +377,10 @@ internal class Cli {
             ),
             CliCommand(
                 "submit",
-                "run",
+                "run,incomplete",
                 "run",
                 "Push Tokate-coded work and request a coordinated v2 draft PR; no inference.",
-                "--run DIR",
+                "--run DIR [--incomplete]",
                 "submit --run /path/to/run"
                 ,
                 effects: "local_read local_write github_read github_write"

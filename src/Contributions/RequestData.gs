@@ -236,6 +236,14 @@ internal class RequestData {
             return Data.Hash(Canonical(J.Parse(J.Write(binding))))
         }
 
+        internal func Incomplete(metadata JsonElement) bool {
+            let value = J.Get(metadata, "incomplete")
+            if value.ValueKind != JsonValueKind.Undefined && value.ValueKind != JsonValueKind.True {
+                throw Exception("Incomplete work must be declared explicitly")
+            }
+            return value.ValueKind == JsonValueKind.True
+        }
+
         internal func Recorded(state JsonElement, actor JsonElement, request JsonElement) JsonElement {
             let binding = Binding(actor, request)
             var result JsonElement
@@ -273,19 +281,22 @@ internal class RequestData {
             } else if J.Text(value, "action") == "publish" {
                 Keys(
                     metadata,
-                    "fork,branch,head,source,tools,verification,correction,summary,attempt,predecessor,import_manifest_sha256"
+                    "fork,branch,head,source,tools,verification,correction,summary,attempt,predecessor,import_manifest_sha256,incomplete"
                 )
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
                 if !Regex.IsMatch(J.Text(metadata, "branch"), "^tokate/v2-[0-9a-f-]{36}$") ||
                     (J.Text(metadata, "source") != "external" && J.Text(metadata, "source") != "tokate") ||
-                    J.Text(metadata, "verification") != "donor-reported-pass" {
+                    J.Text(metadata, "verification") != (Incomplete(metadata) ? "not-passed": "donor-reported-pass") {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
                 AttemptContinuation.Declaration(metadata)
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {
+                    if Incomplete(metadata) {
+                        throw Exception("Incomplete work cannot claim verified correction provenance")
+                    }
                     if J.Text(metadata, "source") != "tokate" {
                         throw Exception("Correction provenance requires managed original work")
                     }

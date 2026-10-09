@@ -11,12 +11,26 @@ internal class Submission {
         internal func Commit(directory string) {
             using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
+            CommitPrepared(directory, run)
+        }
+
+        private func CommitPrepared(directory string, run Data, incomplete bool = false) {
             let record = ContributionAuthority.Recheck(run)
-            if run.Text("source") != "tokate" || run.Text("state") != "generated" {
+            if run.Text("source") != "tokate" || run.Text("state") != (
+                incomplete ? "incomplete_generated": "generated"
+            ) {
                 throw Exception("Expected successfully verified Tokate execution")
             }
             let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
-            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+            let head = Commands.Git(checkout, "rev-parse", "HEAD")
+            let recovered = incomplete && head != run.Text("base") && Commands.Git(
+                checkout,
+                "show",
+                "-s",
+                "--format=%P",
+                "HEAD"
+            ) == run.Text("base")
+            if head != run.Text("base") && !recovered {
                 throw Exception("Verified base changed")
             }
             Commands.Git(checkout, "diff", "--exit-code")
@@ -26,18 +40,23 @@ internal class Submission {
                 throw Exception("Verified patch changed")
             }
             PublicSummary.Bind(run, patch)
-            Commands.Git(
-                checkout,
-                "-c",
-                "user.name=" + run.Text("donor"),
-                "-c",
-                "user.email=tokate@users.noreply.github.com",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-m",
-                J.Text(J.Get(record, "issue"), "title")
-            )
+            if incomplete && J.Get(run.Element(), "public_summary").ValueKind == JsonValueKind.Undefined {
+                throw Exception("Incomplete draft summary no longer matches the saved patch")
+            }
+            if !recovered {
+                Commands.Git(
+                    checkout,
+                    "-c",
+                    "user.name=" + run.Text("donor"),
+                    "-c",
+                    "user.email=tokate@users.noreply.github.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-m",
+                    (incomplete ? "Incomplete: ": "") + J.Text(J.Get(record, "issue"), "title")
+                )
+            }
             run.Fields["commit"] = Commands.Git(checkout, "rev-parse", "HEAD")
             ProtectedPaths.Local(
                 checkout,
@@ -50,12 +69,55 @@ internal class Submission {
             if summary.ValueKind != JsonValueKind.Undefined {
                 run.Fields["public_summary"] = summary
             }
-            run.Fields["verification_provenance"] = "tokate-observed locally"
+            run.Fields[
+                "verification_provenance"
+            ] = incomplete ? "not passed; incomplete draft": "tokate-observed locally"
             run.Fields[
                 "tool_provenance"
             ] = "Tokate-observed harness invocation and requested model/effort; tool-reported usage, not identity attestation"
             run.Save(directory)
-            Terminal.Message("Verified commit saved. Use submit --run " + directory)
+            Terminal.Message(
+                (incomplete ? "Incomplete commit": "Verified commit") + " saved. Use submit --run " + directory
+            )
+        }
+
+        private func Partial(directory string, run Data) {
+            if RequestData.Incomplete(run.Element()) {
+                if run.Text("commit") == "" && run.Text("state") == "incomplete_generated" {
+                    CommitPrepared(directory, run, true)
+                }
+                return
+            }
+            if run.Text("source") != "tokate" ||
+                (run.Text("state") != "failed" && run.Text("state") != "running") ||
+                (run.Text("codex_version") == "" && run.Text("pi_version") == "") ||
+                run.Text("commit") != "" || run.Number("pr") != 0 {
+                throw Exception("Incomplete publication requires stopped, unpublished managed work")
+            }
+            let record = ContributionAuthority.Recheck(run)
+            let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
+            PublicSummary.Capture(directory, checkout, run)
+            if J.Get(run.Element(), "public_summary").ValueKind == JsonValueKind.Undefined {
+                throw Exception(
+                    "Write a short tokate-public-summary.json in the saved checkout before publishing incomplete work"
+                )
+            }
+            let budget = RuntimeBudget(Stopwatch.StartNew(), Math.Min(60, run.Number("seconds")))
+            let patch = Contribution.Snapshot(checkout, run, budget)
+            ProtectedPaths.Local(
+                checkout,
+                J.Get(record, "policy"),
+                J.Get(record, "approval"),
+                run.Text("base"),
+                budget: budget
+            )
+            PublicSummary.Bind(run, patch)
+            File.WriteAllText(Path.Combine(directory, "changes.patch"), patch + "\n")
+            run.Fields["partial_source_state"] = run.Text("state")
+            run.Fields["incomplete"] = true
+            run.Fields["state"] = "incomplete_generated"
+            run.Save(directory)
+            CommitPrepared(directory, run, true)
         }
 
         internal func Posted(repo string, issue int32, actor JsonElement, request JsonElement) bool {
@@ -270,7 +332,10 @@ internal class Submission {
                 "attempt": run.Text("attempt"),
                 "source": run.Text("source"),
                 "tools": J.Get(run.Element(), "tools"),
-                "verification": "donor-reported-pass"
+                "verification": RequestData.Incomplete(run.Element()) ? "not-passed": "donor-reported-pass"
+            }
+            if RequestData.Incomplete(run.Element()) {
+                metadata["incomplete"] = true
             }
             if AttemptContinuation.Has(run) {
                 AttemptContinuation.Keep(metadata, AttemptContinuation.Metadata(run))
@@ -301,6 +366,9 @@ internal class Submission {
             let directory = Path.GetFullPath(args.Need("run"))
             using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
+            if args.Get("incomplete") == "true" {
+                Partial(directory, run)
+            }
             if File.Exists(Path.Combine(directory, "correction.json")) {
                 CorrectionPublication.SubmitLocked(directory, run)
                 return
@@ -353,10 +421,13 @@ internal class Submission {
                 }
             }
             let record = ContributionAuthority.Recheck(run)
-            if run.Text("state") != "generated" || run.Text("commit") == "" {
+            if run.Text("state") != (RequestData.Incomplete(run.Element()) ? "incomplete_generated": "generated") ||
+                run.Text("commit") == "" {
                 throw Exception("Only an independently verified exact commit can be submitted")
             }
-            Verification.Results(run, record)
+            if !RequestData.Incomplete(run.Element()) {
+                Verification.Results(run, record)
+            }
             let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("commit") || Commands.Git(
                 checkout,

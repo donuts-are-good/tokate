@@ -173,7 +173,7 @@ internal class PublicOutput {
             let value = run.Element()
             let result = J.Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,unlimited,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,unlimited,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt,incomplete,partial_source_state"
             )
             if run.Text("source") == "tokate" {
                 result["coding_seconds"] = run.Flag("unlimited") ? nil: run.Number("seconds") - run.Number(

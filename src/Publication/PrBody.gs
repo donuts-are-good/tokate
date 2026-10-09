@@ -55,7 +55,9 @@ internal class PrBody {
             }
             return PublicSummary.Report(
                 summary,
-                "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
+                RequestData.Incomplete(
+                    metadata
+                ) ? "Incomplete draft: independent owner verification has not passed. This work is not ready for acceptance.": "Donor-reported: original owner checks passed locally on this candidate; coordinator did not observe execution."
             ) +
                 OriginalProvenance(metadata)
         }

@@ -115,7 +115,7 @@ internal class Contribution {
             run.Save(directory)
         }
 
-        private func Snapshot(checkout string, run Data, budget RuntimeBudget) string {
+        internal func Snapshot(checkout string, run Data, budget RuntimeBudget) string {
             Verification.Candidate(checkout, budget)
             let head = budget.Git(checkout, "rev-parse", "HEAD")
             if head != run.Text("base") {
