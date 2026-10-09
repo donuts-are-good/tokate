@@ -6,6 +6,43 @@ import System.Text.Json
 
 internal class ReservationRequest {
     shared {
+        internal func Inspect(directory string) JsonElement {
+            let run = Data.Load(directory)
+            let viewer = GitHub.Api("user")
+            if !RepositoryIdentity.SameDonor(viewer, run) {
+                throw CliFailure("authentication_required", "Active GitHub account differs from the saved donor")
+            }
+            let state = CoordinationState.Load(run.Text("repo"), run.Number("issue"))
+            let request = J.Get(run.Element(), "reservation_request")
+            var actions[]string
+            if request.ValueKind != JsonValueKind.Undefined {
+                RequestData.Request(request)
+                if !LeaseLifecycle.Transition(J.Text(request, "action")) {
+                    throw Exception("Invalid saved reservation request")
+                }
+                actions = []string{J.Text(request, "action")}
+            } else {
+                if J.Text(J.Get(state.Value(), "identity"), "id") != run.Text("id") {
+                    throw CliFailure("stale_approval", "Saved contribution ownership was replaced")
+                }
+                LeaseLifecycle.Owner(state, J.Get(viewer, "id"))
+                actions = []string{
+                    J.Text(J.Get(state.Value(), "reservation"), "status") == "paused" ? "resume": "pause",
+                    "renew",
+                    "release"
+                }
+            }
+            return J.Parse(
+                J.Write(
+                    map[string, Object?]{
+                        "status": J.Text(J.Get(state.Value(), "reservation"), "status"),
+                        "pending_request": request.ValueKind != JsonValueKind.Undefined,
+                        "actions": actions
+                    }
+                )
+            )
+        }
+
         private func Result(directory string, run Data, state CoordinationState, request JsonElement) int32 {
             let outcome = RequestData.Recorded(state.Value(), J.Get(run.Element(), "donor_id"), request)
             let pending = outcome.ValueKind == JsonValueKind.Undefined

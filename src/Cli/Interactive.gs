@@ -34,6 +34,7 @@ internal class Interactive {
                 PublicOutput.Reset("status")
                 PublicOutput.RunDirectory = directory
                 let summary = J.Parse(J.Write(PublicOutput.RunSummary(directory)))
+                let task = J.Text(summary, "repo") + " #" + J.Number(summary, "issue").ToString()
                 let options = Args([]string{"status", "--run", directory})
                 PublicOutput.Next(options, "")
                 let commands = List[string]()
@@ -62,25 +63,35 @@ internal class Interactive {
                 }
                 commands.Add("status")
                 labels.Add("Inspect saved status and evidence")
+                var identity Guid
+                if Guid.TryParseExact(J.Text(summary, "id"), "D", out identity) {
+                    commands.Add("reservation")
+                    labels.Add("Manage reservation")
+                }
                 labels.Add("Back to home")
                 let next = commands.Count == 1 ?
                 "No local work can start from this state. Inspect status for the next required action.":
                 "Choose the next action. Nothing starts automatically."
                 let selected = WizardScreen.Choose(
                     "Continue contribution",
-                    J.Text(summary, "repo") + " #" + J.Number(summary, "issue").ToString() + "\nState  " + J.Text(
-                        summary,
-                        "state"
-                    ) +
-                        "\nModel  " +
-                        J.Text(summary, "model") + "\n\n" + next,
+                    task + "\nState  " + J.Text(summary, "state") + "\nModel  " + J.Text(summary, "model") +
+                        "\n\n" +
+                        next,
                     labels.ToArray()
                 )
                 if selected > commands.Count {
                     return
                 }
                 let command = commands[selected - 1]
-                let args = Args([]string{command, "--run", directory})
+                let argv = command == "reservation" ? Reservation(directory, task): []string{
+                    command,
+                    "--run",
+                    directory
+                }
+                if argv.Length == 0 {
+                    continue
+                }
+                let args = Args(argv)
                 if command == "work" {
                     if WizardScreen.Choose(
                         "Start reserved donation",
@@ -113,6 +124,32 @@ internal class Interactive {
                 if Console.ReadLine() == nil {
                     throw OperationCanceledException("Cancelled")
                 }
+            }
+        }
+
+        private func Reservation(directory string, task string)[]string {
+            let state = ReservationRequest.Inspect(directory)
+            let actions = J.Items(J.Get(state, "actions"))
+            let labels = List[string]()
+            for action in actions {
+                let name = action.GetString() ?? ""
+                labels.Add(
+                    J.Bool(state, "pending_request") ? "Check " + name + " request": name.Substring(0, 1)
+                        .ToUpperInvariant() + name.Substring(1) + " reservation"
+                )
+            }
+            labels.Add("Back")
+            let choice = WizardScreen.Choose(
+                "Reservation",
+                task + "\nState  " + J.Text(state, "status"),
+                labels.ToArray()
+            )
+            return choice > actions.Count ? []string{}: []string{
+                "request",
+                "--run",
+                directory,
+                "--operation",
+                actions[choice - 1].GetString() ?? ""
             }
         }
 
