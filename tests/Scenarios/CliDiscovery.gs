@@ -843,6 +843,34 @@ internal class CliDiscovery {
                 Directory.GetFileSystemEntries(first).Length == 1 && Directory.GetFileSystemEntries(second).Length == 1,
                 "Saved inspection created execution artifacts"
             )
+            let firstText = File.ReadAllText(Path.Combine(first, "run.json"))
+            let unlimited = Check.Json(firstText)
+            unlimited["unlimited"] = JsonValue.Create(true)
+            unlimited["seconds"] = JsonValue.Create(20)
+            File.WriteAllText(Path.Combine(first, "run.json"), unlimited.ToJsonString())
+            let budget = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\n1\n1\n2\n3\nq\n")
+            Check.Success(budget)
+            Check.Contains(budget.Output, "unlimited coding time, independent verification budget 20s")
+            Check.That(!budget.Output.Contains("Coding  0"), "Unlimited saved work displayed zero coding time")
+            Check.That(
+                File.ReadAllText(Path.Combine(first, "run.json")) == unlimited.ToJsonString(),
+                "Declined donation changed saved work"
+            )
+            File.WriteAllText(Path.Combine(first, "run.json"), firstText)
+            let secondText = File.ReadAllText(Path.Combine(second, "run.json"))
+            let partial = Check.Json(secondText)
+            partial["state"] = JsonValue.Create("incomplete_generated")
+            partial["incomplete"] = JsonValue.Create(true)
+            File.WriteAllText(Path.Combine(second, "run.json"), partial.ToJsonString())
+            let incomplete = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\n2\n3\nq\n")
+            Check.Success(incomplete)
+            Check.Contains(incomplete.Output, "Submit incomplete work for a draft PR")
+            Check.That(!incomplete.Output.Contains("Submit verified work"), "Incomplete work was labeled verified")
+            Check.That(
+                File.ReadAllText(Path.Combine(second, "run.json")) == partial.ToJsonString(),
+                "Inspection published incomplete work"
+            )
+            File.WriteAllText(Path.Combine(second, "run.json"), secondText)
             Directory.Delete(second, true)
             let cancelled = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\nh\nq\n")
             Check.Success(cancelled)

@@ -201,7 +201,7 @@ internal class RuntimeBudget {
             let total = run.Number("seconds")
             let reserve = run.Number("verification_reserve")
             if run.Flag("unlimited") {
-                return "unlimited coding time; independent verification budget " + reserve.ToString() + "s"
+                return "unlimited coding time, independent verification budget " + reserve.ToString() + "s"
             }
             return "total allowance " + total.ToString() + "s, coding allowance " + (total - reserve).ToString() +
                 "s, verification reserve " +

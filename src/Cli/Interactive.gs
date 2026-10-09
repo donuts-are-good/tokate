@@ -47,7 +47,10 @@ internal class Interactive {
                     let label = switch command {
                         case "work": "Start reserved donation"
                         case "prepare": "Continue preparation"
-                        case "submit": "Submit verified work for a draft PR"
+                        case "submit": J.Bool(
+                            summary,
+                            "incomplete"
+                        ) ? "Submit incomplete work for a draft PR": "Submit verified work for a draft PR"
                         case "checks": "Check PR review and CI"
                         case "recover": "Prepare an explicit correction"
                         default: ""
@@ -79,15 +82,12 @@ internal class Interactive {
                 let command = commands[selected - 1]
                 let args = Args([]string{command, "--run", directory})
                 if command == "work" {
-                    let reserve = J.Number(summary, "verification_reserve")
                     if WizardScreen.Choose(
                         "Start reserved donation",
                         "Model  " + J.Text(summary, "model") + " / " + J.Text(summary, "effort") +
-                            "\nCoding  " +
-                            ((J.Number(summary, "seconds") - reserve) / 60.0).ToString("0.##") +
-                            " minutes\nVerification  " +
-                            (reserve / 60.0).ToString("0.##") +
-                            " minutes\nProject network  " +
+                            "\nBudget  " +
+                            RuntimeBudget.Description(Data.From(summary)) +
+                            "\nProject network  " +
                             (J.Bool(summary, "network") ? "allowed": "offline") +
                             "\n\nUses your selected coding tool and allowance. Authority is rechecked before starting.",
                         []string{"Start donation", "Back"}

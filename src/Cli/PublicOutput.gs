@@ -378,7 +378,7 @@ internal class PublicOutput {
                     if code != "stale_approval" && code != "invalid_state" {
                         if run.Number("pr") > 0 {
                             Actions.Add([]string{"tokate", "checks", "--run", RunDirectory, "--json"})
-                        } else if run.Text("state") == "generated" {
+                        } else if run.Text("state") == "generated" || run.Text("state") == "incomplete_generated" {
                             Actions.Add([]string{"tokate", "submit", "--run", RunDirectory, "--json"})
                         }
                     }
