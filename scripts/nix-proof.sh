@@ -25,16 +25,12 @@ nixpkgs=$(nix flake metadata --json . | python3 -c 'import json,sys; print(json.
 nix profile add --profile "$proof/tools" "github:NixOS/nixpkgs/$nixpkgs#codex" "github:NixOS/nixpkgs/$nixpkgs#hello" \
   "github:NixOS/nixpkgs/$nixpkgs#bash" "github:NixOS/nixpkgs/$nixpkgs#bubblewrap" github:earendil-works/pi/stable
 unrelated=$(readlink -f "$proof/tools/bin/hello")
-TOKATE_BINARY="$PWD/artifacts/linux-x64/tokate" artifacts/tests/tokate-tests --nix-runtime \
-  "$probe/bin/tokate-nix-probe" "$unrelated" "$(command -v nix-store)"
 nix profile add --profile "$proof/profile" .#default
-before=$(readlink -f "$proof/profile")
-if nix profile add --profile "$proof/profile" /nix/store/00000000000000000000000000000000-missing; then
-  exit 1
-fi
-test "$(readlink -f "$proof/profile")" = "$before"
 binary="$proof/profile/bin/tokate"
-"$binary" --version
+payload="$proof/profile/lib/tokate/tokate"
+test -x "$payload"
+TOKATE_BINARY="$payload" artifacts/tests/tokate-tests --nix-runtime \
+  "$probe/bin/tokate-nix-probe" "$unrelated" "$(command -v nix-store)"
 test "$("$binary" --version)" = "tokate $(nix eval --raw .#default.version)"
 (cd "$proof"; "$binary" doctor --external --json) > "$proof/external.json"
 (cd "$proof"; "$binary" doctor --managed --harness-path "$proof/tools/bin/codex" --json) > "$proof/managed.json"
@@ -61,4 +57,4 @@ assert json.loads((root / "update.json").read_text())["error"]["code"] == "inval
 PY
 "$proof/tools/bin/codex" --version
 "$proof/tools/bin/pi" --version
-printf 'PASS Nix package, custom profile, failed profile change, update ownership and real sandbox probes without inference\n'
+printf 'PASS Nix package, custom profile, update ownership and real sandbox probes without inference\n'

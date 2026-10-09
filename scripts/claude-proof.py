@@ -49,9 +49,9 @@ def gate(root, extra=(), success=True, profile=None):
 class Fixture(http.server.ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, root, network, case):
+    def __init__(self, root, case):
         super().__init__(('127.0.0.1', 0), Handler)
-        self.root, self.network, self.case = root, network, case
+        self.root, self.case = root, case
         self.calls, self.gets, self.errors, self.requests, self.tool_results = 0, 0, [], [], []
 
     def handle_error(self, request, address):
@@ -128,10 +128,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def owned_case(root, network, case):
     checkout = root / 'checkout'
     data = gate(root, ['--path', str(checkout), *(['--allow-network'] if network else [])])
+    if case == 'denied':
+        print('Native Claude tested version: ' + data['version'], flush=True)
     require(data['managed_execution_enabled'] is False, 'Managed inference was enabled')
     require(data['auth_status'] == {'loggedIn': True, 'authMethod': 'claude.ai', 'apiProvider': 'firstParty', 'subscriptionType': 'pro'},
             'Native auth status did not pass the approved schema')
-    server = Fixture(root, network, case)
+    server = Fixture(root, case)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     boundary = data['configured_boundary']
@@ -143,11 +145,8 @@ def owned_case(root, network, case):
                                stderr=subprocess.PIPE, text=True, start_new_session=True,
                                env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
     observed = process.args[-len(data['invocation']):]
-    evidence = {'requested': data['requested'], 'observed_invocation': observed}
-    evidence_path = root / 'invocation.json'
     heartbeat = checkout / 'heartbeat.txt'
     try:
-        evidence_path.write_text(json.dumps(evidence))
         process.stdin.write('Run the synthetic scripted fixture.\n')
         process.stdin.close()
         process.stdin = None
@@ -185,10 +184,8 @@ def owned_case(root, network, case):
         print('PASS native failed request without retry or fallback and conflicting error-report model refusal', flush=True)
         return
     parsed = gate(root, ['--file', str(report)], profile=report_profile)['native_reports']
-    evidence['native_reports'] = parsed
-    evidence_path.write_text(json.dumps(evidence))
-    require(observed[observed.index('--model') + 1] == evidence['requested']['model'] and
-            observed[observed.index('--effort') + 1] == evidence['requested']['effort'], 'Observed invocation conflicts with requested choices')
+    require(observed[observed.index('--model') + 1] == data['requested']['model'] and
+            observed[observed.index('--effort') + 1] == data['requested']['effort'], 'Observed invocation conflicts with requested choices')
     require(parsed.get('model') == MODEL and parsed.get('permissionMode') == 'default', 'Native invocation reports conflict or are missing')
     require(process.returncode == 0, 'Native fixture failed: ' + error[:1500])
     require(server.calls == 5, 'Unexpected native fixture turn or retry count')
@@ -256,12 +253,11 @@ def inside():
         checkout = current / 'checkout'
         (checkout / '.git').mkdir(parents=True)
         (checkout / 'input.txt').write_text('native fixture read\n')
-        data = gate(current)
-        print('Native Claude tested version: ' + data['version'], flush=True)
-        for key in ['settings.json', 'managed-settings.json']:
-            (profile / key).write_text('{}')
-            gate(current, success=False)
-            (profile / key).unlink()
+        if case == 'denied':
+            for key in ['settings.json', 'managed-settings.json']:
+                (profile / key).write_text('{}')
+                gate(current, success=False)
+                (profile / key).unlink()
         owned_case(current, network, case)
     print('LIMIT fixture behavior and declared mounts do not prove remote subscription entitlement or all credential and helper isolation', flush=True)
     print('Managed Claude inference remains disabled; no external service route or inference was used', flush=True)

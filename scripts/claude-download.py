@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 import urllib.request
 
 
@@ -26,11 +27,12 @@ def main():
     if manifest.get('version') != version or artifact.get('binary') != 'claude' or not re.fullmatch(r'[a-f0-9]{64}', artifact['checksum']):
         raise RuntimeError('Official release manifest is invalid')
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    temporary = args.output.with_suffix('.download')
+    descriptor, name = tempfile.mkstemp(prefix=args.output.name + '.', suffix='.download', dir=args.output.parent)
+    temporary = Path(name)
     try:
         digest = hashlib.sha256()
         size = 0
-        with urllib.request.urlopen(base + '/' + version + '/linux-x64/claude', timeout=60) as response, temporary.open('xb') as output:
+        with os.fdopen(descriptor, 'wb') as output, urllib.request.urlopen(base + '/' + version + '/linux-x64/claude', timeout=60) as response:
             while block := response.read(1024 * 1024):
                 size += len(block)
                 if size > artifact['size']:

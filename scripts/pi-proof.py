@@ -14,6 +14,15 @@ import tempfile
 import threading
 import time
 
+def shard(value):
+    try:
+        index, count = map(int, value.split('/'))
+        if 0 <= index < count:
+            return index, count
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('Use a zero-based INDEX/COUNT shard')
+
 parser = argparse.ArgumentParser(description='Real installed pi against a synthetic server; no inference')
 parser.add_argument('--pi-root', required=True, type=Path)
 parser.add_argument('--node', default=shutil.which('node'))
@@ -21,6 +30,7 @@ parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
 parser.add_argument('--binary', default='artifacts/linux-x64/tokate')
 parser.add_argument('--catalog-only', action='store_true')
 parser.add_argument('--case', action='append', dest='cases', help='Run only a named system scenario')
+parser.add_argument('--shard', type=shard, help='Run one zero-based INDEX/COUNT subset')
 args = parser.parse_args()
 if not args.node:
     parser.error('Node is not on PATH; supply --node with the installed executable')
@@ -38,6 +48,16 @@ catalog_cases = ['catalog-missing', 'catalog-substituted', 'catalog-malformed', 
                  'catalog-invalid-id', 'catalog-whitespace-id', 'catalog-invalid-metadata', 'catalog-oversized', 'catalog-chunked',
                  'catalog-redirect', 'catalog-unreachable', 'catalog-deadline', 'catalog-metadata',
                  'catalog-recheck-substituted', 'catalog-recheck-unreachable', 'catalog-recheck-malformed']
+all_cases = ['reasoning', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed',
+             *length_cases, 'empty', 'cancel', *catalog_cases]
+cases = args.cases or (catalog_cases if args.catalog_only else all_cases)
+if not set(cases) <= set(all_cases):
+    parser.error('Unknown Pi proof case')
+if args.shard:
+    index, count = args.shard
+    if count > len(cases):
+        parser.error('Shard count exceeds the selected cases')
+    cases = cases[index::count]
 partial_text = 'PRIVATE_PARTIAL_LENGTH_SENTINEL ' + 'é' * 35000 + ' RETAINED_LENGTH_CONTEXT_SENTINEL'
 continuation_instruction = 'Continue the existing approved work and return a complete concise final report.'
 thinking_text = 'PRIVATE_THINKING_CONTENT_SENTINEL'
@@ -244,14 +264,15 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
         raise AssertionError('Private file is readable')
 """
         code += f"denied=False\ntry: Path({outside!r}).write_text('escaped')\nexcept OSError: denied=True\nassert denied\ns=socket.socket(); s.settimeout(1); connected=False\ntry: s.connect(('127.0.0.1',{self.server.server_address[1]})); connected=True\nexcept OSError: pass\nassert connected == {self.server.case == 'on'}\nPath('result.txt').write_text('final')"
+        child_identity = 'printf "%s %s" "$(readlink /proc/self/ns/pid)" "$$" > child-identity; '
         planned = [('write', {'path': 'result.txt', 'content': 'before'}), ('read', {'path': 'result.txt'}),
                    ('edit', {'path': 'result.txt', 'edits': [{'oldText': 'before', 'newText': 'after'}]}),
                    ('read', {'path': private}), ('write', {'path': outside, 'content': 'escaped'}),
                    ('read', {'path': '.git/config'}), ('read', {'path': '/tokate-control/models.json'}),
                    ('bash', {'command': 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE', 'timeout': 4}),
-                   ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
+                   ('bash', {'command': "setsid sh -c '" + child_identity + "sleep 30; touch timeout-escaped' & wait", 'timeout': 1})]
         if self.server.case in ['cancel', 'unlimited-cancel']:
-            planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
+            planned = [('bash', {'command': "setsid sh -c '" + child_identity + "touch running; sleep 30; touch cancel-escaped' & wait"})]
         elif self.server.case == 'unlimited':
             planned = [('bash', {'command': 'sleep 10; printf final > result.txt'})]
         elif self.server.case == 'off':
@@ -287,7 +308,6 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
 with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    cases = args.cases or (catalog_cases if args.catalog_only else ['reasoning', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases])
     for case in cases:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
@@ -345,7 +365,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                         server.release_length.set()
                         if case == 'length-cancel':
                             assert server.length_finished.wait(5), 'Cancelled length response did not settle'
-                    time.sleep(3)
+                    assert process.returncode == 0, 'Cancellation worker did not pass its checks'
                     assert checkout.is_dir(), 'Cancellation evidence disappeared'
                     assert not (checkout / 'cancel-escaped').exists(), 'Cancelled descendant survived'
                     assert not Path(fixture['outside']).exists(), 'Outside write escaped'

@@ -209,9 +209,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Connection", "close")
         self.end_headers()
-        if mode == "hang":
-            time.sleep(3)
-            return
         if mode == "broken-stream":
             self.close_connection = True
             return
@@ -246,11 +243,9 @@ class Proof:
         self.system = root / "system"
         self.system.mkdir(mode=0o700)
         self.counter = 0
-        self.records = []
         self.unsupported = []
 
     def record(self, name, **evidence):
-        self.records.append({"check": name, **evidence})
         print("PASS " + name + (" " + json.dumps(evidence, sort_keys=True) if evidence else ""), flush=True)
 
     def blocked(self, message):
@@ -755,24 +750,29 @@ pathlib.Path('boundary-ok').write_text('ok')
         arguments = ({"cmd": command, "yield_time_ms": 1000} if shell == "exec_command" else
                      {"command": command} if shell == "shell_command" else
                      {"command": ["/bin/sh", "-c", command], "workdir": str(checkout)})
-        patch = "*** Begin Patch\n*** Delete File: " + str(auth) + "\n*** End Patch"
-        patch_command = "apply_patch <<'TOKATE_PATCH'\n" + patch + "\nTOKATE_PATCH"
-        patch_arguments = ({"cmd": patch_command, "yield_time_ms": 1000} if shell == "exec_command" else
-                           {"command": patch_command} if shell == "shell_command" else
-                           {"command": ["/bin/sh", "-c", patch_command], "workdir": str(checkout)})
-        patch_call = ({"type": "custom_tool_call", "id": "ct_patch", "call_id": "call_patch",
-                       "name": "apply_patch", "input": patch} if "apply_patch" in self.native_tools else
-                      {"type": "function_call", "id": "fc_patch", "call_id": "call_patch",
-                       "name": shell, "arguments": json.dumps(patch_arguments)})
+        edited = checkout / "native-edit.txt"
+        edited.write_text("before\n")
         self.fixture.actions = [
             {"type": "function_call", "id": "fc_shell", "call_id": "call_shell",
              "name": shell, "arguments": json.dumps(arguments)},
-            patch_call,
         ]
+        patches = [("allowed", "*** Begin Patch\n*** Update File: " + str(edited) + "\n@@\n-before\n+after\n*** End Patch"),
+                   ("denied", "*** Begin Patch\n*** Delete File: " + str(auth) + "\n*** End Patch")]
+        for label, patch in patches:
+            patch_command = "apply_patch <<'TOKATE_PATCH'\n" + patch + "\nTOKATE_PATCH"
+            patch_arguments = ({"cmd": patch_command, "yield_time_ms": 1000} if shell == "exec_command" else
+                               {"command": patch_command} if shell == "shell_command" else
+                               {"command": ["/bin/sh", "-c", patch_command], "workdir": str(checkout)})
+            self.fixture.actions.append(
+                {"type": "custom_tool_call", "id": "ct_" + label, "call_id": "call_" + label,
+                 "name": "apply_patch", "input": patch} if "apply_patch" in self.native_tools else
+                {"type": "function_call", "id": "fc_" + label, "call_id": "call_" + label,
+                 "name": shell, "arguments": json.dumps(patch_arguments)})
         result, requests = self.execute(root, model=LOCAL_MODEL)
-        require(result[0] == 0 and len(requests) == 3 and not self.fixture.actions,
+        require(result[0] == 0 and len(requests) == 4 and not self.fixture.actions,
                 "Native shell/edit sequence failed: " + result[2][-1800:])
         require((checkout / "boundary-ok").exists(), "Native exec did not run the file/network helper")
+        require(edited.read_text() == "after\n", "Native edit did not update the writable checkout")
         if "command not found" in result[1] or "apply_patch: not found" in result[1]:
             self.blocked("Native patch helper is unavailable under the accepted shell environment; "
                          "protected files survive, but native edit execution is not proven")
@@ -780,7 +780,7 @@ pathlib.Path('boundary-ok').write_text('ok')
                 protected.read_text() == "synthetic protected sentinel" and
                 (checkout / ".git/config").read_text() == "synthetic protected git sentinel",
                 "Native edit/helper changed protected authentication or files")
-        self.record("codex exec native shell/helper and apply_patch preserve protected sentinels")
+        self.record("codex exec native shell/helper and writable edit; protected sentinels preserved")
 
     def all(self, check_only=False):
         self.readiness()
