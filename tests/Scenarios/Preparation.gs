@@ -482,6 +482,17 @@ internal class PreparationChecks {
                 Check.Text(flow.State["pulls"]?[0]?["title"]) == "Implement fixture",
                 "Completion retained generated incomplete title"
             )
+            flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
+            flow.Save()
+            let ready = Check.Json(
+                flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10", "--json"}).Output
+            )
+            Check.That(
+                Check.Text(ready["data"]?["machine_status"]) == "passed" && Check.Text(
+                    ready["data"]?["owner_review"]
+                ) == "required",
+                "Completed amendment lost readiness or accepted itself"
+            )
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial publication restarted inference")
         }
 
