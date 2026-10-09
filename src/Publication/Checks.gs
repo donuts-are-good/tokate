@@ -197,6 +197,23 @@ internal class Checks {
                     binding = currentBinding
                     identity = Identity(pull)
                     target = currentTarget
+                    stage = "freshness"
+                    let history = J.Items(J.Get(run.Element(), "synchronizations"))
+                    let verifiedTarget = history.Count == 0 ? run.Text("base"): J.Text(
+                        history[history.Count - 1],
+                        "upstream"
+                    )
+                    facts["verified_target_revision"] = verifiedTarget
+                    if currentTarget != verifiedTarget {
+                        facts["reconciliation_required"] = true
+                        facts[
+                            "reconciliation_next"
+                        ] = "Ask the current donor to reconcile with the current target and verify the resulting exact commit. Further coding requires a new explicit budget."
+                        throw CliFailure(
+                            "stale_approval",
+                            "Target advanced beyond the contribution's verified base; reconcile and verify the resulting commit"
+                        )
+                    }
                     stage = "report"
                     var reportFailure string = ""
                     try {
