@@ -11,7 +11,6 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
     <RuntimeIdentifiers>linux-x64;linux-musl-x64</RuntimeIdentifiers>
-    <Version>0.3.7</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.gs" />

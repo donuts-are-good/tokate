@@ -1,32 +1,66 @@
 # Nix and NixOS
 
-Tokate's flake builds the x86_64 Linux CLI as NativeAOT.
+Tokate builds as a NativeAOT CLI for x86_64 Linux. Install [Nix](https://nix.dev/install-nix) first.
+
+Enable the command and flake features in `~/.config/nix/nix.conf`:
+
+```ini
+experimental-features = nix-command flakes
+```
+
+On NixOS, set this in your system configuration instead:
+
+```nix
+nix.settings.experimental-features = [ "nix-command" "flakes" ];
+```
+
+## Install
 
 ```sh
 nix profile add github:obselate/tokate
 tokate doctor --external
+```
+
+In an existing NixOS flake, add `inputs.tokate.url = "github:obselate/tokate"`
+and include `inputs.tokate.packages.x86_64-linux.default` in `environment.systemPackages`.
+Use Nix to upgrade, roll back or remove this installation. Tokate does not change system configuration.
+
+## Choose a harness
+
+For Codex:
+
+```sh
 nix profile add nixpkgs#codex
 tokate doctor --managed --harness codex
 ```
 
-For Pi, use its official package:
+For Pi:
 
 ```sh
 nix profile add github:earendil-works/pi/stable
 tokate doctor --managed --harness pi
 ```
 
-NixOS configurations can add `inputs.tokate.packages.x86_64-linux.default` to
-`environment.systemPackages`. Enable flakes through the system's Nix configuration.
-Tokate does not change system configuration or install over a Nix-owned executable.
-Use Nix profile upgrades, rollbacks and removal for that installation.
+Keep custom profile `bin` directories on `PATH`, or use `--harness-path`.
+Keep runtimes outside the checkout. Pi uses Node from its package closure unless `--node` overrides it.
 
-Custom profile `bin` directories must be on `PATH`. An explicit `--harness-path`
-also works. Keep runtimes outside the project checkout. Pi uses the Node runtime
-from its declared package closure unless `--node` selects another runtime.
+## Build from source
 
-Verification commands can select a Nix executable by name or absolute path. Only
-that executable's declared closure and the baseline command tools are mounted.
-Package compound checks with their runtime dependencies, for example with
-`writeShellApplication.runtimeInputs`. Unrelated store paths and home files remain
-unavailable. A removed store path fails verification without deleting saved work.
+From the repository root:
+
+```sh
+nix build
+./result/bin/tokate --version
+```
+
+After changing NuGet dependencies, regenerate their hashes and rebuild:
+
+```sh
+nix build .#default.fetch-deps
+./result nix/deps.json
+nix build
+```
+
+Verification mounts only the selected executable's declared closure and baseline tools.
+For compound checks, declare dependencies with `writeShellApplication.runtimeInputs`.
+Unrelated store paths and home files stay unavailable. Missing store paths fail without deleting saved work.
