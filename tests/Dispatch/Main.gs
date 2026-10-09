@@ -104,6 +104,9 @@ func Main(args[]string) int32 {
             case "--installer-shell-detection" when args.Length == 1 {
                 Installer.ShellDetection(project, binary)
             }
+            case "--skill-install" when args.Length == 1 {
+                Installer.Skill(project)
+            }
             case "--flow" when args.Length == 2 {
                 NativeFlow.All(binary, args[1])
             }

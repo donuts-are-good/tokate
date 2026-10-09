@@ -11,6 +11,7 @@ trap 'rm -rf "$staging"' EXIT
 mkdir -p "$staging/$bundle/docs" "$staging/$bundle/licenses"
 install -m 755 "artifacts/$runtime/tokate" "$staging/$bundle/tokate"
 cp README.md AGENTS.md LICENSE "$staging/$bundle/"
+cp -R plugins "$staging/$bundle/"
 cp docs/owners.md docs/donors.md docs/recovery.md docs/security.md docs/development.md \
     docs/nix.md docs/alpine.md docs/linux-security.md docs/linux-harnesses.md "$staging/$bundle/docs/"
 cp licenses/dotnet-LICENSE.TXT licenses/dotnet-THIRD-PARTY-NOTICES.TXT \
