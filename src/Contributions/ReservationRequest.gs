@@ -71,12 +71,12 @@ internal class ReservationRequest {
                     request = JsonElement{}
                 }
             }
+            let value = state.Value()
+            if J.Text(J.Get(value, "identity"), "id") != run.Text("id") {
+                throw CliFailure("stale_approval", "Saved contribution ownership was replaced")
+            }
+            LeaseLifecycle.Owner(state, J.Get(viewer, "id"))
             if request.ValueKind == JsonValueKind.Undefined {
-                let value = state.Value()
-                if J.Text(J.Get(value, "identity"), "id") != run.Text("id") {
-                    throw CliFailure("stale_approval", "Saved contribution ownership was replaced")
-                }
-                LeaseLifecycle.Owner(state, J.Get(viewer, "id"))
                 if action != "release" {
                     state.Check(repo, issue, run.Text("donor"), J.Get(viewer, "id"))
                     if J.Text(value, "approval_id") != run.Text("approval") {
