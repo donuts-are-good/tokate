@@ -46,7 +46,8 @@ jobs:
                 artifacts/tests-musl/tokate-tests --process
                 artifacts/tests-musl/tokate-tests --flow CrossAccountFlow
                 artifacts/linux-musl-x64/tokate doctor --external --json
-                artifacts/linux-musl-x64/tokate doctor --fix --yes --json
+                npm install --global --prefix /home/tester/.local @openai/codex@latest
+                artifacts/linux-musl-x64/tokate doctor --harness-path /home/tester/.local/bin/codex --json
                 ~/.local/bin/codex --version
                 python3 scripts/native-proof.py --codex ~/.local/bin/codex
                 artifacts/linux-musl-x64/tokate doctor --harness pi --fix --yes --json
