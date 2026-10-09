@@ -49,6 +49,9 @@ try {
     let denied = 0;
     let phase = 'startup';
     const allowed = mode === 'tools' ? 5 : mode === 'network-tool' ? 2 : 1;
+    const validateTransport = expected => check(dispatches === expected && intercepted === expected &&
+        received === expected && unexpected === 0 && denied === 0 && !observations.transport_assertion,
+        'Unapproved dispatch, transport, or recovery');
     const sse = chunks => chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n';
     const chunk = (delta, finish = null, usage) => ({ id: 'synthetic', object: 'chat.completion.chunk', created: 1,
         model: 'synthetic-exact', choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) });
@@ -130,6 +133,7 @@ try {
             } catch { refused = true; }
             check(refused, 'Invalid configuration was accepted');
             check(received === 0 && discoveryAttempts === 0, 'Configuration validation spent a request');
+            validateTransport(0);
             emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, refused: true, requests: 0, blockers: [] });
         } else {
             const model = project();
@@ -257,6 +261,9 @@ try {
                 if (commandFactoryCalls === 0) blockers.push('Restricted SDK sessions ignore the public inline extension command interception hook.');
                 const external = text(await execute('bash', { command: "python3 -c 'import socket; s=socket.socket(); s.settimeout(0.5); print(\"external-route-refused\" if s.connect_ex((\"192.0.2.1\",80)) else \"unexpected-route\")'", timeout: 3 }));
                 check(external.includes('external-route-refused'), 'Unexpected external task route');
+                await session.dispose();
+                session = undefined;
+                validateTransport(0);
                 emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, contextWindow: model.contextWindow,
                     maxTokens: model.maxTokens, requests: received, discoveryAttempts, updates, commandFactoryCalls, commandHookCalls, blockers });
             } else if (mode === 'unsupported') {
@@ -267,6 +274,9 @@ try {
                 }
                 await execute('bash', { command: 'touch pty-fallback', pty: true, timeout: 3 });
                 if (await Bun.file(`${cwd}/pty-fallback`).exists()) blockers.push('Native bash executes an embedded fallback for unsupported PTY requests.');
+                await session.dispose();
+                session = undefined;
+                validateTransport(0);
                 emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, requests: received, blockers });
             } else if (mode.startsWith('command-')) {
                 const controller = new AbortController();
@@ -286,6 +296,7 @@ try {
                 check(received === 0 && discoveryAttempts === 0, 'Command interruption spent a request');
                 await session.dispose();
                 session = undefined;
+                validateTransport(0);
                 emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, requests: 0, updates,
                     disposed: true, completion_candidate: false, blockers });
             } else {
@@ -312,7 +323,6 @@ try {
                 await session.waitForIdle();
                 phase = 'settled';
                 check(!session.isStreaming && !session.isAborting && ended > 0, 'Native session did not settle');
-                check(received === allowed && unexpected === 0, 'Unapproved request, redirect or recovery');
                 const assistants = session.agent.state.messages.filter(message => message.role === 'assistant');
                 const last = assistants.at(-1);
                 const goodUsage = last?.usage && ['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'].every(field =>
@@ -330,6 +340,7 @@ try {
                 else check(!complete, 'Failed or incomplete result fabricated completion');
                 await session.dispose();
                 session = undefined;
+                validateTransport(allowed);
                 emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, requests: received, dispatches, intercepted,
                     denied, discoveryAttempts, settled: true, disposed: true, completion_candidate: Boolean(complete), rawUsageValid, rawUsageCount, toolTurns,
                     taskRequests, commandFactoryCalls, commandHookCalls, blockers });
