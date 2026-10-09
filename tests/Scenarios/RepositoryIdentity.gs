@@ -140,7 +140,7 @@ internal class RepositoryIdentityChecks {
             let issue = flow.State["issue"] ?? throw Exception("Missing issue")
             issue["title"] = JsonValue.Create("Changed issue")
             flow.Save()
-            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "owner must approve again")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Approval revoked or task changed")
             flow.Reload()
             let originalIssue = flow.State["issue"] ?? throw Exception("Missing issue")
             originalIssue["title"] = JsonValue.Create("Implement fixture")

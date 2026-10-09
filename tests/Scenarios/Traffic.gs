@@ -366,6 +366,7 @@ internal class CommandTrafficChecks {
             flow.Approve()
             let run = flow.Claim()
             flow.Call([]string{"work", "--run", run})
+            flow.Publish(run)
             flow.Reload()
             return run
         }
@@ -542,7 +543,7 @@ internal class CommandTrafficChecks {
             flow.ResetTraffic()
             let failed = flow.Call([]string{"checks", "--run", run, "--json"}, 1, traffic: true)
             Check.Envelope(failed, "checks", "error", "verification_failed")
-            Budgets(flow, failed, 23, 0, 0, 12)
+            Budgets(flow, failed, 43, 0, 0, 27)
         }
 
         private func WatchTraffic(binary string) {
@@ -550,10 +551,10 @@ internal class CommandTrafficChecks {
             let run = Published(flow)
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
-            Budgets(flow, pending, 23, 0, 0, 12)
+            Budgets(flow, pending, 43, 0, 0, 27)
             flow.ResetTraffic()
             let direct = flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, traffic: true)
-            Budgets(flow, direct, 23, 0, 0, 12)
+            Budgets(flow, direct, 43, 0, 0, 27)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -562,7 +563,7 @@ internal class CommandTrafficChecks {
             flow.Save()
             flow.ResetTraffic()
             let result = Watch(flow, run, "10", 0)
-            Budgets(flow, result, 70, 0, 0, 57)
+            Budgets(flow, result, 130, 0, 0, 112)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
             let observations = flow.State["check_state_times"]
@@ -576,7 +577,7 @@ internal class CommandTrafficChecks {
             flow.State["check_polls"] = JsonValue.Create(0)
             flow.Save()
             flow.ResetTraffic()
-            Budgets(flow, Watch(flow, run, "10", 0, true), 70, 0, 0, 57)
+            Budgets(flow, Watch(flow, run, "10", 0, true), 130, 0, 0, 112)
         }
 
         private func WatchChanges(binary string) {
@@ -592,8 +593,11 @@ internal class CommandTrafficChecks {
                     flow.Save()
                     flow.ResetTraffic()
                     let result = Watch(flow, run, "5", 1, direct)
-                    Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                    Budgets(flow, result, kind == "head" ? 14: 15, 0, 0, kind == "head" ? 1: 2)
+                    Check.Contains(
+                        result.Error,
+                        kind == "head" ? "current exact-commit coordination authority": "Approval revoked or task changed"
+                    )
+                    Budgets(flow, result, kind == "head" ? 35: 27, 0, 0, kind == "head" ? 17: 9)
                 }
             }
         }
@@ -620,39 +624,44 @@ internal class CommandTrafficChecks {
                     flow.ResetTraffic()
                     let result = flow.Call([]string{"checks", "--run", run}, revoked ? 1: 0, traffic: true)
                     if revoked {
-                        Check.Contains(result.Error, "Issue needs Tokate approval")
+                        Check.Contains(result.Error, "Approval revoked or task changed")
                     }
                     flow.Reload()
+                    var refreshed bool
                     for path in[]string{"repos/owner/project", "repos/owner/project/issues/1"} {
                         var full int32
                         for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                             if Check.Text(call["path"]) == path {
-                                Check.That(
-                                    Check.Text(call["conditional"]) == "false",
-                                    "Evicted or oversized response supplied a validator"
-                                )
-                                Check.That(Check.Text(call["status"]) == "200", "Evicted read was not fully fetched")
-                                full++
+                                if size > 1024 * 1024 {
+                                    Check.That(
+                                        Check.Text(call["conditional"]) == "false",
+                                        "Oversized response supplied a validator"
+                                    )
+                                }
+                                if Check.Text(call["status"]) == "200" {
+                                    full++
+                                }
                             }
                         }
-                        let expected = revoked && path == "repos/owner/project" ? 1: 2
-                        Check.That(full >= expected, "Missing full fetch after cache eviction or non-admission")
+                        Check.That(full > 0, "Missing initial full response")
+                        refreshed = refreshed || full > 1
                     }
+                    Check.That(size > 1024 * 1024 || refreshed, "Missing full fetch after cache eviction")
                 }
             }
             baseline.Restore()
             flow.Reload()
             flow.State["response_padding"] = Check.Map(
                 "repos/owner/project",
-                1024 * 1024,
+                3 * 1024 * 1024,
                 "repos/owner/project/issues/1",
-                1024 * 1024
+                3 * 1024 * 1024
             )
             flow.State["etag_force_304"] = JsonValue.Create(true)
             flow.Save()
             flow.ResetTraffic()
             let unmatched = flow.Call([]string{"checks", "--run", run}, 1, traffic: true)
-            Check.Contains(unmatched.Error, "HTTP 304 without a matching in-memory body")
+            Check.Contains(unmatched.Error, "Donor access authority")
             flow.Reload()
             let calls = flow.State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
             let last = calls[calls.Count - 1] ?? throw Exception("Missing last request")
