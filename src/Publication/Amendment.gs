@@ -120,7 +120,8 @@ internal class Amendment {
             let actor = J.Get(viewer, "id").ToString()
             let originalActor = J.Get(original, "actor").ToString()
             let reservationId = J.Text(reservation, "reservation")
-            let attempt = amendment != nil && amendment.Text("attempt") != "" ? amendment.Text("attempt"):
+            let declaredAttempt = amendment?.Text("attempt") ?? ""
+            let attempt = declaredAttempt != "" ? declaredAttempt:
             (run.Text("publication_attempt") == "" ? run.Text("attempt"): run.Text("publication_attempt"))
             if !(resume && amendment == nil) && attempt != J.Text(reservation, "attempt") {
                 throw CliFailure("stale_approval", "Saved amendment attempt fence changed")
