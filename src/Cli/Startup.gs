@@ -63,7 +63,7 @@ internal class Startup {
         }
 
         internal func NeedsCatalog(command string, options Args?) bool -> command == "select" ||
-            command == "claim" ||
+            (command == "claim" && options?.Get("source") != "external") ||
             command == "work" ||
             (command == "prepare" && options?.Get("source") == "tokate")
 

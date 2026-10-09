@@ -202,7 +202,7 @@ internal class ContributionPreparation {
                 throw CliFailure("stale_approval", "Legacy lease reacquisition requires fresh owner approval")
             }
             Overlaps.RequireDependencies(repo, issue)
-            let run = Plan(args, repo, issue, viewer, state, record, "tokate")
+            let run = Plan(args, repo, issue, viewer, state, record, args.Get("source", "tokate"))
             if args.Command == "work" || args.Guided {
                 DonorSelection.Confirm(args, J.Get(run.Element(), "selection"))
             }
@@ -252,7 +252,8 @@ internal class ContributionPreparation {
         private func CheckPending(run Data, viewer JsonElement, state CoordinationState) {
             let request = J.Get(run.Element(), "claim_request")
             RequestData.Request(request)
-            if run.Number("version") != 2 || run.Text("state") != "claim_pending" || run.Text("source") != "tokate" ||
+            if run.Number("version") != 2 || run.Text("state") != "claim_pending" ||
+                (run.Text("source") != "tokate" && run.Text("source") != "external") ||
                 J.Text(request, "action") != "claim" || !RepositoryIdentity.SameDonor(viewer, run) ||
                 run
                 .Fields
@@ -280,20 +281,25 @@ internal class ContributionPreparation {
             let tools = J.Get(run.Element(), "tools")
             RequestData.Tools(tools)
             policy.ValidateTools(tools, run.Text("source"))
-            if J.Get(run.Element(), "selection").ValueKind != JsonValueKind.Object || run.Text("harness") != J.Text(
-                J.Items(tools)[0],
-                "harness"
-            ) ||
-                run.Text("provider") != J.Text(J.Items(tools)[0], "provider") || run.Text("model") != J.Text(
-                J.Items(tools)[0],
-                "model"
-            ) ||
-                run.Text("effort") != J.Text(J.Items(tools)[0], "effort") {
+            if run.Text("source") == "tokate" &&
+                (
+                J.Get(run.Element(), "selection").ValueKind != JsonValueKind.Object || run.Text("harness") != J.Text(
+                    J.Items(tools)[0],
+                    "harness"
+                ) ||
+                    run.Text("provider") != J.Text(J.Items(tools)[0], "provider") || run.Text("model") != J.Text(
+                    J.Items(tools)[0],
+                    "model"
+                ) ||
+                    run.Text("effort") != J.Text(J.Items(tools)[0], "effort")
+            ) {
                 throw CliFailure("invalid_state", "Pending claim selection differs from its declared tool")
             }
             policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             RuntimeBudget.Validate(run)
-            DonorSelection.Revalidate(run, policy)
+            if run.Text("source") == "tokate" {
+                DonorSelection.Revalidate(run, policy)
+            }
             Overlaps.RequireDependencies(run.Text("repo"), run.Number("issue"))
         }
 
@@ -375,7 +381,11 @@ internal class ContributionPreparation {
                 }
             } catch (error ApiDeadlineException) {
                 Terminal.Message(
-                    "Claim pending. Run: " + directory + "; resume explicitly with work --run DIR or prepare --run DIR"
+                    "Claim pending. Run: " +
+                        directory +
+                        "; resume explicitly with " +
+                        (run.Text("source") == "tokate" ? "work --run DIR or ": "") +
+                        "prepare --run DIR"
                 )
             } finally {
                 ApiTransport.EndDeadline()
@@ -386,13 +396,17 @@ internal class ContributionPreparation {
                 Bind(run, state)
                 WorkspacePreparation.Select(run, run.Text("requested_fork"))
                 WorkspacePreparation.Promote(directory, run)
-                Terminal.Step(RuntimeBudget.Description(run))
+                if run.Text("source") == "tokate" {
+                    Terminal.Step(RuntimeBudget.Description(run))
+                }
                 Terminal.Step("Preparing contribution. Run: " + directory)
                 WorkspacePreparation.Complete(directory, run)
                 Terminal.Message("Prepared contribution. Run: " + directory)
             } else {
                 PublicOutput.ResultData = PublicOutput.RunSummary(directory)
-                PublicOutput.Actions.Add([]string{"tokate", "work", "--run", directory, "--json"})
+                if run.Text("source") == "tokate" {
+                    PublicOutput.Actions.Add([]string{"tokate", "work", "--run", directory, "--json"})
+                }
                 PublicOutput.Actions.Add([]string{"tokate", "prepare", "--run", directory, "--json"})
             }
             return directory

@@ -410,10 +410,10 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
+                "repo,issue,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--source external --tools FILE --seconds N]",
                 "claim https://github.com/owner/project/issues/42 --model gpt-6.1-sol --effort high"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -930,8 +930,13 @@ internal class Cli {
                     }
                 }
             }
-            if args.Command == "prepare" && args.Get("source") == "external" {
+            if (args.Command == "prepare" || args.Command == "claim") && args.Get("source") == "external" {
                 args.Need("tools")
+                for key in[]string{"verification-reserve", "unlimited", "continue-from"} {
+                    if args.Get(key) != "" {
+                        throw Exception("External claims exclude --" + key)
+                    }
+                }
                 for key in[]string{
                     "profile",
                     "harness",
@@ -942,13 +947,17 @@ internal class Cli {
                     "pi-root",
                     "node",
                     "harness-path",
-                    "availability",
-                    "non-interactive"
+                    "availability"
                 } {
                     if args.Get(key) != "" {
                         throw Exception("External declarations use --tools; selection option conflicts: --" + key)
                     }
                 }
+                if args.Command == "prepare" && args.Get("non-interactive") != "" {
+                    throw Exception("External declarations use --tools; selection option conflicts: --non-interactive")
+                }
+            } else if args.Command == "claim" && args.Get("tools") != "" {
+                throw Exception("Claim tool declarations require --source external")
             }
             if args.Get("run") != "" && command.SupportsSavedRun {
                 return

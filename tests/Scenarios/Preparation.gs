@@ -236,6 +236,69 @@ internal class PreparationChecks {
             flow.NoPr()
         }
 
+        private func ExternalClaim(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            File.Delete(Path.Combine(flow.Bin, "codex"))
+            let args = List[string]{
+                "claim",
+                "owner/project",
+                "--issue",
+                "1",
+                "--source",
+                "external",
+                "--tools",
+                test.Tools,
+                "--seconds",
+                "30",
+                "--runs",
+                Path.Combine(flow.Temp.Root, "runs"),
+                "--json"
+            }
+            for option in[]string{"--profile", "--harness", "--verification-reserve"} {
+                let invalid = List[string](args)
+                invalid.AddRange([]string{option, option == "--verification-reserve" ? "5": "codex"})
+                flow.Call(invalid.ToArray(), 1)
+            }
+            Check.That(!Directory.Exists(Path.Combine(flow.Temp.Root, "runs")), "Invalid external claim created a run")
+            let result = Check.Json(flow.Call(args.ToArray(), 8).Output)
+            let run = RunPath(flow)
+            let path = Path.Combine(run, "run.json")
+            let pending = Check.Json(File.ReadAllText(path))
+            Check.That(
+                Check.Text(pending["source"]) == "external" && pending["selection"] == nil,
+                "External claim acquired a managed selection"
+            )
+            Check.That(Check.Text(result["status"]) == "pending", "External claim lost pending status")
+            Check.That(
+                !(result["next_actions"]?.ToJsonString() ?? "").Contains("\"work\""),
+                "External pending claim offered managed inference"
+            )
+            flow.Call([]string{"work", "--run", run}, 1)
+            flow.Reload()
+            let comment = flow.State["request_comments"]?[0] ?? throw Exception("Missing external claim")
+            test.Coordinate(PostedEvent(test, comment))
+            Resume(flow, run)
+            let prepared = Check.Json(File.ReadAllText(path))
+            Check.That(
+                Check.Text(prepared["state"]) == "claimed" && Check.Text(prepared["seconds"]) == "30",
+                "External claim did not retain its verification budget"
+            )
+            Check.That(
+                Directory.Exists(Path.Combine(run, "coding")) && !Directory.Exists(Path.Combine(run, "checkout")),
+                "External claim prepared a managed checkout"
+            )
+            Check.That(
+                prepared["tools"]?.ToJsonString() == File.ReadAllText(test.Tools),
+                "External claim changed donor tool declarations"
+            )
+            flow.Reload()
+            Check.That(Check.Text(flow.State["request_count"]) == "1", "External claim was posted twice")
+            flow.NoInference()
+            flow.NoPr()
+        }
+
         private func External(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -913,6 +976,7 @@ internal class PreparationChecks {
         internal func All(binary string, selected string = "") {
             for test in[]TestCase[string]{
                 TestCase[string]("Guided", async (value string) -> Guided(value)),
+                TestCase[string]("ExternalClaim", async (value string) -> ExternalClaim(value)),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),

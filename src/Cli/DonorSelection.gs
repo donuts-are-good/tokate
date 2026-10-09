@@ -17,7 +17,7 @@ internal class DonorSelection {
             (J.Text(value, "harness") == "pi" && J.Text(value, "provider") == "local-chat-completions")
 
         internal func ApplyDefaults(args Args) {
-            if args.Get("run") != "" ||
+            if args.Get("run") != "" || args.Get("source") == "external" ||
                 (
                 args.Command != "select" &&
                     args.Command != "claim" &&
