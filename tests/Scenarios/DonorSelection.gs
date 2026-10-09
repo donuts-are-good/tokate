@@ -147,7 +147,29 @@ internal class DonorSelectionChecks {
             flow.Call([]string{"defaults", "remove", "--profile", "local"})
             Check.That(!File.Exists(named), "Named profile was not removed")
             flow.Call([]string{"defaults", "set", "--profile", "codex-only", "--harness", "codex"})
-            flow.Call([]string{"defaults", "set", "--profile", "pi-only", "--harness", "pi"})
+            flow.Call(
+                []string{
+                    "defaults",
+                    "set",
+                    "--profile",
+                    "pi-only",
+                    "--harness",
+                    "pi",
+                    "--endpoint",
+                    "http://127.0.0.1:12345/v1"
+                }
+            )
+            flow.Call(
+                []string{"defaults", "set", "--profile", "pi-only", "--model", "local/model", "--effort", "absent"}
+            )
+            Check.That(
+                Check.Text(
+                    Check.Json(flow.Call([]string{"defaults", "read", "--profile", "pi-only"}).Output)["default"]?[
+                        "harness"
+                    ]
+                ) == "pi",
+                "Adding model settings changed the profile harness"
+            )
             flow.Call([]string{"defaults", "use", "--profile", "codex-only"})
             Check.That(
                 Check.Text(

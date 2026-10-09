@@ -11,6 +11,19 @@ internal class DonorDefaults {
         internal let Harnesses[]string = []string{"codex", "pi", "claude", "omp", "hermes"}
 
         internal func NormalizePair(args Args) {
+            if args.Command == "defaults" && args.Subject == "set" && args.Get("harness") == "" && args.Get(
+                "provider"
+            ) == "" {
+                var saved = Read(args.Get("profile"), allowMissing: true)
+                if saved.ValueKind == JsonValueKind.Undefined && args.Get("profile") != "" {
+                    saved = Read()
+                }
+                for key in[]string{"harness", "provider", "endpoint", "pi-root", "node", "harness-path"} {
+                    if args.Get(key) == "" && J.Text(saved, key) != "" {
+                        args.Values["--" + key] = J.Text(saved, key)
+                    }
+                }
+            }
             if args.Get("harness") == "" && args.Get("provider") == "" {
                 args.Values["--harness"] = "codex"
             }
