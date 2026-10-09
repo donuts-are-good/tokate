@@ -59,6 +59,9 @@ internal class MachineSetup {
                         if id == "fedora" || id == "rhel" || id == "centos" || id == "rocky" || id == "almalinux" {
                             return "/usr/bin/dnf"
                         }
+                        if id == "alpine" {
+                            return "/sbin/apk"
+                        }
                     }
                 }
             }
@@ -67,16 +70,24 @@ internal class MachineSetup {
 
         private func Package(name string, manager string) string -> switch name {
             case "git": "git"
-            case "gh": manager.EndsWith("pacman") ? "github-cli": "gh"
+            case "gh": manager.EndsWith("pacman") || manager.EndsWith("apk") ? "github-cli": "gh"
             case "curl": "curl"
             case "tar": "tar"
             case "bwrap": "bubblewrap"
             case "/usr/bin/bwrap": "bubblewrap"
-            case "setsid": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
-            case "/usr/bin/setsid": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
-            case "/usr/bin/unshare": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
+            case "setsid": manager.EndsWith("dnf") ? "util-linux-core": manager.EndsWith(
+                "apk"
+            ) ? "util-linux-misc": "util-linux"
+            case "/usr/bin/setsid": manager.EndsWith("dnf") ? "util-linux-core": manager.EndsWith(
+                "apk"
+            ) ? "util-linux-misc": "util-linux"
+            case "/usr/bin/unshare": manager.EndsWith("dnf") ? "util-linux-core": manager.EndsWith(
+                "apk"
+            ) ? "util-linux-misc": "util-linux"
             case "/usr/bin/env": "coreutils"
             case "/usr/bin/cp": "coreutils"
+            case "/usr/bin/find": "findutils"
+            case "/bin/bash": "bash"
             default: ""
         }
 
@@ -86,6 +97,8 @@ internal class MachineSetup {
                 args.AddRange([]string{"install", "-y", "--no-install-recommends"})
             } else if manager.EndsWith("dnf") {
                 args.AddRange([]string{"install", "--assumeyes", "--setopt=install_weak_deps=False"})
+            } else if manager.EndsWith("apk") {
+                args.AddRange([]string{"add", "--no-cache"})
             } else {
                 args.AddRange([]string{"-Syu", "--needed", "--noconfirm"})
             }
@@ -93,15 +106,21 @@ internal class MachineSetup {
             return args.ToArray()
         }
 
+        private func Privilege(manager string) string -> manager.EndsWith("apk") && LocalPaths.Executable(
+            "/usr/bin/doas"
+        ) ? "/usr/bin/doas":
+        LocalPaths.Executable("/usr/bin/sudo") ? "/usr/bin/sudo": ""
+
         private func InstallPackages(manager string, packages List[string]) {
             let args = List[string]()
             var executable = manager
             if SetupUserId() != 0 {
-                executable = LocalPaths.Executable("/usr/bin/sudo") ? "/usr/bin/sudo": ""
+                executable = Privilege(manager)
                 if executable == "" {
                     throw CliFailure(
                         "missing_tools",
-                        "sudo was not found. Install the listed packages with an administrator, then rerun doctor."
+                        (manager.EndsWith("apk") ? "sudo or doas was not found.": "sudo was not found.") +
+                            " Install the listed packages with an administrator, then rerun doctor."
                     )
                 }
                 if PublicOutput.Enabled || Console.IsInputRedirected {
@@ -139,7 +158,7 @@ internal class MachineSetup {
             let packages = List[string]()
             let missing = List[string]()
             for tool in tools {
-                if tool.Path != "" || tool.Name == "codex" {
+                if (tool.Path != "" && !(manager.EndsWith("apk") && tool.Status == "failed")) || tool.Name == "codex" {
                     continue
                 }
                 let packageName = Package(tool.Name, manager)
@@ -159,6 +178,9 @@ internal class MachineSetup {
                 if packages.Contains("curl") && !packages.Contains("ca-certificates") {
                     packages.Add("ca-certificates")
                 }
+                if manager.EndsWith("apk") && packages.Contains("coreutils") && !packages.Contains("findutils") {
+                    packages.Add("findutils")
+                }
                 if manager == "" || !LocalPaths.Executable(manager) {
                     Terminal.Message(
                         "Not found: " + String.Join(", ", missing) +
@@ -167,7 +189,9 @@ internal class MachineSetup {
                     )
                     return false
                 }
-                let privilege = SetupUserId() == 0 ? "": "sudo " +
+                let helper = Privilege(manager)
+                let privilege = SetupUserId() == 0 ? "": (helper == "" ? "sudo": Path.GetFileName(helper)) +
+                    " " +
                     (PublicOutput.Enabled || Console.IsInputRedirected ? "-n ": "")
                 let command = privilege + manager + " "
                 if !Confirm(
@@ -186,9 +210,21 @@ internal class MachineSetup {
                     return false
                 }
                 InstallPackages(manager, packages)
-                let after = Startup.Scan(missing.ToArray())
+                let recheck = List[string](missing)
+                if manager.EndsWith("apk") {
+                    for name in Startup.Requirements(options) {
+                        if !recheck.Contains(name) {
+                            recheck.Add(name)
+                        }
+                    }
+                }
+                let after = Startup.Scan(recheck.ToArray())
+                if manager.EndsWith("apk") {
+                    Startup.ExecuteChecks(after)
+                }
                 for tool in after {
-                    if tool.Path != "" {
+                    if manager.EndsWith("apk") ? missing.Contains(tool.Name) &&
+                        tool.Status == "ready": tool.Path != "" {
                         return true
                     }
                 }

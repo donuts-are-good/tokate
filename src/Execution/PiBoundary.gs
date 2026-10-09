@@ -25,7 +25,9 @@ internal class PiBoundary {
 
         internal func Boundary(checkout string, root string, node string, control string, network bool) List[string] {
             Verification.Validate(checkout)
-            let tools = NixRuntime.Tools(checkout, []string{node})
+            let bash = LocalPaths.NeedSystemTool("bash", checkout)
+            let bwrap = LocalPaths.NeedSystemTool("bwrap", checkout)
+            let tools = NixRuntime.Tools(checkout, []string{node, bash, bwrap})
             let runtime = List[string](tools)
             runtime.Add(root)
             for path in[]string{root, node, control} {
@@ -57,7 +59,13 @@ internal class PiBoundary {
                 "C.UTF-8",
                 "--setenv",
                 "PI_OFFLINE",
-                "1"
+                "1",
+                "--setenv",
+                "TOKATE_BASH",
+                bash,
+                "--setenv",
+                "TOKATE_BWRAP",
+                bwrap
             }
             if !network {
                 args.Add("--unshare-net")

@@ -32,6 +32,8 @@ internal class Startup {
                         case "curl": "Install curl and add curl to PATH."
                         case "tar": "Install tar and add tar to PATH."
                         case "/usr/bin/cp": "Install GNU coreutils in a system path or Nix profile for independent verification."
+                        case "/usr/bin/find": "Install GNU findutils for independent verification."
+                        case "/bin/bash": "Install Bash for Pi command isolation."
                         default: ""
                     }
                 }
@@ -48,6 +50,11 @@ internal class Startup {
                 if tool.Path != "" && name.StartsWith("/") && !LocalPaths.Executable(tool.Path) {
                     tool.Status = "failed"
                     tool.Detail = "Required helper is not executable. " + tool.Hint
+                } else if tool.Path != "" && LocalPaths.Musl() &&
+                    (name == "setsid" || name.StartsWith("/usr/bin/")) &&
+                    Path.GetFileName(LocalPaths.CanonicalPath(tool.Path)) == "busybox" {
+                    tool.Status = "failed"
+                    tool.Detail = "This operation requires the full tool, not its BusyBox applet. " + tool.Hint
                 }
                 tools.Add(tool)
             }
@@ -113,10 +120,16 @@ internal class Startup {
                 (command == "recover" && options.Get("prepare") != "true")
             if catalog || independent {
                 names.Add("/usr/bin/setsid")
+                if pi {
+                    names.Add("/bin/bash")
+                }
             }
             if independent {
                 names.Add("/usr/bin/bwrap")
                 names.Add("/usr/bin/cp")
+                if LocalPaths.Musl() {
+                    names.Add("/usr/bin/find")
+                }
             }
             if command == "coordinator-setup" || command == "init" {
                 names.Add("curl")
@@ -125,7 +138,7 @@ internal class Startup {
             return names.ToArray()
         }
 
-        private func ExecuteChecks(tools List[ToolCheck]) {
+        internal func ExecuteChecks(tools List[ToolCheck]) {
             var runner bool
             var cleanup = true
             for tool in tools {

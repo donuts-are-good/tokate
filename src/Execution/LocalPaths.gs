@@ -5,6 +5,8 @@ import System.IO
 
 internal class LocalPaths {
     shared {
+        internal func Musl() bool -> File.Exists("/lib/ld-musl-x86_64.so.1")
+
         internal func RuntimePath(value string) string {
             if value.Length > 4096 || !Path.IsPathFullyQualified(value) {
                 throw Exception("Runtime overrides require bounded absolute paths")
@@ -81,7 +83,20 @@ internal class LocalPaths {
                 }
             }
             let standard = Path.Combine(name == "sh" ? "/bin": "/usr/bin", name)
-            return File.Exists(standard) ? standard: ""
+            let alternative = Path.Combine("/bin", name)
+            if File.Exists(standard) || File.Exists(alternative) {
+                return File.Exists(standard) ? standard: alternative
+            }
+            if name == "bash" {
+                let shell = SystemTool("sh", directory)
+                if shell != "" {
+                    let canonical = CanonicalPath(shell)
+                    if Path.GetFileName(canonical) == "bash" {
+                        return canonical
+                    }
+                }
+            }
+            return ""
         }
 
         internal func NeedSystemTool(name string, directory string = "") string {

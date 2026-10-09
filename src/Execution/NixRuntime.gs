@@ -35,7 +35,7 @@ internal class NixRuntime {
                 if !Path.IsPathFullyQualified(executable) {
                     continue
                 }
-                if Root(executable) != "" && !File.Exists(executable) {
+                if Root(executable) != "" && !File.Exists(executable) && !Directory.Exists(executable) {
                     throw CliFailure(
                         "missing_tools",
                         "The selected Nix runtime closure is unavailable. Restore its profile before retrying."

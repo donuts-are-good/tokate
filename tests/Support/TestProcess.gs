@@ -9,6 +9,11 @@ import System.Text
 
 internal class TestProcess {
     shared {
+        internal func SystemPath(path string) string {
+            let alternative = Path.Combine("/bin", Path.GetFileName(path))
+            return path.StartsWith("/usr/bin/") && !File.Exists(path) && File.Exists(alternative) ? alternative: path
+        }
+
         private func NodeExecutable(path string) bool -> File.Exists(path) &&
             (
             File.GetUnixFileMode(path) & (
@@ -115,7 +120,7 @@ internal class TestProcess {
             env Dictionary[string, string],
             cwd string = ""
         ) ProcessStartInfo {
-            let info = ProcessStartInfo(exe)
+            let info = ProcessStartInfo(SystemPath(exe))
             info.UseShellExecute = false
             info.RedirectStandardInput = true
             info.RedirectStandardOutput = true

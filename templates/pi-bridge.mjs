@@ -5,6 +5,9 @@ import { constants } from 'node:fs';
 
 const [mode, cwd, modelId, commandNetwork, sentinel, continueTruncated = 'false', effort = 'absent'] = process.argv.slice(2);
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+const bash = process.env.TOKATE_BASH;
+const bwrap = process.env.TOKATE_BWRAP;
+if (!bash?.startsWith('/') || !bwrap?.startsWith('/')) throw new Error('Missing command isolation tools');
 const sdkPath = '/tokate-runtime/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
 const sdk = await import(sdkPath);
 if (typeof sdk.VERSION !== 'string' || !sdk.VERSION) throw new Error('Missing pi SDK version');
@@ -91,12 +94,15 @@ const shell = {
         if (signal?.aborted) return reject(new Error('aborted'));
         if (directory !== cwd) return reject(new Error('Unexpected shell directory'));
         const args = ['--die-with-parent', '--new-session', '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--cap-drop', 'ALL', '--clearenv',
-            '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'HOME', '/tmp/tokate-home', '--setenv', 'TMPDIR', '/tmp/tokate-home',
+            '--setenv', 'PATH', process.env.PATH, '--setenv', 'HOME', '/tmp/tokate-home', '--setenv', 'TMPDIR', '/tmp/tokate-home',
             '--setenv', 'LANG', 'C.UTF-8', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--dir', '/tmp/tokate-home', '--bind', cwd, cwd, '--tmpfs', `${cwd}/.git`, '--chmod', '000', `${cwd}/.git`,
             '--tmpfs', '/tokate-control', '--chmod', '000', '/tokate-control', '--chdir', cwd];
         if (commandNetwork !== 'true') args.push('--unshare-net');
-        args.push('--', '/bin/bash', '--noprofile', '--norc', '-c', command);
-        const child = spawn('/usr/bin/bwrap', args, { cwd, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
+        for (const key of ['SSL_CERT_FILE', 'GIT_SSL_CAINFO', 'CURL_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS']) {
+            if (process.env[key]) args.push('--setenv', key, process.env[key]);
+        }
+        args.push('--', bash, '--noprofile', '--norc', '-c', command);
+        const child = spawn(bwrap, args, { cwd, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
         let expired = false;
         const stop = () => child.kill('SIGKILL');
         const timer = timeout === undefined ? undefined : setTimeout(() => { expired = true; stop(); }, timeout * 1000);

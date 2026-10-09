@@ -139,7 +139,7 @@ internal partial class Fixture {
             Console.Out.Flush()
             Console.Error.Write("synthetic-blocked-error")
             Console.Error.Flush()
-            let childInfo = ProcessStartInfo("/usr/bin/sleep")
+            let childInfo = ProcessStartInfo(TestProcess.SystemPath("/usr/bin/sleep"))
             childInfo.ArgumentList.Add("120")
             childInfo.RedirectStandardInput = true
             using let child = Process.Start(childInfo) ?? throw Exception("Cannot start blocked-input child")
@@ -182,7 +182,8 @@ internal partial class Fixture {
             }
         }
         if mode == "capture_write_failure" {
-            using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start capture child")
+            using let child = Process.Start(TestProcess.SystemPath("/usr/bin/sleep"), "120") ??
+                throw Exception("Cannot start capture child")
             File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.ChildIdentity(child))
             Console.Write(String('x', 131072))
             Console.Out.Flush()
@@ -239,7 +240,8 @@ internal partial class Fixture {
             File.WriteAllText(sentinel, "private agent temporary data")
         }
         if mode == "timeout" || mode == "completed_timeout" || mode == "background" {
-            using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
+            using let child = Process.Start(TestProcess.SystemPath("/usr/bin/sleep"), "120") ??
+                throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.ChildIdentity(child))
             if mode == "timeout" || mode == "completed_timeout" {
                 let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
