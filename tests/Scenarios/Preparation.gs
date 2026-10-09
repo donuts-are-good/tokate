@@ -365,7 +365,7 @@ internal class PreparationChecks {
             }
         }
 
-        private func Partial(binary string) {
+        private func Partial(binary string, resume bool = false) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
             let flow = test.Flow
@@ -381,7 +381,7 @@ internal class PreparationChecks {
             Check.That(File.Exists(Path.Combine(checkout, "partial.txt")), "Interrupted work was not retained")
             using let baseline = FixtureSnapshot(flow.Temp.Root)
             let summary = "{\"changes\":[\"Preserve incomplete work for the next donor.\"],\"verification\":[],\"limitations\":[\"Independent verification has not passed.\"]}"
-            for mode in[]string{"empty", "protected", "missing-summary", "expired"} {
+            for mode in resume ? []string{}: []string{"empty", "protected", "missing-summary", "expired"} {
                 baseline.Restore()
                 flow.Reload()
                 if mode != "missing-summary" {
@@ -407,6 +407,7 @@ internal class PreparationChecks {
             flow.Call([]string{"submit", "--run", run, "--incomplete"})
             let path = Path.Combine(run, "run.json")
             let saved = Check.Json(File.ReadAllText(path))
+            let originalAttempt = Check.Text(saved["attempt"])
             let commit = Check.Text(saved["commit"])
             Check.That(
                 Check.Text(saved["incomplete"]) == "true" && Check.Text(saved["state"]) == "incomplete_generated",
@@ -420,7 +421,7 @@ internal class PreparationChecks {
                 "Partial metadata claimed passing verification"
             )
             let invalidPath = Path.Combine(flow.Temp.Root, "invalid-partial-request.json")
-            for invalid in[]string{"false", "\"true\"", "1"} {
+            for invalid in resume ? []string{}: []string{"false", "\"true\"", "1"} {
                 let changed = request.DeepClone()
                 (changed["metadata"] ?? throw Exception("Missing metadata"))["incomplete"] = Check.Json(invalid)
                 File.WriteAllText(invalidPath, changed.ToJsonString())
@@ -459,11 +460,27 @@ internal class PreparationChecks {
             flow.Reload()
             (flow.State["pulls"]?[0] ?? throw Exception("Missing draft"))["body"] = JsonValue.Create(body)
             flow.Save()
+            if resume {
+                for action in[]string{"pause", "resume"} {
+                    let reservation = []string{"request", "--run", run, "--operation", action}
+                    flow.Call(reservation, 8)
+                    flow.Reload()
+                    let comments = flow.State["request_comments"]?.AsArray() ??
+                        throw Exception("Missing reservation requests")
+                    test.Coordinate(
+                        PostedEvent(
+                            test,
+                            comments[comments.Count - 1] ?? throw Exception("Missing reservation request")
+                        )
+                    )
+                    flow.Call(reservation)
+                }
+            }
             File.WriteAllText(Path.Combine(checkout, "result.txt"), "Completed work\n")
             flow.Git("-C", checkout, "add", "result.txt")
             flow.DonorGit(checkout, "commit", "-m", "Complete partial work")
             let completed = flow.Git("-C", checkout, "rev-parse", "HEAD")
-            let args = []string{
+            let args = List[string]{
                 "amend",
                 "--run",
                 run,
@@ -474,16 +491,28 @@ internal class PreparationChecks {
                 "--summary",
                 PublishedContribution.Summary(flow, completed, "Complete the interrupted contribution.")
             }
-            flow.Call(args)
+            if resume {
+                flow.Call(args.ToArray(), 1)
+                args.Add("--resume")
+            }
+            flow.Call(args.ToArray())
             flow.Reload()
-            let amendment = flow.State["request_comments"]?[1] ?? throw Exception("Missing completion request")
+            let comments = flow.State["request_comments"]?.AsArray() ?? throw Exception("Missing completion requests")
+            let amendment = comments[comments.Count - 1] ?? throw Exception("Missing completion request")
             test.Coordinate(PostedEvent(test, amendment))
-            flow.Call(args)
+            flow.Call(args.ToArray())
             flow.Reload()
             Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "Completion created another PR")
             Check.That(
                 Check.Json(File.ReadAllText(path))["incomplete"] == nil,
                 "Completed run retained incomplete status"
+            )
+            let current = Check.Json(File.ReadAllText(path))
+            Check.That(
+                Check.Text(current["attempt"]) == originalAttempt && Check.Text(
+                    current["publication_attempt"]
+                ) == Check.Text(test.State()["state"]?["reservation"]?["attempt"]),
+                "Resumed publication changed original execution identity or lost the new fence"
             )
             Check.That(
                 Check.Text(flow.State["pulls"]?[0]?["title"]) == "Implement fixture",
@@ -1183,6 +1212,7 @@ internal class PreparationChecks {
                 TestCase[string]("ExternalClaim", async (value string) -> ExternalClaim(value)),
                 TestCase[string]("Reservation", async (value string) -> Reservation(value)),
                 TestCase[string]("Partial", async (value string) -> Partial(value)),
+                TestCase[string]("PartialResume", async (value string) -> Partial(value, true)),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),

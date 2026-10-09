@@ -100,7 +100,7 @@ internal class Amendment {
             return pull
         }
 
-        internal func Authority(run Data, amendment Data?) JsonElement {
+        internal func Authority(run Data, amendment Data?, resume bool = false) JsonElement {
             let viewer = GitHub.Api("user")
             if !RepositoryIdentity.SameDonor(viewer, run) {
                 throw CliFailure("authentication_required", "Use the same donor account and numeric identity")
@@ -120,7 +120,9 @@ internal class Amendment {
             let actor = J.Get(viewer, "id").ToString()
             let originalActor = J.Get(original, "actor").ToString()
             let reservationId = J.Text(reservation, "reservation")
-            if run.Text("attempt") != J.Text(reservation, "attempt") {
+            let attempt = amendment != nil && amendment.Text("attempt") != "" ? amendment.Text("attempt"):
+            (run.Text("publication_attempt") == "" ? run.Text("attempt"): run.Text("publication_attempt"))
+            if !(resume && amendment == nil) && attempt != J.Text(reservation, "attempt") {
                 throw CliFailure("stale_approval", "Saved amendment attempt fence changed")
             }
             let target = J.Text(approval, "base_branch")
@@ -338,7 +340,7 @@ internal class Amendment {
                     throw Exception("Saved amendment budget or editing provenance changed")
                 }
             } else {
-                let authority = Authority(run, nil)
+                let authority = Authority(run, nil, args.Get("resume") == "true")
                 let record = J.Get(authority, "record")
                 let policy = Policy(J.Write(J.Get(record, "policy")))
                 Tools(policy, tools)
@@ -376,6 +378,7 @@ internal class Amendment {
                 amendment = Data()
                 amendment.Fields["original_evidence_sha256"] = archive
                 amendment.Fields["id"] = Guid.NewGuid().ToString("D")
+                amendment.Fields["attempt"] = J.Text(J.Get(J.Get(authority, "state"), "reservation"), "attempt")
                 amendment.Fields["previous"] = run.Text("commit")
                 amendment.Fields["commit"] = commit
                 amendment.Fields["seconds"] = seconds
@@ -581,7 +584,7 @@ internal class Amendment {
                         "branch": run.Text("branch"),
                         "previous": amendment.Text("previous"),
                         "head": amendment.Text("commit"),
-                        "attempt": run.Text("attempt"),
+                        "attempt": amendment.Text("attempt") == "" ? run.Text("attempt"): amendment.Text("attempt"),
                         "pr": amendment.Number("pr"),
                         "seconds": amendment.Number("seconds"),
                         "tools": J.Get(amendment.Element(), "tools"),
@@ -732,6 +735,9 @@ internal class Amendment {
             run.Fields["amendments"] = history
             Synchronization.Keep(run.Fields, Synchronization.History(amendment.Element()))
             run.Fields["commit"] = amendment.Text("commit")
+            if amendment.Text("attempt") != "" {
+                run.Fields["publication_attempt"] = amendment.Text("attempt")
+            }
             run.Fields.Remove("incomplete")
             Publication.SavePr(directory, run, pull)
             Terminal.Message(

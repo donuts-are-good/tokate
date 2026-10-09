@@ -26,6 +26,7 @@ internal class CliOption(name string, value string, description string, choices 
         case "seconds" when(command == "work" || command == "claim"): "Explicit budget 1..86400 seconds"
         case "seconds" when command == "amend":
         "Separate positive verification budget; required, at most the owner limit"
+        case "resume" when command == "amend": "Use the current same-donor reservation for this new amendment; retain the original execution identity"
         default: Description.Replace("{{seconds}}", command == "recover" ? "300": "min(3600, owner limit)")
     }
 }
@@ -368,10 +369,10 @@ internal class Cli {
             ),
             CliCommand(
                 "amend",
-                "run,commit,seconds,tools,sync,summary",
+                "run,commit,seconds,tools,sync,summary,resume",
                 "run,commit,seconds",
                 "Verify and publish a same-donor review correction; no inference.",
-                "--run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE] [--sync GRANT]",
+                "--run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE] [--sync GRANT] [--resume]",
                 "amend --run /path/to/run --commit SHA --seconds 300",
                 effects: "local_read local_write github_read github_write"
             ),
