@@ -12,7 +12,7 @@ internal class LinuxSandbox {
             return false
         }
 
-        internal func NamespaceFailure() CliFailure {
+        internal func NamespaceFailure(error string) CliFailure {
             if Setting("/proc/sys/user/max_user_namespaces", "0") ||
                 Setting("/proc/sys/kernel/unprivileged_userns_clone", "0") {
                 return CliFailure(
@@ -20,7 +20,13 @@ internal class LinuxSandbox {
                     "User namespaces are disabled on this host or in this container. Ask an administrator to provide a host policy that permits Tokate's namespace isolation. Tokate does not change security policy."
                 )
             }
-            if Setting("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "1") {
+            if Setting("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "1") &&
+                (
+                error.Contains("Operation not permitted", StringComparison.Ordinal) || error.Contains(
+                    "Permission denied",
+                    StringComparison.Ordinal
+                )
+            ) {
                 return CliFailure(
                     "namespace_restricted",
                     "Namespace startup was denied and AppArmor user-namespace restrictions are enabled. Ask an administrator to inspect AppArmor denials for unshare and bubblewrap and permit the required namespace operations. Tokate does not change security policy."
@@ -40,7 +46,7 @@ internal class LinuxSandbox {
                 "Failed to make / slave"
             } {
                 if result.Error.Contains(failure, StringComparison.Ordinal) {
-                    return NamespaceFailure()
+                    return NamespaceFailure(result.Error)
                 }
             }
             return CliFailure("verification_failed", message)

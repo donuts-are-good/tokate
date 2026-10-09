@@ -624,7 +624,7 @@ internal class Commands {
                     "unshare: setgroups failed:"
                 } {
                     if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
-                        throw LinuxSandbox.NamespaceFailure()
+                        throw LinuxSandbox.NamespaceFailure(result.Error)
                     }
                 }
             }
