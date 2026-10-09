@@ -245,7 +245,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
                     throw Exception("Missing donation control: " + name)
                 }
                 Require(
-                    control.Bounds.X >= 202 && control.Bounds.X + control.Bounds.Width <= width + 1,
+                    control.Bounds.X >= (width < 900 ? 0: 202) && control.Bounds.X + control.Bounds.Width <= width + 1,
                     "Donation control escaped the window: " + name
                 )
             }
@@ -475,7 +475,7 @@ func TestDesktop() {
         for name in[]string{"Donate AI time", "Open your project", "Pick up your work"} {
             let action = Find(adapter.Root, AccessibilityRole.Button, name) ?? throw Exception("Missing home action")
             Require(
-                action.Bounds.X >= 202 && action.Bounds.X + action.Bounds.Width <= width + 1,
+                action.Bounds.X >= (width < 900 ? 0: 202) && action.Bounds.X + action.Bounds.Width <= width + 1,
                 "Home action escaped the content width"
             )
             Require(action.Bounds.Y >= title.Bounds.Y + title.Bounds.Height, "Home action overlaps the headline")

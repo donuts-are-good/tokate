@@ -157,11 +157,11 @@ partial class Desktop {
         let panel = DonatePanel()
         panel.Padding = 8
         panel.Gap = 0
-        panel.FlexGrow = 1
-        panel.FlexShrink = 1
-        panel.FlexBasis = 0
+        panel.FlexGrow = Short() ? 0: 1
+        panel.FlexShrink = Short() ? 0: 1
+        panel.FlexBasis = Short() ? Length.Auto: Length(0)
         panel.MinHeight = 0
-        panel.OverflowY = Overflow.Scroll
+        panel.OverflowY = Short() ? Overflow.Visible: Overflow.Scroll
         return panel
     }
 
@@ -212,15 +212,21 @@ partial class Desktop {
 
     private func PageNavigation(page int32, total int32, summary string, change Action[int32]) Blob {
         let last = Math.Max(1, (total + PageSize - 1) / PageSize)
-        let pager = Row(
+        let buttons = Row(
             []Blob{
-                Label("Page " + page.ToString() + " of " + last.ToString() + "  ·  " + summary, 17),
-                Container{FlexGrow: 1},
                 Action("Previous page", () -> change(page - 1), disabled: page <= 1),
                 Action("Next page", () -> change(page + 1), disabled: page >= last),
             }
         )
-        pager.FlexWrap = FlexWrap.NoWrap
+        buttons.JustifyContent = JustifyContent.FlexEnd
+        let pager = Container{
+            FlexDirection: contentWidth < 540 ? FlexDirection.Column: FlexDirection.Row,
+            AlignItems: contentWidth < 540 ? AlignItems.Stretch: AlignItems.Center,
+            Gap: 12,
+            Label("Page " + page.ToString() + " of " + last.ToString() + "  ·  " + summary, 17),
+            buttons,
+        }
+        buttons.FlexGrow = contentWidth < 540 ? 0: 1
         return pager
     }
 }

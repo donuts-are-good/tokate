@@ -152,7 +152,7 @@ partial class Desktop {
         let codingTime = unbounded ? "Unlimited": (Number(donation, "coding_seconds") / 60).ToString() + " minutes"
         let verificationTime = (Number(donation, "verification_reserve") / 60).ToString() + " minutes"
         let body = Container{
-            Height: donationStarted ? Percent(100): Length.Auto,
+            Height: donationStarted && !Short() ? Percent(100): Length.Auto,
             MinHeight: 0,
             Gap: 18,
             DonationHeading(),
@@ -242,9 +242,9 @@ partial class Desktop {
         )
         output.Handle = outputViewport
         output.Accessibility = Accessibility{Role: AccessibilityRole.Generic, Name: "Donation output"}
-        output.FlexGrow = 1
-        output.FlexBasis = 0
-        output.MinHeight = 0
+        output.FlexGrow = Short() ? 0: 1
+        output.FlexBasis = Short() ? Length.Auto: Length(0)
+        output.MinHeight = Short() ? 240: 0
         output.Focusable = true
         output.OnKeyDown = event -> {
             if event.Key == Key.Home {

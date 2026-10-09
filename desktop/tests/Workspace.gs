@@ -31,6 +31,63 @@ func IssueRowCount(node AccessibilityNode?) int32 {
     return count
 }
 
+func FocusVisible(
+    host TestHost,
+    window Window,
+    adapter TestAccessibility,
+    name string,
+    width int32,
+    height int32,
+    pinned bool = false
+) {
+    for attempt in 0 ... 128 {
+        let control = Find(adapter.Root, AccessibilityRole.Button, name) ?? throw Exception("Missing control: " + name)
+        if control.Focused {
+            break
+        }
+        Press(window, Key.Tab)
+        Settle(host)
+    }
+    let focused = Find(adapter.Root, AccessibilityRole.Button, name) ?? throw Exception("Lost control: " + name)
+    Require(focused.Focused, "Keyboard cannot reach " + name)
+    let bounds = focused.Bounds
+    Require(bounds.X >= 0 && bounds.X + bounds.Width <= width + 1, "Control exceeds tiled width: " + name)
+    if pinned {
+        Require(bounds.Y >= 0 && bounds.Y + bounds.Height <= height + 1, "Navigation exceeds tiled height: " + name)
+    }
+}
+
+func TiledLayouts(host TestHost, window Window, adapter TestAccessibility) {
+    let sizes = []int32{480, 540, 960, 270, 640, 720, 1280, 360, 960, 1080, 1920, 540}
+    for i in 0 ... sizes.Length / 2 {
+        let width = sizes[i * 2]
+        let height = sizes[i * 2 + 1]
+        host.Resize(width, height, width * 2, height * 2)
+        Settle(host)
+        for name in[]string{"Welcome", "Donate", "My project", "Saved work", "Appearance"} {
+            FocusVisible(host, window, adapter, name, width, height, true)
+        }
+        for name in[]string{"Donate", "Saved work", "My project"} {
+            Console.WriteLine("Tiling " + name + " at " + width.ToString() + "x" + height.ToString())
+            Choose(host, window, adapter, name)
+            if name == "My project" {
+                Choose(host, window, adapter, "Contributions")
+                if Find(adapter.Root, AccessibilityRole.Button, "Back to issues") != nil {
+                    Choose(host, window, adapter, "Back to issues")
+                }
+            }
+            AwaitControl(host, adapter, AccessibilityRole.Button, "Next page", enabled: true)
+            FocusVisible(host, window, adapter, "Next page", width, height)
+        }
+        Choose(host, window, adapter, "Welcome")
+        FocusVisible(host, window, adapter, "Pick up your work", width, height)
+    }
+    host.Resize(1440, 1000, 1440, 1000)
+    Settle(host)
+    Choose(host, window, adapter, "Donate")
+    FocusVisible(host, window, adapter, "Next page", 1440, 1000)
+}
+
 func WorkspaceFlow() {
     let fixture = Path.Combine(Path.GetTempPath(), "tokate-workspace-" + Guid.NewGuid().ToString("N"))
     let previousPath = Environment.GetEnvironmentVariable("PATH")
@@ -217,6 +274,7 @@ func WorkspaceFlow() {
             "Search filters were not sent to GitHub"
         )
         Require(requests.Contains("repos/owner/repo/issues/42"), "Number search scanned issue pages")
+        TiledLayouts(host, window, adapter)
     } finally {
         Environment.SetEnvironmentVariable("PATH", previousPath)
         Environment.SetEnvironmentVariable("XDG_STATE_HOME", previousState)

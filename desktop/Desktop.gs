@@ -22,6 +22,7 @@ partial class Desktop : Cell {
     private var keyboardFocus bool
     private var chromeHover WindowChromeAction?
     private var windowWidth float64 = 1280
+    private var windowHeight float64 = 860
     private let art Artwork
     private let twilight Anim[float64]
     private let loadingPulse Anim[float64]
@@ -54,8 +55,11 @@ partial class Desktop : Cell {
         loadingPulse = Animate(1.0)
         viewport.MetricsChanged += metrics -> {
             let next = metrics.BorderBox.Width < 1120
-            if Math.Abs(windowWidth - metrics.BorderBox.Width) > 0.5 {
+            if Math.Abs(windowWidth - metrics.BorderBox.Width) > 0.5 || Math.Abs(
+                windowHeight - metrics.BorderBox.Height
+            ) > 0.5 {
                 windowWidth = metrics.BorderBox.Width
+                windowHeight = metrics.BorderBox.Height
                 narrow = next
                 Rebuild()
             }
@@ -151,7 +155,18 @@ partial class Desktop : Cell {
 
     private func Keyboard(button Blob) Blob {
         WidgetKeyBindings.BindActivation(button)
-        return button
+        return RevealFocus(button)
+    }
+
+    private func RevealFocus(control Blob) Blob {
+        let handle = control.Handle ?? ElementHandle()
+        let focused = control.OnFocus
+        control.Handle = handle
+        control.OnFocus = event -> {
+            focused?.Invoke(event)
+            handle.ScrollIntoView()
+        }
+        return control
     }
 
     private func FocusStyle() Style -> keyboardFocus ? Style{
@@ -258,7 +273,7 @@ partial class Desktop : Cell {
                 }
             )
         }
-        return button
+        return Keyboard(button)
     }
 
     private func Entry(
@@ -295,7 +310,7 @@ partial class Desktop : Cell {
         }.Build()
         field.MaxWidth = Percent(100)
         field.FlexShrink = 1
-        return field
+        return RevealFocus(field)
     }
 
     private func Dropdown(
@@ -304,54 +319,56 @@ partial class Desktop : Cell {
         values[]ComboBoxOption,
         change Action[string],
         width float64
-    ) Blob -> Container{
-        Width: width,
-        MaxWidth: Percent(100),
-        Gap: 6,
-        Label(label, 16, true),
-        Cell.Mount[ComboBoxInput, ComboBox](
-            nil,
-            ComboBoxInput{
-                Items: values,
-                SelectedId: value,
-                Placeholder: value,
-                OnSelect: selected -> {
-                    change(selected)
-                    Rebuild()
-                },
-                AccessibilityName: label,
-                Disabled: busy,
-                Width: width,
-                RowHeight: 40,
-                CreateRoot: (input, root) -> {
-                    root.MaxWidth = Percent(100)
-                    return root
-                },
-                CreateTrigger: (input, button) -> {
-                    button.Height = 44
-                    button.BackgroundColor = Surface()
-                    button.BorderColor = Line()
-                    button.BorderRadius = 5
-                    button.Focus = FocusStyle()
-                    button.Hover = Style{BorderColor: Accent()}
-                    return button
-                },
-                CreateRow: (input, item, row) -> {
-                    row.BackgroundColor = item.Id == input.SelectedId ? Paper(): Surface()
-                    row.Hover = Style{BackgroundColor: Paper()}
-                    row.OutlineColor = keyboardFocus ? Accent(): Color.Transparent
-                    return row
-                },
-                CreatePopup: (input, popup) -> {
-                    popup.BackgroundColor = Surface()
-                    popup.BorderColor = Line()
-                    popup.OnKeyDown = event -> KeyNavigation(event)
-                    popup.OnPointerDown = event -> FocusHints(false)
-                    return popup
-                },
-            }
-        ),
-    }
+    ) Blob -> RevealFocus(
+        Container{
+            Width: width,
+            MaxWidth: Percent(100),
+            Gap: 6,
+            Label(label, 16, true),
+            Cell.Mount[ComboBoxInput, ComboBox](
+                nil,
+                ComboBoxInput{
+                    Items: values,
+                    SelectedId: value,
+                    Placeholder: value,
+                    OnSelect: selected -> {
+                        change(selected)
+                        Rebuild()
+                    },
+                    AccessibilityName: label,
+                    Disabled: busy,
+                    Width: width,
+                    RowHeight: 40,
+                    CreateRoot: (input, root) -> {
+                        root.MaxWidth = Percent(100)
+                        return root
+                    },
+                    CreateTrigger: (input, button) -> {
+                        button.Height = 44
+                        button.BackgroundColor = Surface()
+                        button.BorderColor = Line()
+                        button.BorderRadius = 5
+                        button.Focus = FocusStyle()
+                        button.Hover = Style{BorderColor: Accent()}
+                        return button
+                    },
+                    CreateRow: (input, item, row) -> {
+                        row.BackgroundColor = item.Id == input.SelectedId ? Paper(): Surface()
+                        row.Hover = Style{BackgroundColor: Paper()}
+                        row.OutlineColor = keyboardFocus ? Accent(): Color.Transparent
+                        return row
+                    },
+                    CreatePopup: (input, popup) -> {
+                        popup.BackgroundColor = Surface()
+                        popup.BorderColor = Line()
+                        popup.OnKeyDown = event -> KeyNavigation(event)
+                        popup.OnPointerDown = event -> FocusHints(false)
+                        return popup
+                    },
+                }
+            ),
+        }
+    )
 
     private func Check(label string, value bool, change Action[bool]) Blob {
         let checkbox = Checkbox{
@@ -369,7 +386,7 @@ partial class Desktop : Cell {
             CheckedBorderColor: Ink(),
         }.Build()
         checkbox.Focus = FocusStyle()
-        return checkbox
+        return RevealFocus(checkbox)
     }
 
     private func Row(children[]Blob) Container -> Container{
@@ -540,15 +557,28 @@ partial class Desktop : Cell {
         Rebuild()
     }
 
-    private func Navigation(label string, index string) Blob -> Keyboard(
-        Button{
-            Height: 50,
-            Padding: Edges{Left: 14, Right: 14},
+    private func Short() bool -> windowHeight < 600
+
+    private func Compact() bool -> windowWidth < 900 || Short()
+
+    private func Navigation(label string, index string) Blob {
+        let caption = Compact() ? switch label {
+            case "Appearance": "Theme"
+            case "My project": "Project"
+            case "Saved work": "Saved"
+            default: label
+        }: label
+        let button = Button{
+            Height: Compact() ? 42: 50,
+            FlexGrow: Compact() ? 1: 0,
+            FlexBasis: Compact() ? Length(0): Length.Auto,
+            MinWidth: 0,
+            Padding: Edges{Left: Compact() ? 6: 14, Right: Compact() ? 6: 14},
             BorderRadius: 5,
             FlexDirection: FlexDirection.Row,
             AlignItems: AlignItems.Center,
             Gap: 16,
-            JustifyContent: JustifyContent.FlexStart,
+            JustifyContent: Compact() ? JustifyContent.Center: JustifyContent.FlexStart,
             BackgroundColor: page == label ? Surface(): Color.Transparent,
             BorderWidth: 0,
             BorderColor: Color.Transparent,
@@ -557,43 +587,77 @@ partial class Desktop : Cell {
             Accessibility: Accessibility{Role: AccessibilityRole.Button, Name: label},
             Hover: Style{BackgroundColor: Surface()},
             Focus: FocusStyle(),
-            Container{
-                Position: PositionType.Absolute,
-                Left: 0,
-                Top: 6,
-                Bottom: 6,
-                Width: 2,
-                BorderRadius: 1,
-                BackgroundColor: page == label ? Accent(): Color.Transparent,
-            },
-            Text{Content: index, Width: 36, FontFamily: "Cormorant", FontWeight: 500, FontSize: 26, Color: Accent()},
-            Label(label, 19),
+            Label(caption, Compact() ? 16: 19),
         }
-    )
+        let indicator = Container{
+            Position: PositionType.Absolute,
+            Left: 0,
+            BorderRadius: 1,
+            BackgroundColor: page == label ? Accent(): Color.Transparent,
+        }
+        if Compact() {
+            indicator.Right = 0
+            indicator.Bottom = 0
+            indicator.Height = 2
+        } else {
+            indicator.Top = 6
+            indicator.Bottom = 6
+            indicator.Width = 2
+        }
+        button.Children.Insert(0, indicator)
+        if !Compact() {
+            button.Children.Insert(
+                1,
+                Text{Content: index, Width: 36, FontFamily: "Cormorant", FontWeight: 500, FontSize: 26, Color: Accent()}
+            )
+        }
+        return Keyboard(button)
+    }
 
-    private func Sidebar() Blob -> Container{
-        Width: narrow ? 202: 226,
-        FlexShrink: 0,
-        Padding: Edges{Left: 20, Right: 20, Top: 28, Bottom: 24},
-        BorderWidth: Edges{Right: 1},
-        BorderColor: Line(),
-        Gap: 10,
-        Container{
-            FlexDirection: FlexDirection.Row,
+    private func Sidebar() Blob {
+        if Compact() {
+            return Container{
+                Key: "navigation",
+                Height: 46,
+                FlexShrink: 0,
+                FlexDirection: FlexDirection.Row,
+                Padding: Edges{Left: 8, Right: 8, Bottom: 4},
+                Gap: 2,
+                BackgroundColor: Paper(),
+                BorderWidth: Edges{Bottom: 1},
+                BorderColor: Line(),
+                Navigation("Welcome", "I"),
+                Navigation("Donate", "II"),
+                Navigation("My project", "III"),
+                Navigation("Saved work", "IV"),
+                Navigation("Appearance", "V"),
+            }
+        }
+        return Container{
+            Key: "navigation",
+            Width: narrow ? 202: 226,
+            FlexShrink: 0,
+            Padding: Edges{Left: 20, Right: 20, Top: 28, Bottom: 24},
+            BorderWidth: Edges{Right: 1},
+            BorderColor: Line(),
             Gap: 10,
-            AlignItems: AlignItems.Center,
-            JustifyContent: JustifyContent.Center,
-            Padding: Edges{Bottom: 16},
-            Container{Width: 25, Height: 36, art.Mark.Render()},
-            Text{Content: "tokate", FontFamily: "Newsreader", FontSize: narrow ? 34: 38, Color: Accent()},
-        },
-        Container{Height: 1, BackgroundColor: Line(), Margin: Edges{Bottom: 14}},
-        Navigation("Welcome", "I"),
-        Navigation("Donate", "II"),
-        Navigation("My project", "III"),
-        Navigation("Saved work", "IV"),
-        Container{FlexGrow: 1},
-        Navigation("Appearance", "V"),
+            Container{
+                FlexDirection: FlexDirection.Row,
+                Gap: 10,
+                AlignItems: AlignItems.Center,
+                JustifyContent: JustifyContent.Center,
+                Padding: Edges{Bottom: 16},
+                Container{Width: 25, Height: 36, art.Mark.Render()},
+                Text{Content: "tokate", FontFamily: "Newsreader", FontSize: narrow ? 34: 38, Color: Accent()},
+            },
+            Container{Height: 1, BackgroundColor: Line(), Margin: Edges{Bottom: 14}},
+            Navigation("Welcome", "I"),
+            Navigation("Donate", "II"),
+            Navigation("My project", "III"),
+            Navigation("Saved work", "IV"),
+            Container{FlexGrow: 1},
+            Navigation("Appearance", "V"),
+        }
     }
 
     private func HeroHeight() float64 -> contentWidth * 0.4
@@ -611,6 +675,7 @@ partial class Desktop : Cell {
 
     private func SectionBackground() Blob {
         let background = Container{
+            Key: "background",
             Position: PositionType.Absolute,
             Left: 0,
             Right: 0,
@@ -708,10 +773,10 @@ partial class Desktop : Cell {
     }
 
     private func Home() Blob -> Container{
-        Height: Percent(100),
+        Height: Short() ? Length.Auto: Percent(100),
         MinHeight: 0,
         Gap: 0,
-        Painting(0, false),
+        Painting(Short() ? 160: 0, false),
         Container{
             Width: Percent(100),
             MaxWidth: 1050,
@@ -769,11 +834,16 @@ partial class Desktop : Cell {
             Open: confirmation != nil,
             KeyBindings: WidgetKeyBindings.Editing(host?.PlatformInput),
             Header: Heading(confirmationTitle, 32),
-            Content: confirmationContent?.Invoke() ?? Label(confirmationText),
+            Content: Container{
+                MinHeight: 0,
+                FlexShrink: 1,
+                OverflowY: Overflow.Scroll,
+                confirmationContent?.Invoke() ?? Label(confirmationText),
+            },
             AccessibilityName: confirmationTitle,
-            Width: 580,
-            Padding: 30,
-            Gap: 20,
+            Width: Math.Min(580, windowWidth - 32),
+            Padding: Compact() ? 20: 30,
+            Gap: Short() ? 12: 20,
             BackgroundColor: Surface(),
             BorderColor: Line(),
             CancelText: "Go back",
@@ -839,7 +909,7 @@ partial class Desktop : Cell {
                 ownerTab == "Contributions" &&
                 ownerSelected.ValueKind != JsonValueKind.Object
         )
-        if browsing {
+        if browsing && !Short() {
             content.FlexGrow = 1
             content.FlexShrink = 1
             content.FlexBasis = 0
@@ -851,7 +921,8 @@ partial class Desktop : Cell {
                 ownerStep.ToString(): page,
             Handle: contentViewport,
             Width: Percent(100),
-            Height: welcome || live || browsing ? Percent(100): Length.Auto,
+            Height: !Short() && (welcome || live || browsing) ? Percent(100): Length.Auto,
+            FlexShrink: !Short() && (welcome || live || browsing) ? 1: 0,
             MinHeight: 0,
             MaxWidth: welcome ? Percent(100): Length(1050),
             AlignSelf: AlignSelf.Center,
@@ -873,6 +944,88 @@ partial class Desktop : Cell {
                 }
             )
         }
+        let workspace = Container{
+            Key: "workspace",
+            FlexGrow: 1,
+            FlexShrink: 1,
+            FlexBasis: 0,
+            MinWidth: 0,
+            MinHeight: 0,
+            SectionBackground(),
+            WindowChrome{
+                Host: host,
+                Height: 42,
+                BackgroundColor: welcome ? Color.Transparent: Paper(),
+                BorderColor: Color.Transparent,
+                ControlColor: Muted(),
+                HoverBackgroundColor: Surface(),
+                CloseHoverBackgroundColor: ThemeColor("#97492E", "#AA563A"),
+                EnableDoubleClick: true,
+                CreateControlContent: (options, command) -> MaterialIcons.Create(
+                    switch command {
+                        case WindowChromeAction.Minimize: "remove"
+                        case WindowChromeAction.Maximize: "crop_square"
+                        case WindowChromeAction.Restore: "filter_none"
+                        default: "close"
+                    },
+                    18,
+                    chromeHover == command ? (
+                        command == WindowChromeAction.Close ? Color.Parse("#FFF8EB"): Ink()
+                    ): Muted()
+                ),
+                CreateControl: (options, command, content, action) -> Button{
+                    Width: options.ControlWidth,
+                    Height: 32,
+                    Margin: Edges{Right: 4},
+                    BorderRadius: 4,
+                    Padding: 0,
+                    AlignItems: AlignItems.Center,
+                    JustifyContent: JustifyContent.Center,
+                    Focus: FocusStyle(),
+                    OnPointerEnter: event -> {
+                        chromeHover = command
+                        Rebuild()
+                    },
+                    OnPointerLeave: event -> {
+                        chromeHover = nil
+                        Rebuild()
+                    },
+                    Hover: Style{
+                        BackgroundColor: command == WindowChromeAction.Close ? ThemeColor(
+                            "#97492E",
+                            "#AA563A"
+                        ): ThemeColor("#E4D4B8", "#35485F")
+                    },
+                },
+                TrailingContent: IconButton{
+                    Icon: MaterialIcons.Create(night ? "light_mode": "dark_mode", 20, Accent()),
+                    AccessibilityName: night ? "Switch to daylight": "Switch to moonlight",
+                    OnClick: () -> ToggleTheme(),
+                    Width: 46,
+                    Height: 42,
+                    BorderRadius: 0,
+                    HoverBackgroundColor: Surface(),
+                    ShowFocusHighlight: keyboardFocus,
+                    FocusOutlineColor: Accent(),
+                }.Build(),
+            }.Build(),
+            Container{
+                Key: "content-scroll",
+                FlexGrow: 1,
+                FlexShrink: 1,
+                FlexBasis: 0,
+                MinWidth: 0,
+                MinHeight: 0,
+                OverflowX: Overflow.Hidden,
+                OverflowY: !Short() && (welcome || live || browsing) ? Overflow.Hidden: Overflow.Scroll,
+                Padding: welcome ? 0: Compact() ? 16: 28,
+                body,
+            },
+        }
+        workspace.Children[1].Key = "chrome"
+        if Compact() {
+            workspace.Children.Insert(2, Sidebar())
+        }
         let root = Container{
             Width: Percent(100),
             Height: Percent(100),
@@ -885,86 +1038,13 @@ partial class Desktop : Cell {
             BackgroundColor: Paper(),
             FontFamily: "Newsreader",
             Color: Ink(),
-            Sidebar(),
-            Container{
-                FlexGrow: 1,
-                FlexShrink: 1,
-                FlexBasis: 0,
-                MinWidth: 0,
-                MinHeight: 0,
-                SectionBackground(),
-                WindowChrome{
-                    Host: host,
-                    Height: 42,
-                    BackgroundColor: welcome ? Color.Transparent: Paper(),
-                    BorderColor: Color.Transparent,
-                    ControlColor: Muted(),
-                    HoverBackgroundColor: Surface(),
-                    CloseHoverBackgroundColor: ThemeColor("#97492E", "#AA563A"),
-                    EnableDoubleClick: true,
-                    CreateControlContent: (options, command) -> MaterialIcons.Create(
-                        switch command {
-                            case WindowChromeAction.Minimize: "remove"
-                            case WindowChromeAction.Maximize: "crop_square"
-                            case WindowChromeAction.Restore: "filter_none"
-                            default: "close"
-                        },
-                        18,
-                        chromeHover == command ? (
-                            command == WindowChromeAction.Close ? Color.Parse("#FFF8EB"): Ink()
-                        ): Muted()
-                    ),
-                    CreateControl: (options, command, content, action) -> Button{
-                        Width: options.ControlWidth,
-                        Height: 32,
-                        Margin: Edges{Right: 4},
-                        BorderRadius: 4,
-                        Padding: 0,
-                        AlignItems: AlignItems.Center,
-                        JustifyContent: JustifyContent.Center,
-                        Focus: FocusStyle(),
-                        OnPointerEnter: event -> {
-                            chromeHover = command
-                            Rebuild()
-                        },
-                        OnPointerLeave: event -> {
-                            chromeHover = nil
-                            Rebuild()
-                        },
-                        Hover: Style{
-                            BackgroundColor: command == WindowChromeAction.Close ? ThemeColor(
-                                "#97492E",
-                                "#AA563A"
-                            ): ThemeColor("#E4D4B8", "#35485F")
-                        },
-                    },
-                    TrailingContent: IconButton{
-                        Icon: MaterialIcons.Create(night ? "light_mode": "dark_mode", 20, Accent()),
-                        AccessibilityName: night ? "Switch to daylight": "Switch to moonlight",
-                        OnClick: () -> ToggleTheme(),
-                        Width: 46,
-                        Height: 42,
-                        BorderRadius: 0,
-                        HoverBackgroundColor: Surface(),
-                        ShowFocusHighlight: keyboardFocus,
-                        FocusOutlineColor: Accent(),
-                    }.Build(),
-                }.Build(),
-                Container{
-                    FlexGrow: 1,
-                    FlexShrink: 1,
-                    FlexBasis: 0,
-                    MinWidth: 0,
-                    MinHeight: 0,
-                    OverflowX: Overflow.Hidden,
-                    OverflowY: welcome || live || browsing ? Overflow.Hidden: Overflow.Scroll,
-                    Padding: welcome ? 0: 28,
-                    body,
-                },
-            },
+            workspace,
+        }
+        if !Compact() {
+            root.Children.Insert(0, Sidebar())
         }
         if confirmation != nil {
-            root.Children.Add(Container{Width: 0, Height: 0, Dialog()})
+            root.Children.Add(Container{Key: "dialog", Width: 0, Height: 0, Dialog()})
         }
         return root
     }
