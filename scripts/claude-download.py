@@ -11,10 +11,13 @@ import urllib.request
 def main():
     parser = argparse.ArgumentParser(description='Explicit CI download of the official latest native Linux x64 Claude artifact')
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--version')
     args = parser.parse_args()
     base = 'https://downloads.claude.ai/claude-code-releases'
-    with urllib.request.urlopen(base + '/latest', timeout=30) as response:
-        version = response.read(128).decode('ascii').strip()
+    version = args.version
+    if version is None:
+        with urllib.request.urlopen(base + '/latest', timeout=30) as response:
+            version = response.read(128).decode('ascii').strip()
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
         raise RuntimeError('Official latest channel did not resolve to a release version')
     with urllib.request.urlopen(base + '/' + version + '/manifest.json', timeout=30) as response:
@@ -42,7 +45,7 @@ def main():
             raise RuntimeError('Official artifact is not native Linux x64')
         os.chmod(temporary, 0o700)
         temporary.replace(args.output)
-        print('Official latest native Claude ' + version + ': manifest SHA256, size and Linux x64 ELF verified')
+        print('Official native Claude ' + version + ': manifest SHA256, size and Linux x64 ELF verified')
     finally:
         temporary.unlink(missing_ok=True)
 

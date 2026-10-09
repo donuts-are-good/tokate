@@ -32,13 +32,12 @@ sha256sum "$proof/pi-install.sh"
 mkdir -p "$proof/native-codex"
 run "$proof/native-codex" CODEX_INSTALL_DIR="$proof/native-codex/bin" CODEX_HOME="$proof/native-codex/state" "$binary" doctor --managed --harness codex --fix --yes --json > "$proof/native-codex/setup.json"
 probe "$proof/native-codex" codex CODEX_INSTALL_DIR="$proof/native-codex/bin" CODEX_HOME="$proof/native-codex/state"
-run "$proof/native-codex" "$proof/native-codex/bin/codex" --version
+codex_version=$(run "$proof/native-codex" "$proof/native-codex/bin/codex" --version)
+codex_version=${codex_version##* }
 mkdir -p "$proof/native-pi/bin"
 run "$proof/native-pi" PATH="$proof/native-pi/bin:$runtime_path" PI_CODING_AGENT_DIR="$proof/native-pi/agent" sh "$proof/pi-install.sh"
 probe "$proof/native-pi" pi PATH="$proof/native-pi/bin:$runtime_path" PI_CODING_AGENT_DIR="$proof/native-pi/agent"
-run "$proof/native-pi" "$proof/native-pi/bin/pi" --version
-codex_version=$(run "$proof/npm" npm view @openai/codex version)
-pi_version=$(run "$proof/npm" npm view @earendil-works/pi-coding-agent version)
+pi_version=$(run "$proof/native-pi" "$proof/native-pi/bin/pi" --version)
 run "$proof/npm" NPM_CONFIG_PREFIX="$proof/npm/prefix" npm install --global "@openai/codex@$codex_version" "@earendil-works/pi-coding-agent@$pi_version"
 probe "$proof/npm" codex NPM_CONFIG_PREFIX="$proof/npm/prefix"
 probe "$proof/npm" pi NPM_CONFIG_PREFIX="$proof/npm/prefix"
@@ -73,3 +72,6 @@ run "$proof/bun-home" BUN_INSTALL_GLOBAL_DIR="$proof/bun-home/packages" BUN_INST
 probe "$proof/bun-home" codex BUN_INSTALL_BIN="$proof/bun-home/bin"
 probe "$proof/bun-home" pi BUN_INSTALL_BIN="$proof/bun-home/bin"
 printf 'PASS native, npm and Bun Codex/Pi installation discovery and sandbox probes without inference. npm/Bun versions: Codex %s, Pi %s\n' "$codex_version" "$pi_version"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'codex=%s\npi=%s\n' "$codex_version" "$pi_version" >> "$GITHUB_OUTPUT"
+fi
