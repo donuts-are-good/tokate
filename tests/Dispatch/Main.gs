@@ -91,6 +91,9 @@ func Main(args[]string) int32 {
             case "--cli" when args.Length == 1 {
                 CliDiscovery.All(binary)
             }
+            case "--cli-contract" when args.Length == 1 {
+                CliDiscovery.Contract(binary)
+            }
             case "--cli-shell" when args.Length == 2 {
                 CliDiscovery.All(binary, args[1])
             }

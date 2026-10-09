@@ -882,6 +882,10 @@ internal class CliDiscovery {
                 TerminalOutput.All(binary)
                 Saved(binary)
             }
+            Contract(binary, shell)
+        }
+
+        internal func Contract(binary string, shell string = "bash") {
             Check.That(shell == "bash" || shell == "zsh" || shell == "fish", "Choose bash, zsh or fish")
             using let temp = Temp()
             let bin = Path.Combine(temp.Root, "bin")
@@ -990,7 +994,7 @@ internal class CliDiscovery {
             }
             let saved = Path.Combine(temp.Root, "run")
             Directory.CreateDirectory(saved)
-            File.WriteAllText(Path.Combine(saved, "run.json"), "{\"state\":\"claimed\"}")
+            File.WriteAllText(Path.Combine(saved, "run.json"), "{\"version\":2,\"state\":\"claimed\"}")
             Check.Contains(Call(binary, []string{"status", "--run=" + saved}, temp).Output, "claimed")
             Check.That(!File.Exists(log), "Help or invalid inputs invoked a tool")
 
