@@ -144,7 +144,12 @@ internal class Cli {
                 "Owner-selected target; default: upstream default branch (prompt on a terminal)"
             ),
             CliOption("model", "MODEL", "Owner-approved model"),
-            CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
+            CliOption(
+                "effort",
+                "EFFORT",
+                "Owner-approved effort",
+                "off minimal low medium high xhigh max ultra absent"
+            ),
             CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
             CliOption("harness-path", "FILE", "Existing harness executable at an absolute custom path"),
             CliOption("profile", "NAME", "Named local donor profile; explicit compatible choices override it"),

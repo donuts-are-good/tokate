@@ -166,7 +166,7 @@ internal class Policy {
     }
 
     private func ValidEffort(effort string) bool {
-        if Array.IndexOf("minimal low medium high xhigh max ultra".Split(' '), effort) >= 0 {
+        if Array.IndexOf("off minimal low medium high xhigh max ultra".Split(' '), effort) >= 0 {
             return true
         }
         if effort == "unknown" {

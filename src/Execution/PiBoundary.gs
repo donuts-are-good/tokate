@@ -234,15 +234,7 @@ internal class PiBoundary {
                                             "cacheRead": 0,
                                             "cacheWrite": 0
                                         },
-                                        "compat": map[string, Object?]{
-                                            "supportsDeveloperRole": false,
-                                            "supportsReasoningEffort": J.Get(
-                                                J.Get(settings, "compat"),
-                                                "supportsReasoningEffort"
-                                            ),
-                                            "thinkingFormat": J.Text(J.Get(settings, "compat"), "thinkingFormat"),
-                                            "maxTokensField": "max_tokens"
-                                        }
+                                        "compat": J.Get(settings, "compat")
                                     }
                                 }
                             }
