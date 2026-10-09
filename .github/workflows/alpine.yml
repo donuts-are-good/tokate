@@ -36,24 +36,7 @@ jobs:
               apk add --no-cache bash clang build-base zlib-dev git github-cli curl coreutils findutils tar util-linux-misc bubblewrap nodejs npm python3
               adduser -D tester
               chown -R tester:tester /src
-              su -s /bin/bash tester -c "set -e
-                export TOKATE_RUNTIME_IDENTIFIER=linux-musl-x64
-                export TOKATE_BINARY=/src/artifacts/linux-musl-x64/tokate
-                unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
-                bash scripts/build.sh
-                artifacts/tests-musl/tokate-tests --shell /bin/sh
-                artifacts/tests-musl/tokate-tests --cli-setup
-                artifacts/tests-musl/tokate-tests --process
-                artifacts/tests-musl/tokate-tests --flow CrossAccountFlow
-                artifacts/linux-musl-x64/tokate doctor --external --json
-                npm install --global --prefix /home/tester/.local @openai/codex@latest
-                artifacts/linux-musl-x64/tokate doctor --harness-path /home/tester/.local/bin/codex --json
-                ~/.local/bin/codex --version
-                python3 scripts/native-proof.py --codex ~/.local/bin/codex
-                artifacts/linux-musl-x64/tokate doctor --harness pi --fix --yes --json
-                ~/.pi/agent/bin/pi --version
-                node --version
-                bash scripts/package.sh"
+              su -s /bin/bash tester -c "bash scripts/alpine-ci.sh"
             '
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
