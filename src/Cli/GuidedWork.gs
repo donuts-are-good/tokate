@@ -204,10 +204,15 @@ internal class GuidedWork {
             if args.Get("unlimited") == "true" && !allowUnlimited {
                 throw Exception("Repository policy does not allow unlimited coding")
             }
+            let cap = (limit / 60).ToString() + " minutes"
             while true {
                 let answer = WizardScreen.Read(
                     "Set your limit",
-                    allowUnlimited ? "Choose coding minutes, or type unlimited. Verification keeps a separate time limit.": "Choose your coding time in minutes. Verification has a separate reserve.",
+                    allowUnlimited ? "No time limit is available for coding. Timed donations and verification are limited to " +
+                        cap +
+                        ". Choose coding minutes, or type unlimited.": "Owner limit: " +
+                        cap +
+                        " for coding and verification combined. Choose coding minutes.",
                     allowUnlimited ? "Coding minutes or unlimited": "Coding minutes",
                     args.Get("unlimited") == "true" ? "unlimited": "30",
                     "This is a client time limit, not a token, billing or server-resource cap."

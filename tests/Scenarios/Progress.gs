@@ -254,6 +254,8 @@ internal class ProgressChecks {
             Check.That(guided.Code == 1, guided.Output + guided.Error)
             Check.Contains(guided.Output, "Review donation")
             Check.Contains(guided.Output, "No time limit")
+            Check.Contains(guided.Output, "No time limit is available for coding.")
+            Check.Contains(guided.Output, "Timed donations and verification are limited to 60 minutes.")
             flow.NoInference()
             Check.Contains(
                 flow.Call(
