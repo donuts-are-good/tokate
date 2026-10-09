@@ -74,6 +74,17 @@ internal class PrBody {
                     PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
             }
             let prior = J.Get(metadata, "predecessor")
+            let handoff = J.Get(metadata, "handoff")
+            if handoff.ValueKind != JsonValueKind.Undefined {
+                ContributionHandoff.Declaration(handoff)
+                report += "\n\n- Supersedes #" + J.Number(handoff, "pr").ToString() + " from @" + J.Text(
+                    handoff,
+                    "donor"
+                ) +
+                    ". Preserves the original commits from " +
+                    J.Text(handoff, "head") +
+                    ". The repository owner may close the prior draft after reviewing this successor. Its discussion is preserved."
+            }
             return report + (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + ContinuationReport(prior).Trim())
         }
 

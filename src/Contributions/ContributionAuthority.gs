@@ -29,6 +29,7 @@ internal class ContributionAuthority {
                 throw CliFailure("stale_approval", "Saved execution attempt fence changed; old work is preserved")
             }
             let record = state.Check(repo, run.Number("issue"), run.Text("donor"), J.Get(viewer, "id"))
+            ContributionHandoff.Authority(state, J.Get(run.Element(), "handoff"))
             let approval = J.Get(record, "approval")
             if run.Text("base") != J.Text(approval, "base") || run.Text("policy_hash") != J.Text(
                 approval,

@@ -182,6 +182,7 @@ internal class Cli {
                 "Run storage; default: tokate/runs under XDG_STATE_HOME, or ~/.local/state/tokate/runs"
             ),
             CliOption("run", "DIR", "Saved run directory"),
+            CliOption("from-pr", "N", "Seed an external donation from another donor's last coordinated PR commit"),
             CliOption(
                 "continue-from",
                 "DIR",
@@ -322,7 +323,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,yes",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,from-pr,yes",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       [--continue-from DIR --seconds N --verification-reserve N --yes]\n       tokate prepare --run DIR",
@@ -437,7 +438,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
+                "repo,issue,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from,from-pr",
                 "repo,issue",
                 "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--source external --tools FILE --seconds N]",
@@ -776,6 +777,11 @@ internal class Cli {
 
         internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
+            if args.Get("from-pr") != "" &&
+                !args.Help &&
+                (args.Get("source") != "external" || args.Get("continue-from") != "" || args.Number("from-pr") < 1) {
+                throw Exception("--from-pr requires external tools, a positive PR number and no local continuation")
+            }
             if args.Command == "request" && !args.Help {
                 if args.Get("run") != "" {
                     if !LeaseLifecycle.Transition(args.Need("operation")) || args.Get("file") != "" || args.Get(

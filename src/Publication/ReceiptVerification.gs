@@ -49,7 +49,7 @@ internal class ReceiptVerification {
         ) Data {
             RequestData.Keys(
                 receipt,
-                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations,predecessor,import_manifest_sha256,attempt,incomplete"
+                "version,repo,issue,approval,expected,reservation,donor,head,correction,amendment,synchronizations,predecessor,import_manifest_sha256,attempt,incomplete,handoff"
             )
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let value = state.Value()
@@ -59,6 +59,12 @@ internal class ReceiptVerification {
                 throw CliFailure("stale_approval", "PR approval or contribution no longer matches")
             }
             let metadata = J.Get(contribution, "metadata")
+            let handoff = J.Get(metadata, "handoff")
+            ContributionHandoff.Declaration(handoff)
+            if !RequestData.Same(J.Get(receipt, "handoff"), handoff) {
+                throw Exception("Receipt handoff differs from the authoritative source")
+            }
+            ContributionHandoff.Authority(state, handoff)
             let current = CoordinationState.Current(value)
             let incomplete = current.GetRawText() == contribution.GetRawText() && RequestData.Incomplete(metadata)
             if J.Get(receipt, "incomplete").ValueKind != (incomplete ? JsonValueKind.True: JsonValueKind.Undefined) {
@@ -66,6 +72,9 @@ internal class ReceiptVerification {
             }
             let outcome = J.Get(current, "outcome")
             let exactHead = J.Text(outcome, "head")
+            if paths {
+                ContributionHandoff.Candidate(handoff, J.Text(metadata, "fork"), exactHead)
+            }
             let donor = RepositoryIdentity.Login(J.Text(receipt, "donor"))
             let record = state.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
             let publicationRevision = J.Text(value, "publication_revision")

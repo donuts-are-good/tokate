@@ -281,7 +281,7 @@ internal class RequestData {
             } else if J.Text(value, "action") == "publish" {
                 Keys(
                     metadata,
-                    "fork,branch,head,source,tools,verification,correction,summary,attempt,predecessor,import_manifest_sha256,incomplete"
+                    "fork,branch,head,source,tools,verification,correction,summary,attempt,predecessor,import_manifest_sha256,incomplete,handoff"
                 )
                 RepositoryIdentity.Repo(J.Text(metadata, "fork"))
                 RepositoryIdentity.CommitSha(J.Text(metadata, "head"))
@@ -291,6 +291,13 @@ internal class RequestData {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
+                ContributionHandoff.Declaration(J.Get(metadata, "handoff"))
+                if J.Get(metadata, "handoff").ValueKind != JsonValueKind.Undefined && J.Text(
+                    metadata,
+                    "source"
+                ) != "external" {
+                    throw Exception("Published handoffs currently require external coding tools")
+                }
                 AttemptContinuation.Declaration(metadata)
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {

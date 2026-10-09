@@ -208,6 +208,7 @@ internal class ExternalContribution {
             }
             let record = ContributionAuthority.Recheck(run)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
+            ContributionHandoff.Candidate(J.Get(run.Element(), "handoff"), run.Text("head_repo"), commit)
             let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             var seconds = run.Number("seconds")
             var tools = J.Get(run.Element(), "tools")

@@ -337,6 +337,9 @@ internal class Submission {
             if RequestData.Incomplete(run.Element()) {
                 metadata["incomplete"] = true
             }
+            if ContributionHandoff.Has(run) {
+                metadata["handoff"] = J.Get(run.Element(), "handoff")
+            }
             if AttemptContinuation.Has(run) {
                 AttemptContinuation.Keep(metadata, AttemptContinuation.Metadata(run))
             }

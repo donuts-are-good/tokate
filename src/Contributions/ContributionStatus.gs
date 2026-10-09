@@ -198,6 +198,10 @@ internal class ContributionStatus {
             async () -> {
                 let value = state.Value()
                 let current = CoordinationState.Current(value)
+                let handoff = J.Get(J.Get(J.Get(value, "contribution"), "metadata"), "handoff")
+                if handoff.ValueKind == JsonValueKind.Object {
+                    row["handoff"] = handoff
+                }
                 let recorded = J.Number(J.Get(current, "outcome"), "pr")
                 if recorded > 0 {
                     Draft(

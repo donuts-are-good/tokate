@@ -50,6 +50,9 @@ internal class WorkspacePreparation {
                 identity = Data.Hash(identity + ":" + run.Text("harness_path"))
             }
             identity = Data.Hash(identity + ":" + run.Text("attempt"))
+            if ContributionHandoff.Has(run) {
+                identity = Data.Hash(identity + ":" + RequestData.Canonical(J.Get(run.Element(), "handoff")))
+            }
             return AttemptContinuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
@@ -528,7 +531,11 @@ internal class WorkspacePreparation {
             Owned(checkout, run)
             Verification.Candidate(checkout)
             Metadata(checkout)
-            if Commands.Git(checkout, "rev-parse", "HEAD") != run.Text("base") {
+            let head = Commands.Git(checkout, "rev-parse", "HEAD")
+            let source = J.Get(run.Element(), "handoff")
+            let expected = ContributionHandoff.Has(run) ? J.Text(source, "head"): run.Text("base")
+            if head != expected &&
+                !(ContributionHandoff.Has(run) && run.Text("state") == "preparing" && head == run.Text("base")) {
                 Reject(checkout)
             }
             let branch = Commands.GitResult(checkout, []string{"symbolic-ref", "--quiet", "--short", "HEAD"})
@@ -569,6 +576,10 @@ internal class WorkspacePreparation {
                     )
                 } else {
                     Clean(checkout, run)
+                    if ContributionHandoff.Has(run) {
+                        ContributionHandoff.Import(checkout, run)
+                        Clean(checkout, run)
+                    }
                 }
                 if Directory.Exists(staging) || File.Exists(staging) || FileInfo(staging).LinkTarget != nil {
                     Reject(staging)
@@ -641,6 +652,7 @@ internal class WorkspacePreparation {
                 }
                 Clean(staging, run)
             }
+            ContributionHandoff.Import(staging, run)
             Directory.Move(staging, checkout)
             Clean(checkout, run)
             run.Fields["checkout_prepared"] = name

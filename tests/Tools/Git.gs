@@ -90,7 +90,15 @@ internal partial class Fixture {
         }
         let command = List[string]()
         for arg in args {
-            if String.Equals(arg, "https://github.com/owner/project.git", StringComparison.OrdinalIgnoreCase) {
+            let remote = arg.StartsWith("https://github.com/", StringComparison.OrdinalIgnoreCase) && arg.EndsWith(
+                ".git",
+                StringComparison.Ordinal
+            ) ? arg
+                .Substring(19, arg.Length - 23).ToLowerInvariant(): ""
+            let mapped = State["repository_folders"]?[remote]
+            if mapped != nil {
+                command.Add(Path.Combine(Root, Check.Text(mapped)))
+            } else if String.Equals(arg, "https://github.com/owner/project.git", StringComparison.OrdinalIgnoreCase) {
                 command.Add(Path.Combine(Root, "upstream"))
             } else if arg.StartsWith("https://github.com/donor/", StringComparison.OrdinalIgnoreCase) && arg.EndsWith(
                 ".git",

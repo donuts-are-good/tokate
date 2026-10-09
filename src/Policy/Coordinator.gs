@@ -73,6 +73,9 @@ internal class Coordinator {
                     if J.Text(request, "action") == "amend" {
                         ReceiptVerification.Verify(repo, J.Number(J.Get(old, "outcome"), "pr"))
                     }
+                    if J.Text(request, "action") == "publish" {
+                        ContributionHandoff.Supersede(state, request)
+                    }
                     Terminal.Json(J.Get(old, "outcome"), "Recorded request outcome")
                     return
                 }
@@ -100,6 +103,12 @@ internal class Coordinator {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
+                ContributionHandoff.Authority(state, J.Get(metadata, "handoff"))
+                ContributionHandoff.Candidate(
+                    J.Get(metadata, "handoff"),
+                    J.Text(metadata, "fork"),
+                    J.Text(metadata, "head")
+                )
                 AttemptContinuation.Declaration(metadata)
                 if J.Get(metadata, "predecessor").ValueKind != JsonValueKind.Undefined {
                     AttemptContinuation.Authority(state, J.Get(metadata, "predecessor"))
@@ -133,6 +142,9 @@ internal class Coordinator {
                 }
                 if RequestData.Incomplete(metadata) {
                     receipt["incomplete"] = true
+                }
+                if J.Get(metadata, "handoff").ValueKind != JsonValueKind.Undefined {
+                    receipt["handoff"] = J.Get(metadata, "handoff")
                 }
                 AttemptContinuation.Keep(receipt, metadata)
                 let pulls = J.Items(
@@ -275,6 +287,9 @@ internal class Coordinator {
             if J.Text(request, "action") == "amend" {
                 ReceiptVerification.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
             }
+            if action == "publish" {
+                ContributionHandoff.Supersede(acquired, request)
+            }
             Terminal.Json(J.Parse(J.Write(outcome)), "Request outcome")
         }
 
@@ -350,6 +365,9 @@ internal class Coordinator {
             )
             fields["amendment"] = Amendment.PublicRecord(amendment)
             AttemptContinuation.Keep(fields, old)
+            if J.Get(old, "handoff").ValueKind != JsonValueKind.Undefined {
+                fields["handoff"] = J.Get(old, "handoff")
+            }
             let correction = J.Get(old, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction

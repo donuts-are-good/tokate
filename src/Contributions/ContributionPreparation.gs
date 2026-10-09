@@ -113,7 +113,7 @@ internal class ContributionPreparation {
                     )
                 }
             }
-            if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object {
+            if J.Get(state.Value(), "contribution").ValueKind == JsonValueKind.Object && args.Get("from-pr") == "" {
                 throw Exception(
                     "Published work is preserved; saved-checkout continuation remains unsupported until #14"
                 )
@@ -134,6 +134,17 @@ internal class ContributionPreparation {
                     "tools": tools
                 }
             )
+            if args.Get("from-pr") != "" {
+                if source != "external" {
+                    throw Exception("Published handoff uses explicit external tools and their own coding budget")
+                }
+                run.Fields["handoff"] = ContributionHandoff.Read(
+                    state,
+                    J.Get(viewer, "id"),
+                    record,
+                    args.Number("from-pr")
+                )
+            }
             if (args.Command == "work" || args.Command == "claim") && args.Get("unlimited") != "true" {
                 args.Need("seconds")
             }
@@ -325,6 +336,7 @@ internal class ContributionPreparation {
             state.Reservation(J.Get(viewer, "id"))
             LeaseLifecycle.Fence(state, uuid)
             CheckPending(run, viewer, state)
+            ContributionHandoff.Authority(state, J.Get(run.Element(), "handoff"))
             if J.Get(value, "contribution").ValueKind == JsonValueKind.Object {
                 throw CliFailure("invalid_state", "Published work is preserved; this claim cannot prepare new coding")
             }

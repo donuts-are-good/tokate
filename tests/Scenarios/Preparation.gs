@@ -532,6 +532,181 @@ internal class PreparationChecks {
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial publication restarted inference")
         }
 
+        private func Handoff(binary string) {
+            using let test = CoordinationFixture(binary)
+            let priorRun = PublishedContribution.PublishRun(test)
+            let flow = test.Flow
+            flow.Call([]string{"submit", "--run", priorRun})
+            let priorPath = Path.Combine(priorRun, "run.json")
+            let priorRecord = File.ReadAllText(priorPath)
+            let priorHead = Check.Text(Check.Json(priorRecord)["commit"])
+            let priorAuthor = flow.Git(
+                "-C",
+                Path.Combine(flow.Bin, "fork"),
+                "show",
+                "-s",
+                "--format=%an <%ae>",
+                priorHead
+            )
+            let args = []string{
+                "claim",
+                "owner/project",
+                "--issue",
+                "1",
+                "--source",
+                "external",
+                "--tools",
+                test.Tools,
+                "--seconds",
+                "30",
+                "--from-pr",
+                "10",
+                "--fork",
+                "other/project",
+                "--runs",
+                Path.Combine(flow.Temp.Root, "handoffs"),
+                "--json"
+            }
+            flow.Acquire(args, 1)
+            flow.Git("clone", "--bare", flow.Upstream, Path.Combine(flow.Bin, "otherfork"))
+            flow.Reload()
+            flow.State["viewer_id"] = JsonValue.Create(124)
+            flow.State["viewer_login"] = JsonValue.Create("other")
+            flow.State["multiple_pulls"] = JsonValue.Create(true)
+            flow.State["repository_folders"] = Check.Map(
+                "owner/project",
+                "upstream",
+                "donor/project",
+                "fork",
+                "other/project",
+                "otherfork"
+            )
+            flow.State["repository_info"] = Check.Map(
+                "other/project",
+                Check.Map(
+                    "id",
+                    3,
+                    "full_name",
+                    "other/project",
+                    "default_branch",
+                    "main",
+                    "fork",
+                    true,
+                    "owner",
+                    Check.Map("id", 124, "login", "other"),
+                    "parent",
+                    Check.Map("id", 1, "full_name", "owner/project"),
+                    "permissions",
+                    Check.Map("push", true)
+                )
+            )
+            flow.Save()
+            flow.Acquire(args, 1)
+            flow.Reload()
+            flow.State["viewer_id"] = JsonValue.Create(1)
+            flow.State["viewer_login"] = JsonValue.Create("owner")
+            flow.Save()
+            flow.Call(
+                []string{"access", "--repo", "owner/project", "--operation", "trust", "--donor", "other"},
+                owner: true
+            )
+            flow.Reload()
+            flow.State["viewer_id"] = JsonValue.Create(124)
+            flow.State["viewer_login"] = JsonValue.Create("other")
+            flow.Save()
+            flow.Acquire(args, 1)
+            test.Expire()
+            flow.Reload()
+            let oldPull = flow.State["pulls"]?[0] ?? throw Exception("Missing prior draft")
+            oldPull["merged"] = JsonValue.Create(true)
+            flow.Save()
+            flow.Acquire(args, 1)
+            flow.Reload()
+            (flow.State["pulls"]?[0] ?? throw Exception("Missing prior draft"))["merged"] = JsonValue.Create(false)
+            flow.Save()
+            let acquired = Check.Json(flow.Acquire(args).Output)
+            let run = Check.Text(acquired["data"]?["run"])
+            let path = Path.Combine(run, "run.json")
+            let saved = Check.Json(File.ReadAllText(path))
+            let coding = Path.Combine(run, "coding")
+            Check.That(Check.Text(saved["handoff"]?["head"]) == priorHead, "Handoff lost its coordinated source")
+            Check.That(flow.Git("-C", coding, "rev-parse", "HEAD") == priorHead, "Handoff did not import prior work")
+            Check.That(
+                flow.Git("-C", coding, "show", "-s", "--format=%an <%ae>", priorHead) == priorAuthor,
+                "Handoff rewrote original attribution"
+            )
+            Check.That(File.ReadAllText(priorPath) == priorRecord, "Handoff changed the original saved run")
+            Resume(flow, run)
+            let altered = saved.DeepClone()
+            (altered["handoff"] ?? throw Exception("Missing handoff"))["head"] = JsonValue.Create(
+                Check.Text(saved["base"])
+            )
+            File.WriteAllText(path, altered.ToJsonString())
+            Resume(flow, run, 1)
+            File.WriteAllText(path, saved.ToJsonString())
+            flow.Call([]string{"external", "--run", run, "--commit", Check.Text(saved["base"])}, 1)
+            Check.That(File.ReadAllText(path) == saved.ToJsonString(), "Rejected ancestry changed saved work")
+            File.AppendAllText(Path.Combine(coding, "result.txt"), "Second donor contribution\n")
+            flow.Git("-C", coding, "add", "result.txt")
+            flow.Git(
+                "-C",
+                coding,
+                "-c",
+                "user.name=Other",
+                "-c",
+                "user.email=other@example.test",
+                "commit",
+                "-m",
+                "Complete inherited work"
+            )
+            let head = flow.Git("-C", coding, "rev-parse", "HEAD")
+            flow.Git(
+                "-C",
+                coding,
+                "push",
+                Path.Combine(flow.Bin, "otherfork"),
+                "HEAD:refs/heads/" + Check.Text(saved["branch"])
+            )
+            flow.Call(
+                []string{
+                    "external",
+                    "--run",
+                    run,
+                    "--commit",
+                    head,
+                    "--summary",
+                    PublishedContribution.Summary(flow, head, "Complete the inherited contribution.")
+                }
+            )
+            flow.Publish(run)
+            flow.CoordinatePosted()
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "11"})
+            flow.Reload()
+            let pull = flow.State["pulls"]?[1] ?? throw Exception("Missing successor draft")
+            Check.Contains(Check.Text(pull["body"]), "Supersedes #10 from @donor")
+            Check.Contains(Check.Text(flow.State["pulls"]?[0]?["body"]), "Superseded by #11")
+            Check.That(Check.Text(flow.State["pulls"]?[0]?["state"]) == "open", "Handoff closed the prior discussion")
+            let status = Check.Json(
+                flow.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--json"}).Output
+            )
+            Check.That(
+                Check.Text(status["data"]?["work"]?[0]?["handoff"]?["head"]) == priorHead,
+                "Status lost handoff provenance"
+            )
+            let body = Check.Text(pull["body"])
+            pull["body"] = JsonValue.Create(body.Replace(priorHead, Check.Text(saved["base"])))
+            flow.Save()
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "11"}, 1)
+            flow.Reload()
+            (flow.State["pulls"]?[1] ?? throw Exception("Missing successor"))["body"] = JsonValue.Create(body)
+            flow.State["viewer_id"] = JsonValue.Create(123)
+            flow.State["viewer_login"] = JsonValue.Create("donor")
+            flow.Save()
+            flow.Call([]string{"amend", "--run", priorRun, "--commit", priorHead, "--seconds", "30", "--resume"}, 1)
+            Check.That(File.ReadAllText(priorPath) == priorRecord, "Late prior-donor action changed its run")
+            flow.NoInference()
+        }
+
         private func External(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -1213,6 +1388,7 @@ internal class PreparationChecks {
                 TestCase[string]("Reservation", async (value string) -> Reservation(value)),
                 TestCase[string]("Partial", async (value string) -> Partial(value)),
                 TestCase[string]("PartialResume", async (value string) -> Partial(value, true)),
+                TestCase[string]("Handoff", async (value string) -> Handoff(value)),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),
