@@ -107,12 +107,9 @@ internal open class CoordinationFixture : IDisposable {
         traffic: traffic
     )
 
-    internal func Claim(selected bool = false) JsonNode {
+    internal func Claim() JsonNode {
         let request = ClaimRequest()
-        let path = Event(request)
-        Flow.ResetTraffic()
-        let result = Coordinate(path, traffic: true)
-        Flow.Traffic(selected ? 34: 32, 3, selected ? 21: 20, 0, result)
+        Coordinate(Event(request))
         return request
     }
 

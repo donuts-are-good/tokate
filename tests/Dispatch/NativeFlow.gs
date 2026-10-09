@@ -85,12 +85,8 @@ internal partial class NativeFlow : NativeFixture {
                 if Array.IndexOf(
                     []string{
                         "StructuredFailures",
-                        "ModelPolicyModes",
-                        "ProtectedPublication",
                         "GitEvidence",
-                        "PublicationFailures",
                         "CanonicalVerification",
-                        "CanonicalPublication",
                         "ConditionalClaim",
                         "ConditionalApproval",
                         "VerificationNetwork",

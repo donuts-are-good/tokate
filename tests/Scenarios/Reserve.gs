@@ -167,6 +167,8 @@ internal class ReserveChecks {
                 "gpt-6.1-sol",
                 "--effort",
                 "high",
+                "--seconds",
+                "5",
                 "--verification-reserve",
                 "5",
                 "--runs",
@@ -177,10 +179,10 @@ internal class ReserveChecks {
             Check.That(!Directory.Exists(Path.Combine(flow.Temp.Root, "runs")), "Lower owner limit wrote invalid claim")
             flow.NoInference()
             args[Array.IndexOf(args, "--verification-reserve") + 1] = "1"
-            let result = flow.Call(args)
+            let result = flow.Acquire(args)
             let run = result.Output.Substring(result.Output.LastIndexOf("Run: ") + 5).Trim()
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
-            Check.That(Check.Text(saved["seconds"]) == "5", "Reserve changed default total")
+            Check.That(Check.Text(saved["seconds"]) == "5", "Reserve changed explicit total")
             flow.Call([]string{"work", "--run", run})
         }
 
@@ -188,7 +190,7 @@ internal class ReserveChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
-            let result = flow.Call(
+            let result = flow.Acquire(
                 []string{
                     "work",
                     "--repo",

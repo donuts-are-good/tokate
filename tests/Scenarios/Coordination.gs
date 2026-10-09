@@ -310,7 +310,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         )
         Flow.ResetTraffic()
         let replay = Coordinate(path, traffic: true)
-        Flow.Traffic(4, 0, 0, 0, replay)
+        Flow.Traffic(12, 0, 2, 0, replay)
         Check.That(Check.Text(State()["sha"]) == Check.Text(state["sha"]), "Replay wrote state")
         let changed = request.DeepClone()
         changed["metadata"] = Check.Map("command", "touch /tmp/unsafe")
@@ -490,7 +490,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.ProtectedPolicy()
         Flow.Approve()
         let claim = Claim()
-        let commit = Candidate(claim, "permitted")
+        Candidate(claim, "permitted")
         let history = Path.Combine(Flow.Temp.Root, "donor-work")
         for i in 0 ... 250 {
             Flow.DonorGit(history, "commit", "--allow-empty", "--quiet", "-m", "History " + i.ToString())
@@ -559,7 +559,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         pull["body"] = JsonValue.Create(
             Check
                 .Text(pull["body"])
-                .Replace(commit, head, StringComparison.Ordinal)
+                .Replace(historyHead, head, StringComparison.Ordinal)
                 .Replace(expected, Check.Text(state["sha"]), StringComparison.Ordinal)
         )
         Flow.Save()

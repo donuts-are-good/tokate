@@ -237,11 +237,13 @@ internal class DonorSelectionChecks {
                 flow.Initialize()
                 flow.Approve()
                 let args = List[string]{
-                    "work",
+                    "claim",
                     "--repo",
                     "owner/project",
                     "--issue",
                     "1",
+                    "--seconds",
+                    "30",
                     "--runs",
                     Path.Combine(flow.Temp.Root, "runs"),
                     "--non-interactive"
@@ -251,8 +253,10 @@ internal class DonorSelectionChecks {
                 } else {
                     args.AddRange([]string{"--model", "gpt-6.1-sol", "--effort", "high"})
                 }
+                let claimed = flow.Acquire(args.ToArray())
+                let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
                 flow.Mode("model_failure")
-                let result = TestProcess.Run(binary, args.ToArray(), flow.Temp.Env)
+                let result = flow.Call([]string{"work", "--run", run}, 1)
                 Check.That(result.Code == 1, "Synthetic model failure succeeded")
                 Check.Contains(result.Error, "Codex failed")
                 flow.Reload()
@@ -283,13 +287,15 @@ internal class DonorSelectionChecks {
             )
             Check.Envelope(invalid, "select", "error", "missing_tools")
             Check.That(File.ReadAllText(Settings(flow)) == defaults, "Invalid override changed saved defaults")
-            let claimed = flow.Call(
+            let claimed = flow.Acquire(
                 []string{
                     "claim",
                     "--repo",
                     "owner/project",
                     "--issue",
                     "1",
+                    "--seconds",
+                    "30",
                     "--runs",
                     Path.Combine(flow.Temp.Root, "runs")
                 }
@@ -383,7 +389,7 @@ internal class DonorSelectionChecks {
                 flow.Temp.Root,
                 "runs"
             ) +
-                "' --harness codex --seconds 30"
+                "' --harness codex --seconds 30 --plain"
             let declined = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
@@ -401,8 +407,12 @@ internal class DonorSelectionChecks {
                 flow.Temp.Env,
                 "1\ny\n"
             )
-            Check.That(confirmed.Code == 1, "Synthetic model failure succeeded")
-            Check.Contains(confirmed.Output, "Codex failed")
+            Check.That(confirmed.Code == 8, "Confirmed claim did not wait for owner coordination")
+            Check.Contains(confirmed.Output, "Claim pending")
+            flow.NoInference()
+            flow.CoordinatePosted()
+            let run = Directory.GetDirectories(Path.Combine(flow.Temp.Root, "runs"))[0]
+            Check.Contains(flow.Call([]string{"work", "--run", run, "--yes"}, 1).Error, "Codex failed")
             flow.Reload()
             Check.That(
                 Check.Text(flow.State["exec_count"]) == "1",

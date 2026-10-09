@@ -509,6 +509,7 @@ internal open class NativeFixture : IDisposable {
 
     internal func ETags(mode string) {
         Reload()
+        State["etag_path"] = JsonValue.Create("repos/owner/project/issues/1")
         State["etag_initial_prefix"] = JsonValue.Create(mode == "weak" || mode == "weak-to-strong" ? "W/": "")
         State["etag_returned_prefix"] = JsonValue.Create(mode == "weak" || mode == "strong-to-weak" ? "W/": "")
         State["etag_initial"] = nil

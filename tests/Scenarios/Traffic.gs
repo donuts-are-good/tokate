@@ -56,14 +56,14 @@ internal class CommandTrafficChecks {
             flow.Initialize()
             let request = flow.ClaimRequest()
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 10, 1, 1, 1)
+            Budgets(flow.Flow, Request(flow, request), 21, 1, 1, 10)
             Check.That(
                 File.GetUnixFileMode(Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")) ==
                 (UnixFileMode.UserRead | UnixFileMode.UserWrite),
                 "Request posting journal is not private"
             )
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 6, 0, 0)
+            Budgets(flow.Flow, Request(flow, request), 14, 0, 0, 2)
             flow.Flow.Reload()
             Check.That(Check.Text(flow.Flow.State["request_count"]) == "1", "Identical request posted twice")
             let changed = request.DeepClone()
@@ -73,10 +73,10 @@ internal class CommandTrafficChecks {
             flow.Flow.Traffic(2, 0, 0, 0)
             flow.Coordinate(flow.Event(request))
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 4, 0, 0)
+            Budgets(flow.Flow, Request(flow, request), 12, 0, 0, 2)
             flow.Flow.ResetTraffic()
             Check.Contains(Request(flow, changed, 1, "new-file.json").Error, "UUID replay changed")
-            flow.Flow.Traffic(4, 0, 0, 0)
+            flow.Flow.Traffic(12, 0, 2, 0)
             flow.Flow.NoInference()
             flow.Flow.NoPr()
         }
@@ -184,9 +184,10 @@ internal class CommandTrafficChecks {
                     []string{"request", "--repo", "owner/project", "--issue", "1", "--file", path},
                     traffic: true
                 ),
-                6,
+                14,
                 0,
-                0
+                0,
+                2
             )
             flow.Flow.NoInference()
             flow.Flow.NoPr()
@@ -220,11 +221,11 @@ internal class CommandTrafficChecks {
                 Budgets(
                     flow.Flow,
                     result,
-                    mode == "request_fail_before_write" ? 13:
-                    (mode == "request_ambiguous_after_write" ? 15: 14),
+                    mode == "request_fail_before_write" ? 24:
+                    (mode == "request_ambiguous_after_write" ? 26: 25),
                     1,
                     1,
-                    mode == "request_fail_before_write" ? 4: 3
+                    mode == "request_fail_before_write" ? 13: 12
                 )
                 flow.Flow.Mode("")
                 flow.Flow.ResetTraffic()
@@ -232,10 +233,11 @@ internal class CommandTrafficChecks {
                 Budgets(
                     flow.Flow,
                     duplicate,
-                    mode == "request_fail_before_write" ? 5:
-                    (mode == "request_ambiguous_after_write" ? 7: 6),
+                    mode == "request_fail_before_write" ? 13:
+                    (mode == "request_ambiguous_after_write" ? 15: 14),
                     0,
-                    0
+                    0,
+                    2
                 )
                 flow.Flow.Reload()
                 Check.That(

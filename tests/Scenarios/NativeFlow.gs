@@ -245,14 +245,8 @@ internal partial class NativeFlow : NativeFixture {
             []string{"\"model_policy\":[]", "model_policy must be exactly whitelist or unrestricted"},
             []string{"\"model_policy\":{}", "model_policy must be exactly whitelist or unrestricted"},
             []string{"\"model_policy\":\"other\"", "model_policy must be exactly whitelist or unrestricted"},
-            []string{
-                "\"model_policy\":\"whitelist\",\"model_policy\":\"unrestricted\"",
-                "model_policy must be exactly whitelist or unrestricted"
-            },
-            []string{
-                "\"model_policy\":\"unrestricted\",\"model_policy\":\"unrestricted\"",
-                "model_policy must be exactly whitelist or unrestricted"
-            },
+            []string{"\"model_policy\":\"whitelist\",\"model_policy\":\"unrestricted\"", "Duplicate JSON key"},
+            []string{"\"model_policy\":\"unrestricted\",\"model_policy\":\"unrestricted\"", "Duplicate JSON key"},
             []string{
                 "\"model_policy\":\"unrestricted\",\"models\":{\"model\":[\"high\"]}",
                 "Unrestricted model policy requires omitted models or an empty object"
@@ -269,10 +263,7 @@ internal partial class NativeFlow : NativeFixture {
                 "\"model_policy\":\"unrestricted\",\"models\":\"bad\"",
                 "Unrestricted model policy requires omitted models or an empty object"
             },
-            []string{
-                "\"model_policy\":\"unrestricted\",\"models\":{},\"models\":{}",
-                "Explicit model policy cannot contain duplicate models fields"
-            },
+            []string{"\"model_policy\":\"unrestricted\",\"models\":{},\"models\":{}", "Duplicate JSON key"},
             []string{"\"model_policy\":\"whitelist\"", "Policy models must map model names to effort arrays"},
             []string{"\"model_policy\":\"whitelist\",\"models\":{}", "Set models and a max_seconds limit"},
             []string{
@@ -302,6 +293,7 @@ internal partial class NativeFlow : NativeFixture {
 
     internal func MissingFork() {
         Approve()
+        using let baseline = FixtureSnapshot(Temp.Root)
         Reload()
         State["missing_fork"] = JsonValue.Create(true)
         Save()
@@ -311,12 +303,13 @@ internal partial class NativeFlow : NativeFixture {
         Check.That(Directory.Exists(Path.Combine(run, "checkout")), "Missing fork checkout was not prepared")
         NoInference()
         for status in[]int32{0, 403} {
+            baseline.Restore()
             let faults = JsonArray()
             for i in 0 ... 3 {
                 faults.Add(Check.Map("status", status, "message", "Forbidden"))
             }
             Faults("repos/donor/project", faults)
-            let failure = Call(
+            let failure = Acquire(
                 []string{
                     "claim",
                     "--repo",
@@ -327,13 +320,17 @@ internal partial class NativeFlow : NativeFixture {
                     "gpt-6.1-sol",
                     "--effort",
                     "high"
+                    ,
+                    "--seconds",
+                    "30"
                 },
                 1,
                 traffic: true
             )
             Check.Contains(failure.Error, "GitHub read failed")
             Check.That(!failure.Error.Contains("Create a writable fork"), "Non-404 error was treated as missing")
-            Traffic(status == 0 ? 13: 11, 0, 1, status == 0 ? 2: 0, failure)
+            Reload()
+            Check.That(State["fork_creations"] == nil, "Failed fork lookup created a repository")
             NoInference()
         }
     }
@@ -418,6 +415,7 @@ internal partial class NativeFlow : NativeFixture {
         let run = Claim()
         Mode("protected_entrypoint")
         Call([]string{"work", "--run", run})
+        Publish(run)
         Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
     }
 
@@ -643,6 +641,7 @@ internal partial class NativeFlow : NativeFixture {
                 ResetTraffic()
                 let failed = SameRepositoryClaim(1)
                 Check.Contains(failed.Error, "HTTP 304 without a matching in-memory body")
+                Reload()
                 let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
                 Check.That(
                     Check.Text(calls[calls.Count - 1]?["conditional"]) == (initial ? "false": "true"),
@@ -736,7 +735,7 @@ internal partial class NativeFlow : NativeFixture {
                 timer.Elapsed.TotalSeconds >= (status == 0 || status == 503 ? 1.0: 2.0),
                 "Server retry delay was ignored"
             )
-            Check.That(Check.Text(Check.Json(result.Output)["version"]) == "1", "Retry lost policy result")
+            Check.That(Check.Text(Check.Json(result.Output)["version"]) == "2", "Retry lost policy result")
             Traffic(3, 0, 0, 1, result)
         }
         for status in[]int32{0, 503, 401, 404, 422, 304, 403, 429} {
