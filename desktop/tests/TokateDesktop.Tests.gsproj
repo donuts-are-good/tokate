@@ -5,7 +5,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../*.gs" Exclude="../Program.gs" />
+    <Compile Include="../App/**/*.gs;../Controls/**/*.gs;../Screens/**/*.gs;../Services/**/*.gs" />
     <PackageReference Include="Goo" Version="0.7.18" />
     <PackageReference Include="Goo.Svg" Version="0.7.18" />
     <PackageReference Include="Goo.Widgets" Version="0.2.13" />

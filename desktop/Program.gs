@@ -10,7 +10,7 @@ PosixSignalRegistration.Create(
     signal,
     context -> {
         context.Cancel = true
-        CommandRunner.Shutdown()
+        ProcessRunner.Shutdown()
         window.TryPost(
             () -> {
                 window.OnClosing = nil
@@ -21,7 +21,7 @@ PosixSignalRegistration.Create(
 )
 
 func Main() {
-    Window.ConfigureApplication("Tokate", "0.2.102", "dev.tokate.desktop")
+    Window.ConfigureApplication("Tokate", "0.2.103", "dev.tokate.desktop")
     using let body = FontSource("Newsreader", 400, false, File.ReadAllBytes(Asset("newsreader.ttf")))
     using let heading = FontSource("Cormorant", 500, false, File.ReadAllBytes(Asset("cormorant.ttf")))
     using let italic = FontSource("Cormorant", 500, true, File.ReadAllBytes(Asset("cormorant-italic.ttf")))
@@ -59,6 +59,6 @@ func Main() {
         ): nil
         window.Run()
     } finally {
-        CommandRunner.Shutdown()
+        ProcessRunner.Shutdown()
     }
 }

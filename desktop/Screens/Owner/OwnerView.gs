@@ -3,193 +3,9 @@ package TokateDesktop
 import Goo
 import System
 import System.Collections.Generic
-import System.IO
 import System.Text.Json
-import System.Text.Json.Nodes
 
-partial class Desktop {
-    private var ownerOpen bool
-    private var ownerTab string = "Contributions"
-    private var ownerStep int32
-    private var ownerPolicy JsonElement
-    private let ownerWork Dictionary[string, JsonElement] = Dictionary[string, JsonElement]()
-    private var ownerAccess JsonElement
-    private var ownerIssues IssuePage = IssuePage()
-    private var ownerSelected JsonElement
-    private var ownerCanWrite bool
-    private var ownerBranch string = ""
-    private var ownerDonor string = ""
-    private var ownerIssue string = ""
-    private var ownerModelPolicy string = ""
-    private var ownerModel string = ""
-    private var ownerEffort string = ""
-    private var ownerMinutes string = ""
-    private var ownerNetwork string = ""
-    private var ownerChecksChanged bool
-    private var ownerCommandsChanged bool
-    private let ownerChecks List[string] = List[string]()
-    private let ownerCommands List[[]string] = List[[]string]()
-    private let ownerModelMap Dictionary[string, List[string]] = Dictionary[string, List[string]]()
-
-    private func OwnerStrings(values IEnumerable[string]) JsonArray {
-        let result = JsonArray()
-        for value in values {
-            result.Add(JsonValue.Create(value) as JsonNode)
-        }
-        return result
-    }
-
-    private func OwnerModelsJson() string {
-        let result = JsonObject()
-        for item in ownerModelMap {
-            result[item.Key] = OwnerStrings(item.Value)
-        }
-        return result.ToJsonString()
-    }
-
-    private func OwnerCommandsJson() string {
-        let result = JsonArray()
-        for command in ownerCommands {
-            result.Add(OwnerStrings(command) as JsonNode)
-        }
-        return result.ToJsonString()
-    }
-
-    private func
-    OwnerChanged() {
-        ownerArguments = []string{}
-        ownerPreview = ""
-    }
-
-    private func ReadOwnerPolicy(value JsonElement) {
-        ownerPolicy = value
-        ownerTools = ""
-        ownerEligibility = ""
-        ownerModelPolicy = value.ValueKind == JsonValueKind.Object ? "": "unrestricted"
-        ownerModels = ""
-        ownerMinutes = ""
-        ownerNetwork = ""
-        ownerChecksChanged = false
-        ownerCommandsChanged = false
-        ownerChecks.Clear()
-        ownerCommands.Clear()
-        ownerModelMap.Clear()
-        for check in Items(Field(value, "required_checks")) {
-            ownerChecks.Add(check.GetString() ?? "")
-        }
-        for command in Items(Field(value, "verification")) {
-            let args = List[string]()
-            for arg in Items(command) {
-                args.Add(arg.GetString() ?? "")
-            }
-            ownerCommands.Add(args.ToArray())
-        }
-        let models = Field(value, "models")
-        if models.ValueKind == JsonValueKind.Object {
-            for model in models.EnumerateObject() {
-                let efforts = List[string]()
-                for effort in Items(model.Value) {
-                    efforts.Add(effort.GetString() ?? "")
-                }
-                ownerModelMap[model.Name] = efforts
-            }
-        }
-        OwnerChanged()
-    }
-
-    private func LoadOwner() {
-        try {
-            ownerRepository = Repository(ownerRepository)
-            OwnerChanged()
-            Execute(
-                []string{"api", "repos/" + ownerRepository},
-                repo -> {
-                    if Error(repo) {
-                        return
-                    }
-                    ownerIssues = IssuePage()
-                    ownerSelected = JsonElement{}
-                    ownerOpen = true
-                    activityAction = "Refresh project"
-                    ownerCanWrite = Field(Field(repo.Value, "permissions"), "push").ValueKind == JsonValueKind.True
-                    ownerBranch = TextOf(repo.Value, "default_branch")
-                    Execute(
-                        []string{"policy", "--repo", ownerRepository},
-                        policy -> {
-                            ReadOwnerPolicy(Field(Field(policy.Value, "data"), "policy"))
-                            if TextOf(ownerPolicy, "target_branch") != "" {
-                                ownerBranch = TextOf(ownerPolicy, "target_branch")
-                            }
-                            if policy.ExitCode != 0 {
-                                ownerTab = "Setup"
-                                message = "Project policy could not be loaded. Check access before applying setup."
-                                return
-                            }
-                            RefreshOwner()
-                        }
-                    )
-                },
-                "gh"
-            )
-        } catch (error Exception) {
-            message = error.Message
-        }
-    }
-
-    private func RefreshOwner() {
-        ownerWork.Clear()
-        SearchOwnerIssues(1, true)
-    }
-
-    private func SearchOwnerIssues(page int32 = 1, search bool = false) {
-        ownerSelected = JsonElement{}
-        FindIssues(ownerRepository, ownerIssues, page, search)
-    }
-
-    private func InspectOwnerIssue(number string) {
-        Execute(
-            []string{"status", "--repo", ownerRepository, "--issue", number},
-            result -> {
-                for item in Items(Field(Field(result.Value, "data"), "work")) {
-                    ownerWork[TextOf(item, "issue")] = item
-                }
-                Error(result)
-            }
-        )
-    }
-
-    private func LoadAccess() {
-        Execute(
-            []string{"access", "--repo", ownerRepository, "--operation", "list"},
-            result -> {
-                if !Error(result) {
-                    ownerAccess = Field(result.Value, "data")
-                }
-            }
-        )
-    }
-
-    private func OwnerAction(title string, args[]string, detail string, access bool = false) {
-        Confirm(
-            title,
-            ownerRepository + "\n\n" + detail,
-            () -> {
-                Execute(
-                    args,
-                    result -> {
-                        if !Error(result) {
-                            if access {
-                                LoadAccess()
-                            } else {
-                                RefreshOwner()
-                            }
-                        }
-                    }
-                )
-            }
-        )
-    }
-
+partial class OwnerScreen {
     private func OwnerIssue(issue JsonElement) Blob {
         let number = TextOf(issue, "number")
         var approved = false
@@ -198,12 +14,12 @@ partial class Desktop {
         }
         var remote JsonElement
         ownerWork.TryGetValue(number, out remote)
-        let card = DonatePanel()
+        let card = ui.Panel()
         card.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Heading("#" + number + "  " + TextOf(issue, "title"), 27),
-                    StatusBadge(
+                    ui.Heading("#" + number + "  " + TextOf(issue, "title"), 27),
+                    ui.StatusBadge(
                         remote.ValueKind == JsonValueKind.Object ? TextOf(remote, "state").Replace(
                             '_',
                             ' '
@@ -212,16 +28,16 @@ partial class Desktop {
                 }
             )
         )
-        let actions = Row([]Blob{})
-        actions.Children.Add(Action("Refresh contribution", () -> InspectOwnerIssue(number)))
+        let actions = ui.Row([]Blob{})
+        actions.Children.Add(ui.Action("Refresh contribution", () -> InspectOwnerIssue(number)))
         actions.Children.Add(
-            Action(
+            ui.Action(
                 "Open issue #" + number,
-                () -> OpenLink("https://github.com/" + ownerRepository + "/issues/" + number)
+                () -> Browser.Open("https://github.com/" + ownerRepository + "/issues/" + number)
             )
         )
         actions.Children.Add(
-            Action(
+            ui.Action(
                 approved ? "Revoke approval #" + number: "Approve issue #" + number,
                 () -> {
                     let args = List[string]{
@@ -252,60 +68,25 @@ partial class Desktop {
         for draft in Items(Field(remote, "drafts")) {
             let pr = TextOf(draft, "pr")
             actions.Children.Add(
-                Action("Review PR #" + pr, () -> OpenLink("https://github.com/" + ownerRepository + "/pull/" + pr))
+                ui.Action(
+                    "Review PR #" + pr,
+                    () -> Browser.Open("https://github.com/" + ownerRepository + "/pull/" + pr)
+                )
             )
-            actions.Children.Add(Action("Verify PR #" + pr, () -> CheckOwnerPr(pr, "verify-pr")))
-            actions.Children.Add(Action("Check CI #" + pr, () -> CheckOwnerPr(pr, "checks")))
+            actions.Children.Add(ui.Action("Verify PR #" + pr, () -> CheckOwnerPr(pr, "verify-pr")))
+            actions.Children.Add(ui.Action("Check CI #" + pr, () -> CheckOwnerPr(pr, "checks")))
         }
         card.Children.Add(actions)
         return card
     }
 
-    private func CheckOwnerPr(pr string, command string) {
-        Execute(
-            []string{command, "--repo", ownerRepository, "--pr", pr},
-            result -> {
-                if Error(result) {
-                    return
-                }
-                let data = Field(result.Value, "data")
-                message = command == "verify-pr" ? "PR #" +
-                    pr +
-                    " receipt verified. Review the diff before accepting.": "PR #" +
-                    pr +
-                    ": " +
-                    TextOf(data, "checks_status").Replace('_', ' ')
-            }
-        )
-    }
-
-    private func AccessAction(operation string, donor string, issue string = "") {
-        let args = List[string]{"access", "--repo", ownerRepository, "--operation", operation}
-        if donor != "" {
-            args.Add("--donor")
-            args.Add(donor)
-        }
-        if issue != "" {
-            args.Add("--issue")
-            args.Add(issue)
-        }
-        OwnerAction(
-            operation == "init" ? "Initialize donor access": operation + " " + donor,
-            args.ToArray(),
-            operation == "trust" ? "Permit this donor to claim issues with trusted eligibility.": operation == "grant" ? "Permit this donor to claim issue #" +
-                issue +
-                ".": "Change this project's donor access.",
-            true
-        )
-    }
-
     private func OwnerAccessView() Blob {
         let body = Container{Gap: 18}
         body.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Action("Refresh access", () -> LoadAccess()),
-                    Action(
+                    ui.Action("Refresh access", () -> LoadAccess()),
+                    ui.Action(
                         "Initialize access",
                         () -> AccessAction("init", ""),
                         disabled: !ownerCanWrite || TextOf(ownerAccess, "access_sha") != ""
@@ -316,18 +97,20 @@ partial class Desktop {
         for request in Items(Field(ownerAccess, "pending")) {
             let donor = TextOf(request, "donor")
             let issue = TextOf(request, "issue")
-            let card = DonatePanel()
-            card.Children.Add(Row([]Blob{Heading(donor, 28), StatusBadge("Access requested"), Label("#" + issue, 22)}))
+            let card = ui.Panel()
             card.Children.Add(
-                Row(
+                ui.Row([]Blob{ui.Heading(donor, 28), ui.StatusBadge("Access requested"), ui.Label("#" + issue, 22)})
+            )
+            card.Children.Add(
+                ui.Row(
                     []Blob{
-                        Action(
+                        ui.Action(
                             "Grant #" + issue + " to " + donor,
                             () -> AccessAction("grant", donor, issue),
                             true,
                             !ownerCanWrite
                         ),
-                        Action("Trust " + donor, () -> AccessAction("trust", donor), disabled: !ownerCanWrite)
+                        ui.Action("Trust " + donor, () -> AccessAction("trust", donor), disabled: !ownerCanWrite)
                     }
                 )
             )
@@ -337,19 +120,24 @@ partial class Desktop {
             let donor = TextOf(member, "donor")
             let trusted = Field(member, "trusted").ValueKind == JsonValueKind.True
             let denied = Field(member, "denied").ValueKind == JsonValueKind.True
-            let card = DonatePanel()
+            let card = ui.Panel()
             card.Children.Add(
-                Row([]Blob{Heading(donor, 28), StatusBadge(denied ? "Denied": trusted ? "Trusted": "Issue access")})
+                ui.Row(
+                    []Blob{
+                        ui.Heading(donor, 28),
+                        ui.StatusBadge(denied ? "Denied": trusted ? "Trusted": "Issue access")
+                    }
+                )
             )
             card.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Action(
+                        ui.Action(
                             trusted ? "Untrust " + donor: "Trust " + donor,
                             () -> AccessAction(trusted ? "untrust": "trust", donor),
                             disabled: !ownerCanWrite
                         ),
-                        Action(
+                        ui.Action(
                             denied ? "Restore " + donor: "Deny " + donor,
                             () -> AccessAction(denied ? "restore": "deny", donor),
                             disabled: !ownerCanWrite
@@ -359,12 +147,12 @@ partial class Desktop {
             )
             body.Children.Add(card)
         }
-        let add = DonatePanel()
-        add.Children.Add(Heading("Grant access", 28))
+        let add = ui.Panel()
+        add.Children.Add(ui.Heading("Grant access", 28))
         add.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Entry(
+                    ui.Entry(
                         "Donor",
                         ownerDonor,
                         value -> {
@@ -373,7 +161,7 @@ partial class Desktop {
                         "GitHub username",
                         280
                     ),
-                    Entry(
+                    ui.Entry(
                         "Issue",
                         ownerIssue,
                         value -> {
@@ -386,15 +174,15 @@ partial class Desktop {
             )
         )
         add.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Action(
+                    ui.Action(
                         "Grant issue access",
                         () -> AccessAction("grant", ownerDonor, ownerIssue),
                         true,
                         !ownerCanWrite || ownerDonor == "" || !int32.TryParse(ownerIssue, out var number) || number < 1
                     ),
-                    Action(
+                    ui.Action(
                         "Trust donor",
                         () -> AccessAction("trust", ownerDonor),
                         disabled: !ownerCanWrite || ownerDonor == ""
@@ -407,16 +195,16 @@ partial class Desktop {
     }
 
     private func OwnerChecks() Blob {
-        let panel = DonatePanel()
-        panel.Children.Add(Heading("Verification", 28))
+        let panel = ui.Panel()
+        panel.Children.Add(ui.Heading("Verification", 28))
         for index in 0 ... ownerCommands.Count {
             let current = index
             let args = ownerCommands[index]
             panel.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Label(String.Join(" ", args), 20),
-                        Action(
+                        ui.Label(String.Join(" ", args), 20),
+                        ui.Action(
                             "Remove command " + (index + 1).ToString(),
                             () -> {
                                 ownerCommands.RemoveAt(current)
@@ -429,9 +217,9 @@ partial class Desktop {
             )
         }
         panel.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Entry(
+                    ui.Entry(
                         "Command",
                         verifyCommand,
                         value -> {
@@ -440,7 +228,7 @@ partial class Desktop {
                         "dotnet test",
                         520
                     ),
-                    Action(
+                    ui.Action(
                         "Add command",
                         () -> {
                             ownerCommands.Add([]string{"/bin/sh", "-c", verifyCommand})
@@ -453,13 +241,13 @@ partial class Desktop {
                 }
             )
         )
-        panel.Children.Add(Rule())
-        panel.Children.Add(Heading("Required CI checks", 28))
-        let tags = Row([]Blob{})
+        panel.Children.Add(ui.Rule())
+        panel.Children.Add(ui.Heading("Required CI checks", 28))
+        let tags = ui.Row([]Blob{})
         for name in ownerChecks {
             let selected = name
             tags.Children.Add(
-                Action(
+                ui.Action(
                     name + " ×",
                     () -> {
                         ownerChecks.Remove(selected)
@@ -471,9 +259,9 @@ partial class Desktop {
         }
         panel.Children.Add(tags)
         panel.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Entry(
+                    ui.Entry(
                         "Check name",
                         checks,
                         value -> {
@@ -482,7 +270,7 @@ partial class Desktop {
                         "build",
                         360
                     ),
-                    Action(
+                    ui.Action(
                         "Add check",
                         () -> {
                             if !ownerChecks.Contains(checks.Trim()) {
@@ -502,14 +290,14 @@ partial class Desktop {
 
     private func OwnerPermissions() Blob {
         let body = Container{Gap: 18}
-        let access = DonatePanel()
-        access.Children.Add(Heading("Who can contribute", 28))
-        let choices = Row([]Blob{})
+        let access = ui.Panel()
+        access.Children.Add(ui.Heading("Who can contribute", 28))
+        let choices = ui.Row([]Blob{})
         let selected = ownerEligibility == "" ? TextOf(ownerPolicy, "eligibility"): ownerEligibility
         for mode in[]string{"trusted", "open", "manual"} {
             let value = mode
             choices.Children.Add(
-                ChoiceCard(
+                ui.ChoiceCard(
                     mode == "trusted" ? "Trusted donors": mode == "open" ? "Everyone": "Per issue",
                     "",
                     mode == "open" ? "public": "verified_user",
@@ -523,8 +311,8 @@ partial class Desktop {
         }
         access.Children.Add(choices)
         body.Children.Add(access)
-        let tools = DonatePanel()
-        tools.Children.Add(Heading("Coding tools", 28))
+        let tools = ui.Panel()
+        tools.Children.Add(ui.Heading("Coding tools", 28))
         let allowed = List[string]()
         if ownerTools != "" {
             for name in ownerTools.Split(',') {
@@ -538,11 +326,11 @@ partial class Desktop {
         if allowed.Count == 0 {
             allowed.Add("codex")
         }
-        let row = Row([]Blob{})
-        for choice in harnessChoices {
+        let row = ui.Row([]Blob{})
+        for choice in HarnessChoices.Items {
             let tool = choice
             row.Children.Add(
-                ChoiceCard(
+                ui.ChoiceCard(
                     tool.Name,
                     "",
                     tool.Icon,
@@ -563,14 +351,14 @@ partial class Desktop {
         }
         tools.Children.Add(row)
         body.Children.Add(tools)
-        let models = DonatePanel()
-        models.Children.Add(Heading("Models", 28))
+        let models = ui.Panel()
+        models.Children.Add(ui.Heading("Models", 28))
         let modelPolicy =
         ownerModelPolicy == "" ? TextOf(ownerPolicy, "model_policy"): ownerModelPolicy
         models.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    ChoiceCard(
+                    ui.ChoiceCard(
                         "All supported",
                         "",
                         "apps",
@@ -580,7 +368,7 @@ partial class Desktop {
                             OwnerChanged()
                         }
                     ),
-                    ChoiceCard(
+                    ui.ChoiceCard(
                         "Selected models",
                         "",
                         "checklist",
@@ -597,10 +385,10 @@ partial class Desktop {
             for item in ownerModelMap {
                 let key = item.Key
                 models.Children.Add(
-                    Row(
+                    ui.Row(
                         []Blob{
-                            Label(key + " / " + String.Join(", ", item.Value), 20),
-                            Action(
+                            ui.Label(key + " / " + String.Join(", ", item.Value), 20),
+                            ui.Action(
                                 "Remove " + key,
                                 () -> {
                                     ownerModelMap.Remove(key)
@@ -614,9 +402,9 @@ partial class Desktop {
                 )
             }
             models.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Entry(
+                        ui.Entry(
                             "Model ID",
                             ownerModel,
                             value -> {
@@ -625,7 +413,7 @@ partial class Desktop {
                             "gpt-6.1-sol",
                             300
                         ),
-                        Entry(
+                        ui.Entry(
                             "Efforts",
                             ownerEffort,
                             value -> {
@@ -634,7 +422,7 @@ partial class Desktop {
                             "high,xhigh",
                             200
                         ),
-                        Action(
+                        ui.Action(
                             "Add model",
                             () -> {
                                 let efforts = List[string]()
@@ -660,10 +448,10 @@ partial class Desktop {
             )
         }
         body.Children.Add(models)
-        let limits = DonatePanel()
-        limits.Children.Add(Heading("Limits", 28))
+        let limits = ui.Panel()
+        limits.Children.Add(ui.Heading("Limits", 28))
         limits.Children.Add(
-            Entry(
+            ui.Entry(
                 "Maximum minutes per donation",
                 ownerMinutes,
                 value -> {
@@ -675,7 +463,7 @@ partial class Desktop {
             )
         )
         limits.Children.Add(
-            Check(
+            ui.Check(
                 "Allow project network access",
                 (
                     ownerNetwork == "" ? Field(
@@ -695,12 +483,12 @@ partial class Desktop {
 
     private func OwnerSetupView() Blob {
         let body = Container{Gap: 18}
-        let steps = Row([]Blob{})
+        let steps = ui.Row([]Blob{})
         let names = []string{"Checks", "Permissions", "Review"}
         for i in 0 ... names.Length {
             let step = i
             steps.Children.Add(
-                Action(
+                ui.Action(
                     names[i],
                     () -> {
                         ownerStep = step
@@ -715,10 +503,10 @@ partial class Desktop {
         } else if ownerStep == 1 {
             body.Children.Add(OwnerPermissions())
         } else {
-            let review = DonatePanel()
-            review.Children.Add(Heading("Project setup", 28))
+            let review = ui.Panel()
+            review.Children.Add(ui.Heading("Project setup", 28))
             review.Children.Add(
-                Entry(
+                ui.Entry(
                     "Local checkout",
                     projectPath,
                     value -> {
@@ -729,18 +517,18 @@ partial class Desktop {
                     650
                 )
             )
-            review.Children.Add(ReviewDetail("Repository", ownerRepository))
+            review.Children.Add(ui.ReviewDetail("Repository", ownerRepository))
             review.Children.Add(
-                ReviewDetail(
+                ui.ReviewDetail(
                     "Checks",
                     ownerCommands.Count.ToString() + " commands, " + ownerChecks.Count.ToString() + " CI checks"
                 )
             )
             review.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Action("Preview setup", () -> PreviewOwner(), true, projectPath == ""),
-                        Action("Apply preview", () -> ApplyOwner(), disabled: ownerArguments.Length == 0)
+                        ui.Action("Preview setup", () -> PreviewOwner(), true, projectPath == ""),
+                        ui.Action("Apply preview", () -> ApplyOwner(), disabled: ownerArguments.Length == 0)
                     }
                 )
             )
@@ -750,7 +538,7 @@ partial class Desktop {
                         Content: ownerPreview,
                         FontFamily: "monospace",
                         FontSize: 14,
-                        Color: Ink(),
+                        Color: ui.Ink(),
                         MaxHeight: 420,
                         OverflowY: Overflow.Scroll
                     }
@@ -760,16 +548,16 @@ partial class Desktop {
         }
         if ownerStep < 2 {
             body.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Action(
+                        ui.Action(
                             "Back",
                             () -> {
                                 ownerStep--
                             },
                             disabled: ownerStep == 0
                         ),
-                        Action(
+                        ui.Action(
                             ownerStep == 0 ? "Set permissions": "Review setup",
                             () -> {
                                 ownerStep++
@@ -783,14 +571,14 @@ partial class Desktop {
         return body
     }
 
-    private func Owner() Blob {
+    func Build() Blob {
         let body = Container{Gap: 20}
-        body.Children.Add(Heading("My project", 38))
+        body.Children.Add(ui.Heading("My project", 38))
         if !ownerOpen {
-            let project = DonatePanel()
-            project.Children.Add(Heading("Open a project", 28))
+            let project = ui.Panel()
+            project.Children.Add(ui.Heading("Open a project", 28))
             project.Children.Add(
-                Entry(
+                ui.Entry(
                     "GitHub repository",
                     ownerRepository,
                     value -> {
@@ -802,16 +590,16 @@ partial class Desktop {
                 )
             )
             project.Children.Add(
-                Row(
+                ui.Row(
                     []Blob{
-                        Action("Open project", () -> LoadOwner(), true, ownerRepository == ""),
-                        Action(
+                        ui.Action("Open project", () -> LoadOwner(), true, ownerRepository == ""),
+                        ui.Action(
                             "Check owner prerequisites",
-                            () -> Execute(
+                            () -> app.Execute(
                                 []string{"doctor", "--owner", "--auth"},
                                 result -> {
-                                    if !Error(result) {
-                                        message = "Owner prerequisites checked."
+                                    if !app.Error(result) {
+                                        app.Message = "Owner prerequisites checked."
                                     }
                                 }
                             )
@@ -823,24 +611,24 @@ partial class Desktop {
             return body
         }
         body.Children.Add(
-            Row(
+            ui.Row(
                 []Blob{
-                    Heading(ownerRepository, 28),
-                    Action(
+                    ui.Heading(ownerRepository, 28),
+                    ui.Action(
                         "Change project",
                         () -> {
                             ownerOpen = false
                         }
                     ),
-                    Action("Refresh project", () -> RefreshOwner())
+                    ui.Action("Refresh project", () -> RefreshOwner())
                 }
             )
         )
-        let tabs = Row([]Blob{})
+        let tabs = ui.Row([]Blob{})
         for tab in[]string{"Contributions", "Access", "Setup"} {
             let selected = tab
             tabs.Children.Add(
-                Action(
+                ui.Action(
                     tab,
                     () -> {
                         ownerTab = selected
@@ -860,9 +648,9 @@ partial class Desktop {
         } else {
             if ownerSelected.ValueKind == JsonValueKind.Object {
                 body.Children.Add(
-                    Row(
+                    ui.Row(
                         []Blob{
-                            Action(
+                            ui.Action(
                                 "Back to issues",
                                 () -> {
                                     ownerSelected = JsonElement{}
@@ -873,126 +661,20 @@ partial class Desktop {
                 )
                 body.Children.Add(OwnerIssue(ownerSelected))
             } else {
-                body.Children.Add(IssueSearch(ownerIssues, () -> SearchOwnerIssues(1, true), true))
+                body.Children.Add(ui.IssueSearch(ownerIssues, () -> SearchOwnerIssues(1, true), true))
                 body.Children.Add(
-                    IssueRows(
+                    ui.IssueRows(
                         ownerIssues,
                         selected -> {
                             ownerSelected = selected
-                            activityAction = "Refresh contribution"
+                            app.ActionName = "Refresh contribution"
                             InspectOwnerIssue(TextOf(selected, "number"))
                         }
                     )
                 )
-                body.Children.Add(IssuePagination(ownerIssues, page -> SearchOwnerIssues(page)))
+                body.Children.Add(ui.IssuePagination(ownerIssues, page -> SearchOwnerIssues(page)))
             }
         }
         return body
-    }
-
-    private func PreviewOwner() {
-        try {
-            let repo = Repository(ownerRepository)
-            if !Path.IsPathFullyQualified(projectPath) || !Directory.Exists(projectPath) {
-                throw Exception("Enter an existing absolute checkout path.")
-            }
-            let args = List[string]()
-            for item in[]string{"init", "--repo", repo, "--path", projectPath, "--non-interactive"} {
-                args.Add(item)
-            }
-            if ownerCommandsChanged {
-                args.Add("--verification")
-                args.Add(OwnerCommandsJson())
-            }
-            if ownerChecksChanged {
-                args.Add("--required-checks")
-                args.Add(OwnerStrings(ownerChecks).ToJsonString())
-            }
-            if ownerModelPolicy != "" {
-                args.Add("--model-policy")
-                args.Add(ownerModelPolicy)
-                if ownerModelPolicy == "whitelist" {
-                    ownerModels = OwnerModelsJson()
-                }
-            }
-            if ownerMinutes != "" {
-                if !int32.TryParse(ownerMinutes, out var minutes) || minutes < 1 || minutes > 1440 {
-                    throw Exception("Enter 1 to 1440 minutes per donation.")
-                }
-                args.Add("--seconds")
-                args.Add((minutes * 60).ToString())
-            }
-            if ownerNetwork != "" {
-                args.Add("--network")
-                args.Add(ownerNetwork)
-            }
-            if ownerModels.Trim() != "" {
-                args.Add("--models")
-                args.Add(ownerModels)
-            }
-            if ownerTools.Trim() != "" {
-                args.Add("--allowed-tools")
-                args.Add(ownerTools)
-            }
-            if ownerEligibility.Trim() != "" {
-                args.Add("--eligibility")
-                args.Add(ownerEligibility)
-            }
-            ownerArguments = []string{}
-            let proposed = args.ToArray()
-            Execute(
-                proposed,
-                result -> {
-                    if Error(result) {
-                        return
-                    }
-                    ownerArguments = proposed
-                    ownerPreview = result.Diagnostics
-                    message = "Review the proposed files before applying."
-                },
-                directory: projectPath
-            )
-        } catch (error Exception) {
-            message = error.Message
-        }
-    }
-
-    private func ApplyOwner() {
-        let preview = ownerArguments
-        let reviewed = ownerPreview
-        let args = List[string](ownerArguments)
-        args.Add("--yes")
-        Confirm(
-            "Apply project setup?",
-            "Write the policy and workflow shown in the preview.\n\nReview and commit these files before approving work. Existing checks are preserved unless you explicitly replaced them.",
-            () -> {
-                Execute(
-                    preview,
-                    checked -> {
-                        if Error(checked) {
-                            return
-                        }
-                        if checked.Diagnostics != reviewed {
-                            ownerArguments = []string{}
-                            report = checked.Diagnostics
-                            message = "Project setup changed. Preview and review it again before applying."
-                            return
-                        }
-                        Execute(
-                            args.ToArray(),
-                            result -> {
-                                ownerArguments = []string{}
-                                if result.ExitCode == 0 {
-                                    ownerPreview = ""
-                                    message = "Setup saved. Review and commit the files before approving issues."
-                                }
-                            },
-                            directory: projectPath
-                        )
-                    },
-                    directory: projectPath
-                )
-            }
-        )
     }
 }

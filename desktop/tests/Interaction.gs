@@ -543,7 +543,7 @@ func TestCommandLifecycle() {
     var child = 0
     try {
         let clock = Stopwatch.StartNew()
-        let result = CommandRunner().Run(
+        let result = CommandClient().Run(
             []string{
                 "-c",
                 "sleep 30 </dev/null >/dev/null 2>&1 & printf '%s' \"$$!\" > \"$1\"; trap 'exit 0' INT; while :; do sleep .05; done",
@@ -570,7 +570,7 @@ func TestCommandLifecycle() {
     }
 }
 
-func RunShutdownJob(runner CommandRunner, marker string, ignore bool, finished Chan[CommandResult]) {
+func RunShutdownJob(runner CommandClient, marker string, ignore bool, finished Chan[CommandResult]) {
     let trap = ignore ? "trap '' INT": "trap 'exit 0' INT"
     finished <- runner.Run(
         []string{
@@ -590,7 +590,7 @@ func TestDesktopShutdown() {
     let finished = Chan[CommandResult](2)
     try {
         for index in 0 ... 2 {
-            go RunShutdownJob(CommandRunner(), Path.Combine(root, index.ToString()), index == 1, finished)
+            go RunShutdownJob(CommandClient(), Path.Combine(root, index.ToString()), index == 1, finished)
         }
         let startup = Stopwatch.StartNew()
         using let pulse = tick(TimeSpan.FromMilliseconds(10))
@@ -601,7 +601,7 @@ func TestDesktopShutdown() {
             }
         }
         let shutdown = Stopwatch.StartNew()
-        CommandRunner.Shutdown()
+        ProcessRunner.Shutdown()
         for index in 0 ... 2 {
             let result = <-finished
             Require(result.Error.Contains("cancelled"), "Shutdown did not cancel its command")
@@ -609,7 +609,7 @@ func TestDesktopShutdown() {
             AwaitChildStopped(child)
         }
         Require(shutdown.Elapsed.TotalSeconds < 8, "Shutdown exceeded its cleanup deadline")
-        let rejected = CommandRunner().Run(
+        let rejected = CommandClient().Run(
             []string{"-c", "touch \"$1\"; printf '{}'", "fixture", Path.Combine(root, "late")},
             "/bin/sh"
         )
@@ -618,7 +618,7 @@ func TestDesktopShutdown() {
             "Shutdown admitted a new command"
         )
     } finally {
-        CommandRunner.Shutdown()
+        ProcessRunner.Shutdown()
         Directory.Delete(root, true)
     }
 }
@@ -637,16 +637,16 @@ func Main(args[]string) {
     TestDesktop()
     WorkspaceFlow()
     TestCommandLifecycle()
-    let literal = CommandRunner().Run([]string{"%s", "{\"value\":\"$(literal); *\"}"}, "/usr/bin/printf")
+    let literal = CommandClient().Run([]string{"%s", "{\"value\":\"$(literal); *\"}"}, "/usr/bin/printf")
     Require(
         literal.Error == "" && TextOf(literal.Value, "value") == "$(literal); *",
         "Command arguments were not literal"
     )
-    let unlimitedResult = CommandRunner().Run([]string{"-c", "sleep .2; printf '{}'"}, "/bin/sh", seconds: 0)
+    let unlimitedResult = CommandClient().Run([]string{"-c", "sleep .2; printf '{}'"}, "/bin/sh", seconds: 0)
     Require(unlimitedResult.Error == "" && unlimitedResult.ExitCode == 0, "Unlimited command expired")
-    let large = CommandRunner().Run([]string{"-c", "1048577", "/dev/zero"}, "/usr/bin/head")
+    let large = CommandClient().Run([]string{"-c", "1048577", "/dev/zero"}, "/usr/bin/head")
     Require(large.Error.Contains("display limit"), "Oversized command output was not rejected")
-    let noisyRunner = CommandRunner()
+    let noisyRunner = CommandClient()
     let noisy = noisyRunner.Run(
         []string{"-c", "head -c 1048577 /dev/zero >&2; printf finished >&2; printf '{}'"},
         "/bin/sh"
@@ -657,7 +657,7 @@ func Main(args[]string) {
     )
     let marker = Path.Combine(Path.GetTempPath(), "tokate-gui-cancel-" + Guid.NewGuid().ToString("N"))
     try {
-        let interrupted = CommandRunner().Run(
+        let interrupted = CommandClient().Run(
             []string{
                 "-c",
                 "trap 'printf interrupted > \"$1\"; exit 0' INT; while :; do sleep 0.05; done",
