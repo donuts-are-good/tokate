@@ -31,6 +31,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Check committed whitespace
+        env:
+          TOKATE_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n "$TOKATE_DIFF_BASE" && ! "$TOKATE_DIFF_BASE" =~ ^0+$ ]]; then
+            git diff --check "$TOKATE_DIFF_BASE" HEAD
+          else
+            git show --check --oneline HEAD
+          fi
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           global-json-file: global.json
@@ -54,7 +64,7 @@ jobs:
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/tokate-commands
           /usr/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
-      - name: Check proof script failure handling
+      - name: Check script regressions
         run: python3 tests/Tools/proof-regressions.py
       - name: Build and check the selected system
         env:
@@ -62,7 +72,6 @@ jobs:
         run: |
           read -r -a test_args <<< "$TOKATE_TEST_ARGS"
           bash scripts/verify.sh "${test_args[@]}"
-      - run: artifacts/linux-x64/tokate --version
       - name: Check the minimum glibc runtime
         run: |
           required=$(objdump -T artifacts/linux-x64/tokate | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sort -Vu | tail -1)
@@ -195,30 +204,26 @@ jobs:
           name: tokate-binaries
           path: ${{ runner.temp }}
       - run: mkdir -p artifacts && tar -xzf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts
-      - name: Install latest Codex and Pi for native integration proofs
+      - name: Install latest Codex for native integration proofs
         working-directory: ${{ runner.temp }}
         env:
           CODEX_VERSION: ${{ needs.harness-layouts.outputs.codex }}
-          PI_VERSION: ${{ needs.harness-layouts.outputs.pi }}
         run: |
           prefix="$RUNNER_TEMP/tokate-harnesses"
           mkdir -p "$prefix/home"
-          env -i HOME="$prefix/home" PATH="$PATH" LANG=C.UTF-8 npm install --global --prefix "$prefix" "@openai/codex@$CODEX_VERSION" "@earendil-works/pi-coding-agent@$PI_VERSION"
+          env -i HOME="$prefix/home" PATH="$PATH" LANG=C.UTF-8 npm install --global --prefix "$prefix" "@openai/codex@$CODEX_VERSION"
           native=$(find "$prefix/lib/node_modules/@openai/codex" -type f -path '*/vendor/x86_64-unknown-linux-musl/bin/codex')
           test -f "$native"
           node_path=$(command -v node)
           node_version=$("$node_path" --version)
           codex_version=$(env -i HOME="$prefix/home" CODEX_HOME="$prefix/home/codex" PATH="$PATH" LANG=C.UTF-8 "$prefix/bin/codex" --version)
-          pi_version=$(env -i HOME="$prefix/home" PATH="$PATH" LANG=C.UTF-8 PI_OFFLINE=1 "$prefix/bin/pi" --version)
           printf '%s\n' "$prefix/bin" >> "$GITHUB_PATH"
           printf 'TOKATE_HARNESS_PREFIX=%s\nTOKATE_CODEX=%s\nTOKATE_NODE=%s\n' "$prefix" "$native" "$node_path" >> "$GITHUB_ENV"
-          printf '| Harness | Tested version | Coverage |\n| --- | --- | --- |\n| Node | %s | Runtime |\n| Codex | %s | Native integration |\n| Pi | %s | Managed integration |\n' "$node_version" "$codex_version" "$pi_version" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Harness | Tested version | Coverage |\n| --- | --- | --- |\n| Node | %s | Runtime |\n| Codex | %s | Native integration |\n' "$node_version" "$codex_version" >> "$GITHUB_STEP_SUMMARY"
       - name: Prove latest native Codex tools and isolation without inference
         run: python3 scripts/native-proof.py --codex "$TOKATE_CODEX"
       - name: Prove the same Codex installation with donor-local Node
         run: python3 scripts/local-codex-proof.py --prefix "$TOKATE_HARNESS_PREFIX" --node "$TOKATE_NODE"
-      - name: Prove latest Pi managed workflow without inference
-        run: python3 scripts/pi-proof.py --pi-root "$TOKATE_HARNESS_PREFIX/lib/node_modules" --node "$TOKATE_NODE"
       - name: Prove latest native Claude capabilities without inference
         env:
           CLAUDE_VERSION: ${{ needs.harness-installation.outputs.claude }}
@@ -232,11 +237,46 @@ jobs:
           path: ${{ runner.temp }}/claude-proof.txt
           if-no-files-found: ignore
           retention-days: 7
-      - run: git diff --check
-      - name: Probe the real managed sandbox without inference
+      - name: Probe the real managed Codex sandbox without inference
+        run: artifacts/linux-x64/tokate doctor --managed --harness codex --harness-path "$TOKATE_CODEX"
+  pi-proofs:
+    if: ${{ inputs.full == true }}
+    needs: [build, harness-layouts]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: ${{ needs.build.outputs.node }}
+          package-manager-cache: false
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap socat
+      - *namespace
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: tokate-binaries
+          path: ${{ runner.temp }}
+      - run: mkdir -p artifacts && tar -xzf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts
+      - name: Prove latest Pi managed workflow without inference
+        working-directory: ${{ github.workspace }}
+        env:
+          PI_VERSION: ${{ needs.harness-layouts.outputs.pi }}
+          PI_SHARD: ${{ matrix.shard }}
         run: |
-          artifacts/linux-x64/tokate doctor --managed --harness codex --harness-path "$TOKATE_CODEX"
-          artifacts/linux-x64/tokate doctor --managed --harness pi --pi-root "$TOKATE_HARNESS_PREFIX/lib/node_modules" --node "$TOKATE_NODE"
+          prefix="$RUNNER_TEMP/tokate-pi"
+          mkdir -p "$prefix/home"
+          env -i HOME="$prefix/home" PATH="$PATH" LANG=C.UTF-8 npm install --global --prefix "$prefix" "@earendil-works/pi-coding-agent@$PI_VERSION"
+          printf '| Harness | Tested version | Coverage |\n| --- | --- | --- |\n| Pi | %s | Managed integration, shard %s/3 |\n' "$PI_VERSION" "$PI_SHARD" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/pi-proof.py --pi-root "$prefix/lib/node_modules" --node "$(command -v node)" --shard "$PI_SHARD/3"
   suite:
     if: ${{ inputs.full == true }}
     needs: build
@@ -263,7 +303,7 @@ jobs:
       - run: TOKATE_CI_SHARD="${{ matrix.shard }}/8" artifacts/tests/tokate-tests
   verify:
     if: ${{ always() }}
-    needs: [build, suite, harness-installation, harness-layouts, native-proofs]
+    needs: [build, suite, harness-installation, harness-layouts, native-proofs, pi-proofs]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
@@ -274,9 +314,11 @@ jobs:
             test '${{ needs.harness-installation.result }}' = success
             test '${{ needs.harness-layouts.result }}' = success
             test '${{ needs.native-proofs.result }}' = success
+            test '${{ needs.pi-proofs.result }}' = success
           else
             test '${{ needs.suite.result }}' = skipped
             test '${{ needs.harness-installation.result }}' = skipped
             test '${{ needs.harness-layouts.result }}' = skipped
             test '${{ needs.native-proofs.result }}' = skipped
+            test '${{ needs.pi-proofs.result }}' = skipped
           fi

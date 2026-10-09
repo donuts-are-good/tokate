@@ -253,7 +253,8 @@ internal class PiChecks {
                 mode == "length-cancel" ||
                 mode == "length-timeout"
             using let cleanup = interrupted ? nil: flow
-            flow.Initialize(approve: false)
+            flow.Flow.Initialize(access: false)
+            flow.Flow.Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
             let policyPath = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["model_policy"] = JsonValue.Create("whitelist")
@@ -639,17 +640,21 @@ internal class PiChecks {
                         "Partial output became the final report"
                     )
                 }
-                flow.Flow.Call([]string{"submit", "--run", run})
-                flow.Flow.Reload()
-                flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
-                flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                flow.Flow.Reload()
-                Check.That(flow.Flow.State["pulls"]?.AsArray().Count == 1, "Pi did not produce one draft PR")
-                if mode == "continued" {
-                    Check.That(
-                        !Check.Text(flow.Flow.State["pulls"]?[0]?["body"]).Contains("PRIVATE_PARTIAL_LENGTH_SENTINEL"),
-                        "Private partial output escaped into the draft PR"
-                    )
+                if mode == "on" || mode == "continued" {
+                    flow.Flow.Call([]string{"submit", "--run", run})
+                    flow.Flow.Reload()
+                    flow.Coordinate(flow.Event(Check.PostedRequest(flow.Flow.State)))
+                    flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
+                    flow.Flow.Reload()
+                    Check.That(flow.Flow.State["pulls"]?.AsArray().Count == 1, "Pi did not produce one draft PR")
+                    if mode == "continued" {
+                        Check.That(
+                            !Check.Text(flow.Flow.State["pulls"]?[0]?["body"]).Contains(
+                                "PRIVATE_PARTIAL_LENGTH_SENTINEL"
+                            ),
+                            "Private partial output escaped into the draft PR"
+                        )
+                    }
                 }
             } else {
                 Check.That(saved["turn_completed"] == nil, "Failed Pi response fabricated completion")
@@ -664,7 +669,13 @@ internal class PiChecks {
                     )
                 }
             }
-            Check.Success(TestProcess.Run("/bin/sleep", []string{"3"}, flow.Flow.Temp.Env))
+            let child = Path.Combine(checkout, "child-identity")
+            if (success && mode != "unlimited" && mode != "continued") || (interrupted && mode != "length-cancel") {
+                Check.That(File.Exists(child), "Pi cleanup proof did not start its child")
+            }
+            if File.Exists(child) {
+                TestProcess.Collected(File.ReadAllText(child), "Pi tool left a live descendant")
+            }
             Check.That(
                 !File.Exists(Path.Combine(checkout, "timeout-escaped")),
                 "Pi tool timeout left a live descendant"

@@ -8,8 +8,8 @@ if [[ "$runtime" == linux-musl-x64 ]]; then
     tests=artifacts/tests-musl
 fi
 dotnet restore Tokate.gsproj --locked-mode --nologo
-tokate_sdk_cache="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
-dotnet "$tokate_sdk_cache/gsharp.net.sdk/0.4.1150/tools/formatter/gsfmt.dll" --check src tests
+formatter=$(dotnet msbuild Tokate.gsproj -getProperty:GsharpFormatterFullPath -nologo)
+dotnet "$formatter" --check src tests
 dotnet publish Tokate.gsproj -c Release -r "$runtime" --no-restore -o "artifacts/$runtime" --nologo -warnaserror
 sh -n site/install.sh
 dotnet restore tests/Tokate.Tests.gsproj --locked-mode --nologo
