@@ -118,7 +118,7 @@ internal class Cli {
             CliOption(
                 "allowed-tools",
                 "TOOLS",
-                "Allowed managed tools, comma-separated: codex (Subscription), pi (Local); omitted preserves policy"
+                "Managed codex,pi preserves external permissions; exact harness/provider pairs replace the list"
             ),
             CliOption(
                 "eligibility",

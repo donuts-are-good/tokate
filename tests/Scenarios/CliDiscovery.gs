@@ -246,6 +246,43 @@ internal class CliDiscovery {
             }
             flow.Call(invalid, 1, true)
             Check.That(File.ReadAllText(policyPath) == restricted, "Invalid policy replaced owner work")
+            policy["allowed_tools"] = Check.Json(
+                "[{\"harness\":\"claude\",\"provider\":\"anthropic\"},{\"harness\":\"omp\",\"provider\":\"gufo\"}]"
+            )
+            Check.SaveJson(policyPath, policy)
+            let toolArgs = List[string]{
+                "init",
+                "--repo",
+                "owner/project",
+                "--path",
+                root,
+                "--allowed-tools",
+                "pi",
+                "--non-interactive",
+                "--yes"
+            }
+            flow.Call(toolArgs.ToArray(), owner: true)
+            let mixed = Check.Json(File.ReadAllText(policyPath))["allowed_tools"]?.ToJsonString() ?? ""
+            for name in[]string{"claude", "omp", "pi"} {
+                Check.Contains(mixed, "\"harness\":\"" + name + "\"")
+            }
+            toolArgs[6] = "claude/anthropic,hermes/openrouter"
+            flow.Call(toolArgs.ToArray(), owner: true)
+            policy = Check.Json(File.ReadAllText(policyPath))
+            let exact = policy["allowed_tools"]?.AsArray() ?? throw Exception("Missing tools")
+            Check.That(
+                exact.Count == 2 && Check.Text(exact[1]?["harness"]) == "hermes",
+                "Exact external tools were not selected"
+            )
+            toolArgs[6] = "codex"
+            flow.Call(toolArgs.ToArray(), owner: true)
+            policy = Check.Json(File.ReadAllText(policyPath))
+            let kept = policy["allowed_tools"]?.AsArray() ?? throw Exception("Missing tools")
+            Check.That(kept.Count == 3, "Managed selection removed external permissions")
+            let beforeInvalidTool = File.ReadAllText(policyPath)
+            toolArgs[6] = "claude/"
+            flow.Call(toolArgs.ToArray(), 1, true)
+            Check.That(File.ReadAllText(policyPath) == beforeInvalidTool, "Invalid tool pair changed policy")
             let obsolete = Path.Combine(flow.Temp.Root, "obsolete")
             Directory.CreateDirectory(Path.Combine(obsolete, ".github"))
             let obsoletePolicy = Check.Json(TestResources.Template("tokate.json"))
