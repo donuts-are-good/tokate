@@ -486,10 +486,28 @@ func TestDesktop() {
             "Duplicate contribution action"
         )
     }
+    host.Resize(1280, 860, 1920, 1290)
+    Settle(host)
     let donate = Find(adapter.Root, AccessibilityRole.Button, "Donate") ?? throw Exception("Missing navigation")
-    Require(
-        window.PerformAccessibilityAction(donate.Id, AccessibilityActionRequest(AccessibilityAction.Activate)),
-        "Cannot navigate"
+    let navigationX = float32(donate.Bounds.X + donate.Bounds.Width / 2)
+    let navigationY = float32(donate.Bounds.Y + donate.Bounds.Height / 2)
+    window.PlatformInput.PointerPress(
+        1,
+        PointerDevice.Mouse,
+        navigationX,
+        navigationY,
+        PointerButton.Primary,
+        KeyModifiers{},
+        1
+    )
+    window.PlatformInput.PointerRelease(
+        1,
+        PointerDevice.Mouse,
+        navigationX,
+        navigationY,
+        PointerButton.Primary,
+        KeyModifiers{},
+        0
     )
     Settle(host)
     let field = Find(adapter.Root, AccessibilityRole.TextInput) ?? throw Exception("Missing repository input")
