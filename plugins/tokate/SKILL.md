@@ -55,6 +55,6 @@ After verification succeeds, use `submit --run DIR` when publication is authoriz
 
 Preserve the run, checkout and evidence after cancellation, failure or stale authority. Do not edit `run.json` or bypass failure with a new run. Ask only for the decision needed to continue.
 
-- Use `request --run DIR --operation ACTION` for an explicitly chosen pause, resume, renewal or release. Resuming a reservation does not restart coding.
+- Use `request --run DIR --operation ACTION` for an explicitly chosen `pause`, `resume`, `renew` or `release`. Resuming a reservation does not restart coding.
 - For unpublished corrections, inspect `help recover`. For a published PR, edit `DIR/checkout`, then use `amend --run DIR --commit SHA --seconds N --tools FILE --summary FILE`. Declare later editing tools separately from original execution. Omitted amendment tools mean manual editing. Add `--resume` only when using a resumed reservation.
 - Useful stopped managed work can become an authorized incomplete draft with `submit --run DIR --incomplete`. Continue another donor's published work with `claim --from-pr N` and preserve their commits.
