@@ -30,9 +30,11 @@ def main():
     if not native.is_file():
         raise RuntimeError("Proof requires the selected unmodified optional dependency layout; do not rearrange the installation")
     launcher = prefix / ("bin/codex" if options.layout == "nested" else "node_modules/.bin/codex")
-    artifacts = Path("artifacts").resolve()
-    artifacts.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="local-codex-proof-", dir=artifacts) as directory:
+    storage = Path.home() / ".cache/tokate-proofs"
+    storage.mkdir(parents=True, exist_ok=True)
+    if storage.resolve().is_relative_to(Path.cwd().resolve()):
+        raise RuntimeError("The simulated donor home must be outside the checkout")
+    with tempfile.TemporaryDirectory(prefix="local-codex-proof-", dir=storage) as directory:
         root = Path(directory)
         node = root / "home/.local/bin/node"
         node.parent.mkdir(parents=True)
