@@ -33,8 +33,10 @@ internal class OverlapContribution {
         Facts["dependencies_status"] = "unknown"
         Files = nil
         Facts["upstream_status"] = "unknown"
+        Facts.Remove("upstream_file_count")
         Facts.Remove("upstream_overlap_count")
         Facts.Remove("upstream_paths")
+        Facts.Remove("upstream_paths_complete")
         Facts.Remove("upstream_next")
     }
 }
