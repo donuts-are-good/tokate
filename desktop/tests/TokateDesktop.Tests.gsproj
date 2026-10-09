@@ -6,7 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../*.gs" Exclude="../Program.gs" />
-    <PackageReference Include="Goo" Version="0.7.16" />
+    <PackageReference Include="Goo" Version="0.7.18" />
+    <PackageReference Include="Goo.Svg" Version="0.7.18" />
     <PackageReference Include="Goo.Widgets" Version="0.2.13" />
     <PackageReference Include="Goo.Animations" Version="0.2.5" />
     <GooShaderEffect Include="../Shaders/fresco.slang" TargetPath="Shaders/fresco.goo-effect" />
