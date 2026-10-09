@@ -328,6 +328,29 @@ internal class OverlapChecks {
                         "Revision binding lost"
                     )
                 }
+                if layout == "disjoint" {
+                    File.WriteAllText(
+                        Path.Combine(test.Flow.Upstream, "file-1.txt"),
+                        "Owner changed the first contribution's path\n"
+                    )
+                    test.Flow.Commit("Advance one contribution path")
+                    let changed = test.Report()["data"] ?? throw Exception("Missing changed-target report")
+                    for i in 0 ... 2 {
+                        let item = changed["contributions"]?[i]
+                        Check.That(
+                            Check.Text(item?["upstream_status"]) == "changed" && Check.Text(
+                                item?["upstream_overlap_count"]
+                            ) == (i == 0 ? "1": "0"),
+                            "Target change did not distinguish affected and unrelated work"
+                        )
+                        Check.That(
+                            Check.Text(item?["checks_head"]) == test.Heads[i],
+                            "Target movement relabeled old checks"
+                        )
+                    }
+                    Check.Contains(Check.Text(changed["contributions"]?[0]?["upstream_next"]), "current donor")
+                    Check.Contains(Check.Text(changed["contributions"]?[1]?["upstream_next"]), "semantic compatibility")
+                }
                 if (version == 1 && layout == "disjoint") || (version == 2 && layout == "overlap") {
                     let upstream = test.Synchronize()
                     File.WriteAllText(Path.Combine(test.Flow.Upstream, "later.txt"), "Later target change\n")
@@ -357,6 +380,12 @@ internal class OverlapChecks {
                                 upstream != test.Bases[i] &&
                                 upstream != target,
                             "Synchronization confused approved, authorized and current target revisions"
+                        )
+                        Check.That(
+                            Check.Text(item?["upstream_status"]) == "changed" && Check.Text(
+                                item?["upstream_overlap_count"]
+                            ) == "0",
+                            "Post-synchronization target changes used an obsolete approved base"
                         )
                     }
                     Console.WriteLine("PASS V" + version.ToString() + " synchronized overlap files: " + layout)

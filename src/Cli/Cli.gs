@@ -53,7 +53,11 @@ internal class CliCommand(
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
 
-    internal prop SupportsSavedRun bool -> Name == "work" || Name == "checks" || Name == "prepare" || Name == "status"
+    internal prop SupportsSavedRun bool -> Name == "work" ||
+        Name == "checks" ||
+        Name == "prepare" ||
+        Name == "status" ||
+        Name == "request"
 
     internal func ConflictsWithRun(name string) bool -> name != "run" &&
         name != "help" &&
@@ -64,6 +68,7 @@ internal class CliCommand(
         (
         (Name == "work" && name != "yes" && name != "non-interactive" && name != "continue-truncated") ||
             (Name == "checks" && name != "watch" && name != "timeout") ||
+            (Name == "request" && name != "operation") ||
             Name == "prepare" ||
             Name == "status"
     )
@@ -285,10 +290,10 @@ internal class Cli {
             ),
             CliCommand(
                 "request",
+                "repo,issue,file,run,operation",
                 "repo,issue,file",
-                "repo,issue,file",
-                "Post a v2 claim, lease transition or publication request; no inference.",
-                "[--repo OWNER/REPO] --issue N|URL --file FILE",
+                "Post a request or change a saved reservation; no inference.",
+                "[--repo OWNER/REPO] --issue N|URL --file FILE\n       --run DIR --operation pause|resume|renew|release",
                 "request --repo owner/project --issue 42 --file request.json"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -749,6 +754,20 @@ internal class Cli {
 
         internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
+            if args.Command == "request" {
+                if args.Get("run") != "" {
+                    if !LeaseLifecycle.Transition(args.Need("operation")) || args.Get("file") != "" || args.Get(
+                        "repo"
+                    ) != "" ||
+                        args.Get("issue") != "" || args.Target != "" {
+                        throw Exception(
+                            "Saved reservation requests use only --run and --operation pause|resume|renew|release"
+                        )
+                    }
+                } else if args.Get("operation") != "" {
+                    throw Exception("--operation requires a saved --run")
+                }
+            }
             if args.Get("unlimited") == "true" {
                 if args.Get("seconds") != "" || args.Get("continue-from") != "" ||
                     (args.Command == "prepare" && args.Get("source") != "tokate") {

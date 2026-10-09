@@ -358,6 +358,19 @@ internal class CheckGates {
 
         private func Movement(test PublishedContribution) {
             let flow = test.Coordination.Flow
+            test.Restore()
+            Passing(test)
+            File.WriteAllText(Path.Combine(flow.Upstream, "already-advanced.txt"), "Target changed before checks\n")
+            flow.Commit("Advance target before readiness read")
+            let advanced = Data(Read(test, 1))
+            Gate(advanced, "freshness", "stale")
+            Check.That(
+                Check.Text(advanced["reconciliation_required"]) == "true" && Check.Text(
+                    advanced["machine_status"]
+                ) == "failed",
+                "Pre-existing target movement retained machine readiness"
+            )
+            Check.Contains(Check.Text(advanced["reconciliation_next"]), "current donor")
             for kind in[]string{
                 "head",
                 "approval",
