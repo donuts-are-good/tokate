@@ -19,7 +19,7 @@ internal open class CoordinationFixture : IDisposable {
     }
 
     internal func Initialize(approve bool = true) {
-        Flow.Initialize()
+        Flow.Initialize(access: false)
         Flow.Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
         let policyPath = Path.Combine(Flow.Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(policyPath))
@@ -30,7 +30,7 @@ internal open class CoordinationFixture : IDisposable {
         let models = policy["models"] ?? throw Exception("Missing models")
         models["claude-sonnet-4-6"] = Check.Json("[\"unknown\"]")
         File.WriteAllText(policyPath, policy.ToJsonString())
-        Flow.Commit("Explicit owner version-2 opt-in")
+        Flow.Commit("Owner tool policy")
         if approve {
             Flow.Approve()
         }
@@ -107,12 +107,9 @@ internal open class CoordinationFixture : IDisposable {
         traffic: traffic
     )
 
-    internal func Claim(selected bool = false) JsonNode {
+    internal func Claim() JsonNode {
         let request = ClaimRequest()
-        let path = Event(request)
-        Flow.ResetTraffic()
-        let result = Coordinate(path, traffic: true)
-        Flow.Traffic(selected ? 18: 16, 3, selected ? 9: 8, 0, result)
+        Coordinate(Event(request))
         return request
     }
 

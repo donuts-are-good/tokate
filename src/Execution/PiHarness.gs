@@ -201,7 +201,7 @@ internal class PiHarness {
             let continuationLimit = continueTruncated ? 1: 0
             let timer = Stopwatch.StartNew()
             let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
-            Preparation.Ready(directory, run)
+            WorkspacePreparation.Ready(directory, run)
             let runtime = PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
             let endpoint = PiBoundary.Endpoint(run.Text("pi_endpoint"))
             let limits = PiBoundary.ModelSettings(
@@ -230,8 +230,8 @@ internal class PiHarness {
                         run.Text("effort")
                     }
                 )
-                ContributionClaim.Recheck(run)
-                Preparation.Ready(directory, run)
+                ContributionAuthority.Recheck(run)
+                WorkspacePreparation.Ready(directory, run)
                 try {
                     run.Fields["failure_stage"] = "endpoint_check"
                     run.Fields["failure_reason"] = "endpoint_unavailable"

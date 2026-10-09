@@ -221,7 +221,7 @@ internal class RequestData {
             if J.Count(tools) > 0 {
                 RequestData.Tools(tools)
                 let owner = Policy(J.Write(policy))
-                owner.ValidateEditingTools(tools, "Version-1 owner policy permits only codex/openai correction tools")
+                owner.ValidateTools(tools)
             }
         }
 
@@ -283,7 +283,7 @@ internal class RequestData {
                     throw Exception("Invalid contribution declaration")
                 }
                 Tools(J.Get(metadata, "tools"))
-                V2Continuation.Declaration(metadata)
+                AttemptContinuation.Declaration(metadata)
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {
                     if J.Text(metadata, "source") != "tokate" {

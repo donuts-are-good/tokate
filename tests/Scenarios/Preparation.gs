@@ -122,14 +122,16 @@ internal class PreparationChecks {
                     "--model",
                     "gpt-6.1-sol",
                     "--effort",
-                    "high"
+                    "high",
+                    "--seconds",
+                    "30"
                 }
                 let success = mode == "renamed" || mode == "explicit"
                 if mode == "explicit" {
                     args.AddRange([]string{"--fork", "donor/custom"})
                 }
                 args.AddRange([]string{"--runs", Path.Combine(flow.Temp.Root, "runs")})
-                flow.Call(args.ToArray(), success ? 0: 1)
+                flow.Acquire(args.ToArray(), success ? 0: 1)
                 if success {
                     let saved = Check.Json(File.ReadAllText(Path.Combine(RunPath(flow), "run.json")))
                     Check.That(
@@ -263,21 +265,6 @@ internal class PreparationChecks {
         }
 
         private func Ownership(binary string) {
-            using let v1 = NativeFixture(binary)
-            v1.Initialize()
-            v1.ApproveSelf()
-            let claimed = v1.SameRepositoryClaim()
-            let index = claimed.Output.LastIndexOf("Run: ")
-            Check.That(index >= 0, "Owner v1 preparation failed")
-            let directory = claimed.Output.Substring(index + 5).Trim()
-            let path = Path.Combine(directory, "run.json")
-            let saved = Check.Json(File.ReadAllText(path))
-            saved.AsObject().Remove("preparation_version")
-            saved.AsObject().Remove("preparation_identity")
-            File.WriteAllText(path, saved.ToJsonString())
-            let old = File.ReadAllText(path)
-            Resume(v1, directory, 1)
-            Check.That(File.ReadAllText(path) == old, "Old v1 record was migrated")
             for owner in[]bool{true, false} {
                 using let test = CoordinationFixture(binary)
                 test.Initialize(false)
@@ -387,13 +374,13 @@ internal class PreparationChecks {
             Resume(external.Flow, directory, 1)
             Check.That(File.ReadAllText(path) == original, "Old v2 run was migrated")
             let commit = external.Candidate(claim)
-            external.Flow.Call([]string{"external", "--run", directory, "--commit", commit})
+            external.Flow.Call([]string{"external", "--run", directory, "--commit", commit}, 1)
             external.Flow.NoInference()
             external.Flow.NoPr()
         }
 
         private func LinkedControls(binary string) {
-            for v2 in[]bool{false, true} {
+            for v2 in[]bool{true} {
                 using let test = CoordinationFixture(binary)
                 let flow = test.Flow
                 var run string
@@ -430,12 +417,10 @@ internal class PreparationChecks {
                             "work",
                             "external",
                             "submit",
-                            "publish",
                             "recover",
                             "correction",
                             "amend",
                             "submit-correction",
-                            "publish-correction"
                         } {
                             let corrected = command.EndsWith("-correction")
                             if corrected {
@@ -445,7 +430,7 @@ internal class PreparationChecks {
                                 command == "correction" ? "recover": command
                             )
                             let args = List[string]{name, "--run", run}
-                            if command == "correction" {
+                            if command == "correction" || command == "recover" {
                                 args.Add("--prepare")
                             }
                             if command == "external" || command == "amend" {

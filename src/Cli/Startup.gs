@@ -87,9 +87,9 @@ internal class Startup {
             if catalog && !pi {
                 names.Add("codex")
             }
-            if options.Get("run") != "" && command != "repair" {
+            if options.Get("run") != "" {
                 let run = Data.Load(Path.GetFullPath(options.Need("run")))
-                if command == "work" && run.Number("version") == 2 && run.Text("source") != "tokate" {
+                if command == "work" && (run.Number("version") != 2 || run.Text("source") != "tokate") {
                     throw CliFailure("invalid_state", "External work uses external --run; inference is never launched")
                 }
             }
@@ -98,11 +98,9 @@ internal class Startup {
                 command == "claim" ||
                 command == "prepare" ||
                 command == "external" ||
-                command == "publish" ||
                 command == "submit" ||
                 command == "amend" ||
                 command == "reconcile" ||
-                command == "repair" ||
                 command == "recover" {
                 names.Add("git")
             }
@@ -113,7 +111,6 @@ internal class Startup {
                 command == "claim" ||
                 command == "external" ||
                 command == "amend" ||
-                command == "repair" ||
                 (command == "recover" && options.Get("prepare") != "true")
             if catalog || independent {
                 names.Add("/usr/bin/setsid")

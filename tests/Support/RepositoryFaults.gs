@@ -48,6 +48,9 @@ internal class RepositoryFaults {
                     case "repo_full_name" {
                         value = "\"owner/other\""
                     }
+                    case "repo_id" {
+                        message = "Donor access authority"
+                    }
                 }
                 flow.State[fault] = Check.Json(value)
                 flow.Save()

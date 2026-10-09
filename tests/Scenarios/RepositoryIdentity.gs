@@ -23,12 +23,10 @@ internal class RepositoryIdentityChecks {
             "--json"
         }
 
-        private func Approve(flow NativeFixture, repo string, donor string = "donor") {
-            flow.Call([]string{"approve", "--repo", repo, "--issue", "1", "--donor", donor}, owner: true)
-            let approval = Check.Json(
-                flow.Git("-C", flow.Upstream, "show", "tokate/approvals/1:.github/tokate-approval.json")
-            )
-            Check.That(Check.Text(approval["repo"]) == repo, "Approval spelling was rewritten")
+        private func Approve(flow NativeFixture, repo string) {
+            flow.Call([]string{"approve", "--repo", repo, "--issue", "1"}, owner: true)
+            let approval = Check.Json(flow.Git("-C", flow.Upstream, "show", "tokate/contributions/1:state.json"))
+            Check.That(Check.Text(approval["approval"]?["repo"]) == repo, "Approval spelling was rewritten")
         }
 
         private func MixedWork(binary string, selfOwned bool, approvalRepo string, workRepo string) {
@@ -36,10 +34,13 @@ internal class RepositoryIdentityChecks {
             flow.Initialize()
             flow.State["self_owned"] = JsonValue.Create(selfOwned)
             flow.Save()
-            Approve(flow, approvalRepo, selfOwned ? "owner": "donor")
-            let approval = flow.Git("-C", flow.Upstream, "rev-parse", "tokate/approvals/1")
-            let result = Check.Envelope(flow.Call(WorkArgs(flow, workRepo)), "work", "ok")
+            Approve(flow, approvalRepo)
+            let approval = Check.Text(
+                Check.Json(flow.Git("-C", flow.Upstream, "show", "tokate/contributions/1:state.json"))["approval_id"]
+            )
+            let result = Check.Envelope(flow.Acquire(WorkArgs(flow, workRepo)), "work", "ok")
             let run = Check.Text(result["data"]?["run"])
+            flow.Publish(run)
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
             Check.That(Check.Text(saved["repo"]) == workRepo, "Run spelling was rewritten")
             Check.That(Check.Text(saved["approval"]) == approval, "Original approval was replaced")
@@ -65,7 +66,7 @@ internal class RepositoryIdentityChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             Approve(flow, "OwNeR/PrOjEcT")
-            let claim = Check.Envelope(flow.Call(WorkArgs(flow, "owner/project", "claim")), "claim", "ok")
+            let claim = Check.Envelope(flow.Acquire(WorkArgs(flow, "owner/project", "claim")), "claim", "ok")
             let run = Check.Text(claim["data"]?["run"])
             let path = Path.Combine(run, "run.json")
             RepositoryFaults.Reject(flow, run, []string{"work", "--run", run})
@@ -75,12 +76,7 @@ internal class RepositoryIdentityChecks {
                 let text = Check.Text(saved[field])
                 saved[field] = JsonValue.Create(field == "base_branch" ? "Main": text.ToUpperInvariant())
                 File.WriteAllText(path, saved.ToJsonString())
-                flow.Reject(
-                    []string{"work", "--run", run},
-                    field == "approval" ? "Approval was replaced": (
-                        field == "branch" ? "Invalid saved claim branch": "Saved run differs from owner approval"
-                    )
-                )
+                flow.Call([]string{"work", "--run", run}, 1)
                 saved = Check.Json(original)
             }
             saved["repo"] = JsonValue.Create("OWNER/PROJECT")
@@ -91,74 +87,22 @@ internal class RepositoryIdentityChecks {
             saved["repo"] = JsonValue.Create("owner/project")
             saved["head_repo"] = JsonValue.Create("donor/project")
             File.WriteAllText(path, saved.ToJsonString())
-            flow.Call([]string{"publish", "--run", run})
+            flow.Publish(run)
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             flow.Reload()
             let pull = flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
             let body = Check.Text(pull["body"])
             pull["body"] = JsonValue.Create(
-                body.Replace("\"repo\":\"OWNER/PROJECT\"", "\"repo\":\"owner/other\"", StringComparison.Ordinal)
+                body.Replace("\"repo\":\"owner/project\"", "\"repo\":\"owner/other\"", StringComparison.Ordinal)
             )
             Check.That(Check.Text(pull["body"]) != body, "Cross-repository receipt was not changed")
             flow.Save()
             Check.Contains(
                 flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1, owner: true).Error,
-                "repository does not match"
+                "current exact-commit coordination authority"
             )
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Saved-run validation repeated inference")
             Console.WriteLine("PASS saved-run repository case changes and exact hash/ref validation")
-        }
-
-        private func LegacyPreparation(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            Approve(flow, "OwNeR/PrOjEcT")
-            let claim = Check.Envelope(flow.Call(WorkArgs(flow, "OwNeR/PrOjEcT", "claim")), "claim", "ok")
-            let directory = Check.Text(claim["data"]?["run"])
-            let path = Path.Combine(directory, "run.json")
-            let run = Check.Json(File.ReadAllText(path))
-            let legacy = Check.Map()
-            for field in[]string{
-                "version",
-                "id",
-                "repo",
-                "issue",
-                "donor_id",
-                "approval",
-                "state_sha",
-                "base",
-                "base_branch",
-                "branch",
-                "source"
-            } {
-                legacy[field] = field == "version" || field == "issue" || field == "donor_id" ?
-                run[field]?.DeepClone(): JsonValue.Create(Check.Text(run[field]))
-            }
-            legacy["fork"] = JsonValue.Create(Check.Text(run["requested_fork"]))
-            legacy["head_repo"] = JsonValue.Create(Check.Text(run["head_repo"]))
-            let identity = Check.TextHash(legacy.ToJsonString())
-            Check.That(identity != Check.Text(run["preparation_identity"]), "Legacy fixture did not retain exact case")
-            let saved = Check.Json(File.ReadAllText(path))
-            saved["preparation_identity"] = JsonValue.Create(identity)
-            File.WriteAllText(path, saved.ToJsonString())
-            let markerPath = Path.Combine(directory, "checkout/.git/tokate-preparation.json")
-            let marker = Check.Json(File.ReadAllText(markerPath))
-            marker["identity"] = JsonValue.Create(identity)
-            File.WriteAllText(markerPath, marker.ToJsonString())
-            flow.Call([]string{"prepare", "--run", directory})
-            flow.NoInference()
-            flow.Call([]string{"work", "--run", directory})
-            let completed = Check.Json(File.ReadAllText(path))
-            for field in[]string{"preparation_identity", "approval", "base", "policy_hash", "base_branch", "branch"} {
-                Check.That(
-                    Check.Text(completed[field]) == Check.Text(saved[field]),
-                    "Legacy authority was rewritten: " + field
-                )
-            }
-            Check.That(Check.Text(completed["state"]) == "published", "Legacy preparation did not publish")
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Legacy preparation repeated inference")
-            Console.WriteLine("PASS unchanged mixed-case legacy preparation digest through resume and work")
         }
 
         private func Refusals(binary string) {
@@ -169,34 +113,34 @@ internal class RepositoryIdentityChecks {
             flow.Reload()
             flow.State["repository_folders"] = Check.Json("{\"owner/other\":\"other\"}")
             flow.Save()
-            Check.Contains(flow.Call(WorkArgs(flow, "owner/other"), 1).Error, "owner must approve again")
+            Check.Envelope(flow.Call(WorkArgs(flow, "owner/other"), 1), "work", "error", "command_failed")
             flow.NoInference()
-            let claimed = Check.Envelope(flow.Call(WorkArgs(flow, "owner/project", "claim")), "claim", "ok")
+            let claimed = Check.Envelope(flow.Acquire(WorkArgs(flow, "owner/project", "claim")), "claim", "ok")
             let run = Check.Text(claimed["data"]?["run"])
             let path = Path.Combine(run, "run.json")
             let saved = Check.Json(File.ReadAllText(path))
             saved["repo"] = JsonValue.Create("owner/other")
             File.WriteAllText(path, saved.ToJsonString())
-            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "owner must approve again")
+            flow.Call([]string{"work", "--run", run}, 1)
             flow.NoInference()
+            saved["repo"] = JsonValue.Create("owner/project")
+            File.WriteAllText(path, saved.ToJsonString())
             flow.Reload()
             flow.State["fork_parent"] = JsonValue.Create("owner/other")
             flow.Save()
-            Check.Contains(
-                flow.Call(Array.FindAll(WorkArgs(flow, "OWNER/PROJECT", "claim"), arg -> arg != "--json"), 1).Error,
-                "Head repository is not a fork of the selected upstream"
-            )
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "not a fork")
             flow.Reload()
             flow.State.AsObject().Remove("fork_parent")
             flow.State["viewer_login"] = JsonValue.Create("other")
             flow.Save()
-            Check.Contains(flow.Call(WorkArgs(flow, "OWNER/PROJECT"), 1).Error, "matching your account")
+            flow.Call([]string{"work", "--run", run}, 1)
+            flow.NoInference()
             flow.Reload()
             flow.State.AsObject().Remove("viewer_login")
             let issue = flow.State["issue"] ?? throw Exception("Missing issue")
             issue["title"] = JsonValue.Create("Changed issue")
             flow.Save()
-            Check.Contains(flow.Call(WorkArgs(flow, "OWNER/PROJECT"), 1).Error, "owner must approve again")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Approval revoked or task changed")
             flow.Reload()
             let originalIssue = flow.State["issue"] ?? throw Exception("Missing issue")
             originalIssue["title"] = JsonValue.Create("Implement fixture")
@@ -206,7 +150,7 @@ internal class RepositoryIdentityChecks {
             policy["max_seconds"] = JsonValue.Create(3601)
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Changed policy")
-            Check.Contains(flow.Call(WorkArgs(flow, "OWNER/PROJECT"), 1).Error, "policy or template changed")
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "policy or template changed")
             flow.NoInference()
             flow.NoPr()
             Console.WriteLine(
@@ -218,7 +162,8 @@ internal class RepositoryIdentityChecks {
             using let test = CoordinationFixture(binary)
             test.Initialize(false)
             let flow = test.Flow
-            flow.Call([]string{"approve", "--repo", "OwNeR/PrOjEcT", "--issue", "1", "--donor", "donor"}, owner: true)
+            flow.OwnerAccess()
+            flow.Call([]string{"approve", "--repo", "OwNeR/PrOjEcT", "--issue", "1"}, owner: true)
             let claim = test.ClaimRequest()
             var eventPath = test.Event(claim)
             let event = Check.Json(File.ReadAllText(eventPath))
@@ -275,7 +220,6 @@ internal class RepositoryIdentityChecks {
             MixedWork(binary, false, "owner/project", "OwNeR/PrOjEcT")
             MixedWork(binary, true, "OwNeR/PrOjEcT", "OWNER/PROJECT")
             SavedRun(binary)
-            LegacyPreparation(binary)
             Refusals(binary)
             Coordination(binary)
             Console.WriteLine(

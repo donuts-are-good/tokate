@@ -19,174 +19,10 @@ internal class ReceiptVerification {
                 PrBody.ReceiptText(body, "PR needs exactly one Tokate receipt"),
                 1024 * 1024
             )
-            if J.Number(receipt, "version") == 2 {
-                return ReceiptVerification.VerifyV2(repo, number, pull, receipt, ready, paths)
+            if J.Number(receipt, "version") != 2 {
+                throw Exception("Unsupported receipt protocol")
             }
-            let author = J.Get(pull, "user")
-            if J.Number(receipt, "version") != 1 || !RepositoryIdentity.SameRepo(J.Text(receipt, "repo"), repo) ||
-                J.Text(author, "login") != J.Text(receipt, "donor") {
-                throw Exception("PR author or repository does not match the receipt")
-            }
-            let head = J.Get(pull, "head")
-            if J.Text(head, "sha") != J.Text(receipt, "head") {
-                throw Exception("PR head changed since the receipt was written")
-            }
-            let record = OwnerApproval.Approved(
-                repo,
-                J.Number(receipt, "issue"),
-                RepositoryIdentity.Login(J.Text(receipt, "donor"))
-            )
-            let approval = J.Get(record, "approval")
-            let predecessor = J.Get(receipt, "predecessor")
-            if J.Text(approval, "predecessor_approval") != "" && predecessor.ValueKind == JsonValueKind.Undefined {
-                throw Exception("Continuation receipt omitted interrupted-origin provenance")
-            }
-            if predecessor.ValueKind != JsonValueKind.Undefined {
-                V1Continuation.Grant(record, J.Text(predecessor, "approval"), J.Get(author, "id"))
-                V1Continuation.Receipt(predecessor, J.Text(receipt, "import_manifest_sha256"), approval)
-                if !PrBody.ReportText(body, "").Contains(PrBody.ContinuationReport(predecessor).Trim()) {
-                    throw Exception("PR report omitted interrupted-origin provenance")
-                }
-            }
-            if J.Text(record, "sha") != J.Text(receipt, "approval") || J.Text(approval, "policy_hash") != J.Text(
-                receipt,
-                "policy"
-            ) ||
-                J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
-                throw CliFailure("stale_approval", "PR approval or policy no longer matches")
-            }
-            let expectedBranch = "tokate/issue-" + J.Number(receipt, "issue").ToString() + "-" + J.Text(record, "sha")
-                .Substring(0, 12)
-            if J.Text(head, "ref") != expectedBranch || !String.Equals(
-                J.Text(J.Get(J.Get(head, "repo"), "owner"), "login"),
-                J.Text(receipt, "donor"),
-                StringComparison.OrdinalIgnoreCase
-            ) {
-                throw Exception("PR does not use the assigned donor's claim")
-            }
-            Policy(J.Write(J.Get(record, "policy"))).Validate(
-                J.Text(receipt, "model"),
-                J.Text(receipt, "effort"),
-                J.Number(receipt, "seconds"),
-                J.Bool(receipt, "network")
-            )
-            let correction = J.Get(receipt, "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                RequestData.Correction(
-                    correction,
-                    J.Get(receipt, "amendment").ValueKind == JsonValueKind.Undefined ? J.Text(receipt, "head"):
-                    J.Text(receipt, "original_head"),
-                    J.Get(record, "policy")
-                )
-            }
-            let history = Synchronization.History(receipt)
-            let fork = RepositoryIdentity.Repo(J.Text(J.Get(head, "repo"), "full_name"))
-            if history.GetArrayLength() > 0 {
-                Synchronization.Live(
-                    repo,
-                    number,
-                    record,
-                    J.Text(record, "sha"),
-                    history,
-                    fork,
-                    J.Text(head, "ref"),
-                    J.Text(head, "sha"),
-                    ready: ready
-                )
-                if paths {
-                    Synchronization.Remote(
-                        repo,
-                        J.Get(record, "policy"),
-                        J.Get(record, "approval"),
-                        J.Text(approval, "base"),
-                        history,
-                        fork,
-                        J.Text(head, "sha")
-                    )
-                }
-            } else if paths {
-                GitHubPathEvidence.Check(
-                    repo,
-                    J.Get(record, "policy"),
-                    J.Get(record, "approval"),
-                    J.Text(approval, "base"),
-                    RepositoryIdentity.Repo(J.Text(J.Get(head, "repo"), "full_name")),
-                    J.Text(head, "sha")
-                )
-            }
-            let amendment = J.Get(receipt, "amendment")
-            if amendment.ValueKind != JsonValueKind.Undefined {
-                Amendment.ValidateReceipt(amendment, Policy(J.Write(J.Get(record, "policy"))), J.Text(receipt, "head"))
-                RepositoryIdentity.CommitSha(J.Text(receipt, "original_head"))
-                if J.Text(amendment, "sync") != "" {
-                    Synchronization.Live(
-                        repo,
-                        number,
-                        record,
-                        J.Text(record, "sha"),
-                        history,
-                        fork,
-                        J.Text(head, "ref"),
-                        J.Text(head, "sha"),
-                        J.Text(amendment, "sync"),
-                        previous: J.Text(amendment, "previous"),
-                        ready: ready
-                    )
-                }
-                let report = PrBody.AmendmentReport(receipt)
-                let observedReport = PrBody.ReportText(body, report)
-                let prior = J.Get(receipt, "predecessor")
-                let legacy = (
-                    prior.ValueKind == JsonValueKind.Undefined ? "":
-                    PrBody.ContinuationReport(prior)
-                ) +
-                    Amendment
-                    .LegacySummary(
-                    J.Text(amendment, "previous"),
-                    J.Text(receipt, "head"),
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools")
-                )
-                if observedReport != report &&
-                    (J.Get(amendment, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
-                    throw Exception("PR amendment report differs from its exact-head receipt")
-                }
-            }
-            if J.Get(receipt, "repair").ValueKind != JsonValueKind.Undefined {
-                Repair.Receipt(repo, pull, receipt, record)
-            }
-            if history.GetArrayLength() > 0 {
-                if J.Text(
-                    OwnerApproval.Approved(repo, J.Number(receipt, "issue"), J.Text(receipt, "donor")),
-                    "sha"
-                ) != J.Text(record, "sha") {
-                    throw Exception("Approval changed during receipt validation")
-                }
-                Synchronization.Live(
-                    repo,
-                    number,
-                    record,
-                    J.Text(record, "sha"),
-                    history,
-                    fork,
-                    J.Text(head, "ref"),
-                    J.Text(head, "sha"),
-                    ready: ready
-                )
-            }
-            let run = Data()
-            run.Fields["repo"] = repo
-            run.Fields["pr"] = number
-            run.Fields["pr_url"] = J.Text(pull, "html_url")
-            run.Fields["commit"] = J.Text(head, "sha")
-            run.Fields["policy"] = J.Get(record, "policy")
-            let authority = J.Get(J.Get(receipt, "amendment"), "summary")
-            if authority.ValueKind != JsonValueKind.Undefined {
-                run.Fields["public_summary"] = authority
-            }
-            Binding(run, receipt, approval, J.Text(record, "sha"))
-            Synchronization.Keep(run.Fields, history)
-            return run
+            return VerifyCurrent(repo, number, pull, receipt, ready, paths)
         }
 
         internal func Binding(run Data, receipt JsonElement, approval JsonElement, revision string) {
@@ -203,7 +39,7 @@ internal class ReceiptVerification {
             run.Fields["policy_hash"] = J.Get(approval, "policy_hash")
         }
 
-        internal func VerifyV2(
+        internal func VerifyCurrent(
             repo string,
             number int32,
             pull JsonElement,
@@ -218,15 +54,16 @@ internal class ReceiptVerification {
             let state = CoordinationState.Load(repo, J.Number(receipt, "issue"))
             let value = state.Value()
             let contribution = J.Get(value, "contribution")
+            if J.Text(value, "approval_id") != J.Text(receipt, "approval") ||
+                contribution.ValueKind != JsonValueKind.Object {
+                throw CliFailure("stale_approval", "PR approval or contribution no longer matches")
+            }
             let metadata = J.Get(contribution, "metadata")
             let current = CoordinationState.Current(value)
             let outcome = J.Get(current, "outcome")
             let exactHead = J.Text(outcome, "head")
             let donor = RepositoryIdentity.Login(J.Text(receipt, "donor"))
             let record = state.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
-            if !LeaseLifecycle.Supported(value) {
-                state.Reservation(J.Get(contribution, "actor"))
-            }
             let publicationRevision = J.Text(value, "publication_revision")
             let authenticated = publicationRevision == "" ? state: CoordinationState.At(
                 repo,
@@ -243,31 +80,26 @@ internal class ReceiptVerification {
             ) {
                 throw CliFailure("stale_approval", "Publication revision differs from current contribution evidence")
             }
-            if LeaseLifecycle.Supported(authenticated.Value()) {
-                let publishedLease = J.Get(authenticated.Value(), "reservation")
-                let publishedIdentity = J.Get(authenticated.Value(), "identity")
-                if J.Text(publishedLease, "status") != "active" || J.Text(publishedLease, "attempt") == "" || J.Text(
-                    publishedIdentity,
-                    "id"
-                ) != J.Text(publishedLease, "reservation") || RepositoryIdentity.PositiveId(
-                    J.Get(publishedIdentity, "actor")
-                ) != RepositoryIdentity.PositiveId(J.Get(contribution, "actor")) || RepositoryIdentity.PositiveId(
-                    J.Get(publishedLease, "actor")
-                ) != RepositoryIdentity
-                    .PositiveId(J.Get(contribution, "actor")) {
-                    throw CliFailure(
-                        "stale_approval",
-                        "Publication revision lacks authenticated active attempt authority"
-                    )
-                }
-                LeaseLifecycle.Fence(
-                    authenticated,
-                    J.Get(current, "metadata").ValueKind == JsonValueKind.Object ? J.Text(
-                        J.Get(current, "metadata"),
-                        "attempt"
-                    ): J.Text(current, "attempt")
-                )
+            let publishedLease = J.Get(authenticated.Value(), "reservation")
+            let publishedIdentity = J.Get(authenticated.Value(), "identity")
+            if J.Text(publishedLease, "status") != "active" || J.Text(publishedLease, "attempt") == "" || J.Text(
+                publishedIdentity,
+                "id"
+            ) != J.Text(publishedLease, "reservation") || RepositoryIdentity.PositiveId(
+                J.Get(publishedIdentity, "actor")
+            ) != RepositoryIdentity.PositiveId(J.Get(contribution, "actor")) || RepositoryIdentity.PositiveId(
+                J.Get(publishedLease, "actor")
+            ) != RepositoryIdentity
+                .PositiveId(J.Get(contribution, "actor")) {
+                throw CliFailure("stale_approval", "Publication revision lacks authenticated active attempt authority")
             }
+            LeaseLifecycle.Fence(
+                authenticated,
+                J.Get(current, "metadata").ValueKind == JsonValueKind.Object ? J.Text(
+                    J.Get(current, "metadata"),
+                    "attempt"
+                ): J.Text(current, "attempt")
+            )
             let stateCommit = GitHub.Api("repos/" + repo + "/git/commits/" + authenticated.Sha)
             let parents = J.Items(J.Get(stateCommit, "parents"))
             let expected = J.Text(receipt, "expected")
@@ -304,27 +136,25 @@ internal class ReceiptVerification {
             if J.Text(base, "ref") != target {
                 throw CliFailure("stale_approval", failure)
             }
-            if AccessState.Task(approval) {
-                if donor != J.Text(contribution, "donor") {
-                    throw CliFailure("stale_approval", "Receipt donor differs from the canonical contribution actor")
-                }
-                RepositoryAccess.ValidateFork(
-                    repo,
-                    J.Parse(
-                        J.Write(
-                            map[string, Object?]{
-                                "fork": J.Text(metadata, "fork"),
-                                "branch": J.Text(metadata, "branch"),
-                                "head": exactHead
-                            }
-                        )
-                    ),
-                    J.Get(contribution, "actor")
-                )
+            if donor != J.Text(contribution, "donor") {
+                throw CliFailure("stale_approval", "Receipt donor differs from the canonical contribution actor")
             }
+            RepositoryAccess.ValidateFork(
+                repo,
+                J.Parse(
+                    J.Write(
+                        map[string, Object?]{
+                            "fork": J.Text(metadata, "fork"),
+                            "branch": J.Text(metadata, "branch"),
+                            "head": exactHead
+                        }
+                    )
+                ),
+                J.Get(contribution, "actor")
+            )
             let policy = Policy(J.Write(J.Get(record, "policy")))
             policy.ValidateTools(J.Get(metadata, "tools"), J.Text(metadata, "source"))
-            V2Continuation.Declaration(metadata)
+            AttemptContinuation.Declaration(metadata)
             for key in[]string{"predecessor", "import_manifest_sha256"} {
                 if !RequestData.Same(J.Get(receipt, key), J.Get(metadata, key)) {
                     throw Exception("Continuation receipt differs from authoritative import provenance")
@@ -335,8 +165,8 @@ internal class ReceiptVerification {
                 if J.Text(receipt, "attempt") != J.Text(metadata, "attempt") {
                     throw Exception("Continuation receipt lost its destination attempt fence")
                 }
-                V2Continuation.Authority(authenticated, prior)
-                if !PrBody.ReportText(J.Text(pull, "body"), "").Contains(PrBody.ContinuationReport(prior).Trim()) {
+                AttemptContinuation.Authority(authenticated, prior)
+                if !PrBody.ReportText(J.Text(pull, "body")).Contains(PrBody.ContinuationReport(prior).Trim()) {
                     throw Exception("PR report omitted interrupted-origin provenance")
                 }
             } else if J.Get(receipt, "attempt").ValueKind != JsonValueKind.Undefined {
@@ -357,15 +187,8 @@ internal class ReceiptVerification {
                 if !RequestData.Same(J.Get(amendment, "summary"), J.Get(current, "summary")) {
                     throw Exception("PR amendment summary differs from coordination authority")
                 }
-                let observedReport = PrBody.ReportText(J.Text(pull, "body"), report)
-                let legacy = Amendment.LegacySummary(
-                    J.Text(amendment, "previous"),
-                    exactHead,
-                    J.Number(amendment, "seconds"),
-                    J.Get(amendment, "tools")
-                )
-                if observedReport != report &&
-                    (J.Get(current, "summary").ValueKind != JsonValueKind.Undefined || observedReport != legacy) {
+                let observedReport = PrBody.ReportText(J.Text(pull, "body"))
+                if observedReport != report {
                     throw Exception("PR amendment report differs from coordination authority")
                 }
                 let failure = "Amendment receipt differs from current coordination record"
@@ -435,9 +258,6 @@ internal class ReceiptVerification {
                     throw Exception("Coordination authority changed during receipt validation")
                 }
                 live.Check(repo, J.Number(receipt, "issue"), donor, J.Get(contribution, "actor"))
-                if !LeaseLifecycle.Supported(live.Value()) {
-                    live.Reservation(J.Get(contribution, "actor"))
-                }
                 Synchronization.Live(
                     repo,
                     number,
@@ -451,9 +271,7 @@ internal class ReceiptVerification {
                     contribution: contribution
                 )
             }
-            if AccessState.Task(approval) {
-                AccessState.Check(repo, J.Number(receipt, "issue"), approval, J.Get(contribution, "actor"))
-            }
+            AccessState.Check(repo, J.Number(receipt, "issue"), approval, J.Get(contribution, "actor"))
             let run = Data()
             run.Fields["version"] = 2
             run.Fields["repo"] = repo

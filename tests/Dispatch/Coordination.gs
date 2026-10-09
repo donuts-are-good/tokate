@@ -56,7 +56,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "EffortDeclarations",
                 "ManagedModelPolicy",
                 "ModelPolicyAuthority",
-                "Compatibility",
                 "ProtectedExternal",
                 "ProtectedCoordinator",
                 "ProtectedManaged",
@@ -122,15 +121,11 @@ internal partial class CoordinationFlow : CoordinationFixture {
                         Console.WriteLine("PASS V2 " + name)
                         continue
                     }
-                    case "Compatibility" {
-                        Compatibility(binary)
-                        Console.WriteLine("PASS V2 " + name)
-                        continue
-                    }
                 }
                 using let test = CoordinationFlow(binary)
                 test.Initialize(
-                    approve: name != "ProtectedExternal" &&
+                    approve: name != "LeaseTakeover" &&
+                        name != "ProtectedExternal" &&
                         name != "ProtectedManaged" &&
                         name != "ReceiptEvidence" &&
                         name != "InterruptedVerification"

@@ -42,17 +42,14 @@ internal class SuiteCatalog {
                         }
                     }
                 }
-                case "SynchronizationV2" {
-                    SynchronizationChecks.All(binary, "v2,v2-task")
+                case "Synchronization" {
+                    SynchronizationChecks.All(binary, "current")
                 }
-                case "SynchronizationV2First" {
-                    SynchronizationChecks.All(binary, "v2,v2-task", 1)
+                case "SynchronizationFirst" {
+                    SynchronizationChecks.All(binary, "current", 1)
                 }
-                case "SynchronizationV2Second" {
-                    SynchronizationChecks.All(binary, "v2,v2-task", 2)
-                }
-                case "SynchronizationV1" {
-                    SynchronizationChecks.All(binary, "v1")
+                case "SynchronizationSecond" {
+                    SynchronizationChecks.All(binary, "current", 2)
                 }
                 case "Native" {
                     NativeFlow.All(binary, parallel: true)
@@ -73,9 +70,6 @@ internal class SuiteCatalog {
                 case "Amendment" {
                     AmendmentFlow.All(binary)
                 }
-                case "Repair" {
-                    RepairChecks.All(binary)
-                }
                 case "Decree" {
                     DecreeFlow.All(binary)
                 }
@@ -88,11 +82,7 @@ internal class SuiteCatalog {
                     }
                 }
                 case "Continuation" {
-                    ContinuationChecks.All(binary)
-                    V2ContinuationChecks.All(binary)
-                }
-                case "ContinuationV2" {
-                    V2ContinuationChecks.All(binary)
+                    AttemptContinuationChecks.All(binary)
                 }
                 case "Targets" {
                     if CiShard.Include("Targets") {
@@ -122,16 +112,14 @@ internal class SuiteCatalog {
                 File.Copy(Path.Combine(project, "global.json"), Path.Combine(published, "global.json"))
                 let jobs = []SuiteJob{
                     Job("Environment"),
-                    Job("SynchronizationV2First"),
-                    Job("SynchronizationV1"),
-                    Job("SynchronizationV2Second"),
+                    Job("SynchronizationFirst"),
+                    Job("SynchronizationSecond"),
                     Job("Native"),
                     Job("Coordination"),
                     Job("Admission"),
                     Job("LeaseLifecycle"),
                     Job("Correction"),
                     Job("Amendment"),
-                    Job("Repair"),
                     Job("Decree"),
                     Job("Targets"),
                     Job("Preparation"),

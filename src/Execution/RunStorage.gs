@@ -78,8 +78,11 @@ internal class RunStorage {
                                     throw Exception("Saved contribution metadata is too long")
                                 }
                             }
-                            if J.Number(value, "issue") < 1 || J.Text(value, "state") == "" {
-                                throw Exception("Incomplete saved contribution")
+                            if J.Number(value, "version") != 2 || J.Number(value, "issue") < 1 || J.Text(
+                                value,
+                                "state"
+                            ) == "" {
+                                throw Exception("Unsupported or incomplete saved contribution")
                             }
                             rows[directory] = map[string, Object?]{
                                 "run": directory,

@@ -39,8 +39,11 @@ internal class AdmissionChecks {
             if let text = message {
                 policy["close_message"] = JsonValue.Create(text)
             }
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Owner admission configuration")
+            let configured = policy.ToJsonString()
+            if File.ReadAllText(path) != configured {
+                File.WriteAllText(path, configured)
+                test.Flow.Commit("Owner admission configuration")
+            }
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
         }
 
@@ -181,26 +184,6 @@ internal class AdmissionChecks {
                 )
                 Admit(test, mode == "open" ? "open": "closed")
             }
-            using let legacy = CoordinationFixture(binary)
-            legacy.Flow.Initialize()
-            legacy.Flow.Approve()
-            Pull(legacy, "Fixes #1")
-            Admit(legacy, "open")
-            Target(legacy, "other")
-            Admit(legacy, "closed", action: "edited")
-            Target(legacy, "main")
-            legacy.Flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
-            Reopen(legacy)
-            Admit(legacy, "closed", action: "reopened")
-            using let assigned = CoordinationFixture(binary)
-            assigned.Initialize()
-            Pull(assigned, "Fixes #1")
-            Admit(assigned, "open")
-            assigned.Flow.Reload()
-            let task = assigned.Flow.State["issue"] ?? throw Exception("Missing issue")
-            task["assignees"] = Check.Json("[{\"login\":\"outsider\",\"id\":124}]")
-            assigned.Flow.Save()
-            Admit(assigned, "closed", action: "edited")
         }
 
         private func Coordinator(binary string) {

@@ -77,12 +77,7 @@ internal class GuidedWork {
 
         private func Eligible(value JsonElement, policy Policy) bool ->
         DonorSelection.Supported(value) && policy.Allows(J.Text(value, "model"), J.Text(value, "effort")) &&
-            (
-            J.Number(policy.Value, "version") == 1 ? J.Text(value, "harness") == "codex": policy.AllowsTool(
-                J.Text(value, "harness"),
-                J.Text(value, "provider")
-            )
-        )
+            (policy.AllowsTool(J.Text(value, "harness"), J.Text(value, "provider")))
 
         internal func Profile(args Args, policy Policy) {
             for key in[]string{"profile", "harness", "provider", "model", "effort", "endpoint", "pi-root", "node"} {
@@ -118,11 +113,11 @@ internal class GuidedWork {
             }
             let tools = List[string]()
             let routes = List[string]()
-            if J.Number(policy.Value, "version") == 1 || policy.AllowsTool("codex", "openai") {
+            if policy.AllowsTool("codex", "openai") {
                 tools.Add("Codex | Subscription")
                 routes.Add("codex")
             }
-            if J.Number(policy.Value, "version") == 2 && policy.AllowsTool("pi", "local-chat-completions") {
+            if policy.AllowsTool("pi", "local-chat-completions") {
                 tools.Add("Pi | Local")
                 routes.Add("pi")
             }
@@ -299,17 +294,13 @@ internal class GuidedWork {
             let donor = RepositoryIdentity.Login(J.Text(viewer, "login"))
             let info = GitHub.Api("repos/" + repo)
             let policy = Policy.Load(repo, J.Text(info, "default_branch"))
-            if J.Number(policy.Value, "version") == 2 {
-                CoordinationState.Load(repo, args.Number("issue")).Check(
-                    repo,
-                    args.Number("issue"),
-                    donor,
-                    J.Get(viewer, "id")
-                )
-            } else {
-                OwnerApproval.Approved(repo, args.Number("issue"), donor)
-            }
-            let allowUnlimited = J.Number(policy.Value, "version") == 2 && J.Bool(policy.Value, "allow_unlimited")
+            CoordinationState.Load(repo, args.Number("issue")).Check(
+                repo,
+                args.Number("issue"),
+                donor,
+                J.Get(viewer, "id")
+            )
+            let allowUnlimited = J.Bool(policy.Value, "allow_unlimited")
             if (args.Get("seconds") == "" && args.Get("unlimited") != "true") ||
                 (args.Get("unlimited") == "true" && args.Get("verification-reserve") == "") {
                 Budget(args, J.Number(policy.Value, "max_seconds"), allowUnlimited)

@@ -31,9 +31,10 @@ internal partial class Fixture {
             value["synthetic_padding"] = JsonValue.Create(String('x', Int32.Parse(padding)))
         }
         let etag = "\"" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.ToJsonString()))) + "\""
-        let initial = State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
+        let custom = Check.Text(State["etag_path"]) == "" || Check.Text(State["etag_path"]) == ApiPath
+        let initial = !custom ? etag: State["etag_initial"] == nil ? Check.Text(State["etag_initial_prefix"]) + etag:
         Check.Text(State["etag_initial"])
-        let returned = State["etag_returned"] == nil ? Check.Text(State["etag_returned_prefix"]) + etag:
+        let returned = !custom ? etag: State["etag_returned"] == nil ? Check.Text(State["etag_returned_prefix"]) + etag:
         Check.Text(State["etag_returned"])
         let calls = State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic records")
         var reads int32
@@ -43,7 +44,11 @@ internal partial class Fixture {
             }
         }
         let unchanged = Verb == "GET" &&
-            (Conditional == "If-None-Match: " + initial || (Check.Text(State["etag_force_304"]) == "true" && reads > 1))
+            (
+            Conditional == "If-None-Match: " +
+                initial ||
+                (custom && Check.Text(State["etag_force_304"]) == "true" && reads > 1)
+        )
         if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
             let issue = State["issue"] ?? throw Exception("Missing issue")
             if Check.Text(State["mode"]) == "after_304_edit" {
@@ -219,11 +224,13 @@ internal partial class Fixture {
             if login == "missing" {
                 return Response(404)
             }
-            return Answer(Check.Map("login", login, "id", login == "donor" || login == "renamed" ? 123: 124))
+            return Answer(
+                Check.Map("login", login, "id", login == "owner" ? 1: login == "donor" || login == "renamed" ? 123: 124)
+            )
         }
         if path.StartsWith("user/") {
             let id = Int32.Parse(path.Substring(5))
-            return Answer(Check.Map("id", id, "login", id == 123 ? "donor": "other"))
+            return Answer(Check.Map("id", id, "login", id == 1 ? "owner": id == 123 ? "donor": "other"))
         }
         if path.StartsWith("repos/obselate/tokate/releases/tags/") {
             if let release = State["release"] {

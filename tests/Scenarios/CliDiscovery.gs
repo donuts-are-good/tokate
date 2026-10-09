@@ -15,7 +15,7 @@ func DiscoveryPeer(socket int32, level int32, option int32, value[]byte, length[
 
 internal class CliDiscovery {
     shared {
-        private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external reconcile authorize-sync revoke-sync repair amend submit coordinate admit policy approve assign revoke claim work recover publish status verify-pr overlaps checks completion help --version"
+        private let Commands[]string = "doctor update uninstall defaults select init coordinator-setup access coordination request prepare external reconcile authorize-sync revoke-sync amend submit coordinate admit policy approve revoke claim work recover status verify-pr overlaps checks completion help --version"
             .Split(' ')
 
         private func Address(root string) UnixDomainSocketEndPoint -> UnixDomainSocketEndPoint(
@@ -246,38 +246,20 @@ internal class CliDiscovery {
             }
             flow.Call(invalid, 1, true)
             Check.That(File.ReadAllText(policyPath) == restricted, "Invalid policy replaced owner work")
-            let legacy = Path.Combine(flow.Temp.Root, "legacy")
-            Directory.CreateDirectory(Path.Combine(legacy, ".github/workflows"))
-            File.WriteAllText(Path.Combine(legacy, ".github/tokate.json"), TestResources.Template("tokate.json"))
-            File.WriteAllText(Path.Combine(legacy, ".github/workflows/tokate-coordinator.yml"), "legacy owner wiring\n")
-            let legacyText = File.ReadAllText(Path.Combine(legacy, ".github/tokate.json"))
+            let obsolete = Path.Combine(flow.Temp.Root, "obsolete")
+            Directory.CreateDirectory(Path.Combine(obsolete, ".github"))
+            let obsoletePolicy = Check.Json(TestResources.Template("tokate.json"))
+            obsoletePolicy["version"] = JsonValue.Create(1)
+            let obsoleteText = obsoletePolicy.ToJsonString()
+            File.WriteAllText(Path.Combine(obsolete, ".github/tokate.json"), obsoleteText)
             flow.Call(
-                []string{"init", "--repo", "owner/project", "--path", legacy, "--non-interactive", "--yes"},
-                owner: true
+                []string{"init", "--repo", "owner/project", "--path", obsolete, "--non-interactive", "--yes"},
+                1,
+                true
             )
             Check.That(
-                File.ReadAllText(Path.Combine(legacy, ".github/tokate.json")) == legacyText,
-                "Repeat changed legacy approval binding"
-            )
-            flow.Call(
-                []string{
-                    "init",
-                    "--repo",
-                    "owner/project",
-                    "--path",
-                    legacy,
-                    "--upgrade",
-                    "--non-interactive",
-                    "--yes"
-                },
-                owner: true
-            )
-            let upgraded = Check.Json(File.ReadAllText(Path.Combine(legacy, ".github/tokate.json")))
-            Check.That(
-                Check.Text(upgraded["model_policy"]) == "whitelist" && upgraded["models"]?.ToJsonString() == Check
-                    .Json(TestResources.Template("tokate.json"))["models"]
-                    ?.ToJsonString(),
-                "Upgrade removed model restrictions"
+                File.ReadAllText(Path.Combine(obsolete, ".github/tokate.json")) == obsoleteText,
+                "Unsupported policy was rewritten"
             )
             let interactiveRoot = Path.Combine(flow.Temp.Root, "interactive")
             let command = "'" + binary + "' init --repo owner/project --path '" + interactiveRoot + "' --plain"
@@ -612,7 +594,7 @@ internal class CliDiscovery {
             let identity = String('x', 3000)
             let record = Check.Map(
                 "version",
-                1,
+                2,
                 "id",
                 "saved",
                 "state",
@@ -818,6 +800,12 @@ internal class CliDiscovery {
             File.WriteAllText(Path.Combine(second, "run.json"), record.ToJsonString())
             let firstBytes = Check.Hash(Path.Combine(first, "run.json"))
             let secondBytes = Check.Hash(Path.Combine(second, "run.json"))
+            let obsolete = Path.Combine(root, "obsolete")
+            Directory.CreateDirectory(obsolete)
+            record["version"] = JsonValue.Create(1)
+            let obsoleteText = record.ToJsonString()
+            File.WriteAllText(Path.Combine(obsolete, "run.json"), obsoleteText)
+            record["version"] = JsonValue.Create(2)
             let broken = Path.Combine(root, "broken")
             let oversized = Path.Combine(root, "oversized")
             Directory.CreateDirectory(broken)
@@ -829,8 +817,12 @@ internal class CliDiscovery {
             let selected = TestProcess.Run("/usr/bin/script", command, temp.Env, input: "3\n99\n1\n3\n3\n2\nq\n")
             Check.Success(selected)
             Check.Contains(selected.Output, "a first")
+            Check.That(
+                File.ReadAllText(Path.Combine(obsolete, "run.json")) == obsoleteText,
+                "Unsupported saved run was changed"
+            )
             Check.Contains(selected.Output, "b second")
-            Check.Contains(selected.Output, "Unreadable entries skipped: 3")
+            Check.Contains(selected.Output, "Unreadable entries skipped: 4")
             Check.Contains(selected.Output, "Choose a number from 1 to 2.")
             Check.Contains(selected.Output, "Start reserved donation")
             let last = selected.Output.Substring(selected.Output.LastIndexOf("Continue contribution"))

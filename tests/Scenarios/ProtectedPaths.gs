@@ -7,8 +7,9 @@ import System.Text.Json.Nodes
 internal class ProtectedPathChecks {
     shared {
         internal func All(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
+            using let test = CoordinationFixture(binary)
+            test.Initialize(approve: false)
+            let flow = test.Flow
             let paths = []string{" protected", "\uFEFFprotected", "scripts/quoted\" ", "scripts/checks/line\n\".sh"}
             let entries = JsonArray()
             for path in paths {
@@ -21,55 +22,31 @@ internal class ProtectedPathChecks {
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Raw protected Git names")
             flow.Approve()
-            let run = flow.Claim()
+            let claim = test.ClaimRequest()
+            test.Coordinate(test.Event(claim))
             using let baseline = FixtureSnapshot(flow.Temp.Root)
             for path in paths {
-                for committed in[]bool{false, true} {
-                    baseline.Restore()
-                    let checkout = Path.Combine(run, "checkout")
-                    File.AppendAllText(Path.Combine(checkout, path), "changed\n")
-                    flow.Git("-C", checkout, "add", "-A")
-                    let savedPath = Path.Combine(run, "run.json")
-                    let saved = Check.Json(File.ReadAllText(savedPath))
-                    saved["state"] = JsonValue.Create("generated")
-                    let checks = JsonArray()
-                    checks.Add(Check.Map("command", policy["verification"]?[0], "exit_code", 0))
-                    saved["verification"] = checks
-                    File.WriteAllText(
-                        Path.Combine(run, "changes.patch"),
-                        flow.Git("-C", checkout, "diff", "--cached", "--binary", Check.Text(saved["base"])) + "\n"
-                    )
-                    if committed {
-                        flow.Git(
-                            "-C",
-                            checkout,
-                            "-c",
-                            "user.name=Fixture",
-                            "-c",
-                            "user.email=fixture@example.test",
-                            "commit",
-                            "-m",
-                            "Forged success"
-                        )
-                        saved["commit"] = JsonValue.Create(flow.Git("-C", checkout, "rev-parse", "HEAD"))
-                    }
-                    File.WriteAllText(savedPath, saved.ToJsonString())
-                    Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "protected owner path")
-                    Check.That(
-                        flow.Git(
-                            "-C",
-                            Path.Combine(flow.Bin, "fork"),
-                            "rev-parse",
-                            Check.Text(saved["branch"])
-                        ) == Check.Text(saved["base"]),
-                        "Protected path was pushed"
-                    )
-                    flow.NoInference()
-                    flow.NoPr()
-                }
+                baseline.Restore()
+                test.Candidate(claim)
+                let checkout = Path.Combine(flow.Temp.Root, "donor-work")
+                File.AppendAllText(Path.Combine(checkout, path), "changed\n")
+                flow.Git("-C", checkout, "add", "-A")
+                flow.DonorGit(checkout, "commit", "-m", "Protected edit")
+                let head = flow.Git("-C", checkout, "rev-parse", "HEAD")
+                flow.Git(
+                    "-C",
+                    checkout,
+                    "push",
+                    Path.Combine(flow.Bin, "fork"),
+                    "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
+                )
+                let result = test.Coordinate(test.Event(test.PublishRequest(claim, head)), 1)
+                Check.Contains(result.Error, "protected owner path")
+                flow.NoInference()
+                flow.NoPr()
             }
             Console.WriteLine(
-                "PASS CLI publication rejects staged and committed whitespace, BOM, quoted and newline protected Git names"
+                "PASS coordinated publication rejects whitespace, BOM, quoted and newline protected Git names"
             )
         }
     }

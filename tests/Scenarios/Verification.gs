@@ -23,6 +23,8 @@ internal class VerificationChecks {
             let run = flow.Claim()
             flow.Mode("verification_fail")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+            flow.Call([]string{"recover", "--run", run, "--prepare"})
+            let commit = CorrectionChecks.Correct(flow, run)
             using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "checkout-link",
@@ -69,7 +71,7 @@ internal class VerificationChecks {
                     PublishedContribution.Write(git, mode == "commondir" ? mode: "objects/info/" + mode, flow.Temp.Root)
                     reason = "self-contained Git metadata"
                 }
-                Check.Contains(flow.Call([]string{"recover", "--run", run}, 1).Error, reason)
+                Check.Contains(CorrectionChecks.Recover(flow, run, commit, 1).Error, reason)
                 if mode != "inside" && mode != "alias" {
                     Check.That(
                         File.ReadAllText(Path.Combine(run, "verification.json")) == evidence,
@@ -151,6 +153,8 @@ internal class VerificationChecks {
             let run = flow.Claim()
             let marker = Path.Combine(run, "checkout/verification-marker")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+            flow.Call([]string{"recover", "--run", run, "--prepare"})
+            let commit = CorrectionChecks.Correct(flow, run)
             let storage = Path.Combine(flow.Temp.Root, "runtime-tmp")
             Directory.CreateDirectory(storage)
             flow.Temp.Env["TMPDIR"] = storage
@@ -188,13 +192,16 @@ internal class VerificationChecks {
                 } else {
                     args.AddRange([]string{"--ro-bind", broken, "/usr/bin/bwrap"})
                 }
-                args.AddRange([]string{"--", binary, "recover", "--run", run, "--json"})
+                args.AddRange(
+                    []string{"--", binary, "recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}
+                )
                 let result = TestProcess.Run("/usr/bin/bwrap", args.ToArray(), flow.Temp.Env)
                 Check.Envelope(result, "recover", "error", missing ? "missing_tools": "verification_failed")
                 if missing {
                     Check.Contains(result.Error, "/usr/bin/bwrap: missing")
                 } else {
-                    let checks = Check.Json(File.ReadAllText(Path.Combine(run, "verification.json"))).AsArray()
+                    let record = Check.Json(File.ReadAllText(Path.Combine(run, "correction.json")))
+                    let checks = record["verification"]?.AsArray() ?? JsonArray()
                     if checks.Count > 0 {
                         Check.Contains(
                             Check.Text(checks[checks.Count - 1]?["error"]),

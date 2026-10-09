@@ -33,8 +33,11 @@ internal class EligibilityChecks {
             let policy = Check.Json(File.ReadAllText(path))
             policy["approval_scope"] = JsonValue.Create("task")
             policy["eligibility"] = JsonValue.Create(mode)
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Owner task eligibility " + mode)
+            let text = policy.ToJsonString()
+            if File.ReadAllText(path) != text {
+                File.WriteAllText(path, text)
+                test.Flow.Commit("Owner task eligibility " + mode)
+            }
         }
 
         private func Setup(test CoordinationFixture, mode string) {
@@ -453,9 +456,11 @@ internal class EligibilityChecks {
         private func Declarations(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
-            Access(test, "init")
             let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
             let original = File.ReadAllText(path)
+            let incomplete = Check.Json(original)
+            incomplete.AsObject().Remove("approval_scope")
+            incomplete.AsObject().Remove("eligibility")
             for invalid in[]string{
                 "\"eligibility\":\"open\"",
                 "\"approval_scope\":\"task\"",
@@ -465,12 +470,12 @@ internal class EligibilityChecks {
                 "\"eligibility\":\"open\",\"eligibility\":\"manual\",\"approval_scope\":\"task\"",
                 "\"eligibility\":\"open\",\"approval_scope\":\"task\",\"version\":2"
             } {
-                File.WriteAllText(path, original.TrimEnd().TrimEnd('}') + "," + invalid + "}")
+                File.WriteAllText(path, incomplete.ToJsonString().TrimEnd('}') + "," + invalid + "}")
                 test.Flow.Commit("Malformed owner declaration")
                 test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, 1, true)
             }
             File.WriteAllText(path, original)
-            test.Flow.Commit("Restore legacy policy")
+            test.Flow.Commit("Restore current policy")
             Policy(test, "open")
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}, 1, true)
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)

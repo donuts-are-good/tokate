@@ -20,6 +20,7 @@ internal class TerminalOutput {
             flow.Approve()
             let run = flow.Claim()
             flow.Call([]string{"work", "--run", run})
+            flow.Publish(run)
             flow.Reload()
             let name = "[red]literal[/]-" + String('n', 130) + "\u001b[31mcontrol\u001b[0m"
             let link = "https://example.test/check/" + String('u', 130)
@@ -133,7 +134,7 @@ internal class TerminalOutput {
                 Path.Combine(saved, "run.json"),
                 Check.Map(
                     "version",
-                    1,
+                    2,
                     "repo",
                     "owner/project",
                     "issue",

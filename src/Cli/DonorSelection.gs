@@ -73,7 +73,7 @@ internal class DonorSelection {
                     "Unsupported managed harness/provider: choose codex/openai explicitly. No inference started."
                 )
             }
-            if harness != "pi" && J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider) {
+            if harness != "pi" && !policy.AllowsTool(harness, provider) {
                 throw Exception(
                     "No eligible pair: codex/openai is rejected by current exact owner tool restrictions. No inference started."
                 )
@@ -245,8 +245,8 @@ internal class DonorSelection {
 
         internal func Revalidate(run Data, policy Policy) {
             let selected = J.Get(run.Element(), "selection")
-            if selected.ValueKind == JsonValueKind.Undefined {
-                return
+            if selected.ValueKind != JsonValueKind.Object {
+                throw Exception("Managed runs require saved selection metadata; start a fresh claim")
             }
             let harness = J.Text(selected, "harness")
             let provider = J.Text(selected, "provider")
@@ -270,7 +270,7 @@ internal class DonorSelection {
             if J.Text(selected, "policy_hash") != policy.Digest ||
                 harness != "codex" ||
                 provider != "openai" ||
-                (J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider)) {
+                (!policy.AllowsTool(harness, provider)) {
                 throw Exception(failure)
             }
             policy.Validate(run.Text("model"), run.Text("effort"), run.Number("seconds"), run.Flag("network"))

@@ -53,10 +53,10 @@ internal class CheckGates {
             Check.Json(result.Output)["data"] ?? throw Exception("Missing checks result")
         )
 
-        private func Gate(data JsonNode, name string, status string) {
+        private func Gate(data JsonNode, name string, status string, context string = "") {
             Check.That(
                 Check.Text(data["gates"]?[name]?["status"]) == status,
-                "Wrong " + name + " gate: " + data.ToJsonString()
+                "Wrong " + name + " gate " + context + ": " + data.ToJsonString()
             )
         }
 
@@ -387,7 +387,7 @@ internal class CheckGates {
                 }
                 flow.Save()
                 let result = Data(Read(test, 1))
-                Gate(result, "freshness", "stale")
+                Gate(result, "freshness", kind == "merged-branch" ? "unavailable": "stale", kind)
                 Gate(result, "report", "stale")
                 Gate(result, "checks", "stale")
                 Check.That(
@@ -571,7 +571,7 @@ internal class CheckGates {
 
         internal func All(binary string) {
             for v2 in[]bool{false, true} {
-                using let test = PublishedContribution.Create(binary, v2: v2)
+                using let test = PublishedContribution.Create(binary, external: v2)
                 Success(test)
                 Report(test, v2)
                 CheckEvidence(test)

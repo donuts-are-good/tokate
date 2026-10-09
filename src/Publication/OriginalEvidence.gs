@@ -186,63 +186,13 @@ internal class OriginalEvidence {
                     throw Exception("Saved first amendment differs from contribution history")
                 }
             }
-            let sealPath = Path.Combine(archive, "seal.json")
-            if File.Exists(Path.Combine(archive, "manifest.json")) || File.Exists(sealPath) {
-                let original = Load(directory, run)
-                let digest = Data.Read(sealPath).Text("manifest_sha256")
-                for saved in[]Data? {first, amendment} {
-                    if saved != nil && saved.Fields.ContainsKey("original_evidence_sha256") && saved.Text(
-                        "original_evidence_sha256"
-                    ) != digest {
-                        throw Exception("Saved original evidence seal changed")
-                    }
-                }
-                return original
-            }
-            let inventory = Inventory(archive)
-            let original = Data.Load(archive)
-            Authority(original, run)
-            let failure = "Original evidence lacks its required seal; refusing archive downgrade"
-            if first == nil || first.Fields.ContainsKey("original_evidence_sha256") ||
-                (amendment != nil && amendment.Fields.ContainsKey("original_evidence_sha256")) ||
-                original.Text("commit") != first.Text("previous") || first.Number("pr") < 1 || File.Exists(
-                Path.Combine(archive, "archive.json")
-            ) ||
-                File.Exists(Path.Combine(directory, "correction.json")) {
-                throw Exception(failure)
-            }
-            if run.Number("version") == 1 &&
-                (original.Text("state") != "published" || original.Number("pr") != first.Number("pr")) {
-                throw Exception(failure)
-            }
-            RepositoryIdentity.CommitSha(original.Text("commit"))
-            for file in inventory {
-                if file.Key.Contains('/') {
-                    throw Exception(failure)
+            let original = Load(directory, run)
+            let digest = Data.Read(Path.Combine(archive, "seal.json")).Text("manifest_sha256")
+            for saved in[]Data? {first, amendment} {
+                if saved != nil && saved.Text("original_evidence_sha256") != digest {
+                    throw Exception("Saved original evidence seal changed")
                 }
             }
-            if !RequestData.Same(J.Get(original.Element(), "verification"), J.Get(run.Element(), "verification")) {
-                throw Exception("Legacy original verification records changed")
-            }
-            VerificationReferences(directory, J.Get(original.Element(), "verification"))
-            for name in[]string{
-                "events.jsonl",
-                "changes.patch",
-                "candidate.patch",
-                "verification.json",
-                "report.md",
-                "pr-body.md",
-                "publication.json"
-            } {
-                if inventory.ContainsKey(name) {
-                    let path = Path.Combine(directory, name)
-                    if FileInfo(path).LinkTarget != nil || !File.Exists(path) ||
-                        FileHash(path) != FileHash(Path.Combine(archive, name)) {
-                        throw Exception("Legacy original evidence differs from preserved run records")
-                    }
-                }
-            }
-            Terminal.Message("Legacy original evidence is unsealed; preserved logs remain in the run directory")
             return original
         }
     }

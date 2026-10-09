@@ -54,32 +54,25 @@ internal class CoordinationState {
     }
 
     internal func Check(repo string, issue int32, donor string, actor JsonElement) JsonElement {
-        let record = CheckApproval(repo, issue, donor: donor)
+        let record = CheckApproval(repo, issue)
         let approval = J.Get(record, "approval")
         AccessState.Check(repo, issue, approval, actor)
         return record
     }
 
-    internal func CheckApproval(repo string, issue int32, quiet bool = false, donor string = "") JsonElement {
+    internal func CheckApproval(repo string, issue int32, quiet bool = false) JsonElement {
         let state = Value()
         let approval = J.Get(state, "approval")
         let task = GitHub.Issue(repo, issue)
-        let assigned = J.Text(approval, "donor")
-        let scoped = AccessState.Task(approval)
-        if J.Bool(state, "revoked") || !GitHub.HasLabel(task) ||
-            (
-            !scoped &&
-                (
-                !GitHub.Assigned(task, assigned) ||
-                    (donor != "" && !String.Equals(donor, assigned, StringComparison.OrdinalIgnoreCase))
-            )
-        ) ||
-            J.Text(approval, "issue_hash") != GitHub.Fingerprint(task) {
-            throw CliFailure("stale_approval", "Approval revoked, task changed, or donor is no longer eligible")
+        AccessState.Task(approval)
+        if J.Bool(state, "revoked") || !GitHub.HasLabel(task) || J.Text(approval, "issue_hash") != GitHub.Fingerprint(
+            task
+        ) {
+            throw CliFailure("stale_approval", "Approval revoked or task changed")
         }
-        let configuration = ApprovalBase.Check(repo, approval, 2, quiet)
+        let configuration = ApprovalBase.Check(repo, approval, quiet)
         let mode = configuration.Item1.Eligibility
-        if scoped != (mode != "") || (scoped && J.Text(approval, "eligibility") != mode) {
+        if J.Text(approval, "eligibility") != mode {
             throw CliFailure("stale_approval", "Task eligibility declaration differs from current policy")
         }
         return J.Parse(

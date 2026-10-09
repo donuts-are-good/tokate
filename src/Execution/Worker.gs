@@ -216,17 +216,16 @@ internal class Worker {
         internal func Execute(directory string, options Args) {
             using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
-            if run.Number("version") == 2 && run.Text("source") != "tokate" {
+            if run.Number("version") != 2 || run.Text("source") != "tokate" {
                 throw Exception("External work uses external --run; inference is never launched")
             }
             if run.Text("state") != "claimed" {
                 throw CliFailure(
                     "invalid_state",
-                    "This claim has already run. Use publish to retry publication, or request fresh approval for a new attempt."
+                    "This claim has already run. Use submit for publication, or request a new coding attempt."
                 )
             }
-            if run.Number("version") == 2 &&
-                (
+            if (
                 run.Fields.ContainsKey("codex_version") || run.Fields.ContainsKey("pi_version") || File.Exists(
                     Path.Combine(directory, "events.jsonl")
                 ) ||
@@ -238,19 +237,15 @@ internal class Worker {
                 throw Exception("--continue-truncated requires managed Pi. No inference started.")
             }
             Terminal.Step("Checking owner approval and donor login...")
+            let record = ContributionAuthority.Recheck(run)
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            policy.Digest = run.Text("policy_hash")
+            DonorSelection.Revalidate(run, policy)
             let selected = J.Get(run.Element(), "selection")
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                if V1Continuation.Has(run) {
-                    V1Continuation.Confirm(options, selected)
-                } else {
-                    DonorSelection.Confirm(options, selected)
-                }
-            }
-            let record = ContributionClaim.Recheck(run)
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                let policy = Policy(J.Write(J.Get(record, "policy")))
-                policy.Digest = run.Text("policy_hash")
-                DonorSelection.Revalidate(run, policy)
+            if AttemptContinuation.Has(run) {
+                AttemptContinuation.Confirm(options, selected)
+            } else {
+                DonorSelection.Confirm(options, selected)
             }
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
@@ -275,44 +270,7 @@ internal class Worker {
                 throw Exception("A supported Codex CLI is required")
             }
             let checkout = Path.Combine(directory, "checkout")
-            if run.Number("preparation_version") == 1 {
-                Preparation.Ready(directory, run)
-            } else {
-                if Directory.Exists(checkout) {
-                    throw Exception(
-                        "Checkout already exists. Inspect this interrupted run before requesting fresh approval."
-                    )
-                }
-                Terminal.Step("Preparing isolated checkout...")
-                Commands.Git(
-                    directory,
-                    "clone",
-                    "--quiet",
-                    "--no-checkout",
-                    "--template=",
-                    "--",
-                    "https://github.com/" + run.Text("repo") + ".git",
-                    checkout
-                )
-                if J.Get(J.Get(record, "approval"), "authority_branch").ValueKind != JsonValueKind.Undefined {
-                    Commands.Git(
-                        checkout,
-                        "fetch",
-                        "--quiet",
-                        "--no-tags",
-                        "--no-recurse-submodules",
-                        "origin",
-                        run.Text("base")
-                    )
-                }
-                Commands.Git(checkout, "checkout", "--quiet", "--detach", run.Text("base"))
-                Commands.Git(checkout, "remote", "remove", "origin")
-                for file in Commands.Git(checkout, "ls-files").Split('\n') {
-                    if file.StartsWith(".codex/") || file.Contains("/.codex/") {
-                        throw Exception("Repository Codex configuration is not supported in donor runs")
-                    }
-                }
-            }
+            WorkspacePreparation.Ready(directory, run)
             Probe(directory, checkout, harnessPath)
             let args = List[string]{
                 "exec",
@@ -331,9 +289,7 @@ internal class Worker {
                 Path.Combine(directory, "report.md")
             }
             Config(args, "model_reasoning_effort", J.Write(run.Text("effort")))
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                Config(args, "model_provider", J.Write(J.Text(selected, "provider")))
-            }
+            Config(args, "model_provider", J.Write(J.Text(selected, "provider")))
             Config(args, "approval_policy", "\"never\"")
             Config(args, "web_search", "\"disabled\"")
             Config(args, "allow_login_shell", "false")
@@ -362,10 +318,8 @@ internal class Worker {
                 Config(args, "features." + feature, "false")
             }
             args.Add("-")
-            ContributionClaim.Recheck(run)
-            if run.Number("preparation_version") == 1 {
-                Preparation.Ready(directory, run)
-            }
+            ContributionAuthority.Recheck(run)
+            WorkspacePreparation.Ready(directory, run)
             run.Fields["state"] = "running"
             run.Fields["failure_stage"] = "inference"
             run.Fields["failure_reason"] = "inference_failed"

@@ -23,13 +23,8 @@ internal class CliOption(name string, value string, description string, choices 
         ): "Never prompt; supply missing choices explicitly; preview unless --yes is given"
         case "seconds" when command == "external": "Separate positive verification budget, at most the owner limit; required only for correction"
         case "tools" when command == "external": "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
-        case "run" when command == "repair": "Separate saved repair evidence directory; initially empty, reused on explicit resume"
-        case "path" when command == "repair": "Clean, self-contained candidate checkout; default current directory; separate from repair evidence"
-        case "commit" when command == "repair": "Exact candidate; default from the selected owner synchronization grant; conflicts are refused"
-        case "seconds" when(
-            command == "work" || command == "claim"
-        ): "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
-        case "seconds" when command == "amend" || command == "repair":
+        case "seconds" when(command == "work" || command == "claim"): "Explicit budget 1..86400 seconds"
+        case "seconds" when command == "amend":
         "Separate positive verification budget; required, at most the owner limit"
         default: Description.Replace("{{seconds}}", command == "recover" ? "300": "min(3600, owner limit)")
     }
@@ -122,11 +117,6 @@ internal class Cli {
                 "TEXT",
                 "Optional literal admission message reserved for later admission integration"
             ),
-            CliOption(
-                "upgrade",
-                "",
-                "Explicitly upgrade legacy policy to task-scoped version 2 while preserving restrictions"
-            ),
             CliOption("scope", "SCOPE", "Requested donor access; default issue", "issue trust"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption(
@@ -177,12 +167,7 @@ internal class Cli {
             CliOption(
                 "continue-from",
                 "DIR",
-                "Import stopped unpublished same-donor managed work; v2 prepare requires a fresh active attempt"
-            ),
-            CliOption(
-                "continue-approval",
-                "SHA",
-                "Owner v1 continuation grant naming the current unrevoked predecessor approval; preserves its original base"
+                "Import stopped unpublished same-donor managed work into a fresh active attempt"
             ),
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
@@ -261,7 +246,7 @@ internal class Cli {
             ),
             CliCommand(
                 "init",
-                "repo,path,model-policy,models,allowed-tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
+                "repo,path,model-policy,models,allowed-tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,non-interactive,yes",
                 "repo",
                 "Preview and confirm owner policy and a pinned shared workflow; preserve existing customization.",
                 "[--repo OWNER/REPO] [--path DIR] [options]",
@@ -356,15 +341,6 @@ internal class Cli {
                 effects: "local_read github_read github_write"
             ),
             CliCommand(
-                "repair",
-                "repo,pr,run,path,commit,sync,seconds,allow-network",
-                "repo,pr,run,sync,seconds",
-                "Verify and repair a v1 draft PR when original private state is unavailable; no inference.",
-                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --sync GRANT --seconds N\n       [--path CHECKOUT] [--commit SHA] [--allow-network]",
-                "repair --repo owner/project --pr 10 --run /path/to/repair --sync G --seconds 300",
-                effects: "local_read local_write github_read github_write"
-            ),
-            CliCommand(
                 "amend",
                 "run,commit,seconds,tools,sync,summary",
                 "run,commit,seconds",
@@ -414,21 +390,11 @@ internal class Cli {
             ),
             CliCommand(
                 "approve",
-                "repo,issue,donor,base-branch,continue-approval",
+                "repo,issue,base-branch",
                 "repo,issue",
-                "Write GitHub task approval and label; legacy scope also requires one donor assignment.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH | --continue-approval SHA]",
-                "approve https://github.com/owner/project/issues/42 --donor donor"
-                ,
-                effects: "local_read github_read github_write"
-            ),
-            CliCommand(
-                "assign",
-                "repo,issue,donor,base-branch",
-                "repo,issue,donor",
-                "Replace approval and donor on an approved issue on GitHub; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
-                "assign --repo owner/project --issue 42 --donor donor"
+                "Write GitHub task approval and label; no donor assignment.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--base-branch BRANCH]",
+                "approve https://github.com/owner/project/issues/42"
                 ,
                 effects: "local_read github_read github_write"
             ),
@@ -466,19 +432,9 @@ internal class Cli {
                 "recover",
                 "run,seconds,prepare,commit,tools,summary",
                 "run",
-                "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
-                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
-                "recover --run /path/to/run --seconds 300"
-                ,
-                effects: "local_read local_write github_read github_write"
-            ),
-            CliCommand(
-                "publish",
-                "run",
-                "run",
-                "Push and publish a v1 draft PR from a successful run; no inference.",
-                "--run DIR",
-                "publish --run /path/to/run"
+                "Prepare or verify an explicit correction to completed work; no inference.",
+                "--run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
+                "recover --run /path/to/run --prepare"
                 ,
                 effects: "local_read local_write github_read github_write"
             ),
@@ -804,9 +760,6 @@ internal class Cli {
                     args.Need("verification-reserve")
                 }
             }
-            if args.Get("continue-approval") != "" && args.Get("base-branch") != "" {
-                throw Exception("--continue-approval derives its original target and excludes --base-branch")
-            }
             if args.Get("continue-from") != "" && !args.Help {
                 args.Need("seconds")
                 args.Need("verification-reserve")
@@ -840,6 +793,9 @@ internal class Cli {
                 }
             }
             if args.Command == "recover" {
+                if !args.Help && args.Get("prepare") != "true" && args.Get("commit") == "" {
+                    throw Exception("Recover requires --prepare or --commit SHA with --seconds N")
+                }
                 if args.Get("prepare") == "true" &&
                     (
                     args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "" || args.Get(
@@ -924,7 +880,7 @@ internal class Cli {
                     throw Exception("Invalid value for --" + key)
                 }
             }
-            for key in[]string{"state", "commit", "grant", "upstream", "sync", "continue-approval"} {
+            for key in[]string{"state", "commit", "grant", "upstream", "sync"} {
                 if args.Get(key) != "" {
                     RepositoryIdentity.CommitSha(args.Get(key))
                 }

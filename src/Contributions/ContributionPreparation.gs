@@ -6,7 +6,7 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json
 
-internal class V2Preparation {
+internal class ContributionPreparation {
     shared {
         internal func Prepare(args Args) string {
             if args.Get("run") != "" {
@@ -25,26 +25,28 @@ internal class V2Preparation {
             Overlaps.RequireDependencies(repo, issue)
             let run = Plan(args, repo, issue, viewer, state, record, args.Need("source"))
             Bind(run, state)
-            let directory = args.Get("continue-from") != "" ? V2Continuation.RunDirectory(
+            let directory = args.Get("continue-from") != "" ? AttemptContinuation.RunDirectory(
                 args,
                 run.Text("attempt")
-            ): Preparation.RunDirectory(args, run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt"))
+            ): WorkspacePreparation.RunDirectory(args, run.Text("attempt"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
-            Preparation.Select(run, args.Get("fork"))
+            WorkspacePreparation.Select(run, args.Get("fork"))
             if args.Get("continue-from") != "" {
                 if run.Text("source") != "tokate" || run.Text("attempt") == "" {
                     throw Exception("Continuation requires a managed v2 fresh active attempt")
                 }
                 let sourceDirectory = LocalPaths.DirectoryPath(args.Need("continue-from"))
-                using let sourceLease = V1Continuation.SourceLease(sourceDirectory)
-                let source = V2Continuation.Source(sourceDirectory, run, record)
+                using let sourceLease = ContinuationImport.SourceLease(sourceDirectory)
+                let source = AttemptContinuation.Source(sourceDirectory, run, record)
                 run.Fields["continuation_source"] = sourceDirectory
-                run.Fields["continuation"] = V2Continuation.Provenance(source)
-                run.Fields["continuation_source_metadata_sha256"] = Data.Hash(V1Continuation.Metadata(sourceDirectory))
-                V1Continuation.Confirm(args, J.Get(run.Element(), "selection"))
+                run.Fields["continuation"] = AttemptContinuation.Provenance(source)
+                run.Fields["continuation_source_metadata_sha256"] = Data.Hash(
+                    ContinuationImport.Metadata(sourceDirectory)
+                )
+                AttemptContinuation.Confirm(args, J.Get(run.Element(), "selection"))
             }
             Directory.CreateDirectory(
                 directory,
@@ -55,8 +57,8 @@ internal class V2Preparation {
             }
             using let lease = RunStorage.Lease(directory)
             Terminal.Step("Preparing contribution. Run: " + directory)
-            Preparation.Initialize(directory, run, args.Get("fork"))
-            Preparation.Complete(directory, run)
+            WorkspacePreparation.Initialize(directory, run, args.Get("fork"))
+            WorkspacePreparation.Complete(directory, run)
             Terminal.Message("Prepared contribution. Run: " + directory)
             return directory
         }
@@ -171,9 +173,7 @@ internal class V2Preparation {
             let reservation = J.Get(state.Value(), "reservation")
             run.Fields["id"] = J.Text(reservation, "reservation")
             run.Fields["state_sha"] = state.Sha
-            if LeaseLifecycle.Supported(state.Value()) {
-                run.Fields["attempt"] = J.Text(reservation, "attempt")
-            }
+            run.Fields["attempt"] = J.Text(reservation, "attempt")
             run.Fields["branch"] = "tokate/v2-" + run.Text("id")
         }
 
@@ -183,9 +183,6 @@ internal class V2Preparation {
             let branch = J.Text(info, "default_branch")
             let revision = GitHub.Branch(repo, branch)
             let policy = Policy.Load(repo, revision)
-            if J.Number(policy.Value, "version") == 1 {
-                return ContributionClaim.Claim(args, ValueTuple[string, string, Policy](branch, revision, policy))
-            }
             if args.Get("continue-from") != "" {
                 throw Exception(
                     "For stopped v2 work, explicitly acquire a fresh attempt then use prepare --continue-from with its current --state; no claim was posted"
@@ -224,7 +221,7 @@ internal class V2Preparation {
             run.Fields["claim_request"] = request
             run.Fields["requested_fork"] = args.Get("fork")
             run.Fields["state"] = "claim_pending"
-            let directory = Preparation.RunDirectory(args, J.Text(request, "uuid"))
+            let directory = WorkspacePreparation.RunDirectory(args, J.Text(request, "uuid"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) || File.Exists(directory) || FileInfo(directory).LinkTarget != nil {
                 throw CliFailure("invalid_state", "Saved claim already exists; inspect its original run")
@@ -234,7 +231,7 @@ internal class V2Preparation {
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
             using let lease = RunStorage.Lease(directory)
-            Preparation.Pending(directory, run)
+            WorkspacePreparation.Pending(directory, run)
             return Pending(directory, run, args)
         }
 
@@ -244,7 +241,7 @@ internal class V2Preparation {
             let run = Data.Load(directory)
             if run.Text("state") != "claim_pending" {
                 if args.Command == "prepare" {
-                    Preparation.Complete(directory, run)
+                    WorkspacePreparation.Complete(directory, run)
                     Terminal.Message("Prepared contribution. Run: " + directory)
                 }
                 return directory
@@ -387,11 +384,11 @@ internal class V2Preparation {
                 let outcome = RequestData.Recorded(state.Value(), J.Get(viewer, "id"), request)
                 Accepted(run, viewer, state, outcome)
                 Bind(run, state)
-                Preparation.Select(run, run.Text("requested_fork"))
-                Preparation.Promote(directory, run)
+                WorkspacePreparation.Select(run, run.Text("requested_fork"))
+                WorkspacePreparation.Promote(directory, run)
                 Terminal.Step(RuntimeBudget.Description(run))
                 Terminal.Step("Preparing contribution. Run: " + directory)
-                Preparation.Complete(directory, run)
+                WorkspacePreparation.Complete(directory, run)
                 Terminal.Message("Prepared contribution. Run: " + directory)
             } else {
                 PublicOutput.ResultData = PublicOutput.RunSummary(directory)
