@@ -12,7 +12,9 @@ import threading
 import time
 
 
-MODEL = 'claude-opus-4-6'
+MODEL = ''
+EFFORT = ''
+POLICY = None
 
 
 def require(condition, message):
@@ -38,7 +40,8 @@ def run(command, seconds=30):
 
 def gate(root, extra=(), success=True, profile=None):
     command = ['/tokate-control/tokate', 'claude-capabilities', '--claude', '/tokate-control/claude',
-               '--claude-profile', str(profile or root / 'profile'), '--sole-use', '--model', MODEL, '--effort', 'high', '--json', *extra]
+               '--claude-profile', str(profile or root / 'profile'), '--sole-use', '--model', MODEL, '--effort', EFFORT,
+               '--policy', str(POLICY), '--json', *extra]
     result = run(command)
     require((result.returncode == 0) == success, 'Native capability gate gave an unexpected result: ' + result.stderr[:1000])
     envelope = json.loads(result.stdout)
@@ -76,7 +79,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         server.calls += 1
         server.requests.append(body)
         require(body.get('model') == MODEL, 'Native CLI remapped the exact model')
-        require(body.get('output_config', {}).get('effort') == 'high', 'Native CLI did not request high effort')
+        require(body.get('output_config', {}).get('effort') == EFFORT, 'Native CLI did not request the selected effort')
         names = {tool['name'] for tool in body.get('tools', [])}
         require({'Read', 'Write', 'Bash'} <= names and names <= {'Read', 'Write', 'Edit', 'Bash', 'EndConversation'},
                 'Native CLI enabled unexpected automatic tools')
@@ -199,7 +202,7 @@ def owned_case(root, network, case):
     require(bool(server.tool_results[-1].get('is_error')) == (not network), 'Command-network tool result was not the expected success or refusal')
     print('PASS native Read, Write, Bash, helper, exact request and command-network ' + ('permitted' if network else 'denied'), flush=True)
     if 'effort' not in parsed and 'effortLevel' not in parsed:
-        print('LIMIT native reports omit effort; requested high is observed only in the local synthetic protocol request', flush=True)
+        print('LIMIT native reports omit effort; requested effort is observed only in the local synthetic protocol request', flush=True)
 
 
 def new_profile(profile, plan='pro'):
@@ -222,7 +225,7 @@ def managed_metadata(root):
                '--ro-bind', '/tokate-control', '/tokate-control', '--ro-bind', str(policy), '/etc/claude-code',
                '--chdir', '/fixture', '--', '/tokate-control/tokate', 'claude-capabilities',
                '--claude', '/tokate-control/claude', '--claude-profile', '/fixture/profile', '--sole-use',
-               '--model', MODEL, '--effort', 'high', '--json']
+               '--model', MODEL, '--effort', EFFORT, '--policy', str(POLICY), '--json']
     result = run(command)
     require(result.returncode == 1 and 'managed-policy presence' in result.stdout,
             'Managed-policy metadata was not refused before profile exposure')
@@ -264,11 +267,19 @@ def inside():
 
 
 def main():
+    global MODEL, EFFORT, POLICY
     parser = argparse.ArgumentParser(description='Native Claude ordinary synthetic protocol checks without external service access or inference')
     parser.add_argument('--claude', required=True, type=Path)
     parser.add_argument('--binary', type=Path, default=Path('artifacts/linux-x64/tokate'))
+    parser.add_argument('--policy', type=Path, default=Path('.github/tokate.json'))
     parser.add_argument('--inside', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    POLICY = args.policy.resolve(strict=True)
+    policy = json.loads(POLICY.read_text())
+    selections = [(model, effort) for model, efforts in policy.get('models', {}).items()
+                  if model.startswith('claude-') for effort in efforts]
+    require(selections, 'Native proof requires an explicit Claude model/effort in the repository policy')
+    MODEL, EFFORT = selections[0]
     if args.inside:
         inside()
         return
@@ -279,9 +290,11 @@ def main():
                    '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'LANG', 'C.UTF-8', *system_mounts(),
                    '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--dir', '/tmp/home',
                    '--bind', root, '/fixture', '--ro-bind', str(Path(__file__).resolve()), '/tokate-control/proof.py',
+                   '--ro-bind', str(POLICY), '/tokate-control/policy.json',
                    '--ro-bind', str(claude), '/tokate-control/claude', '--ro-bind', str(binary), '/tokate-control/tokate',
                    '--chdir', '/fixture', '--', '/usr/bin/python3', '/tokate-control/proof.py',
-                   '--inside', '--claude', '/tokate-control/claude', '--binary', '/tokate-control/tokate']
+                   '--inside', '--claude', '/tokate-control/claude', '--binary', '/tokate-control/tokate',
+                   '--policy', '/tokate-control/policy.json']
         result = subprocess.run(command, timeout=300)
         require(result.returncode == 0, 'Native Claude proof failed; managed execution remains disabled')
 

@@ -11,17 +11,6 @@ import System.Text.RegularExpressions
 
 internal class ClaudeCode {
     shared {
-        internal let Model string = "claude-opus-4-6"
-        internal let Effort string = "high"
-
-        internal func Choice(model string, effort string) {
-            if model != Model || effort != Effort {
-                throw Exception(
-                    "Claude capability checks require explicit claude-opus-4-6/high; xhigh maps to high and is unsupported. No inference started."
-                )
-            }
-        }
-
         internal func ManagedPolicy() {
             let status = [256]byte
             if RuntimeMetadataStat(-100, "/etc/claude-code", 256, 1, status) == 0 {
@@ -107,7 +96,7 @@ internal class ClaudeCode {
             "DISABLE_COMPACT": "1"
         }
 
-        internal func Settings(network bool) JsonElement -> J.Parse(
+        internal func Settings(model string, network bool) JsonElement -> J.Parse(
             J.Write(
                 map[string, Object?]{
                     "disableAllHooks": true,
@@ -117,7 +106,7 @@ internal class ClaudeCode {
                     "switchModelsOnFlag": false,
                     "fallbackModel": []string{},
                     "modelOverrides": map[string, Object?]{},
-                    "availableModels": []string{Model},
+                    "availableModels": []string{model},
                     "sandbox": map[string, Object?]{
                         "enabled": true,
                         "failIfUnavailable": true,
@@ -139,38 +128,35 @@ internal class ClaudeCode {
             )
         )
 
-        internal func Invocation(model string, effort string, network bool)[]string {
-            Choice(model, effort)
-            return []string{
-                "--restricted",
-                "--safe-mode",
-                "--setting-sources",
-                "",
-                "--strict-mcp-config",
-                "--mcp-config",
-                "{\"mcpServers\":{}}",
-                "--disable-slash-commands",
-                "--no-chrome",
-                "--tools",
-                "Read,Write,Edit,Bash",
-                "--allowedTools",
-                "Read,Write,Edit,Bash",
-                "--permission-mode",
-                "default",
-                "--permission-prompts",
-                "none",
-                "--settings",
-                Settings(network).GetRawText(),
-                "--model",
-                model,
-                "--effort",
-                effort,
-                "--no-session-persistence",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--print"
-            }
+        internal func Invocation(model string, effort string, network bool)[]string -> []string{
+            "--restricted",
+            "--safe-mode",
+            "--setting-sources",
+            "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{\"mcpServers\":{}}",
+            "--disable-slash-commands",
+            "--no-chrome",
+            "--tools",
+            "Read,Write,Edit,Bash",
+            "--allowedTools",
+            "Read,Write,Edit,Bash",
+            "--permission-mode",
+            "default",
+            "--permission-prompts",
+            "none",
+            "--settings",
+            Settings(model, network).GetRawText(),
+            "--model",
+            model,
+            "--effort",
+            effort,
+            "--no-session-persistence",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--print"
         }
 
         internal func Boundary(binary string, profile string, checkout string)[]string {
@@ -241,7 +227,7 @@ internal class ClaudeCode {
             )
         }
 
-        internal func Reports(text string) JsonElement {
+        internal func Reports(text string, model string, effort string) JsonElement {
             let reports = map[string, Object?]{}
             for line in text.Split('\n') {
                 if String.IsNullOrWhiteSpace(line) {
@@ -250,31 +236,31 @@ internal class ClaudeCode {
                 let value = RequestData.Parse(line, 1024 * 1024)
                 let type = J.Text(value, "type")
                 if type == "system" && J.Text(value, "subtype") == "init" {
-                    ReportField(reports, value, "model", Model)
+                    ReportField(reports, value, "model", model)
                     ReportField(reports, value, "permissionMode", "default")
-                    ReportField(reports, value, "effort", Effort)
-                    ReportField(reports, value, "effortLevel", Effort)
+                    ReportField(reports, value, "effort", effort)
+                    ReportField(reports, value, "effortLevel", effort)
                 }
                 if type == "assistant" {
-                    ReportField(reports, J.Get(value, "message"), "model", Model)
+                    ReportField(reports, J.Get(value, "message"), "model", model)
                 }
                 if type == "result" {
-                    ReportField(reports, value, "model", Model)
-                    ReportField(reports, value, "effort", Effort)
-                    ReportField(reports, value, "effortLevel", Effort)
+                    ReportField(reports, value, "model", model)
+                    ReportField(reports, value, "effort", effort)
+                    ReportField(reports, value, "effortLevel", effort)
                     let usage = J.Get(value, "usage")
                     if usage.ValueKind == JsonValueKind.Object {
                         reports["usage"] = NumericUsage(usage)
                     }
                     let models = J.Get(value, "modelUsage")
                     if models.ValueKind == JsonValueKind.Object {
-                        for model in models.EnumerateObject() {
-                            if model.Name != Model {
+                        for usageModel in models.EnumerateObject() {
+                            if usageModel.Name != model {
                                 throw Exception(
                                     "Claude reported a conflicting usage model; no retry or fallback is allowed."
                                 )
                             }
-                            reports["model_usage"] = NumericUsage(model.Value)
+                            reports["model_usage"] = NumericUsage(usageModel.Value)
                         }
                     }
                 }
@@ -342,7 +328,20 @@ internal class ClaudeCode {
         }
 
         internal func Gate(args Args) JsonElement {
-            Choice(args.Need("model"), args.Need("effort"))
+            let model = args.Need("model")
+            let effort = args.Need("effort")
+            let policy = Policy(
+                File.ReadAllText(
+                    args.Get(
+                        "policy",
+                        Path.Combine(args.Get("path", Directory.GetCurrentDirectory()), ".github/tokate.json")
+                    )
+                )
+            )
+            if !policy.AllowsTool("claude", "anthropic") {
+                throw Exception("Claude/anthropic is not allowed by the repository policy; no inference started.")
+            }
+            policy.Validate(model, effort, 1, args.Get("allow-network") == "true")
             ManagedPolicy()
             EnvironmentProfile()
             if args.Get("sole-use") != "true" {
@@ -421,8 +420,9 @@ internal class ClaudeCode {
             let result = map[string, Object?]{
                 "version": version.Output.Trim(),
                 "auth_status": authentication,
-                "requested": map[string, Object?]{"model": Model, "effort": Effort},
-                "invocation": Invocation(Model, Effort, args.Get("allow-network") == "true"),
+                "policy_hash": policy.Digest,
+                "requested": map[string, Object?]{"model": model, "effort": effort},
+                "invocation": Invocation(model, effort, args.Get("allow-network") == "true"),
                 "environment_controls": environment,
                 "required_interfaces": required,
                 "managed_execution_enabled": false,
@@ -435,7 +435,7 @@ internal class ClaudeCode {
                 result["configured_boundary"] = Boundary(binary, profile, args.Need("path"))
             }
             if args.Get("file") != "" {
-                result["native_reports"] = Reports(Report(args.Need("file"), profile))
+                result["native_reports"] = Reports(Report(args.Need("file"), profile), model, effort)
             }
             return J.Parse(J.Write(result))
         }
