@@ -245,10 +245,6 @@ internal class Checks {
                     var pending bool
                     var inspection bool
                     for row in J.Items(rows) {
-                        let bucket = J.Text(row, "bucket")
-                        failed = failed || bucket == "fail" || bucket == "cancel"
-                        pending = pending ||
-                            (bucket != "pass" && bucket != "skipping" && bucket != "fail" && bucket != "cancel")
                         inspection = inspection || J.Text(row, "state") == "ACTION_REQUIRED"
                     }
                     let required = List[Object]()
@@ -271,6 +267,7 @@ internal class Checks {
                             }
                         }
                         conflicting = success && !passed
+                        failed = failed || nameFailed
                         pending = pending || !found || !passed
                         if required.Count < 64 {
                             required.Add(
