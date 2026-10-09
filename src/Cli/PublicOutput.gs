@@ -44,6 +44,7 @@ internal class PublicOutput {
             case "authentication_required": "Authentication is required with the appropriate account."
             case "stale_approval": "Owner approval is absent or changed. Fresh owner approval is required."
             case "invalid_state": "The saved run or command state does not permit this operation. Inspect its artifacts."
+            case "dependencies_unavailable": "Project dependencies are not available offline. Start a fresh claim with network consent or ask the owner for an offline package source. No inference started."
             case "verification_failed": "Independent verification failed. Inspect the private verification artifact."
             case "inference_failed": "Inference did not complete successfully. Inspect private events and report artifacts; fresh owner approval is required for another attempt."
             case "endpoint_unavailable": "Selected local endpoint did not provide valid bounded metadata advertising the exact model ID. No inference started."

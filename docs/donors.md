@@ -95,7 +95,12 @@ After coordinator publication, repeat `submit --run RUN_DIRECTORY` to save the P
 
 `--seconds` caps coding plus verification time, not tokens or server billing.
 Command network access defaults off. Downloads need both owner permission and
-`--allow-network` on the new claim. Inference connectivity is separate. There is no
+`--allow-network` on the new claim. Verification starts with an empty package cache.
+After preparation, and again before `work` starts inference, Tokate reads .NET project
+files for versioned SDKs and packages that the repository does not hold in a
+`NuGet.Config` offline source, and runs nothing from the repository. `work` stops
+before inference when verification reaches `dotnet` and downloads are off. Inference
+connectivity is separate. There is no
 automatic retry, continuation or model fallback. Review [data and isolation limits](security.md).
 
 ## Check progress

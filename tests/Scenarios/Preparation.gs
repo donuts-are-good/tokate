@@ -52,6 +52,57 @@ internal class PreparationChecks {
             }
         }
 
+        private func Dependencies(binary string) {
+            let project = "<Project Sdk=\"Gsharp.NET.Sdk/0.4.1150\">\n  <ItemGroup>\n" +
+                "    <PackageReference Include=\"Spectre.Console\" Version=\"0.57.2\" />\n  </ItemGroup>\n</Project>\n"
+            for mode in[]string{"missing", "prepared", "network", "unknown"} {
+                using let flow = NativeFixture(binary)
+                flow.Initialize()
+                Directory.CreateDirectory(Path.Combine(flow.Upstream, "app"))
+                File.WriteAllText(Path.Combine(flow.Upstream, "app/App.gsproj"), project)
+                if mode == "prepared" {
+                    Directory.CreateDirectory(Path.Combine(flow.Upstream, "packages"))
+                    File.WriteAllText(
+                        Path.Combine(flow.Upstream, "NuGet.Config"),
+                        "<configuration><packageSources><clear />" +
+                            "<add key=\"local\" value=\"packages\" />" +
+                            "</packageSources></configuration>"
+                    )
+                    for package in[]string{"Gsharp.NET.Sdk.0.4.1150", "Spectre.Console.0.57.2"} {
+                        File.WriteAllText(Path.Combine(flow.Upstream, "packages/" + package + ".nupkg"), "package")
+                    }
+                }
+                flow.VerificationPolicy(
+                    mode == "unknown" ? "test -f result.txt": "test -f result.txt && echo dotnet",
+                    mode == "network"
+                )
+                flow.Approve()
+                let claim = flow.Acquire(flow.ClaimArgs(network: mode == "network"))
+                let notice = claim.Output + claim.Error
+                let index = claim.Output.LastIndexOf("Run: ")
+                Check.That(index >= 0, "Claim did not print its run directory")
+                let run = claim.Output.Substring(index + 5).Trim()
+                if mode == "missing" {
+                    for expected in[]string{
+                        "Dependency readiness",
+                        "Gsharp.NET.Sdk 0.4.1150",
+                        "Spectre.Console 0.57.2",
+                        "--allow-network"
+                    } {
+                        Check.Contains(notice, expected)
+                    }
+                    Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Dependency readiness")
+                    flow.NoInference()
+                } else if mode == "prepared" {
+                    Check.That(!notice.Contains("Dependency readiness"), "Prepared offline source was reported missing")
+                    flow.Call([]string{"work", "--run", run})
+                } else {
+                    Check.Contains(notice, mode == "network" ? "can download": "cannot tell")
+                    flow.Call([]string{"work", "--run", run})
+                }
+            }
+        }
+
         private func Selection(binary string) {
             for mode in[]string{
                 "renamed",
@@ -1537,6 +1588,7 @@ internal class PreparationChecks {
                 TestCase[string]("PendingAuthority", async (value string) -> PendingAuthority(value)),
                 TestCase[string]("ClaimRecovery", async (value string) -> ClaimRecovery(value)),
                 TestCase[string]("Creation", async (value string) -> Creation(value)),
+                TestCase[string]("Dependencies", async (value string) -> Dependencies(value)),
                 TestCase[string]("Selection", async (value string) -> Selection(value)),
                 TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
                 TestCase[string]("Preservation", async (value string) -> Preservation(value)),

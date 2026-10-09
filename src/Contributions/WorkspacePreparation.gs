@@ -185,6 +185,7 @@ internal class WorkspacePreparation {
             run.Fields["state"] = "claimed"
             run.Save(directory)
             Terminal.Step("Approved source " + run.Text("base") + " for target " + run.Text("base_branch"))
+            DependencyReadiness.Notice(checkout, run, record)
             if run.Text("source") == "external" {
                 Terminal.Step("External coding checkout: " + checkout + "; independent verification uses DIR/checkout")
             }

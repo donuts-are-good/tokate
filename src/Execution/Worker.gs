@@ -307,6 +307,7 @@ internal class Worker {
                 DonorSelection.Confirm(options, selected)
             }
             RuntimeBudget.Validate(run)
+            DependencyReadiness.Require(Path.Combine(directory, "checkout"), run, record)
             let prompt = TaskContext.Build(run, record)
             if run.Text("harness") == "pi" {
                 PiHarness.Execute(directory, run, record, prompt, options.Get("continue-truncated") == "true")
