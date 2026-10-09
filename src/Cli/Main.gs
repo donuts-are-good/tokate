@@ -5,6 +5,9 @@ import System.IO
 
 func Main(args[]string) int32 {
     Terminal.Initialize()
+    if args.Length > 0 && args[0] == "version" {
+        args[0] = "--version"
+    }
     for argument in args {
         PublicOutput.Enabled = PublicOutput.Enabled || argument == "--json" || argument.StartsWith("--json=")
         Terminal.Plain = Terminal.Plain || argument == "--plain" || argument.StartsWith("--plain=")

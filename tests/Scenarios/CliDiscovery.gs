@@ -455,6 +455,21 @@ internal class CliDiscovery {
                 ),
                 "Structured and plain versions differ"
             )
+            let alias = Check.Json(Call(binary, []string{"version", "--json"}, temp).Output)
+            Check.That(JsonNode.DeepEquals(alias, version), "Version alias result differs")
+            Check.That(
+                Call(binary, []string{"version"}, temp).Output.Trim() == "tokate " + Check.Text(
+                    version["data"]?["version"]
+                ),
+                "Plain version alias differs"
+            )
+            Check.Contains(Call(binary, []string{"version", "--help"}, temp).Output, "Usage: tokate --version")
+            Check.Envelope(
+                Call(binary, []string{"version", "extra", "--json"}, temp, 1),
+                "--version",
+                "error",
+                "invalid_arguments"
+            )
             let defaults = Check.Envelope(Call(binary, []string{"help", "defaults", "--json"}, temp), "help", "ok")[
                 "data"
             ]?["commands"]?[0]
