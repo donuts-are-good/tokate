@@ -2,11 +2,8 @@ package Tokate
 
 import System
 import System.Collections.Generic
-import System.Formats.Tar
 import System.IO
-import System.IO.Compression
 import System.Runtime.InteropServices
-import System.Security.Cryptography
 
 @DllImport("libc", EntryPoint: "geteuid")
 func SetupUserId() uint32;
@@ -299,7 +296,7 @@ internal class MachineSetup {
             )
             try {
                 if name == "codex" {
-                    options.Values["--harness-path"] = InstallCodex(home, temporary)
+                    options.Values["--harness-path"] = InstallCodex(temporary)
                 } else {
                     let script = Path.Combine(temporary, "install.sh")
                     Download("https://pi.dev/install.sh", script)
@@ -307,24 +304,22 @@ internal class MachineSetup {
                     Installation.Execute(
                         LocalPaths.NeedSystemTool("setsid"),
                         []string{"--wait", LocalPaths.NeedSystemTool("sh"), script},
-                        capture: true
+                        capture: true,
+                        pathVariables: []string{"PI_CODING_AGENT_DIR"}
                     ):
-                    Installation.Execute(LocalPaths.NeedSystemTool("sh"), []string{script}, capture: true)
+                    Installation.Execute(
+                        LocalPaths.NeedSystemTool("sh"),
+                        []string{script},
+                        capture: true,
+                        pathVariables: []string{"PI_CODING_AGENT_DIR"}
+                    )
                     if code != 0 {
                         throw CliFailure(
                             "missing_tools",
                             "The official Pi installer did not complete. Run interactive doctor --managed --harness pi --fix for its Node setup prompts; existing configuration was kept."
                         )
                     }
-                    var path = LocalPaths.Harness("pi")
-                    for candidate in[]string{
-                        Path.Combine(home, ".pi/agent/bin/pi"),
-                        Path.Combine(home, ".local/bin/pi")
-                    } {
-                        if path == "" && LocalPaths.Executable(candidate) {
-                            path = candidate
-                        }
-                    }
+                    let path = LocalPaths.Harness("pi")
                     if path == "" {
                         throw CliFailure(
                             "missing_tools",
@@ -362,78 +357,28 @@ internal class MachineSetup {
             )
         }
 
-        private func InstallCodex(home string, temporary string) string {
-            let destination = Path.Combine(home, ".local/bin/codex")
+        private func InstallCodex(temporary string) string {
+            let destination = LocalPaths.CodexInstallPath()
             if File.Exists(destination) || FileInfo(destination).LinkTarget != nil {
                 return CodexRuntime.Resolve(destination)
             }
-            let release = RequestData.Parse(
-                Commands.Checked(
-                    "curl",
-                    []string{
-                        "-qfsSL",
-                        "--proto",
-                        "=https",
-                        "--connect-timeout",
-                        "15",
-                        "--max-time",
-                        "30",
-                        "https://api.github.com/repos/openai/codex/releases/latest"
-                    }
-                ),
-                2 * 1024 * 1024
+            let script = Path.Combine(temporary, "codex-install.sh")
+            Download("https://chatgpt.com/codex/install.sh", script)
+            let code = Installation.Execute(
+                LocalPaths.NeedSystemTool("env"),
+                []string{"CODEX_NON_INTERACTIVE=1", LocalPaths.NeedSystemTool("sh"), script},
+                capture: true,
+                pathVariables: []string{"CODEX_INSTALL_DIR", "CODEX_HOME"}
             )
-            let archive = Path.Combine(temporary, "codex.tar.gz")
-            var digest = ""
-            for asset in J.Items(J.Get(release, "assets")) {
-                if J.Text(asset, "name") != "codex-x86_64-unknown-linux-musl.tar.gz" {
-                    continue
-                }
-                let url = J.Text(asset, "browser_download_url")
-                digest = J.Text(asset, "digest")
-                if !url.StartsWith("https://github.com/openai/codex/releases/download/") || !digest.StartsWith(
-                    "sha256:"
-                ) ||
-                    digest.Length != 71 {
-                    throw CliFailure("missing_tools", "The official Codex release has no verifiable native asset")
-                }
-                Download(url, archive)
-                break
-            }
-            using let input = File.OpenRead(archive)
-            if "sha256:" + Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant() != digest {
-                throw CliFailure("missing_tools", "Codex download checksum mismatch; existing installation was kept")
-            }
-            input.Position = 0
-            using let gzip = GZipStream(input, CompressionMode.Decompress)
-            using let tar = TarReader(gzip)
-            Directory.CreateDirectory(Path.GetDirectoryName(destination) ?? home)
-            let staged = destination + "." + Guid.NewGuid().ToString("N")
-            try {
-                var entry = tar.GetNextEntry()
-                while entry != nil && entry.Name != "codex-x86_64-unknown-linux-musl" {
-                    entry = tar.GetNextEntry()
-                }
-                if entry == nil || entry.EntryType != TarEntryType.RegularFile || entry.DataStream == nil {
-                    throw CliFailure("missing_tools", "The Codex archive has no regular native executable")
-                }
-                {
-                    using let output = FileStream(staged, FileMode.CreateNew, FileAccess.Write)
-                    let data = entry.DataStream ??
-                        throw CliFailure("missing_tools", "The Codex archive has no executable data")
-                    data.CopyTo(output)
-                }
-                File.SetUnixFileMode(
-                    staged,
-                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute
+            if code != 0 {
+                throw CliFailure(
+                    "missing_tools",
+                    "The official Codex installer did not complete. Existing installation and authentication remain owned by Codex."
                 )
-                CodexRuntime.Resolve(staged)
-                Commands.Checked(staged, []string{"--version"}, harness: true)
-                File.Move(staged, destination)
-            } finally {
-                File.Delete(staged)
             }
-            return destination
+            let executable = CodexRuntime.Resolve(destination)
+            Commands.Checked(executable, []string{"--version"}, harness: true)
+            return executable
         }
     }
 }

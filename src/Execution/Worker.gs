@@ -83,7 +83,19 @@ internal class Worker {
                     wrapper.AddRange([]string{"--ro-bind", path, path})
                 }
             }
-            wrapper.AddRange([]string{"--chdir", directory, "--", codex})
+            wrapper.AddRange([]string{"--chdir", directory, "--"})
+            let bubblewrap = CodexRuntime.Bubblewrap(codex)
+            if bubblewrap != "" {
+                wrapper.AddRange(
+                    []string{
+                        LocalPaths.NeedSystemTool("env", directory),
+                        "PATH=" + Path.GetDirectoryName(bubblewrap) +
+                            ":" +
+                            (Environment.GetEnvironmentVariable("PATH") ?? "/usr/bin:/bin")
+                    }
+                )
+            }
+            wrapper.Add(codex)
             wrapper.AddRange(args)
             let cancellation Chan[bool]? = capture ? Chan[bool](1): nil
             var activity Action[string]? = nil
@@ -139,6 +151,10 @@ internal class Worker {
                 " = \"write\", " +
                 J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(codex) +
                 " = \"read\""
+            let bubblewrap = CodexRuntime.Bubblewrap(codex)
+            if bubblewrap != "" {
+                policy += ", " + J.Write(bubblewrap) + " = \"read\""
+            }
             if paths.Count > 0 {
                 for path in paths {
                     policy += ", " + J.Write(path) + " = \"read\""

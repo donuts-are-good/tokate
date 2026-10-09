@@ -44,6 +44,48 @@ internal class LocalPaths {
             return ""
         }
 
+        private func TrustedExecutable(path string, checkout string) bool {
+            if !Executable(path) || Within(path, checkout) {
+                return false
+            }
+            try {
+                return !Within(CanonicalPath(path), checkout)
+            } catch (error IOException) { } catch (error UnauthorizedAccessException) { }
+            return false
+        }
+
+        internal func FindTrusted(name string) string {
+            let checkout = CheckoutRoot()
+            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
+                if Path.IsPathFullyQualified(entry) {
+                    let candidate = Path.GetFullPath(Path.Combine(entry, name))
+                    if TrustedExecutable(candidate, checkout) {
+                        return candidate
+                    }
+                }
+            }
+            return ""
+        }
+
+        internal func PiDirectory() string {
+            let configured = Environment.GetEnvironmentVariable("PI_CODING_AGENT_DIR") ?? ""
+            return configured == "" ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".pi/agent"
+            ): RuntimePath(configured)
+        }
+
+        internal func CodexInstallPath() string {
+            let configured = Environment.GetEnvironmentVariable("CODEX_INSTALL_DIR") ?? ""
+            return Path.Combine(
+                configured == "" ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    ".local/bin"
+                ): RuntimePath(configured),
+                "codex"
+            )
+        }
+
         internal func CheckoutRoot(directory string = "") string {
             var current = Path.TrimEndingDirectorySeparator(
                 Path.GetFullPath(directory == "" ? Directory.GetCurrentDirectory(): directory)
@@ -128,17 +170,27 @@ internal class LocalPaths {
             if path != "" {
                 return RuntimePath(path)
             }
-            let found = Find(name)
+            let found = FindTrusted(name)
             if found != "" {
                 return found
             }
             let home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-            let candidate = Path.Combine(home, ".local/bin", name)
-            if Executable(candidate) {
-                return candidate
+            let checkout = CheckoutRoot()
+            let configured = name == "codex" ? CodexInstallPath(): name == "pi" ?
+            Path.Combine(PiDirectory(), "bin/pi"): ""
+            let npm = Environment.GetEnvironmentVariable("NPM_CONFIG_PREFIX") ?? ""
+            let bun = Environment.GetEnvironmentVariable("BUN_INSTALL_BIN") ?? ""
+            for candidate in[]string{
+                configured,
+                Path.Combine(home, ".local/bin", name),
+                npm == "" ? "": Path.Combine(RuntimePath(npm), "bin", name),
+                Path.Combine(bun == "" ? Path.Combine(home, ".bun/bin"): RuntimePath(bun), name)
+            } {
+                if candidate != "" && TrustedExecutable(candidate, checkout) {
+                    return candidate
+                }
             }
-            let managed = Path.Combine(home, ".pi/agent/bin/pi")
-            return name == "pi" && Executable(managed) ? managed: ""
+            return ""
         }
 
         internal func StateDirectory(defaultLocation bool = false) string {

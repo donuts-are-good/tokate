@@ -60,20 +60,14 @@ internal class PiHarness {
                 }
                 return nixRoot
             }
-            let agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
+            var agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
+            if cli != Path.Combine(agent, "bin/pi") || !File.Exists(
+                Path.Combine(agent, "install/managed-install.json")
+            ) {
+                agent = LocalPaths.PiDirectory()
+            }
             let markerPath = Path.Combine(agent, "install/managed-install.json")
-            if cli != Path.Combine(agent, "bin/pi") ||
-                (!File.Exists(markerPath) && FileInfo(markerPath).LinkTarget == nil) {
-                let npm = LocalPaths.Find("npm")
-                if npm != "" {
-                    let result = Commands.Run(npm, []string{"root", "--global"}, seconds: 5)
-                    let root = result.Output.Trim()
-                    if result.Code == 0 && !result.Truncated && Path.IsPathFullyQualified(root) && File.Exists(
-                        Path.Combine(root, "@earendil-works/pi-coding-agent/package.json")
-                    ) {
-                        return root
-                    }
-                }
+            if !File.Exists(markerPath) && FileInfo(markerPath).LinkTarget == nil {
                 throw Exception(
                     "Cannot locate the Pi SDK from this launcher. Select its installed node_modules directory with --pi-root."
                 )
@@ -160,7 +154,9 @@ internal class PiHarness {
                 .Exists(Path.Combine(packagePath, "dist/index.js")) {
                 throw Exception("The installed pi SDK package layout is required")
             }
-            let node = LocalPaths.CanonicalPath(args.Get("node") == "" ? LocalPaths.Find("node"): args.Need("node"))
+            let node = LocalPaths.CanonicalPath(
+                args.Get("node") == "" ? LocalPaths.FindTrusted("node"): args.Need("node")
+            )
             if !File.Exists(node) || !Path.IsPathFullyQualified(node) {
                 throw Exception("An existing Node runtime is required; Tokate never installs one")
             }

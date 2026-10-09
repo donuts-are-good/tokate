@@ -141,6 +141,15 @@ internal class PiChecks {
             Check.That(!File.Exists(installMarker), "Failed Pi probe triggered installation of an existing runtime")
             File.Delete(curl)
             let explicitSelection = Check.Json(flow.Call(args.ToArray()).Output)
+            File.Delete(Path.Combine(flow.Bin, "pi"))
+            File.Copy(launcher, Path.Combine(flow.Bin, "pi"))
+            let entrypoint = marker["entrypoint"] ?? throw Exception("Missing Pi entrypoint")
+            entrypoint["type"] = JsonValue.Create("script")
+            File.WriteAllText(markerPath, marker.ToJsonString())
+            Check.That(
+                JsonNode.DeepEquals(explicitSelection, Check.Json(flow.Call(args.ToArray()).Output)),
+                "Managed Pi script in a separate bin directory lost its SDK"
+            )
             let providerIndex = args.IndexOf("--provider")
             args.RemoveRange(providerIndex, 2)
             let inferredSelection = Check.Json(flow.Call(args.ToArray()).Output)
@@ -208,15 +217,14 @@ internal class PiChecks {
                 Path.Combine(flow.Bin, "pi"),
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
+            entrypoint["path"] = JsonValue.Create(launcher)
+            File.WriteAllText(markerPath, marker.ToJsonString())
             let npm = Path.Combine(flow.Bin, "npm")
-            File.WriteAllText(
-                npm,
-                "#!/bin/sh\n[ \"$$1\" = root ] && [ \"$$2\" = --global ] || exit 78\nprintf '%s\\n' '" + root + "'\n"
-            )
+            let npmCalled = Path.Combine(flow.Temp.Root, "unrelated-npm-called")
+            File.WriteAllText(npm, "#!/bin/sh\ntouch '" + npmCalled + "'\nprintf '%s\\n' '" + root + "'\n")
             File.SetUnixFileMode(npm, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
-            Check.Contains(flow.Call(args.ToArray()).Output, "advertised")
-            File.WriteAllText(npm, "#!/bin/sh\nexit 79\n")
-            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Cannot locate the Pi SDK")
+            Check.Contains(flow.Call(args.ToArray(), 1).Error, "Unsupported Pi installation metadata")
+            Check.That(!File.Exists(npmCalled), "Queried an unrelated global npm SDK for an unverified wrapper")
             flow.NoInference()
             flow.NoPr()
             Check.That(flow.State["posted_request"] == nil, "Pi selection posted a claim request")

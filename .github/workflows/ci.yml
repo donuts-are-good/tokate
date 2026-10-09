@@ -99,6 +99,31 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+  harness-layouts:
+    if: ${{ inputs.full == true }}
+    needs: build
+    name: Native, npm and Bun harness paths
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: latest
+          package-manager-cache: false
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - run: bwrap --version && unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: tokate-binaries
+          path: ${{ runner.temp }}
+      - run: mkdir -p artifacts && tar -xzf "$RUNNER_TEMP/tokate-binaries.tar.gz" -C artifacts linux-x64/tokate
+      - run: bash scripts/harness-layout-proof.sh
   harness-installation:
     if: ${{ inputs.full == true }}
     name: Latest Claude, OMP and Hermes installation only
@@ -186,7 +211,7 @@ jobs:
       - run: TOKATE_CI_SHARD="${{ matrix.shard }}/8" artifacts/tests/tokate-tests
   verify:
     if: ${{ always() }}
-    needs: [build, suite, harness-installation]
+    needs: [build, suite, harness-installation, harness-layouts]
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
@@ -195,7 +220,9 @@ jobs:
           if [[ '${{ inputs.full }}' == true ]]; then
             test '${{ needs.suite.result }}' = success
             test '${{ needs.harness-installation.result }}' = success
+            test '${{ needs.harness-layouts.result }}' = success
           else
             test '${{ needs.suite.result }}' = skipped
             test '${{ needs.harness-installation.result }}' = skipped
+            test '${{ needs.harness-layouts.result }}' = skipped
           fi

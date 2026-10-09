@@ -436,6 +436,75 @@ internal class Diagnostics {
             )
         }
 
+        private func Discovery(binary string) {
+            using let flow = NativeFixture(binary)
+            flow.Initialize()
+            let hostile = Path.Combine(flow.Upstream, "tool-bin")
+            let linked = Path.Combine(flow.Temp.Root, "linked-bin")
+            Directory.CreateDirectory(hostile)
+            Directory.CreateDirectory(linked)
+            let marker = Path.Combine(flow.Temp.Root, "untrusted-harness-started")
+            let command = Path.Combine(hostile, "codex")
+            File.WriteAllText(command, "#!/bin/sh\ntouch '" + marker + "'\nexit 19\n")
+            File.SetUnixFileMode(command, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            File.CreateSymbolicLink(Path.Combine(linked, "codex"), command)
+            flow.Temp.Env["PATH"] = linked + ":" + hostile + ":" + flow.Temp.Env["PATH"]
+            let trusted = Path.Combine(flow.Bin, "codex")
+            let discovered = Check.Envelope(
+                TestProcess.Run(binary, []string{"doctor", "--managed", "--json"}, flow.Temp.Env, cwd: flow.Upstream),
+                "doctor",
+                "ok"
+            )
+            Check.That(Check.Text(Row(discovered, "codex")["path"]) == trusted, "Selected checkout-supplied harness")
+            Check.That(!File.Exists(marker), "Automatic discovery executed checkout code")
+            let configured = Path.Combine(flow.Temp.Root, "configured-bin")
+            Directory.CreateDirectory(configured)
+            File.Move(trusted, trusted + "-configured")
+            File.CreateSymbolicLink(Path.Combine(configured, "codex"), trusted + "-configured")
+            let prefix = Path.Combine(flow.Temp.Root, "npm-prefix")
+            Directory.CreateDirectory(Path.Combine(prefix, "bin"))
+            File.CreateSymbolicLink(Path.Combine(prefix, "bin/codex"), trusted + "-configured")
+            for setting in[]string{"CODEX_INSTALL_DIR", "NPM_CONFIG_PREFIX", "BUN_INSTALL_BIN"} {
+                flow.Temp.Env[setting] = setting == "NPM_CONFIG_PREFIX" ? prefix: configured
+                let installed = Check.Envelope(
+                    TestProcess.Run(
+                        binary,
+                        []string{"doctor", "--managed", "--json"},
+                        flow.Temp.Env,
+                        cwd: flow.Upstream
+                    ),
+                    "doctor",
+                    "ok"
+                )
+                Check.That(
+                    Check.Text(Row(installed, "codex")["path"]) == Path.Combine(
+                        setting == "NPM_CONFIG_PREFIX" ? Path.Combine(prefix, "bin"): configured,
+                        "codex"
+                    ),
+                    "Ignored configured installation: " + setting
+                )
+                flow.Temp.Env.Remove(setting)
+            }
+            Check.That(!File.Exists(marker), "Configured discovery executed checkout code")
+            let explicitPath = Check.Envelope(
+                TestProcess.Run(
+                    binary,
+                    []string{"doctor", "--managed", "--harness-path", command, "--json"},
+                    flow.Temp.Env,
+                    cwd: flow.Upstream
+                ),
+                "doctor",
+                "error",
+                "missing_tools"
+            )
+            Check.That(Check.Text(Row(explicitPath, "codex")["path"]) == command, "Ignored explicit harness path")
+            Check.That(File.Exists(marker), "Explicit selection did not take precedence")
+            flow.NoInference()
+            Console.WriteLine(
+                "PASS trusted harness discovery, configured installation and explicit selection precedence"
+            )
+        }
+
         private func Sandboxes(binary string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
@@ -520,6 +589,7 @@ internal class Diagnostics {
             Check.That(
                 selected == "" ||
                     selected == "local" ||
+                    selected == "discovery" ||
                     selected == "sandbox" ||
                     selected == "fixed" ||
                     selected == "metadata",
@@ -527,6 +597,9 @@ internal class Diagnostics {
             )
             if selected == "" || selected == "local" {
                 Local(binary)
+            }
+            if selected == "" || selected == "discovery" {
+                Discovery(binary)
             }
             if selected == "" || selected == "sandbox" {
                 Sandboxes(binary)

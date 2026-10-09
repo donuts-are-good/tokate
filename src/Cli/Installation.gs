@@ -21,7 +21,13 @@ internal class Installation {
             )
         }
 
-        internal func Execute(executable string, args[]string, input string? = nil, capture bool = false) int32 {
+        internal func Execute(
+            executable string,
+            args[]string,
+            input string? = nil,
+            capture bool = false,
+            pathVariables[]string = nil
+        ) int32 {
             let info = ProcessStartInfo(executable)
             info.UseShellExecute = false
             info.RedirectStandardInput = input != nil
@@ -44,6 +50,12 @@ internal class Installation {
             } {
                 if let value = Environment.GetEnvironmentVariable(key) {
                     info.Environment[key] = value
+                }
+            }
+            for key in pathVariables ?? []string{} {
+                let path = Environment.GetEnvironmentVariable(key) ?? ""
+                if path != "" {
+                    info.Environment[key] = LocalPaths.RuntimePath(path)
                 }
             }
             let started = Chan[Process?](1)

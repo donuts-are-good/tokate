@@ -125,6 +125,41 @@ internal class CodexRuntime {
             ) != 0
         }
 
+        internal func Bubblewrap(executable string) string {
+            let root = Directory.GetParent(executable)?.Parent?.FullName ?? ""
+            let manifest = Path.Combine(root, "codex-package.json")
+            if !File.Exists(manifest) && FileInfo(manifest).LinkTarget == nil {
+                return ""
+            }
+            let metadata = Metadata(manifest)
+            if J.Number(metadata, "layoutVersion") != 1 || J.Text(metadata, "variant") != "codex" || J.Text(
+                metadata,
+                "entrypoint"
+            ) != "bin/codex" ||
+                J.Text(metadata, "resourcesDir") != "codex-resources" || J.Text(metadata, "version") == "" ||
+                (
+                J.Text(metadata, "target") != "x86_64-unknown-linux-musl" && J.Text(
+                    metadata,
+                    "target"
+                ) != "x86_64-unknown-linux-gnu"
+            ) ||
+                executable != Path
+                .Combine(root, "bin/codex") {
+                throw CliFailure(
+                    "verification_failed",
+                    "Unsupported standalone Codex package layout. Repair the selected installation."
+                )
+            }
+            let bubblewrap = Path.Combine(root, "codex-resources/bwrap")
+            if !Native(bubblewrap) {
+                throw CliFailure(
+                    "verification_failed",
+                    "The selected Codex package has no executable native bubblewrap resource. Repair that installation."
+                )
+            }
+            return bubblewrap
+        }
+
         internal func Resolve(path string = "") string {
             let selected = LocalPaths.Harness("codex", path)
             if selected == "" {
