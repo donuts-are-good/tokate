@@ -2,7 +2,9 @@
 
 Source builds require the exact .NET SDK in `global.json`, Clang and zlib development
 headers for NativeAOT. The project pins the G# SDK through `Tokate.gsproj` and its
-lock file. Supported release binaries target Linux x86_64, glibc 2.34+.
+lock file. Supported release binaries target Linux x86_64 with glibc 2.34+ or Alpine 3.24.
+On Alpine, set `TOKATE_RUNTIME_IDENTIFIER=linux-musl-x64` for the build and package scripts.
+Musl tests are written to `artifacts/tests-musl`; set `TOKATE_BINARY` to the musl CLI when running them.
 
 ```sh
 bash scripts/build.sh

@@ -8,6 +8,7 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <RuntimeIdentifiers>linux-x64;linux-musl-x64</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="../templates/tokate.json" LogicalName="TokateTests.templates.tokate.json" />

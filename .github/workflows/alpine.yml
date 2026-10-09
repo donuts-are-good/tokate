@@ -1,0 +1,51 @@
+name: Alpine
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: alpine-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  musl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build and test on Alpine as an ordinary user
+        run: |
+          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+            -v "$PWD:/src" -w /src \
+            mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 \
+            /bin/sh -ec '
+              apk add --no-cache bash clang build-base zlib-dev git github-cli curl coreutils findutils tar util-linux-misc bubblewrap nodejs npm
+              adduser -D tester
+              chown -R tester:tester /src
+              su -s /bin/bash tester -c "set -e
+                export TOKATE_RUNTIME_IDENTIFIER=linux-musl-x64
+                export TOKATE_BINARY=/src/artifacts/linux-musl-x64/tokate
+                bash scripts/build.sh
+                artifacts/tests-musl/tokate-tests --shell /bin/sh
+                artifacts/tests-musl/tokate-tests --cli-setup
+                artifacts/tests-musl/tokate-tests --process
+                artifacts/tests-musl/tokate-tests --flow CrossAccountFlow
+                artifacts/linux-musl-x64/tokate doctor --external --json
+                artifacts/linux-musl-x64/tokate doctor --fix --yes --json
+                ~/.local/bin/codex --version
+                artifacts/linux-musl-x64/tokate doctor --harness pi --fix --yes --json
+                ~/.pi/agent/bin/pi --version
+                node --version
+                bash scripts/package.sh"
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tokate-linux-musl-x64
+          path: |
+            artifacts/tokate-*-linux-musl-x64.tar.gz
+            artifacts/tokate-*-linux-musl-x64.tar.gz.sha256
+          if-no-files-found: error

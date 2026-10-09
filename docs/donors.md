@@ -1,7 +1,7 @@
 # Donate work
 
 Use your own GitHub account and coding harness. Tokate needs Linux x86_64,
-glibc 2.34+, Git, the GitHub CLI and bubblewrap with working user namespaces.
+glibc 2.34+ or [Alpine 3.24](alpine.md), Git, the GitHub CLI and bubblewrap with working user namespaces.
 Project build tools must be accessible from system paths. Keep managed runs and
 harness installations outside `/tmp`.
 

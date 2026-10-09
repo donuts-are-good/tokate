@@ -12,7 +12,7 @@ PRs. Donors use their own accounts and tools. Owners review and merge.
    results and the responsible person's next action.
 
 Use [installation](README.md), the [owner guide](docs/owners.md) or the
-[donor guide](docs/donors.md). The release supports Linux x86_64 with glibc 2.34+
+[donor guide](docs/donors.md). The release supports Linux x86_64 with glibc 2.34+ or Alpine 3.24
 and public GitHub repositories. `tokate help COMMAND` supplies installed syntax.
 Do not infer support for another platform, forge or harness.
 
