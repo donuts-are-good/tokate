@@ -6,7 +6,7 @@ Tokate's flake builds the x86_64 Linux CLI as NativeAOT.
 nix profile add github:obselate/tokate
 tokate doctor --external
 nix profile add nixpkgs#codex
-tokate doctor --managed
+tokate doctor --managed --harness codex
 ```
 
 For Pi, use its official package:
