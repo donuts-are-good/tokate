@@ -132,7 +132,8 @@ internal class AmendmentFlow {
                 RepositoryFaults.Reject(
                     flow,
                     run,
-                    []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+                    []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"},
+                    repositoryError: "identity changed"
                 )
                 Check.That(
                     !Directory.Exists(Path.Combine(run, "amendments", commit)),

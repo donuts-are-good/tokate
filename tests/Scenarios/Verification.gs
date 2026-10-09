@@ -184,11 +184,9 @@ internal class VerificationChecks {
                     flow.Temp.Root
                 }
                 if missing {
-                    args.AddRange([]string{"--tmpfs", "/usr/bin"})
-                    for tool in[]string{"bash", "env", "git", "setsid", "unshare"} {
-                        args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
-                    }
-                    args.AddRange([]string{"--symlink", "bash", "/usr/bin/sh"})
+                    args.AddRange(
+                        []string{"--ro-bind", "/dev/null", "/usr/bin/bwrap", "--ro-bind", "/dev/null", "/bin/bwrap"}
+                    )
                 } else {
                     args.AddRange([]string{"--ro-bind", broken, "/usr/bin/bwrap"})
                 }

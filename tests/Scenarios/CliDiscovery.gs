@@ -921,7 +921,7 @@ internal class CliDiscovery {
             let work = Call(binary, []string{"work", "--help"}, temp).Output
             Check.Contains(work, "inference")
             Check.Contains(work, "publication step")
-            Check.Contains(work, "default: min(3600, owner limit)")
+            Check.Contains(work, "Explicit budget 1..86400 seconds")
             Check.Contains(work, "(required)")
             Check.Contains(work, "use --run DIR instead of required inputs")
             Check.That(!work.Contains("tokate doctor"), "Work help repeats global help")
