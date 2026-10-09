@@ -1,4 +1,6 @@
 import contextlib
+import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -6,14 +8,73 @@ import shutil
 import signal
 import subprocess
 import sys
+import runpy
+import tarfile
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 PROJECT = Path(__file__).resolve().parents[2]
 
 
 class ProofRegressions(unittest.TestCase):
+    def test_download_preserves_unowned_files_and_failed_update(self):
+        payload = b'\x7fELF\x02\x01' + b'\0' * 12 + b'\x3e\x00'
+        manifest = {'version': '1.2.3', 'platforms': {'linux-x64': {
+            'binary': 'claude', 'size': len(payload), 'checksum': hashlib.sha256(payload).hexdigest(),
+        }}}
+        def response(url, **options):
+            return io.BytesIO(json.dumps(manifest).encode() if url.endswith('manifest.json') else payload)
+        with tempfile.TemporaryDirectory(prefix='tokate-download-') as directory:
+            root = Path(directory)
+            destination = root / 'claude'
+            collision = destination.with_suffix('.download')
+            collision.write_text('unowned partial download')
+            args = ['claude-download.py', '--version', '1.2.3', '--output', str(destination)]
+            with patch.object(sys, 'argv', args), patch('urllib.request.urlopen', response):
+                runpy.run_path(str(PROJECT / 'scripts/claude-download.py'), run_name='__main__')
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(collision.read_text(), 'unowned partial download')
+            manifest['platforms']['linux-x64']['checksum'] = '0' * 64
+            with patch.object(sys, 'argv', args), patch('urllib.request.urlopen', response):
+                with self.assertRaisesRegex(RuntimeError, 'checksum or size mismatch'):
+                    runpy.run_path(str(PROJECT / 'scripts/claude-download.py'), run_name='__main__')
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(collision.read_text(), 'unowned partial download')
+            self.assertEqual(list(root.glob('claude.*.download')), [])
+
+    def test_package_excludes_unlisted_plugin_files(self):
+        documents = ['owners', 'donors', 'recovery', 'security', 'development', 'nix',
+                     'alpine', 'linux-security', 'linux-harnesses']
+        notices = ['dotnet-LICENSE.TXT', 'dotnet-THIRD-PARTY-NOTICES.TXT', 'GSharp.txt', 'Spectre.Console.txt']
+        files = ['scripts/package.sh', 'README.md', 'AGENTS.md', 'LICENSE',
+                 'plugins/install.sh', 'plugins/tokate/SKILL.md']
+        files += ['docs/' + name + '.md' for name in documents]
+        files += ['licenses/' + name for name in notices]
+        with tempfile.TemporaryDirectory(prefix='tokate-package-') as directory:
+            root = Path(directory)
+            for name in files:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(PROJECT / name, target)
+            (root / 'plugins/.env').write_text('synthetic private settings')
+            (root / 'plugins/private-note.txt').write_text('synthetic private note')
+            for name, output in [('bin/dotnet', '1.2.3'), ('artifacts/linux-x64/tokate', 'tokate 1.2.3')]:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("#!/bin/sh\nprintf '%s\\n' '" + output + "'\n")
+                target.chmod(0o755)
+            result = subprocess.run(['bash', str(root / 'scripts/package.sh')], cwd=root,
+                env={'HOME': str(root), 'PATH': str(root / 'bin') + ':/usr/bin:/bin'},
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with tarfile.open(root / 'artifacts/tokate-1.2.3-linux-x64.tar.gz') as archive:
+                plugins = [member.name for member in archive.getmembers()
+                           if member.isfile() and '/plugins/' in member.name]
+            self.assertEqual(sorted(plugins), ['tokate-1.2.3-linux-x64/plugins/install.sh',
+                'tokate-1.2.3-linux-x64/plugins/tokate/SKILL.md'])
+
     def test_omp_rejects_guard_failures_after_expected_error(self):
         node = Path(shutil.which('node')).resolve()
         with tempfile.TemporaryDirectory(prefix='tokate-omp-guards-', dir='/var/tmp') as directory:
