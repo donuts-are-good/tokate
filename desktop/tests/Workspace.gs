@@ -115,6 +115,7 @@ func WorkspaceFlow() {
         "if [ \"$$2\" = search/issues ]; then\n  query=''\n  page=1\n  limit=0\n  for arg in \"$$@\"; do\n    case \"$$arg\" in q=*) query=$${arg#q=};; page=*) page=$${arg#page=};; per_page=*) limit=$${arg#per_page=};; esac\n  done\n  [ \"$$limit\" = 8 ] || exit 1\n  printf '%s\\n' \"$$@\" >> FIXTURE/issue-calls\n  approved=false\n  case \"$$query\" in *'-label:tokate:approved'*) ;; *'label:tokate:approved'*) approved=true;; esac\n  count=8\n  total=512\n  first=$$((42 + (page - 1) * 8))\n  case \"$$query\" in *'\"needle\"'*) count=1; total=1; first=999;; esac\n  printf '{\"total_count\":%s,\"incomplete_results\":false,\"items\":[' \"$$total\"\n  i=0\n  while [ \"$$i\" -lt \"$$count\" ]; do\n    [ \"$$i\" -eq 0 ] || printf ','\n    number=$$((first + i))\n    printf '{\"number\":%s,\"title\":\"Issue %s\",\"state\":\"open\",\"html_url\":\"https://github.com/owner/repo/issues/%s\",\"labels\":[' \"$$number\" \"$$number\" \"$$number\"\n    [ \"$$approved\" = false ] || printf '{\"name\":\"tokate:approved\"}'\n    printf ']}'\n    i=$$((i + 1))\n  done\n  printf ']}'\nelif [ \"$$2\" = repos/owner/repo/issues/42 ]; then\n  printf '%s\\n' \"$$@\" >> FIXTURE/issue-calls\n  printf '%s' '{\"number\":42,\"title\":\"Issue 42\",\"state\":\"open\",\"html_url\":\"https://github.com/owner/repo/issues/42\",\"labels\":[]}'\nelif [ \"$$2\" = user ]; then\n  printf '%s' '{\"login\":\"fixture\"}'\nelif [ \"$$1\" = pr ]; then\n  if [ \"$$3\" = 4 ]; then printf '%s' '{\"state\":\"MERGED\"}'; else printf '%s' '{\"state\":\"OPEN\",\"reviewDecision\":\"CHANGES_REQUESTED\"}'; fi\nelif [ \"$$2\" = repos/owner/repo ]; then\n  printf '%s' '{\"permissions\":{\"push\":true},\"default_branch\":\"main\"}'\nelif [ \"$$2\" = 'repos/owner/repo/issues?state=open&sort=updated&per_page=30' ]; then\n  printf '%s' '[{\"number\":42,\"title\":\"Improve rendering\",\"labels\":[]}]'\nelse\n  printf '%s' '{\"title\":\"Improve rendering\"}'\nfi\n"
             .Replace("FIXTURE", fixture)
     )
+    Script(bin, "codex", "printf '%s' '{\"models\":[]}'\n")
     Environment.SetEnvironmentVariable("PATH", bin + ":" + previousPath)
     Environment.SetEnvironmentVariable("XDG_STATE_HOME", fixture)
     try {
@@ -300,6 +301,28 @@ func WorkspaceFlow() {
         )
         Require(requests.Contains("repos/owner/repo/issues/42"), "Number search scanned issue pages")
         TiledLayouts(host, window, adapter)
+        Choose(host, window, adapter, "Issue #42: Issue 42")
+        AwaitControl(host, adapter, AccessibilityRole.TextInput, "Verification minutes", enabled: true)
+        Edit(window, host, adapter, "Verification minutes", "7")
+        Choose(host, window, adapter, "Saved work")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Saved owner/repo #43", enabled: true)
+        Choose(host, window, adapter, "Saved owner/repo #43")
+        Choose(host, window, adapter, "Amend contribution")
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Verification minutes")?.Value == "30",
+            "Donation budget leaked into amendment settings"
+        )
+        Edit(window, host, adapter, "Verification minutes", "11")
+        Choose(host, window, adapter, "Donate")
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Verification minutes")?.Value == "7",
+            "Amendment changed the donation budget"
+        )
+        Choose(host, window, adapter, "Saved work")
+        Require(
+            Find(adapter.Root, AccessibilityRole.TextInput, "Verification minutes")?.Value == "11",
+            "Navigation discarded amendment settings"
+        )
     } finally {
         Environment.SetEnvironmentVariable("PATH", previousPath)
         Environment.SetEnvironmentVariable("XDG_STATE_HOME", previousState)

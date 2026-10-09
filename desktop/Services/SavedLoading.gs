@@ -1,12 +1,22 @@
 package TokateDesktop
 
-import Goo
 import System
 import System.Collections.Generic
 import System.Text.Json
 
+class SavedContribution {
+    var Path string = ""
+    var Data JsonElement
+    var Actions JsonElement
+    var Title string = ""
+    var Remote JsonElement
+    var RemoteError bool
+    var Error string = ""
+    var Refreshed bool
+}
+
 class SavedPageLoader {
-    let Readers[]CommandRunner = []CommandRunner{CommandRunner(), CommandRunner(), CommandRunner(), CommandRunner()}
+    let Readers[]CommandClient = []CommandClient{CommandClient(), CommandClient(), CommandClient(), CommandClient()}
 
     func Stop() {
         for reader in Readers {
@@ -17,7 +27,6 @@ class SavedPageLoader {
 
 func ReadSavedPage(
     loader SavedPageLoader,
-    host Window,
     sources[]SavedContribution,
     changed Action[SavedContribution],
     finished Action
@@ -31,18 +40,13 @@ func ReadSavedPage(
                     batch.Add(sources[item])
                 }
             }
-            go ReadSavedContributions(loader.Readers[index], host, batch.ToArray(), changed)
+            go ReadSavedContributions(loader.Readers[index], batch.ToArray(), changed)
         }
     }
-    host.TryPost(finished)
+    finished()
 }
 
-func ReadSavedContributions(
-    reader CommandRunner,
-    host Window,
-    sources[]SavedContribution,
-    changed Action[SavedContribution]
-) {
+func ReadSavedContributions(reader CommandClient, sources[]SavedContribution, changed Action[SavedContribution]) {
     for source in sources {
         var item = source
         if item.Data.ValueKind != JsonValueKind.Object {
@@ -62,7 +66,7 @@ func ReadSavedContributions(
                 item.Error = item.Error == "" ? "Saved contribution could not be read.": item.Error
             }
             let local = item
-            host.TryPost(() -> changed(local))
+            changed(local)
         }
         let updated = SavedContribution{
             Path: item.Path,
@@ -110,6 +114,6 @@ func ReadSavedContributions(
                 }
             }
         }
-        host.TryPost(() -> changed(updated))
+        changed(updated)
     }
 }

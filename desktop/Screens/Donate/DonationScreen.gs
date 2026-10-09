@@ -4,10 +4,9 @@ import Goo
 import Goo.Widgets.Inputs
 import System
 import System.Collections.Generic
-import System.IO
 import System.Text.Json
 
-partial class Desktop {
+partial class DonationScreen {
     private var repository string = ""
     private var account string = ""
     private var selectedRepository string = ""
@@ -28,36 +27,65 @@ partial class Desktop {
     private var verification string = "30"
     private var network bool
     private var selection JsonElement
-    private var runDirectory string = ""
-    private var run JsonElement
-    private var runActions List[string] = List[string]()
-    private var projectPath string = ""
-    private var ownerRepository string = ""
-    private var checks string = ""
-    private var verifyCommand string = ""
-    private var ownerModels string = ""
-    private var ownerTools string = ""
-    private var ownerEligibility string = ""
-    private var ownerArguments[]string = []string{}
-    private var ownerPreview string = ""
+    private var donation JsonElement
+    private var donationPath string = ""
+    private var donationReady bool
+    private var donationStarted bool
+    private var donationRunning bool
+    private var donationOutput string = ""
+    private var donationElapsed int32
+    private var donationState string = ""
+    private var approvalTimer WindowTimer?
+    private var approvalRunner CommandClient?
+    private let outputViewport ElementHandle = ElementHandle()
+    private var outputRange float64
+    private var outputOffset float64
+    private var followOutput bool = true
+    private var renderedOutput string = ""
+    private var renderedTheme float64 = -1
+    private var activityLines List[ActivityLine] = List[ActivityLine]()
 
-    private func Error(result CommandResult) bool {
-        if result.ExitCode == 0 {
-            return false
-        }
-        if page == "Donate" || page == "My project" || page == "Saved work" {
-            message = TextOf(Field(result.Value, "error"), "message")
-            if message == "" {
-                message = result.Diagnostics.Trim().Split('\n')[0]
+    private let app DesktopSession
+    private let ui ThemedControls
+    private let issues IssueBrowser
+    private let openSaved Action[string]
+    private let rememberRun Action[string]
+
+    init(session DesktopSession, controls ThemedControls, saved Action[string], remember Action[string]) {
+        app = session
+        ui = controls
+        issues = IssueBrowser(app)
+        openSaved = saved
+        rememberRun = remember
+        outputViewport.MetricsChanged += metrics -> {
+            let follow = outputRange - outputOffset <= 2
+            let changed = metrics.ScrollRange.Y != outputRange
+            if metrics.ScrollOffset.Y < Math.Min(outputOffset, metrics.ScrollRange.Y) - 1 {
+                followOutput = false
+                app.Refresh()
             }
-            if message == "" {
-                message = "Could not complete this action."
+            outputRange = metrics.ScrollRange.Y
+            outputOffset = metrics.ScrollOffset.Y
+            if changed && follow && followOutput {
+                if activityLines.Count > 0 {
+                    outputViewport.ScrollToItem(activityLines[activityLines.Count - 1].Index.ToString())
+                } else {
+                    outputViewport.ScrollTo(0, outputRange)
+                }
             }
-            report = ""
-            return true
         }
-        ShowResult(result)
-        return true
+    }
+
+    prop Key string -> "Donate" + step.ToString()
+    prop IsDonating bool -> step == 3
+    prop IsLive bool -> IsDonating && donationStarted
+    prop IsBrowsing bool -> step == 0 && donorIssues.Loaded
+
+    func Stop() {
+        approvalTimer?.Dispose()
+        approvalTimer = nil
+        approvalRunner?.Stop()
+        approvalRunner = nil
     }
 
     private func LoadProject() {
@@ -74,37 +102,37 @@ partial class Desktop {
             issue = ""
             issueTitle = ""
             selection = JsonElement{}
-            Execute(
+            app.Execute(
                 []string{"api", "user"},
                 user -> {
-                    if Error(user) {
+                    if app.Error(user) {
                         return
                     }
                     account = TextOf(user.Value, "login")
-                    Execute(
+                    app.Execute(
                         []string{"policy", "--repo", selectedRepository},
                         response -> {
-                            if Error(response) {
+                            if app.Error(response) {
                                 return
                             }
                             policy = Field(Field(response.Value, "data"), "policy")
                             if requested == "" {
-                                FindIssues(selectedRepository, donorIssues, search: true)
+                                issues.FindIssues(selectedRepository, donorIssues, search: true)
                                 return
                             }
-                            Execute(
+                            app.Execute(
                                 []string{"api", "repos/" + selectedRepository + "/issues/" + requested},
                                 found -> {
-                                    if Error(found) {
+                                    if app.Error(found) {
                                         return
                                     }
                                     let item = found.Value
                                     if Field(item, "pull_request").ValueKind != JsonValueKind.Undefined {
-                                        message = "This is a pull request. Choose an issue."
+                                        app.Message = "This is a pull request. Choose an issue."
                                     } else if TextOf(item, "state") != "open" {
-                                        message = "Issue #" + requested + " is closed."
-                                    } else if !ApprovedIssue(item) {
-                                        message = "Issue #" + requested + " needs owner approval."
+                                        app.Message = "Issue #" + requested + " is closed."
+                                    } else if !IssuePage.ApprovedIssue(item) {
+                                        app.Message = "Issue #" + requested + " needs owner approval."
                                     } else {
                                         ChooseIssue(item)
                                     }
@@ -118,7 +146,7 @@ partial class Desktop {
                 "gh"
             )
         } catch (error Exception) {
-            message = error.Message
+            app.Message = error.Message
         }
     }
 
@@ -126,10 +154,10 @@ partial class Desktop {
         issue = TextOf(value, "number")
         issueTitle = TextOf(value, "title")
         step = 1
-        Execute(
+        app.Execute(
             []string{"defaults", "list"},
             result -> {
-                if Error(result) {
+                if app.Error(result) {
                     return
                 }
                 profiles = Field(Field(result.Value, "data"), "profiles")
@@ -139,10 +167,10 @@ partial class Desktop {
     }
 
     private func LoadCodexModels() {
-        Execute(
+        app.Execute(
             []string{"debug", "models", "--bundled"},
             result -> {
-                if Error(result) {
+                if app.Error(result) {
                     return
                 }
                 codexModels.Clear()
@@ -167,12 +195,12 @@ partial class Desktop {
                         let value = TextOf(level, "effort")
                         let name = value == "xhigh" ? "Extra high": char.ToUpperInvariant(value[0]).ToString() +
                             value.Substring(1)
-                        result.Add(ComboBoxOption{Id: value, Label: name, Content: Label(name)})
+                        result.Add(ComboBoxOption{Id: value, Label: name, Content: ui.Label(name)})
                     }
                 }
             } else {
                 let name = TextOf(item, "display_name")
-                result.Add(ComboBoxOption{Id: id, Label: name, Content: Label(name)})
+                result.Add(ComboBoxOption{Id: id, Label: name, Content: ui.Label(name)})
             }
         }
         return result.ToArray()
@@ -238,10 +266,10 @@ partial class Desktop {
     private func ReviewDonation() {
         try {
             BudgetSeconds()
-            Execute(
+            app.Execute(
                 SelectionArguments("select").ToArray(),
                 result -> {
-                    if Error(result) {
+                    if app.Error(result) {
                         return
                     }
                     selection = Field(result.Value, "data")
@@ -249,11 +277,11 @@ partial class Desktop {
                     model = TextOf(selection, "model")
                     effort = TextOf(selection, "effort")
                     step = 2
-                    message = ""
+                    app.Message = ""
                 }
             )
         } catch (error Exception) {
-            message = error.Message
+            app.Message = error.Message
         }
     }
 
@@ -278,7 +306,7 @@ partial class Desktop {
             if network {
                 args.Add("--allow-network")
             }
-            Confirm(
+            app.Confirm(
                 "Reserve this contribution?",
                 "",
                 () -> {
@@ -287,15 +315,19 @@ partial class Desktop {
                     donationReady = false
                     donationPath = ""
                     donationState = "Reserving donation"
-                    Execute(
+                    app.Execute(
                         args.ToArray(),
                         result -> {
+                            if result.Error != "" {
+                                donationState = "Reservation needs attention"
+                                return
+                            }
                             let directory = TextOf(Field(result.Value, "data"), "run")
                             if directory != "" && (result.ExitCode == 0 || result.ExitCode == 8) {
-                                Execute(
+                                app.Execute(
                                     []string{"status", "--run", directory},
                                     status -> {
-                                        if !Error(status) {
+                                        if !app.Error(status) {
                                             OpenDonation(Field(status.Value, "data"), directory, false)
                                         }
                                     }
@@ -303,28 +335,29 @@ partial class Desktop {
                             } else {
                                 donationState = "Reservation needs attention"
                                 step = 2
-                                ShowResult(result)
+                                app.ShowResult(result)
                             }
                         },
-                        seconds: 600
+                        seconds: 600,
+                        completeOnError: true
                     )
                 },
                 label: "Send request",
                 content: () -> Container{
                     Gap: 16,
-                    Heading(selectedRepository + " #" + issue, 25),
-                    Row(
+                    ui.Heading(selectedRepository + " #" + issue, 25),
+                    ui.Row(
                         []Blob{
-                            SummaryTile("Coding", unlimited ? "Unlimited": coding + " minutes", "schedule"),
-                            SummaryTile("Verification", verification + " minutes", "verified"),
+                            ui.SummaryTile("Coding", unlimited ? "Unlimited": coding + " minutes", "schedule"),
+                            ui.SummaryTile("Verification", verification + " minutes", "verified"),
                         }
                     ),
-                    ReviewDetail("Model", model + " / " + effort),
-                    ReviewDetail("Network", network ? "Allowed": "Offline"),
+                    ui.ReviewDetail("Model", model + " / " + effort),
+                    ui.ReviewDetail("Network", network ? "Allowed": "Offline"),
                 }
             )
         } catch (error Exception) {
-            message = error.Message
+            app.Message = error.Message
         }
     }
 }
