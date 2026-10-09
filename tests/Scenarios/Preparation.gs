@@ -419,6 +419,13 @@ internal class PreparationChecks {
                 ) == "true",
                 "Partial metadata claimed passing verification"
             )
+            let invalidPath = Path.Combine(flow.Temp.Root, "invalid-partial-request.json")
+            for invalid in[]string{"false", "\"true\"", "1"} {
+                let changed = request.DeepClone()
+                (changed["metadata"] ?? throw Exception("Missing metadata"))["incomplete"] = Check.Json(invalid)
+                File.WriteAllText(invalidPath, changed.ToJsonString())
+                flow.Call([]string{"request", "--repo", "owner/project", "--issue", "1", "--file", invalidPath}, 1)
+            }
             saved["commit"] = JsonValue.Create("")
             File.WriteAllText(path, saved.ToJsonString())
             flow.Call([]string{"submit", "--run", run, "--incomplete"})
