@@ -21,8 +21,10 @@ tokate access --repo OWNER/REPO --operation request --issue 42 --scope trust
 
 ## Choose a tool
 
-Use `tokate doctor --fix` for confirmed setup or `--harness-path` for an existing
-custom installation. Harness authentication remains separate.
+`tokate doctor --fix` selects Codex by default. For Pi, use
+`tokate doctor --managed --harness pi --fix`. Use `--harness-path` for an existing
+custom installation. Harness authentication and [host namespace policy](linux-security.md)
+remain separate from package installation.
 
 For Codex, use a current native installation with your ChatGPT login:
 
