@@ -29,6 +29,7 @@ jobs:
       - name: Build and test on Alpine as an ordinary user
         run: |
           docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=tokate-alpine-tests \
+            --security-opt systempaths=unconfined \
             -v "$PWD:/src" -w /src \
             mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 \
             /bin/sh -ec '
