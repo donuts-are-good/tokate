@@ -245,6 +245,7 @@ internal class PreparationChecks {
             let original = File.ReadAllText(path)
             let work = Path.Combine(run, "coding/unfinished.txt")
             File.WriteAllText(work, "Saved work")
+            test.Flow.Call([]string{"request", "--run", run, "--help"})
             var requests int32
             for action in[]string{"renew", "pause", "resume", "release"} {
                 let args = []string{"request", "--run", run, "--operation", action, "--json"}
@@ -255,6 +256,11 @@ internal class PreparationChecks {
                 let pending = Check.Json(test.Flow.Call(args, 8).Output)
                 Check.That(Check.Text(pending["data"]?["pending"]) == "true", "Reservation request lost pending status")
                 let saved = Check.Json(File.ReadAllText(path))
+                let pendingText = File.ReadAllText(path)
+                saved["id"] = JsonValue.Create(Guid.NewGuid().ToString("D"))
+                File.WriteAllText(path, saved.ToJsonString())
+                test.Flow.Call(args, 1)
+                File.WriteAllText(path, pendingText)
                 let request = saved["reservation_request"] ?? throw Exception("Missing saved request")
                 let journal = Path.Combine(run, "reservation-" + Check.Text(request["uuid"]) + ".posting.json")
                 let backup = journal + ".saved"
