@@ -6,6 +6,13 @@ experimental-features = nix-command flakes"
 proof=$(mktemp -d)
 trap 'rm -rf "$proof"' EXIT
 nix build .#default --out-link "$proof/package"
+source=$(nix eval --raw .#default.src)
+test ! -e "$source/branding"
+test ! -e "$source/tests"
+test ! -e "$source/site/assets"
+for notice in LICENSE licenses/*; do
+  cmp "$notice" "$proof/package/share/licenses/tokate/${notice##*/}"
+done
 export TOKATE_NIX_SOURCE=$PWD
 probe=$(nix build --impure --no-link --print-out-paths --expr '
   let

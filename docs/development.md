@@ -51,6 +51,8 @@ and unsupported capabilities. It does not establish real model quality or allowa
 
 ## Package
 
+Edit `VERSION` to change the product version used by MSBuild, Nix and release packaging.
+
 ```sh
 bash scripts/package.sh
 ```

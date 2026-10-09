@@ -65,9 +65,7 @@ phrase, as in *a purpose*.
 
 Based on [tokate.dev](https://tokate.dev/) and its [stylesheet](site/style.css),
 using the [DESIGN.md format](https://github.com/google-labs-code/design.md/blob/main/docs/spec.md).
-The tokens and bundled fonts are authoritative. The card is a visual reference.
-
-![Tokate brand card with daylight and moonlight palettes, typography and design choices on a quiet fresco background.](branding/brand-card.png)
+The tokens and fonts in `site/assets/` are authoritative.
 
 ## Colors
 
@@ -138,8 +136,7 @@ scroll edges are accents, not borders around every component.
 ## Components
 
 - **Identity and artwork:** reuse the olive mark and existing painted assets
-  from [site/assets](site/assets/). Original PNGs live in
-  [branding/artwork](branding/artwork/). Hands offering the sun express donation.
+  from [site/assets](site/assets/). Hands offering the sun express donation.
   The moon supports the darker theme. Preserve proportions and breathing room.
 - **Actions:** use the existing stone artwork for spacious promotional choices.
   Use the flat button tokens for denser interfaces. Keep labels short and clear,
