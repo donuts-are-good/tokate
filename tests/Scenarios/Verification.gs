@@ -184,9 +184,20 @@ internal class VerificationChecks {
                     flow.Temp.Root
                 }
                 if missing {
-                    args.AddRange(
-                        []string{"--ro-bind", "/dev/null", "/usr/bin/bwrap", "--ro-bind", "/dev/null", "/bin/bwrap"}
-                    )
+                    let systemBin = Directory.ResolveLinkTarget("/bin", true)?.FullName ?? "/bin"
+                    args.AddRange([]string{"--tmpfs", "/usr/bin"})
+                    if systemBin != "/usr/bin" {
+                        args.AddRange([]string{"--tmpfs", systemBin})
+                    }
+                    for tool in[]string{"bash", "env", "git", "setsid", "unshare"} {
+                        args.AddRange(
+                            []string{"--ro-bind", TestProcess.SystemPath("/usr/bin/" + tool), "/usr/bin/" + tool}
+                        )
+                    }
+                    args.AddRange([]string{"--symlink", "bash", "/usr/bin/sh"})
+                    if systemBin != "/usr/bin" {
+                        args.AddRange([]string{"--symlink", "/usr/bin/sh", Path.Combine(systemBin, "sh")})
+                    }
                 } else {
                     args.AddRange([]string{"--ro-bind", broken, "/usr/bin/bwrap"})
                 }
