@@ -532,11 +532,40 @@ internal class PreparationChecks {
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial publication restarted inference")
         }
 
-        private func Handoff(binary string) {
+        private func Handoff(binary string, harness string = "external") {
+            using let catalog = harness == "pi" ? PiCatalog(): nil
             using let test = CoordinationFixture(binary)
-            let priorRun = PublishedContribution.PublishRun(test)
             let flow = test.Flow
-            flow.Call([]string{"submit", "--run", priorRun})
+            test.Initialize(false)
+            if harness == "pi" {
+                let endpoint = catalog?.Endpoint ?? throw Exception("Missing Pi catalog")
+                PiCatalog.Configure(flow, endpoint)
+                let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+                let policy = Check.Json(File.ReadAllText(policyPath))
+                policy["model_policy"] = JsonValue.Create("whitelist")
+                (policy["allowed_tools"] ?? throw Exception("Missing tools"))
+                    .AsArray()
+                    .Add(Check.Map("harness", "pi", "provider", "local-chat-completions"))
+                (policy["models"] ?? throw Exception("Missing models"))["fixture-model"] = Check.Json("[\"absent\"]")
+                File.WriteAllText(policyPath, policy.ToJsonString())
+                flow.Commit("Allow the fixture Pi model")
+            }
+            flow.Approve()
+            let previous = test.Claim()
+            let priorRun = test.Prepare()
+            let previousHead = test.Candidate(previous)
+            flow.Call(
+                []string{
+                    "external",
+                    "--run",
+                    priorRun,
+                    "--commit",
+                    previousHead,
+                    "--summary",
+                    PublishedContribution.Summary(flow, previousHead, "Add the prior contribution result.")
+                }
+            )
+            flow.Publish(priorRun)
             let priorPath = Path.Combine(priorRun, "run.json")
             let priorRecord = File.ReadAllText(priorPath)
             let priorHead = Check.Text(Check.Json(priorRecord)["commit"])
@@ -548,15 +577,13 @@ internal class PreparationChecks {
                 "--format=%an <%ae>",
                 priorHead
             )
-            let args = []string{
+            let args = List[string]{
                 "claim",
                 "owner/project",
                 "--issue",
                 "1",
                 "--source",
-                "external",
-                "--tools",
-                test.Tools,
+                harness == "external" ? "external": "tokate",
                 "--seconds",
                 "30",
                 "--from-pr",
@@ -567,7 +594,35 @@ internal class PreparationChecks {
                 Path.Combine(flow.Temp.Root, "handoffs"),
                 "--json"
             }
-            flow.Acquire(args, 1)
+            if harness == "external" {
+                args.AddRange([]string{"--tools", test.Tools})
+            } else {
+                args.AddRange(
+                    []string{
+                        "--harness",
+                        harness,
+                        "--model",
+                        harness == "pi" ? "fixture-model": "gpt-6.1-sol",
+                        "--effort",
+                        harness == "pi" ? "absent": "high",
+                        "--verification-reserve",
+                        "10"
+                    }
+                )
+                if harness == "pi" {
+                    args.AddRange(
+                        []string{
+                            "--pi-root",
+                            Path.Combine(flow.Temp.Root, "runtime/node_modules"),
+                            "--node",
+                            TestProcess.Node(),
+                            "--endpoint",
+                            catalog?.Endpoint ?? ""
+                        }
+                    )
+                }
+            }
+            flow.Acquire(args.ToArray(), 1)
             flow.Git("clone", "--bare", flow.Upstream, Path.Combine(flow.Bin, "otherfork"))
             flow.Reload()
             flow.State["viewer_id"] = JsonValue.Create(124)
@@ -601,7 +656,7 @@ internal class PreparationChecks {
                 )
             )
             flow.Save()
-            flow.Acquire(args, 1)
+            flow.Acquire(args.ToArray(), 1)
             flow.Reload()
             flow.State["viewer_id"] = JsonValue.Create(1)
             flow.State["viewer_login"] = JsonValue.Create("owner")
@@ -614,21 +669,21 @@ internal class PreparationChecks {
             flow.State["viewer_id"] = JsonValue.Create(124)
             flow.State["viewer_login"] = JsonValue.Create("other")
             flow.Save()
-            flow.Acquire(args, 1)
+            flow.Acquire(args.ToArray(), 1)
             test.Expire()
             flow.Reload()
             let oldPull = flow.State["pulls"]?[0] ?? throw Exception("Missing prior draft")
             oldPull["merged"] = JsonValue.Create(true)
             flow.Save()
-            flow.Acquire(args, 1)
+            flow.Acquire(args.ToArray(), 1)
             flow.Reload()
             (flow.State["pulls"]?[0] ?? throw Exception("Missing prior draft"))["merged"] = JsonValue.Create(false)
             flow.Save()
-            let acquired = Check.Json(flow.Acquire(args).Output)
+            let acquired = Check.Json(flow.Acquire(args.ToArray()).Output)
             let run = Check.Text(acquired["data"]?["run"])
             let path = Path.Combine(run, "run.json")
             let saved = Check.Json(File.ReadAllText(path))
-            let coding = Path.Combine(run, "coding")
+            let coding = Path.Combine(run, harness == "external" ? "coding": "checkout")
             Check.That(Check.Text(saved["handoff"]?["head"]) == priorHead, "Handoff lost its coordinated source")
             Check.That(flow.Git("-C", coding, "rev-parse", "HEAD") == priorHead, "Handoff did not import prior work")
             Check.That(
@@ -644,45 +699,68 @@ internal class PreparationChecks {
             File.WriteAllText(path, altered.ToJsonString())
             Resume(flow, run, 1)
             File.WriteAllText(path, saved.ToJsonString())
-            flow.Call([]string{"external", "--run", run, "--commit", Check.Text(saved["base"])}, 1)
-            Check.That(File.ReadAllText(path) == saved.ToJsonString(), "Rejected ancestry changed saved work")
-            File.AppendAllText(Path.Combine(coding, "result.txt"), "Second donor contribution\n")
-            flow.Git("-C", coding, "add", "result.txt")
-            flow.Git(
-                "-C",
-                coding,
-                "-c",
-                "user.name=Other",
-                "-c",
-                "user.email=other@example.test",
-                "commit",
-                "-m",
-                "Complete inherited work"
-            )
-            let head = flow.Git("-C", coding, "rev-parse", "HEAD")
-            flow.Git(
-                "-C",
-                coding,
-                "push",
-                Path.Combine(flow.Bin, "otherfork"),
-                "HEAD:refs/heads/" + Check.Text(saved["branch"])
-            )
-            flow.Call(
-                []string{
-                    "external",
-                    "--run",
-                    run,
-                    "--commit",
-                    head,
-                    "--summary",
-                    PublishedContribution.Summary(flow, head, "Complete the inherited contribution.")
+            if harness == "external" {
+                flow.Call([]string{"external", "--run", run, "--commit", Check.Text(saved["base"])}, 1)
+                Check.That(File.ReadAllText(path) == saved.ToJsonString(), "Rejected ancestry changed saved work")
+                File.AppendAllText(Path.Combine(coding, "result.txt"), "Second donor contribution\n")
+                flow.Git("-C", coding, "add", "result.txt")
+                flow.Git(
+                    "-C",
+                    coding,
+                    "-c",
+                    "user.name=Other",
+                    "-c",
+                    "user.email=other@example.test",
+                    "commit",
+                    "-m",
+                    "Complete inherited work"
+                )
+                let head = flow.Git("-C", coding, "rev-parse", "HEAD")
+                flow.Git(
+                    "-C",
+                    coding,
+                    "push",
+                    Path.Combine(flow.Bin, "otherfork"),
+                    "HEAD:refs/heads/" + Check.Text(saved["branch"])
+                )
+                flow.Call(
+                    []string{
+                        "external",
+                        "--run",
+                        run,
+                        "--commit",
+                        head,
+                        "--summary",
+                        PublishedContribution.Summary(flow, head, "Complete the inherited contribution.")
+                    }
+                )
+            } else {
+                flow.Call([]string{"work", "--run", run})
+                if harness == "codex" {
+                    flow.Reload()
+                    Check.Contains(
+                        Check.Text(flow.State["prompts"]?[0]),
+                        "Continue the published work of another donor"
+                    )
                 }
-            )
+            }
             flow.Publish(run)
             flow.CoordinatePosted()
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "11"})
             flow.Reload()
             let pull = flow.State["pulls"]?[1] ?? throw Exception("Missing successor draft")
+            let publishedHead = Check.Text(pull["head"]?["sha"])
+            Check.That(
+                flow.Git(
+                    "-C",
+                    Path.Combine(flow.Bin, "otherfork"),
+                    "show",
+                    "-s",
+                    "--format=%P",
+                    publishedHead
+                ) == priorHead,
+                "Successor lost the prior commit as its parent"
+            )
             Check.Contains(Check.Text(pull["body"]), "Supersedes #10 from @donor")
             Check.Contains(Check.Text(flow.State["pulls"]?[0]?["body"]), "Superseded by #11")
             Check.That(Check.Text(flow.State["pulls"]?[0]?["state"]) == "open", "Handoff closed the prior discussion")
@@ -704,7 +782,14 @@ internal class PreparationChecks {
             flow.Save()
             flow.Call([]string{"amend", "--run", priorRun, "--commit", priorHead, "--seconds", "30", "--resume"}, 1)
             Check.That(File.ReadAllText(priorPath) == priorRecord, "Late prior-donor action changed its run")
-            flow.NoInference()
+            if harness == "external" {
+                flow.NoInference()
+            } else {
+                Check.That(
+                    Check.Text(Check.Json(File.ReadAllText(path))["source"]) == "tokate",
+                    "Managed handoff became external"
+                )
+            }
         }
 
         private func External(binary string) {
@@ -1389,6 +1474,8 @@ internal class PreparationChecks {
                 TestCase[string]("Partial", async (value string) -> Partial(value)),
                 TestCase[string]("PartialResume", async (value string) -> Partial(value, true)),
                 TestCase[string]("Handoff", async (value string) -> Handoff(value)),
+                TestCase[string]("HandoffCodex", async (value string) -> Handoff(value, "codex")),
+                TestCase[string]("HandoffPi", async (value string) -> Handoff(value, "pi")),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),

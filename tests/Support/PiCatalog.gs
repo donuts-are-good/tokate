@@ -8,6 +8,28 @@ import System.Net.Sockets
 import System.Text
 
 internal class PiCatalog : IDisposable {
+    shared {
+        internal func Configure(flow NativeFixture, endpoint string) {
+            let root = Path.Combine(flow.Temp.Root, "runtime/node_modules")
+            let installed = Path.Combine(root, "@earendil-works/pi-coding-agent")
+            Directory.CreateDirectory(Path.Combine(installed, "dist"))
+            File.WriteAllText(
+                Path.Combine(installed, "package.json"),
+                "{\"name\":\"@earendil-works/pi-coding-agent\",\"version\":\"fixture-continuation\",\"type\":\"module\"}"
+            )
+            File.WriteAllText(Path.Combine(installed, "dist/index.js"), TestResources.Template("PiContinuation.mjs"))
+            let config = Path.Combine(flow.Temp.Root, "pi-models")
+            Directory.CreateDirectory(config)
+            flow.Temp.Env["PI_CODING_AGENT_DIR"] = config
+            File.WriteAllText(
+                Path.Combine(config, "models.json"),
+                "{\"providers\":{\"local\":{\"baseUrl\":\"" +
+                    endpoint +
+                    "\",\"api\":\"openai-completions\",\"models\":[{\"id\":\"fixture-model\",\"reasoning\":false,\"contextWindow\":32768,\"maxTokens\":4096}]}}}"
+            )
+        }
+    }
+
     private let Listener TcpListener = TcpListener(IPAddress.Loopback, 0)
     private let Stopped Chan[bool] = Chan[bool](1)
     internal let Endpoint string

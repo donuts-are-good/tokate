@@ -45,7 +45,8 @@ export async function createAgentSession({ cwd, model, thinkingLevel, customTool
         dispose() {},
         async prompt(prompt) {
             observer({ type: 'tool_execution_start', toolName: 'write', args: { prompt } });
-            const interrupted = !prompt.startsWith('This is a fresh v2 attempt seeded from unpublished interrupted work.');
+            const interrupted = !prompt.startsWith('This is a fresh v2 attempt seeded from unpublished interrupted work.') &&
+                !prompt.startsWith('Continue the published work of another donor from preserved commit ');
             await writeFile(path.join(cwd, 'tracked.txt'), 'preserved\n');
             await writeFile(path.join(cwd, 'imported.txt'), 'untracked\n');
             if (interrupted) {

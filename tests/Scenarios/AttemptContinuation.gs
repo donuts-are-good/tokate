@@ -18,26 +18,6 @@ internal class AttemptContinuationChecks {
             run.ToJsonString()
         )
 
-        private func Pi(test CoordinationFlow, endpoint string) {
-            let root = Path.Combine(test.Flow.Temp.Root, "runtime/node_modules")
-            let installed = Path.Combine(root, "@earendil-works/pi-coding-agent")
-            Directory.CreateDirectory(Path.Combine(installed, "dist"))
-            File.WriteAllText(
-                Path.Combine(installed, "package.json"),
-                "{\"name\":\"@earendil-works/pi-coding-agent\",\"version\":\"fixture-continuation\",\"type\":\"module\"}"
-            )
-            File.WriteAllText(Path.Combine(installed, "dist/index.js"), TestResources.Template("PiContinuation.mjs"))
-            let config = Path.Combine(test.Flow.Temp.Root, "pi-models")
-            Directory.CreateDirectory(config)
-            test.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = config
-            File.WriteAllText(
-                Path.Combine(config, "models.json"),
-                "{\"providers\":{\"local\":{\"baseUrl\":\"" +
-                    endpoint +
-                    "\",\"api\":\"openai-completions\",\"models\":[{\"id\":\"fixture-model\",\"reasoning\":false,\"contextWindow\":32768,\"maxTokens\":4096}]}}}"
-            )
-        }
-
         private func Args(
             test CoordinationFlow,
             source string = "",
@@ -124,7 +104,7 @@ internal class AttemptContinuationChecks {
                 "[[\"/bin/bash\",\"-c\",\"test -f result.txt && test \\\"$$(cat tracked.txt)\\\" = preserved && test \\\"$$(cat imported.txt)\\\" = untracked && test \\\"$$(git show HEAD:tracked.txt)\\\" = approved\"]]"
             )
             if harness == "pi" {
-                Pi(test, endpoint)
+                PiCatalog.Configure(test.Flow, endpoint)
                 policy["model_policy"] = JsonValue.Create("whitelist")
                 policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
                 policy["models"] = Check.Json("{\"fixture-model\":[\"absent\"]}")
