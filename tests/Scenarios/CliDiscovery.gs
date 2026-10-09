@@ -455,6 +455,26 @@ internal class CliDiscovery {
                 ),
                 "Structured and plain versions differ"
             )
+            let alias = Check.Envelope(Call(binary, []string{"version", "--json"}, temp), "--version", "ok")
+            Check.That(JsonNode.DeepEquals(alias, version), "Version alias envelope differs from --version")
+            Check.That(
+                Call(binary, []string{"version"}, temp).Output == Call(binary, []string{"--version"}, temp).Output,
+                "Version alias plain output differs from --version"
+            )
+            Check.That(
+                JsonNode.DeepEquals(
+                    Check.Envelope(Call(binary, []string{"version", "--help", "--json"}, temp), "--version", "ok"),
+                    Check.Envelope(Call(binary, []string{"--version", "--help", "--json"}, temp), "--version", "ok")
+                ),
+                "Version alias help differs from --version help"
+            )
+            Check.Envelope(
+                Call(binary, []string{"version", "extra", "--json"}, temp),
+                "--version",
+                "error",
+                "invalid_arguments"
+            )
+            Check.That(!File.Exists(calls), "Version alias invoked prerequisites")
             let defaults = Check.Envelope(Call(binary, []string{"help", "defaults", "--json"}, temp), "help", "ok")[
                 "data"
             ]?["commands"]?[0]

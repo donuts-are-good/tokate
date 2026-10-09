@@ -10,7 +10,9 @@ func Main(args[]string) int32 {
         Terminal.Plain = Terminal.Plain || argument == "--plain" || argument.StartsWith("--plain=")
         Terminal.Ascii = Terminal.Ascii || argument == "--ascii"
     }
-    PublicOutput.Command = args.Length == 0 || args[0] == "--help" || args[0] == "-h" ? "help": args[0]
+    PublicOutput.Command = args.Length == 0 ||
+        args[0] == "--help" ||
+        args[0] == "-h" ? "help": (args[0] == "version" ? "--version": args[0])
     var traffic bool
     var validated bool
     var options Args? = nil

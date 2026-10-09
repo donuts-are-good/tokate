@@ -21,6 +21,8 @@ internal class Args {
         Command = args[0]
         if Command == "--help" || Command == "-h" {
             Command = "help"
+        } else if Command == "version" {
+            Command = "--version"
         }
         Cli.Find(Command)
         var i int32 = 1
