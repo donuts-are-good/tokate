@@ -269,11 +269,19 @@ internal class Startup {
                     }
                     let result = Commands.Run(
                         executable,
-                        codex ? []string{"login", "status"}: []string{"auth", "status", "--hostname", "github.com"},
+                        codex ? []string{"login", "status"}: []string{
+                            "api",
+                            "user",
+                            "--jq",
+                            ".id",
+                            "--hostname",
+                            "github.com"
+                        },
                         seconds: 10,
                         harness: codex,
                         github: !codex
                     )
+                    var actor int64
                     if result.Truncated || result.ReadFailed {
                         check.Status = "failed"
                         check.Detail = "Authentication status did not complete reliably. " + check.Hint
@@ -281,7 +289,10 @@ internal class Startup {
                         check.Status = "failed"
                         check.Detail = "Authentication status tool could not start. Repair or reinstall " + name + "."
                     } else if result.Code != 0 ||
-                        (codex && !(result.Output + result.Error).Contains("Logged in using ChatGPT")) {
+                        (
+                        codex ? !(result.Output + result.Error).Contains("Logged in using ChatGPT"):
+                        !Int64.TryParse(result.Output.Trim(), out actor) || actor < 1
+                    ) {
                         check.Status = "authentication_required"
                         check.Detail = check.Hint
                         PublicOutput.Actions.Add(
@@ -295,7 +306,7 @@ internal class Startup {
                         )
                     } else {
                         check.Status = "ready"
-                        check.Detail = codex ? "ChatGPT login reported by codex login status.": "GitHub authentication reported by gh auth status for github.com."
+                        check.Detail = codex ? "ChatGPT login reported by codex login status.": "GitHub identity verified by gh api user."
                     }
                 } catch (error Exception) {
                     check.Status = "failed"

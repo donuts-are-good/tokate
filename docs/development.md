@@ -1,19 +1,36 @@
 # Build and verify
 
-Source builds require the exact .NET SDK in `global.json`, Clang and zlib development
-headers for NativeAOT. The project pins the G# SDK through `Tokate.gsproj` and its
-lock file. Supported release binaries target Linux x86_64 with glibc 2.34+ or Alpine 3.24.
+Run from the repository root with Bash, curl, the exact .NET SDK in `global.json`,
+Clang and zlib development headers. These are build requirements. The released
+native CLI does not require .NET or G#. On Ubuntu 24.04:
+
+```sh
+sudo apt-get update
+sudo apt-get install --no-install-recommends bash curl ca-certificates clang zlib1g-dev libicu74 libgssapi-krb5-2
+```
+
+Other distributions need their [.NET system dependencies](https://learn.microsoft.com/dotnet/core/install/linux-scripted-manual#dependencies)
+and [NativeAOT build packages](https://learn.microsoft.com/dotnet/core/deploying/native-aot/#prerequisites).
+The build restores the pinned G# SDK and NuGet packages automatically; the first
+restore needs network access. Supported binaries target Linux x86_64 with glibc 2.34+ or Alpine 3.24.
 On Alpine, set `TOKATE_RUNTIME_IDENTIFIER=linux-musl-x64` for the build and package scripts.
 Musl tests are written to `artifacts/tests-musl`; set `TOKATE_BINARY` to the musl CLI when running them.
 
 ```sh
+sdk_setup=$(mktemp)
+curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$sdk_setup"
+bash "$sdk_setup" --jsonfile global.json --install-dir "$HOME/.dotnet" --no-path
+rm "$sdk_setup"
+export PATH="$HOME/.dotnet:$PATH"
 bash scripts/build.sh
 artifacts/linux-x64/tokate --version
 ```
 
+Skip SDK installation when the pinned SDK is already available on `PATH`.
+
 ## Test the changed system
 
-Reuse the published binaries for focused behavior checks:
+After building, use the generated test executable for focused behavior checks:
 
 ```sh
 artifacts/tests/tokate-tests --saved-runs
