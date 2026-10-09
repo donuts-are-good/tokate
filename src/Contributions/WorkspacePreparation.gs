@@ -49,9 +49,7 @@ internal class WorkspacePreparation {
             if run.Text("harness_path") != "" {
                 identity = Data.Hash(identity + ":" + run.Text("harness_path"))
             }
-            if run.Text("attempt") != "" {
-                identity = Data.Hash(identity + ":" + run.Text("attempt"))
-            }
+            identity = Data.Hash(identity + ":" + run.Text("attempt"))
             return AttemptContinuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
@@ -394,10 +392,7 @@ internal class WorkspacePreparation {
                 )
             }
             if J.Text(J.Get(reference, "object"), "sha") != run.Text("base") {
-                if run.Text("attempt") != "" {
-                    throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
-                }
-                Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
             }
         }
 
@@ -405,9 +400,6 @@ internal class WorkspacePreparation {
             let reference = Reference(run)
             if !run.Flag("branch_creation_attempted") {
                 if reference.ValueKind != JsonValueKind.Undefined {
-                    if run.Text("attempt") == "" {
-                        Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
-                    }
                     ContributionAuthority.Recheck(run)
                     CheckBranch(run)
                     let pulls = J.Items(

@@ -237,19 +237,15 @@ internal class Worker {
                 throw Exception("--continue-truncated requires managed Pi. No inference started.")
             }
             Terminal.Step("Checking owner approval and donor login...")
-            let selected = J.Get(run.Element(), "selection")
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                if AttemptContinuation.Has(run) {
-                    AttemptContinuation.Confirm(options, selected)
-                } else {
-                    DonorSelection.Confirm(options, selected)
-                }
-            }
             let record = ContributionAuthority.Recheck(run)
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                let policy = Policy(J.Write(J.Get(record, "policy")))
-                policy.Digest = run.Text("policy_hash")
-                DonorSelection.Revalidate(run, policy)
+            let policy = Policy(J.Write(J.Get(record, "policy")))
+            policy.Digest = run.Text("policy_hash")
+            DonorSelection.Revalidate(run, policy)
+            let selected = J.Get(run.Element(), "selection")
+            if AttemptContinuation.Has(run) {
+                AttemptContinuation.Confirm(options, selected)
+            } else {
+                DonorSelection.Confirm(options, selected)
             }
             RuntimeBudget.Validate(run)
             let prompt = TaskContext.Build(run, record)
@@ -293,9 +289,7 @@ internal class Worker {
                 Path.Combine(directory, "report.md")
             }
             Config(args, "model_reasoning_effort", J.Write(run.Text("effort")))
-            if selected.ValueKind != System.Text.Json.JsonValueKind.Undefined {
-                Config(args, "model_provider", J.Write(J.Text(selected, "provider")))
-            }
+            Config(args, "model_provider", J.Write(J.Text(selected, "provider")))
             Config(args, "approval_policy", "\"never\"")
             Config(args, "web_search", "\"disabled\"")
             Config(args, "allow_login_shell", "false")

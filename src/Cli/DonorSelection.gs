@@ -245,8 +245,8 @@ internal class DonorSelection {
 
         internal func Revalidate(run Data, policy Policy) {
             let selected = J.Get(run.Element(), "selection")
-            if selected.ValueKind == JsonValueKind.Undefined {
-                return
+            if selected.ValueKind != JsonValueKind.Object {
+                throw Exception("Managed runs require saved selection metadata; start a fresh claim")
             }
             let harness = J.Text(selected, "harness")
             let provider = J.Text(selected, "provider")

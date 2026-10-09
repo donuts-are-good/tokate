@@ -18,6 +18,9 @@ tokate access --repo OWNER/REPO --operation request --issue 42 --scope trust
 
 ## Choose a tool
 
+Use `tokate doctor --fix` for confirmed setup or `--harness-path` for an existing
+custom installation. Harness authentication remains separate.
+
 For Codex, use a current native installation with your ChatGPT login:
 
 ```sh
@@ -36,7 +39,7 @@ Profiles store neither budgets nor network consent.
 
 Install current Pi and Node using [Pi's official instructions](https://pi.dev/).
 Configure the model in Pi and start a no-auth HTTP loopback Chat Completions endpoint.
-Tokate does not install a harness or start a model server. The owner must allow
+Tokate does not start a model server. The owner must allow
 `pi/local-chat-completions` and your exact model and reasoning level. The guided CLI
 offers levels from Pi. Use `absent` only for a model without reasoning.
 
@@ -78,6 +81,7 @@ tokate submit --run RUN_DIRECTORY
 `work` spends the selected budget and independently verifies completed work.
 `submit` requests the draft PR. Tokate discovers or creates your fork. Use `--fork`
 only when you need to select one explicitly. You do not need to write request JSON.
+After coordinator publication, repeat `submit --run RUN_DIRECTORY` to save the PR locally.
 
 `--seconds` caps coding plus verification time, not tokens or server billing.
 Command network access defaults off. Downloads need both owner permission and
@@ -96,5 +100,4 @@ tokate checks --repo OWNER/REPO --pr 10 --watch
 
 Follow the reported next action. Quiet output does not justify restarting work.
 Keep the saved directory for [recovery and review changes](recovery.md). The owner
-reviews and merges. Older assignment-bound repositories retain their existing
-workflow, which can publish from `work`; inspect their policy before starting.
+reviews and merges.

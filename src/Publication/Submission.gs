@@ -196,9 +196,6 @@ internal class Submission {
             if J.Text(value, "action") != "claim" {
                 if LeaseLifecycle.Transition(J.Text(value, "action")) {
                     LeaseLifecycle.Owner(state, actor)
-                    if !LeaseLifecycle.Supported(state.Value()) {
-                        throw Exception("Legacy lease transitions are unsupported")
-                    }
                 } else {
                     state.Reservation(actor)
                     LeaseLifecycle.Fence(state, J.Text(J.Get(value, "metadata"), "attempt"))
@@ -270,12 +267,10 @@ internal class Submission {
                 "fork": run.Text("head_repo"),
                 "branch": run.Text("branch"),
                 "head": correction?.Text("commit") ?? run.Text("commit"),
+                "attempt": run.Text("attempt"),
                 "source": run.Text("source"),
                 "tools": J.Get(run.Element(), "tools"),
                 "verification": "donor-reported-pass"
-            }
-            if run.Text("attempt") != "" {
-                metadata["attempt"] = run.Text("attempt")
             }
             if AttemptContinuation.Has(run) {
                 AttemptContinuation.Keep(metadata, AttemptContinuation.Metadata(run))

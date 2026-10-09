@@ -326,7 +326,7 @@ internal class DonorSelectionChecks {
             flow.NoPr()
         }
 
-        private func LegacyRun(binary string) {
+        private func MissingSelection(binary string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
@@ -337,17 +337,10 @@ internal class DonorSelectionChecks {
             saved.AsObject().Remove("harness")
             saved.AsObject().Remove("provider")
             File.WriteAllText(path, saved.ToJsonString())
-            Set(flow, effort: "xhigh")
-            flow.Mode("model_failure")
-            let result = TestProcess.Run(binary, []string{"work", "--run", run}, flow.Temp.Env)
-            Check.That(result.Code == 1, "Synthetic model failure succeeded")
-            Check.Contains(result.Error, "Codex failed")
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Legacy run changed confirmation behavior")
-            Check.That(
-                Check.Text(Check.Json(File.ReadAllText(path))["effort"]) == "high",
-                "Legacy run used new preferences"
-            )
+            let original = File.ReadAllText(path)
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "require saved selection metadata")
+            Check.That(File.ReadAllText(path) == original, "Invalid selection changed saved work")
+            flow.NoInference()
         }
 
         private func InteractiveChoices(binary string) {
@@ -846,8 +839,8 @@ internal class DonorSelectionChecks {
             Console.WriteLine("PASS explicit and saved default work without repeated confirmation")
             ConfirmationAndRuns(binary)
             Console.WriteLine("PASS pinned runs, capability revalidation and no model fallback")
-            LegacyRun(binary)
-            Console.WriteLine("PASS legacy saved-run pair and behavior")
+            MissingSelection(binary)
+            Console.WriteLine("PASS missing saved selection is refused before inference")
             InteractiveChoices(binary)
             Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
             VersionTwo(binary)

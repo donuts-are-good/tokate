@@ -46,7 +46,7 @@ const roles = {
             "Set your checks, approve a task and grant donor access",
             "Review the tested pull request and decide what merges",
         ],
-        anchor: "for-owners",
+        guide: "owners",
         prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me set up my repository to receive donated inference\nI am the repository owner\nInspect my project, help me choose existing checks, and guide me through setup, task approval and donor access with the matching stable release",
     },
     donor: {
@@ -56,7 +56,7 @@ const roles = {
             "Get access and claim an approved task",
             "Prepare, run and submit verified work for a draft PR",
         ],
-        anchor: "for-donors",
+        guide: "donors",
         prompt: "Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me donate inference to a repository\nI am the donor\nConfirm my tools, the approved issue and my access\nGuide me through coordination, preparation, work and submission with the matching stable release\nExplain the budget before starting a run",
     },
 };
@@ -105,7 +105,7 @@ for (const button of document.querySelectorAll("[data-role]")) {
             }),
         );
         document.querySelector("#full-guide").href =
-            `https://github.com/obselate/tokate/blob/main/README.md#${role.anchor}`;
+            `https://github.com/obselate/tokate/blob/main/docs/${role.guide}.md`;
         copyStatus.textContent = "Copy setup prompt";
         copyButton.classList.remove("copied");
         document.querySelector("#prompt-fallback").hidden = true;

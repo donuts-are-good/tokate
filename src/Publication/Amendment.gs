@@ -120,7 +120,7 @@ internal class Amendment {
             let actor = J.Get(viewer, "id").ToString()
             let originalActor = J.Get(original, "actor").ToString()
             let reservationId = J.Text(reservation, "reservation")
-            if LeaseLifecycle.Supported(value) && run.Text("attempt") != J.Text(reservation, "attempt") {
+            if run.Text("attempt") != J.Text(reservation, "attempt") {
                 throw CliFailure("stale_approval", "Saved amendment attempt fence changed")
             }
             let target = J.Text(approval, "base_branch")
@@ -580,6 +580,7 @@ internal class Amendment {
                         "branch": run.Text("branch"),
                         "previous": amendment.Text("previous"),
                         "head": amendment.Text("commit"),
+                        "attempt": run.Text("attempt"),
                         "pr": amendment.Number("pr"),
                         "seconds": amendment.Number("seconds"),
                         "tools": J.Get(amendment.Element(), "tools"),
@@ -587,9 +588,6 @@ internal class Amendment {
                     },
                     J.Get(amendment.Element(), "public_summary")
                 )
-                if run.Text("attempt") != "" {
-                    metadata["attempt"] = run.Text("attempt")
-                }
                 if amendment.Text("sync") != "" {
                     metadata["sync"] = amendment.Text("sync")
                 }

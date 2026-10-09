@@ -10,7 +10,7 @@ Commands below do not start inference unless they explicitly use `work`.
 | Interrupted preparation | Inspect saved state, then `prepare --run DIR`. |
 | Failed inference | Preserve evidence. A new attempt needs current authority and a fresh donor budget. |
 | Expired claim or stale approval | Return to the owner. |
-| Verified work awaiting publication | `submit --run DIR` for coordinated contributions. |
+| Verified work awaiting publication | `submit --run DIR`. |
 | Existing PR needs changes | Use an amendment below. |
 | Upstream moved | `reconcile --run DIR`, inspect conflicts, then obtain owner authorization for amendment. |
 
@@ -33,8 +33,7 @@ tokate submit --run DIR
 ```
 
 The correction uses a separate verification budget. Failed or incomplete original
-inference cannot use this path. For older direct-publication runs, follow the
-reported `publish` action instead of `submit`.
+inference cannot use this path.
 
 ## Amend a published PR
 
@@ -51,10 +50,6 @@ attributed. Fresh CI and owner review are still required.
 If upstream moved, `reconcile --run DIR` merges the current target without inference.
 Resolve conflicts and use `--resume`. The owner then issues `authorize-sync` for the
 exact candidate and upstream commits. Pass that grant to `amend --sync GRANT`.
-If the original local run is unavailable, `repair` uses separate evidence storage
-and an explicit owner grant. Run it from the clean candidate checkout; the grant
-supplies the exact commit. Explicit `--path` and `--commit` remain available.
-It cannot reconstruct private execution evidence.
 
 ## Continue stopped work
 
@@ -72,9 +67,8 @@ tokate submit --run NEW_RUN_DIR
 Pi must retain its original model, runtime and endpoint. Network permission needs
 fresh opt-in. Preparation preserves the predecessor's files and failed outcome.
 Active, completed, external, published and cross-donor sources are excluded.
-Update the owner's pinned coordinator before submission. Older assignment-bound
-runs require the owner's `approve --continue-approval` path. Do not silently change
-policy versions. Advanced lease requests use `request --file`; the accepted schema
+Update the owner's pinned coordinator before submission.
+Advanced lease requests use `request --file`; the accepted schema
 is defined by [RequestData](https://github.com/obselate/tokate/blob/main/src/Contributions/RequestData.gs).
 
 After acceptance and evidence backup, you may explicitly delete a completed run.

@@ -435,6 +435,7 @@ internal class Coordinator {
                 "tools": J.Get(metadata, "tools"),
                 "actor": actor,
                 "donor": donor,
+                "attempt": J.Text(J.Get(value, "reservation"), "attempt"),
                 "outcome": outcome,
                 "verification_provenance": "donor-reported; exact-commit owner CI required"
             }
@@ -445,9 +446,6 @@ internal class Coordinator {
                 entry["sync"] = J.Text(metadata, "sync")
             }
             Synchronization.Keep(entry, history)
-            if LeaseLifecycle.Supported(value) {
-                entry["attempt"] = J.Text(J.Get(value, "reservation"), "attempt")
-            }
             retainedHistory.Add(entry)
             state.Fields["amendments"] = retainedHistory
             return outcome

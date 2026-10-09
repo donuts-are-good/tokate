@@ -28,7 +28,7 @@ internal class ContributionPreparation {
             let directory = args.Get("continue-from") != "" ? AttemptContinuation.RunDirectory(
                 args,
                 run.Text("attempt")
-            ): WorkspacePreparation.RunDirectory(args, run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt"))
+            ): WorkspacePreparation.RunDirectory(args, run.Text("attempt"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
@@ -173,9 +173,7 @@ internal class ContributionPreparation {
             let reservation = J.Get(state.Value(), "reservation")
             run.Fields["id"] = J.Text(reservation, "reservation")
             run.Fields["state_sha"] = state.Sha
-            if LeaseLifecycle.Supported(state.Value()) {
-                run.Fields["attempt"] = J.Text(reservation, "attempt")
-            }
+            run.Fields["attempt"] = J.Text(reservation, "attempt")
             run.Fields["branch"] = "tokate/v2-" + run.Text("id")
         }
 
