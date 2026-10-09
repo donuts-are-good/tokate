@@ -16,6 +16,9 @@
       "low",
       "medium",
       "high"
+    ],
+    "~deepseek/deepseek-flash-latest": [
+      "low"
     ]
   },
   "max_seconds": 14400,
@@ -44,6 +47,14 @@
     {
       "harness": "pi",
       "provider": "local-chat-completions"
+    },
+    {
+      "harness": "omp",
+      "provider": "gufo"
+    },
+    {
+      "harness": "omp",
+      "provider": "openrouter"
     }
   ],
   "target_branch": "main"

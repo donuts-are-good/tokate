@@ -907,7 +907,7 @@ internal class Cli {
                 args.Get("model"),
                 args.Get("harness") == "pi" || args.Get("harness") == "" || args.Get(
                     "profile"
-                ) != "" ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                ) != "" ? RequestData.ModelPattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             ) {
                 throw Exception("Invalid model name: --model")
             }

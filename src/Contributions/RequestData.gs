@@ -9,6 +9,8 @@ import System.Text.RegularExpressions
 
 internal class RequestData {
     shared {
+        internal let ModelPattern string = "^(?=.{1,256}\\z)~?[A-Za-z0-9][A-Za-z0-9._:/-]*\\z"
+
         internal func Same(left JsonElement, right JsonElement) bool {
             if left.ValueKind == JsonValueKind.Undefined || right.ValueKind == JsonValueKind.Undefined {
                 return left.ValueKind == right.ValueKind

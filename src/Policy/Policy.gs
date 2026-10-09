@@ -95,7 +95,7 @@ internal class Policy {
         var count int32
         if models.ValueKind == JsonValueKind.Object {
             for model in models.EnumerateObject() {
-                if !Regex.IsMatch(model.Name, "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$") {
+                if !Regex.IsMatch(model.Name, RequestData.ModelPattern) {
                     throw Exception("Invalid model name")
                 }
                 let efforts = J.Items(model.Value)
@@ -200,7 +200,7 @@ internal class Policy {
         effort != "unknown"
 
     internal func Validate(model string, effort string, seconds int32, network bool, external bool = false) {
-        if !Regex.IsMatch(model, external ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]*$") ||
+        if !Regex.IsMatch(model, external ? RequestData.ModelPattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$") ||
             !ValidEffort(effort) {
             throw Exception("Invalid model name or reasoning effort")
         }

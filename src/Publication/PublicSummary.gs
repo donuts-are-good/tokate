@@ -50,7 +50,7 @@ internal class PublicSummary {
             if text == "" && !model {
                 return "unknown"
             }
-            let pattern = model ? "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
+            let pattern = model ? RequestData.ModelPattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"
             if !Regex.IsMatch(text, pattern) || text.Contains("://") || Regex.IsMatch(
                 text,
                 "(?i)(gh[pousr]_|github_pat_|sk-|secret|password)"

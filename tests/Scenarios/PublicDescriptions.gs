@@ -81,7 +81,22 @@ internal class PublicDescriptions {
 
         private func External(binary string) {
             using let flow = CoordinationFixture(binary)
-            flow.Initialize()
+            flow.Initialize(false)
+            let model = "~deepseek/deepseek-flash-latest"
+            let policyPath = Path.Combine(flow.Flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            (policy["models"] ?? throw Exception("Missing models"))[model] = Check.Json("[\"low\"]")
+            policy["allowed_tools"]?.AsArray().Add(Check.Map("harness", "omp", "provider", "openrouter"))
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Flow.Commit("Owner OpenRouter alias policy")
+            flow.Flow.Approve()
+            File.WriteAllText(
+                flow.Tools,
+                Check.Json(
+                    "[{\"harness\":\"omp\",\"provider\":\"openrouter\",\"model\":\"" + model + "\",\"effort\":\"low\"}]"
+                )
+                    .ToJsonString()
+            )
             let claim = flow.Claim()
             let run = flow.Prepare()
             let head = flow.Candidate(claim)
@@ -154,6 +169,7 @@ internal class PublicDescriptions {
             }
             Check.Contains(body, "coordinator did not observe execution")
             Check.Contains(body, "Original donor-reported tools")
+            Check.Contains(body, model)
             Check.That(!body.Contains("\"harness\""), "Raw tool JSON in public report")
             flow.Coordinate(event)
             Check.That(Body(flow.Flow) == body, "Repeated publication changed body")
@@ -393,7 +409,16 @@ internal class PublicDescriptions {
             let claim = flow.Claim()
             let head = flow.Flow.Git("-C", flow.Flow.Upstream, "rev-parse", "HEAD")
             for action in[]string{"publish", "amend"} {
-                for model in[]string{"ghp_SYNTHETIC", "sk-synthetic"} {
+                for model in[]string{
+                    "ghp_SYNTHETIC",
+                    "sk-synthetic",
+                    "~",
+                    "~~alias",
+                    "~invalid alias",
+                    String('x', 257),
+                    "~" + String('x', 256),
+                    "alias\n"
+                } {
                     let request = flow.PublishRequest(claim, head)
                     let metadata = request["metadata"] ?? throw Exception("Missing metadata")
                     let tool = metadata["tools"]?[0] ?? throw Exception("Missing tool declaration")
