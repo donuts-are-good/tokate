@@ -9,11 +9,15 @@ case "$1" in
     claude) root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills" ;;
     pi) root="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills" ;;
     omp)
-        if [ -n "${OMP_PROFILE:-${PI_PROFILE:-}}" ] && [ "$#" -ne 2 ]; then
-            echo 'Pass the skills directory for the selected OMP profile.' >&2
-            exit 1
+        root=${2:-}
+        if [ -z "$root" ]; then
+            root=$(omp config path)
+            case "$root" in
+                /*) root="$root/skills" ;;
+                *) echo 'OMP did not return an absolute agent directory.' >&2; exit 1 ;;
+            esac
         fi
-        root="${PI_CODING_AGENT_DIR:-$HOME/.omp/agent}/skills" ;;
+        ;;
     hermes) root="${HERMES_HOME:-$HOME/.hermes}/skills" ;;
     *) echo 'Unknown harness.' >&2; exit 1 ;;
 esac
