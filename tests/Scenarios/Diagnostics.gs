@@ -216,12 +216,21 @@ internal class Diagnostics {
                 "Diagnostic tool path was shortened"
             )
             temp.Env["PATH"] = Path.Combine(temp.Root, "bin")
+            Tool(temp, "gh", "test \"$1\" = --version && exit 0\n" + "test \"$1\" = auth && exit 0\nexit 4\n")
             let auth = Call(binary, temp, []string{"doctor", "--owner", "--auth"}, "error", "authentication_required")
             Check.That(
                 Check.Text(Row(auth, "gh-auth")["status"]) == "authentication_required",
                 "Missing auth not distinguished"
             )
             Check.That(Check.Text(auth["next_actions"]?[0]?[0]) == "gh", "Authentication repair action missing")
+            Check.Contains(File.ReadAllText(calls), "api user --jq .id --hostname github.com")
+            File.WriteAllText(
+                Path.Combine(temp.Root, "bin/gh"),
+                "#!/bin/sh\ntest \"$1\" = --version && exit 0\n" +
+                    "printf '%s\\n' '123'\nprintf '%s\\n' synthetic-auth-secret >&2\n"
+            )
+            let authenticated = Call(binary, temp, []string{"doctor", "--owner", "--auth"})
+            Check.That(Check.Text(Row(authenticated, "gh-auth")["status"]) == "ready", "Verified identity was rejected")
             let missing = Call(binary, temp, []string{"doctor", "--managed"}, "error", "missing_tools")
             Check.That(Check.Text(Row(missing, "codex")["status"]) == "missing", "Missing Codex not distinguished")
             Check.That(Check.Text(Row(missing, "sandbox")["status"]) == "skipped", "Skipped probe passed")
