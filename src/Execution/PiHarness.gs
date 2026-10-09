@@ -38,6 +38,28 @@ internal class PiHarness {
         }
 
         private func ManagedRuntime(cli string, args Args) string {
+            let store = NixRuntime.Root(cli)
+            let nixRoot = Path.Combine(store, "lib/pi/node_modules")
+            if store != "" && cli == Path.Combine(store, "bin/pi") && Directory.Exists(nixRoot) {
+                if args.Get("node") == "" {
+                    let nodes = HashSet[string](StringComparer.Ordinal)
+                    for path in NixRuntime.Paths([]string{cli}, Directory.GetCurrentDirectory()) {
+                        let candidate = Path.Combine(path, "bin/node")
+                        if LocalPaths.Executable(candidate) {
+                            nodes.Add(LocalPaths.CanonicalPath(candidate))
+                        }
+                    }
+                    if nodes.Count != 1 {
+                        throw Exception(
+                            "Select --node explicitly; the Pi Nix closure does not identify one Node runtime."
+                        )
+                    }
+                    for node in nodes {
+                        args.Values["--node"] = node
+                    }
+                }
+                return nixRoot
+            }
             let agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
             let markerPath = Path.Combine(agent, "install/managed-install.json")
             if cli != Path.Combine(agent, "bin/pi") ||
@@ -97,9 +119,10 @@ internal class PiHarness {
         }
 
         internal func Runtime(args Args) {
-            if !OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64 || !File.Exists(
-                "/usr/bin/bwrap"
-            ) {
+            if !OperatingSystem.IsLinux() ||
+                RuntimeInformation.ProcessArchitecture != Architecture.X64 ||
+                !LocalPaths
+                .Executable(LocalPaths.SystemTool("bwrap")) {
                 throw Exception("Managed pi requires verified Linux x64 bubblewrap isolation; no host fallback")
             }
             if args.Get("harness-path") != "" && !LocalPaths.Executable(
@@ -273,7 +296,7 @@ internal class PiHarness {
                             activity = line -> Activity(line)
                         }
                         result = Commands.Run(
-                            "/usr/bin/bwrap",
+                            LocalPaths.NeedSystemTool("bwrap", checkout),
                             args.ToArray(),
                             checkout,
                             prompt,

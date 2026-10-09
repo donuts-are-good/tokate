@@ -14,6 +14,22 @@ internal class Worker {
             args.Add(key + "=" + value)
         }
 
+        private func ShellEnvironment(checkout string, harnessPath string) string {
+            let tools = NixRuntime.Tools(checkout, []string{CodexPath(harnessPath)})
+            let values = List[string]{
+                "PATH = " + J.Write(NixRuntime.SearchPath(tools.ToArray())),
+                "HOME = \"/tmp/tokate-home\"",
+                "TMPDIR = \"/tmp/tokate-home\""
+            }
+            let certificates = LocalPaths.Certificates()
+            if certificates != "" && tools.Exists(tool -> NixRuntime.Root(LocalPaths.CanonicalPath(tool)) != "") {
+                for name in[]string{"SSL_CERT_FILE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"} {
+                    values.Add(name + " = " + J.Write(certificates))
+                }
+            }
+            return "{ " + String.Join(", ", values) + " }"
+        }
+
         internal func CodexPath(path string = "") string -> CodexRuntime.Resolve(path)
 
         internal func Run(
@@ -59,6 +75,14 @@ internal class Worker {
                 "--dir",
                 "/tmp/tokate-home"
             }
+            let checkout = Path.Combine(directory, "checkout")
+            let paths = NixRuntime.Paths(NixRuntime.Tools(checkout, []string{codex}).ToArray(), checkout)
+            if paths.Count > 0 {
+                wrapper.AddRange([]string{"--tmpfs", "/nix/store"})
+                for path in paths {
+                    wrapper.AddRange([]string{"--ro-bind", path, path})
+                }
+            }
             wrapper.AddRange([]string{"--chdir", directory, "--", codex})
             wrapper.AddRange(args)
             let cancellation Chan[bool]? = capture ? Chan[bool](1): nil
@@ -67,7 +91,7 @@ internal class Worker {
                 activity = line -> Activity(line)
             }
             return Commands.Run(
-                "bwrap",
+                LocalPaths.NeedSystemTool("bwrap", directory),
                 wrapper.ToArray(),
                 directory,
                 input,
@@ -109,18 +133,25 @@ internal class Worker {
 
         internal func Filesystem(checkout string, gitRead bool = false, harnessPath string = "") string {
             let gitMode = gitRead ? "read": "deny"
-            return "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " + J.Write(checkout) +
+            let codex = CodexPath(harnessPath)
+            let paths = NixRuntime.Paths(NixRuntime.Tools(checkout, []string{codex}).ToArray(), checkout)
+            var policy = "{ \":root\" = \"deny\", \":minimal\" = \"read\", \"/tmp\" = \"write\", " + J.Write(checkout) +
                 " = \"write\", " +
-                J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(
-                CodexPath(harnessPath)
-            ) +
-                " = \"read\" }"
+                J.Write(Path.Combine(checkout, ".git")) + " = " + J.Write(gitMode) + ", " + J.Write(codex) +
+                " = \"read\""
+            if paths.Count > 0 {
+                for path in paths {
+                    policy += ", " + J.Write(path) + " = \"read\""
+                }
+            }
+            return policy + " }"
         }
 
         internal func Probe(directory string, checkout string, harnessPath string = "") {
             let sentinel = Path.Combine(directory, "private-probe")
             let args = List[string]{"sandbox", "-P", "tokate", "--include-managed-config", "-C", checkout}
             var failure Exception? = nil
+            var scriptIndex int32
             try {
                 File.WriteAllText(sentinel, "private")
                 Config(args, "permissions.tokate.filesystem", Filesystem(checkout, harnessPath: harnessPath))
@@ -128,12 +159,14 @@ internal class Worker {
                 args.AddRange(
                     []string{
                         "--",
-                        "/usr/bin/env",
+                        LocalPaths.NeedSystemTool("env", checkout),
                         "-i",
-                        "PATH=/usr/local/bin:/usr/bin:/bin",
+                        "PATH=" + NixRuntime.SearchPath(
+                            NixRuntime.Tools(checkout, []string{CodexPath(harnessPath)}).ToArray()
+                        ),
                         "HOME=/tmp/tokate-home",
                         "TMPDIR=/tmp/tokate-home",
-                        "/bin/sh",
+                        LocalPaths.NeedSystemTool("sh", checkout),
                         "-c",
                         "test ! -r \"$1\" && test ! -r .git/config && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && test ! -d \"$$HOME/.cache/browser\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && mkdir -p \"$$HOME/.cache/browser\" && cache=$$(mktemp \"$$HOME/.cache/browser/tokate-cache.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && \"$2\" --version >/dev/null",
                         "probe",
@@ -141,6 +174,16 @@ internal class Worker {
                         CodexPath(harnessPath)
                     }
                 )
+                scriptIndex = args.Count - 4
+                let paths = NixRuntime.Paths(
+                    NixRuntime.Tools(checkout, []string{CodexPath(harnessPath)}).ToArray(),
+                    checkout
+                )
+                let denied = NixRuntime.ProbeFile(paths, checkout)
+                if denied != "" {
+                    args[scriptIndex] += " && test ! -r \"$3\""
+                    args.Add(denied)
+                }
                 let result = Run(directory, args.ToArray(), harnessPath: harnessPath)
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
                     throw CliFailure(
@@ -162,8 +205,8 @@ internal class Worker {
                 throw error
             }
             if File.Exists(Path.Combine(checkout, "global.json")) {
-                args[args.Count - 4] = "dotnet msbuild -nologo -version"
-                args[args.Count - 3] = "toolchain"
+                args[scriptIndex] = "dotnet msbuild -nologo -version"
+                args[scriptIndex + 1] = "toolchain"
                 try {
                     let toolchain = Run(directory, args.ToArray(), harnessPath: harnessPath)
                     if toolchain.Code != 0 || toolchain.Truncated || toolchain.ReadFailed {
@@ -297,11 +340,7 @@ internal class Worker {
             Config(args, "permissions.tokate.filesystem", Filesystem(checkout, harnessPath: harnessPath))
             Config(args, "permissions.tokate.network.enabled", run.Flag("network") ? "true": "false")
             Config(args, "shell_environment_policy.inherit", "\"none\"")
-            Config(
-                args,
-                "shell_environment_policy.set",
-                "{ PATH = \"/usr/local/bin:/usr/bin:/bin\", HOME = \"/tmp/tokate-home\", TMPDIR = \"/tmp/tokate-home\" }"
-            )
+            Config(args, "shell_environment_policy.set", ShellEnvironment(checkout, harnessPath))
             Config(args, "skills.include_instructions", "false")
             Config(args, "features.skip_host_skill_discovery", "true")
             for feature in[]string{

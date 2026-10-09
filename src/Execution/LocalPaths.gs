@@ -42,6 +42,73 @@ internal class LocalPaths {
             return ""
         }
 
+        internal func CheckoutRoot(directory string = "") string {
+            var current = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(directory == "" ? Directory.GetCurrentDirectory(): directory)
+            )
+            while current != "" {
+                let marker = Path.Combine(current, ".git")
+                if Directory.Exists(marker) || File.Exists(marker) {
+                    return CanonicalPath(current)
+                }
+                current = Path.GetDirectoryName(current) ?? ""
+            }
+            return ""
+        }
+
+        internal func Within(path string, directory string) bool -> directory != "" &&
+            (path == directory || path.StartsWith(directory + "/", StringComparison.Ordinal))
+
+        internal func SystemTool(name string, directory string = "") string {
+            let checkout = CheckoutRoot(directory)
+            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
+                if !Path.IsPathFullyQualified(entry) {
+                    continue
+                }
+                let path = Path.GetFullPath(Path.Combine(entry, name))
+                if Within(path, checkout) || (checkout != "" && CheckoutRoot(entry) == checkout) || !Executable(path) {
+                    continue
+                }
+                let canonical = CanonicalPath(path)
+                if !Within(canonical, checkout) &&
+                    (
+                    NixRuntime.Root(canonical) != "" || canonical.StartsWith(
+                        "/run/wrappers/bin/",
+                        StringComparison.Ordinal
+                    )
+                ) {
+                    return NixRuntime.Executable(path)
+                }
+            }
+            let standard = Path.Combine(name == "sh" ? "/bin": "/usr/bin", name)
+            return File.Exists(standard) ? standard: ""
+        }
+
+        internal func NeedSystemTool(name string, directory string = "") string {
+            let path = SystemTool(name, directory)
+            if !Executable(path) {
+                throw CliFailure(
+                    "missing_tools",
+                    "Install " + name + " in a system path or a Nix profile outside the checkout."
+                )
+            }
+            return path
+        }
+
+        internal func Certificates() string {
+            for path in[]string{
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/ssl/cert.pem",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+            } {
+                if File.Exists(path) {
+                    return path
+                }
+            }
+            return ""
+        }
+
         internal func Harness(name string, path string = "") string {
             if path != "" {
                 return RuntimePath(path)

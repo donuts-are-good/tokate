@@ -23,14 +23,20 @@ internal class CodexRuntime {
             try {
                 let prefix = List[string]{
                     "-i",
-                    "PATH=/usr/local/bin:/usr/bin:/bin",
+                    "PATH=" + NixRuntime.SearchPath(NixRuntime.Tools("", []string{executable}).ToArray()),
                     "HOME=" + home,
                     "CODEX_HOME=" + home,
                     executable
                 }
                 let help = List[string](prefix)
                 help.AddRange([]string{"exec", "--help"})
-                let controls = Commands.Run("/usr/bin/env", help.ToArray(), home, seconds: 10, isolated: true)
+                let controls = Commands.Run(
+                    LocalPaths.NeedSystemTool("env"),
+                    help.ToArray(),
+                    home,
+                    seconds: 10,
+                    isolated: true
+                )
                 for flag in[]string{"--model", "--config", "--ignore-user-config", "--strict-config"} {
                     if controls.Code != 0 || !controls.Output.Contains(flag) {
                         throw Exception(
@@ -40,7 +46,13 @@ internal class CodexRuntime {
                 }
                 let catalog = List[string](prefix)
                 catalog.AddRange([]string{"debug", "models", "--bundled"})
-                let result = Commands.Run("/usr/bin/env", catalog.ToArray(), home, seconds: 10, isolated: true)
+                let result = Commands.Run(
+                    LocalPaths.NeedSystemTool("env"),
+                    catalog.ToArray(),
+                    home,
+                    seconds: 10,
+                    isolated: true
+                )
                 if result.Code != 0 {
                     throw Exception("Cannot verify offline Codex model/effort capabilities; availability is unknown")
                 }

@@ -56,9 +56,13 @@ internal class Verification {
                     []string{
                         "/bin/sh",
                         "-c",
-                        "test ! -r \"$1\" && test -r .git/config && ! touch .git/tokate-probe && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && cache=$$(mktemp \"$$HOME/tokate-probe.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\"",
+                        "test ! -r \"$1\" && test -r .git/config && ! touch .git/tokate-probe && test \"$$HOME\" = /tmp/tokate-home && test \"$$TMPDIR\" = \"$$HOME\" && probe=$$(mktemp .tokate-probe.XXXXXX) && rm \"$$probe\" && touch /tmp/tokate-probe && cache=$$(mktemp \"$$HOME/tokate-probe.XXXXXX\") && test -z \"$$(find . -samefile \"$$cache\")\" && { test -z \"$2\" || test ! -r \"$2\"; }",
                         "probe",
-                        sentinel
+                        sentinel,
+                        NixRuntime.ProbeFile(
+                            NixRuntime.Paths(NixRuntime.Tools(checkout, []string{}).ToArray(), checkout),
+                            checkout
+                        )
                     },
                     false,
                     30
@@ -108,7 +112,7 @@ internal class Verification {
                     throw Exception("Unsupported verification checkout layout: " + checkout)
                 }
             }
-            for root in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/dev", "/proc", "/sys"} {
+            for root in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/dev", "/proc", "/sys", "/nix"} {
                 if checkout == "/" || checkout == root || checkout.StartsWith(root + "/") {
                     throw Exception("Unsupported verification checkout layout: " + checkout)
                 }
@@ -299,13 +303,15 @@ internal class Verification {
             budget RuntimeBudget? = nil,
             mountDirectory string = ""
         ) CommandResult {
-            if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/bwrap") {
-                throw Exception(
-                    "Independent verification requires Linux and /usr/bin/bwrap; no host fallback is supported"
-                )
+            if !OperatingSystem.IsLinux() {
+                throw Exception("Independent verification requires Linux and bubblewrap; no host fallback is supported")
             }
             let checkout = Validate(directory, budget)
             let mounted = mountDirectory == "" ? checkout: Validate(mountDirectory, budget)
+            let selected = command.Length == 0 ? "": Path.IsPathFullyQualified(command[0]) ? command[0]:
+            command[0].Contains('/') ? Path.GetFullPath(command[0], checkout): LocalPaths.Find(command[0])
+            let tools = NixRuntime.Tools(checkout, []string{selected})
+            let runtimePaths = NixRuntime.Paths(tools.ToArray(), checkout)
             for path in[]string{outputPath, errorPath} {
                 if path != "" {
                     let parent = LocalPaths.DirectoryPath(Path.GetDirectoryName(Path.GetFullPath(path)) ?? "/")
@@ -343,7 +349,7 @@ internal class Verification {
                 "--clearenv",
                 "--setenv",
                 "PATH",
-                "/usr/local/bin:/usr/bin:/bin",
+                NixRuntime.SearchPath(tools.ToArray()),
                 "--setenv",
                 "HOME",
                 "/tmp/tokate-home",
@@ -363,10 +369,19 @@ internal class Verification {
             if !network {
                 args.Add("--unshare-net")
             }
+            let certificates = LocalPaths.Certificates()
+            if certificates != "" {
+                for name in[]string{"SSL_CERT_FILE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"} {
+                    args.AddRange([]string{"--setenv", name, certificates})
+                }
+            }
             for path in[]string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc/alternatives"} {
                 if Directory.Exists(path) {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
+            }
+            for path in runtimePaths {
+                args.AddRange([]string{"--ro-bind", path, path})
             }
             let cancellation = Chan[bool](1)
             let onCancel = ConsoleCancelEventHandler(
@@ -398,6 +413,8 @@ internal class Verification {
                         "/etc/ssl/certs/ca-certificates.crt",
                         "/etc/ssl/cert.pem",
                         "/etc/pki/tls/certs/ca-bundle.crt"
+                        ,
+                        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
                     } {
                         if File.Exists(path) {
                             args.AddRange([]string{"--ro-bind", RuntimeFile(path, storage.FullName), path})
@@ -440,7 +457,7 @@ internal class Verification {
                         }
                     }
                     result = Commands.Run(
-                        "/usr/bin/bwrap",
+                        LocalPaths.NeedSystemTool("bwrap", checkout),
                         args.ToArray(),
                         checkout,
                         seconds: seconds,

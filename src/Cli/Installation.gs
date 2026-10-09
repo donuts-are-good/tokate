@@ -7,11 +7,19 @@ import System.Runtime.ExceptionServices
 
 internal class Installation {
     shared {
-        internal func Run(command string) int32 -> Execute(
-            "/bin/sh",
-            []string{"-s", "--", command, Environment.ProcessPath ?? ""},
-            ApplicationInfo.Resource("install.sh")
-        )
+        internal func Run(command string) int32 {
+            if MachineSetup.NixManaged() {
+                throw CliFailure(
+                    "invalid_state",
+                    "Nix manages this installation. Use nix profile upgrade/remove or update your NixOS configuration."
+                )
+            }
+            return Execute(
+                LocalPaths.NeedSystemTool("sh"),
+                []string{"-s", "--", command, Environment.ProcessPath ?? ""},
+                ApplicationInfo.Resource("install.sh")
+            )
+        }
 
         internal func Execute(executable string, args[]string, input string? = nil, capture bool = false) int32 {
             let info = ProcessStartInfo(executable)

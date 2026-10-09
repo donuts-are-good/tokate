@@ -24,24 +24,23 @@ internal class Startup {
                         case "gh": "Install GitHub CLI and add gh to PATH."
                         case "codex": "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported. Use --harness-path FILE for a custom location."
                         case "setsid": "Install util-linux and add setsid to PATH."
-                        case "/usr/bin/setsid": "Install util-linux at /usr/bin/setsid for catalog probes and independent verification."
-                        case "/usr/bin/env": "Install coreutils at /usr/bin/env for command cleanup and managed sandbox probes."
-                        case "/usr/bin/unshare": "Install util-linux at /usr/bin/unshare and ensure user namespaces are supported for command cleanup."
+                        case "/usr/bin/setsid": "Install util-linux in a system path or Nix profile for catalog probes and independent verification."
+                        case "/usr/bin/env": "Install coreutils in a system path or Nix profile for command cleanup and managed sandbox probes."
+                        case "/usr/bin/unshare": "Install util-linux in a system path or Nix profile and enable user namespaces for command cleanup."
                         case "bwrap": "Install bubblewrap and add bwrap to PATH."
-                        case "/usr/bin/bwrap": "Install bubblewrap at /usr/bin/bwrap for independent verification."
+                        case "/usr/bin/bwrap": "Install bubblewrap in a system path or Nix profile for independent verification."
                         case "curl": "Install curl and add curl to PATH."
                         case "tar": "Install tar and add tar to PATH."
-                        case "/usr/bin/cp": "Install GNU coreutils at /usr/bin/cp for independent verification."
+                        case "/usr/bin/cp": "Install GNU coreutils in a system path or Nix profile for independent verification."
                         default: ""
                     }
                 }
-                tool.Path = name == "codex" ? LocalPaths.Harness(name, harnessPath): name.StartsWith("/") ? (
-                    File.Exists(name) ? name: ""
-                ): LocalPaths.Find(name)
+                tool.Path = name == "codex" ? LocalPaths.Harness(name, harnessPath): name.StartsWith("/") ?
+                LocalPaths.SystemTool(Path.GetFileName(name)): LocalPaths.Find(name)
                 if tool.Path != "" {
                     tool.Status = "found"
                     tool.Detail = name.StartsWith("/") ?
-                    "Found at the required path; execution has not been checked.":
+                    "Found through a system path or Nix profile; execution has not been checked.":
                     "Found on PATH; execution has not been checked."
                 } else {
                     tool.Detail = tool.Hint
@@ -297,7 +296,7 @@ internal class Startup {
                     Name: "sandbox",
                     Status: "skipped",
                     Hint: doctorScope == "external" ||
-                        pi ? "Install /usr/bin/bwrap and ensure independent verification namespaces are supported. Tokate does not change security settings.": "Ensure bubblewrap user namespaces and native Codex permission profiles are supported. Tokate does not change security settings.",
+                        pi ? "Install bubblewrap and ensure independent verification namespaces are supported. Tokate does not change security settings.": "Ensure bubblewrap user namespaces and native Codex permission profiles are supported. Tokate does not change security settings.",
                     Detail: doctorScope == "external" ||
                         pi ? "Requires working setsid, /usr/bin/setsid and /usr/bin/bwrap.": "Requires working setsid, /usr/bin/setsid, /usr/bin/env, codex and bwrap."
                 }

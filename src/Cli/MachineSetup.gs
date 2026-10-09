@@ -13,6 +13,22 @@ func SetupUserId() uint32;
 
 internal class MachineSetup {
     shared {
+        internal func NixManaged() bool {
+            let executable = Environment.ProcessPath ?? ""
+            return executable != "" && NixRuntime.Root(LocalPaths.CanonicalPath(executable)) != ""
+        }
+
+        private func NixHost() bool {
+            if File.Exists("/etc/os-release") {
+                for line in File.ReadLines("/etc/os-release") {
+                    if line.StartsWith("ID=") && line.Substring(3).Trim('"', '\'') == "nixos" {
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
         private func Confirm(options Args, message string) bool {
             Terminal.Message(message, "yellow", true)
             if options.Command == "doctor" && options.Get("yes") == "true" {
@@ -133,6 +149,13 @@ internal class MachineSetup {
                 }
             }
             if packages.Count > 0 {
+                if NixManaged() || NixHost() {
+                    Terminal.Message(
+                        "Nix manages these prerequisites. Add git, gh, bubblewrap, util-linux, coreutils and findutils to your Nix configuration or profile, then rerun doctor.",
+                        error: true
+                    )
+                    return false
+                }
                 if packages.Contains("curl") && !packages.Contains("ca-certificates") {
                     packages.Add("ca-certificates")
                 }
@@ -192,6 +215,14 @@ internal class MachineSetup {
                 return false
             }
             WizardScreen.Close()
+            if NixManaged() || NixHost() {
+                Terminal.Message(
+                    "Install through Nix: nix profile add " +
+                        (name == "pi" ? "github:earendil-works/pi/stable": "nixpkgs#codex"),
+                    error: true
+                )
+                return false
+            }
             Terminal.Message("Could not use " + name + ". It may be installed at a custom location.", "yellow", true)
             if name == "pi" {
                 Terminal.Message("For an SDK installation, use --pi-root DIR --node FILE.", error: true)
@@ -237,8 +268,12 @@ internal class MachineSetup {
                     let script = Path.Combine(temporary, "install.sh")
                     Download("https://pi.dev/install.sh", script)
                     let code = PublicOutput.Enabled || Console.IsInputRedirected ?
-                    Installation.Execute("/usr/bin/setsid", []string{"--wait", "/bin/sh", script}, capture: true):
-                    Installation.Execute("/bin/sh", []string{script}, capture: true)
+                    Installation.Execute(
+                        LocalPaths.NeedSystemTool("setsid"),
+                        []string{"--wait", LocalPaths.NeedSystemTool("sh"), script},
+                        capture: true
+                    ):
+                    Installation.Execute(LocalPaths.NeedSystemTool("sh"), []string{script}, capture: true)
                     if code != 0 {
                         throw CliFailure(
                             "missing_tools",

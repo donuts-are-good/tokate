@@ -25,6 +25,9 @@ internal class PiBoundary {
 
         internal func Boundary(checkout string, root string, node string, control string, network bool) List[string] {
             Verification.Validate(checkout)
+            let tools = NixRuntime.Tools(checkout, []string{node})
+            let runtime = List[string](tools)
+            runtime.Add(root)
             for path in[]string{root, node, control} {
                 if path == checkout || path.StartsWith(checkout + "/") {
                     throw Exception("Pi runtime and control files must be outside the writable checkout")
@@ -42,7 +45,7 @@ internal class PiBoundary {
                 "--clearenv",
                 "--setenv",
                 "PATH",
-                "/usr/bin:/bin",
+                NixRuntime.SearchPath(tools.ToArray()),
                 "--setenv",
                 "HOME",
                 "/tmp/tokate-agent",
@@ -59,10 +62,19 @@ internal class PiBoundary {
             if !network {
                 args.Add("--unshare-net")
             }
+            let certificates = LocalPaths.Certificates()
+            if certificates != "" {
+                for name in[]string{"SSL_CERT_FILE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"} {
+                    args.AddRange([]string{"--setenv", name, certificates})
+                }
+            }
             for path in[]string{"/usr/bin", "/usr/lib", "/usr/share", "/bin", "/lib", "/lib64"} {
                 if Directory.Exists(path) {
                     args.AddRange([]string{"--ro-bind", path, path})
                 }
+            }
+            for path in NixRuntime.Paths(runtime.ToArray(), checkout) {
+                args.AddRange([]string{"--ro-bind", path, path})
             }
             for path in[]string{
                 "/etc/ld.so.cache",
@@ -71,7 +83,8 @@ internal class PiBoundary {
                 "/etc/resolv.conf",
                 "/etc/ssl/certs/ca-certificates.crt",
                 "/etc/ssl/cert.pem",
-                "/etc/pki/tls/certs/ca-bundle.crt"
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
             } {
                 if File.Exists(path) {
                     args.AddRange([]string{"--ro-bind", path, path})
@@ -132,9 +145,9 @@ internal class PiBoundary {
                     "--map-current-user",
                     "--net",
                     "--",
-                    "/usr/bin/env",
+                    LocalPaths.NeedSystemTool("env"),
                     "-i",
-                    "PATH=/usr/bin:/bin",
+                    "PATH=" + NixRuntime.SearchPath(NixRuntime.Tools("", []string{node}).ToArray()),
                     "LANG=C.UTF-8",
                     "PI_OFFLINE=1"
                 }
@@ -145,7 +158,7 @@ internal class PiBoundary {
                 }
                 args.AddRange([]string{node, "--experimental-import-meta-resolve", script, root, model})
                 let result = Commands.Run(
-                    "/usr/bin/unshare",
+                    LocalPaths.NeedSystemTool("unshare"),
                     args.ToArray(),
                     storage.FullName,
                     input: endpoint,
@@ -263,7 +276,7 @@ internal class PiBoundary {
                     }
                 )
                 let result = Commands.Run(
-                    "/usr/bin/bwrap",
+                    LocalPaths.NeedSystemTool("bwrap", checkout),
                     args.ToArray(),
                     checkout,
                     seconds: 30,

@@ -28,6 +28,9 @@ func Main(args[]string) int32 {
             "artifacts/linux-x64/tokate"
         )
         switch args.Length == 0 ? "": args[0] {
+            case "--nix-runtime" when args.Length == 4 {
+                NixChecks.Run(binary, args[1], args[2], args[3])
+            }
             case "--pi-runtime" when(args.Length == 1 || args.Length == 2) {
                 PiChecks.Runtime(binary, args.Length == 2 ? args[1]: "")
             }
