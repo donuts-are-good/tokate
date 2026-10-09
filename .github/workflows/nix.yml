@@ -1,0 +1,48 @@
+name: Nix
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          global-json-file: global.json
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap clang zlib1g-dev
+      - name: Install Nix through its official channel
+        run: |
+          curl -qfsSL --proto '=https' --proto-redir '=https' https://nixos.org/nix/install -o "$RUNNER_TEMP/nix-install"
+          sh "$RUNNER_TEMP/nix-install" --no-daemon --no-modify-profile --no-channel-add --yes
+          printf '%s\n' "$HOME/.nix-profile/bin" >> "$GITHUB_PATH"
+      - name: Permit required command namespaces
+        run: |
+          sudo tee /etc/apparmor.d/tokate-nix-commands <<'EOF'
+          abi <abi/4.0>,
+          profile tokate-nix-bwrap /nix/store/*/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          profile tokate-nix-unshare /nix/store/*/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          profile tokate-system-bwrap /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          profile tokate-system-unshare /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/tokate-nix-commands
+      - run: bash scripts/build.sh
+      - run: bash scripts/nix-proof.sh

@@ -83,6 +83,15 @@ main() {
         printf 'Tokate removed. Saved runs and shell setup markers were kept.\n'
         return
     fi
+    if [ -r /etc/os-release ]; then
+        while IFS= read -r tokate_release_line; do
+            case "$tokate_release_line" in
+                ID=nixos|ID=\"nixos\"|ID=\'nixos\')
+                    fail 'On NixOS, use nix profile add github:obselate/tokate. Existing installation was kept.'
+                    ;;
+            esac
+        done < /etc/os-release
+    fi
     if [ -z "$tokate_shell" ] && command -v getent >/dev/null 2>&1; then
         if tokate_uid=$(id -u 2>/dev/null) && tokate_account=$(getent passwd "$tokate_uid" 2>/dev/null); then
             tokate_shell=${tokate_account##*:}
