@@ -236,6 +236,66 @@ internal class PreparationChecks {
             flow.NoPr()
         }
 
+        private func Reservation(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            test.Claim()
+            let run = test.Prepare()
+            let path = Path.Combine(run, "run.json")
+            let original = File.ReadAllText(path)
+            let work = Path.Combine(run, "coding/unfinished.txt")
+            File.WriteAllText(work, "Saved work")
+            var requests int32
+            for action in[]string{"renew", "pause", "resume", "release"} {
+                let args = []string{"request", "--run", run, "--operation", action, "--json"}
+                test.Flow.Call(args, 1, owner: true)
+                if action == "release" {
+                    test.Flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
+                }
+                let pending = Check.Json(test.Flow.Call(args, 8).Output)
+                Check.That(Check.Text(pending["data"]?["pending"]) == "true", "Reservation request lost pending status")
+                let saved = Check.Json(File.ReadAllText(path))
+                let request = saved["reservation_request"] ?? throw Exception("Missing saved request")
+                let journal = Path.Combine(run, "reservation-" + Check.Text(request["uuid"]) + ".posting.json")
+                let backup = journal + ".saved"
+                File.Move(journal, backup)
+                File.CreateSymbolicLink(journal, work)
+                test.Flow.Call(args, 1)
+                File.Delete(journal)
+                File.Move(backup, journal)
+                test.Flow.Call(args, 8)
+                test.Flow.Reload()
+                requests++
+                Check.That(
+                    Check.Text(test.Flow.State["request_count"]) == requests.ToString(),
+                    "Repeated reservation request posted another comment"
+                )
+                let comment = test
+                    .Flow
+                    .State["request_comments"]?[requests - 1] ??
+                    throw Exception("Missing request comment")
+                test.Coordinate(PostedEvent(test, comment))
+                let complete = Check.Json(test.Flow.Call(args).Output)
+                Check.That(
+                    Check.Text(complete["data"]?["pending"]) == "false",
+                    "Recorded reservation request stayed pending"
+                )
+                let state = test.State()["state"]?["reservation"]
+                Check.That(
+                    Check.Text(state?["status"]) == (
+                        action == "pause" ? "paused": action == "release" ? "released": "active"
+                    ),
+                    "Reservation did not make the requested transition"
+                )
+                Check.That(
+                    File.ReadAllText(path) == original && File.ReadAllText(work) == "Saved work",
+                    "Reservation changed saved execution authority or discarded work"
+                )
+                test.Flow.NoInference()
+                test.Flow.NoPr()
+            }
+        }
+
         private func External(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -889,6 +949,7 @@ internal class PreparationChecks {
         internal func All(binary string, selected string = "") {
             for test in[]TestCase[string]{
                 TestCase[string]("Guided", async (value string) -> Guided(value)),
+                TestCase[string]("Reservation", async (value string) -> Reservation(value)),
                 TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
                 TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
                 TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),

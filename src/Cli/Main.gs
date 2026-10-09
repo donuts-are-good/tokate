@@ -179,6 +179,9 @@ func Dispatch(options Args) int32 {
             }
         }
         case "request" {
+            if options.Get("run") != "" {
+                return ReservationRequest.Run(options)
+            }
             Submission.Request(options)
         }
         case "prepare" {

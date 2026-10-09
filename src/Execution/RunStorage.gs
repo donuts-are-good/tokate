@@ -16,18 +16,22 @@ internal class RunStorage {
                 throw Exception(error.Message + "; saved run directory: " + directory, error)
             }
             for name in[]string{".lock", "run.json", "run.json.tmp", "claim.posting.json"} {
-                let path = Path.Combine(directory, name)
-                if FileInfo(path).LinkTarget != nil {
+                ControlFile(directory, name)
+            }
+        }
+
+        internal func ControlFile(directory string, name string) {
+            let path = Path.Combine(directory, name)
+            if FileInfo(path).LinkTarget != nil {
+                Reject(directory)
+            }
+            if File.Exists(path) || Directory.Exists(path) {
+                let status = [256]byte
+                if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
+                    (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
+                    (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
+                    BitConverter.ToUInt32(status, 16) != 1 {
                     Reject(directory)
-                }
-                if File.Exists(path) || Directory.Exists(path) {
-                    let status = [256]byte
-                    if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
-                        (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
-                        (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
-                        BitConverter.ToUInt32(status, 16) != 1 {
-                        Reject(directory)
-                    }
                 }
             }
         }
