@@ -9,6 +9,31 @@ import System.Text
 
 internal class TestProcess {
     shared {
+        internal func SystemPath(path string) string {
+            let alternative = Path.Combine("/bin", Path.GetFileName(path))
+            return path.StartsWith("/usr/bin/") && !File.Exists(path) && File.Exists(alternative) ? alternative: path
+        }
+
+        private func NodeExecutable(path string) bool -> File.Exists(path) &&
+            (
+            File.GetUnixFileMode(path) & (
+                UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute
+            )
+        ) != 0
+
+        internal func Node() string {
+            let bundled = Path.Combine(Path.GetDirectoryName(Environment.ProcessPath) ?? "", "node")
+            if NodeExecutable(bundled) {
+                return bundled
+            }
+            for entry in(Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator) {
+                if Path.IsPathFullyQualified(entry) && NodeExecutable(Path.Combine(entry, "node")) {
+                    return Path.Combine(entry, "node")
+                }
+            }
+            throw Exception("Pi continuation requires installed Node on PATH")
+        }
+
         internal func ChildIdentity(child Process) string {
             let name = FileInfo("/proc/self/ns/pid").LinkTarget ?? throw Exception("Missing child PID namespace")
             return name + " " + child.Id.ToString()
@@ -89,15 +114,13 @@ internal class TestProcess {
             result <- reader.ReadToEnd()
         }
 
-        internal func Run(
+        internal func StartInfo(
             exe string,
             args[]string,
             env Dictionary[string, string],
-            input string? = nil,
-            cwd string = "",
-            seconds int32 = 120
-        ) Result {
-            let info = ProcessStartInfo(exe)
+            cwd string = ""
+        ) ProcessStartInfo {
+            let info = ProcessStartInfo(SystemPath(exe))
             info.UseShellExecute = false
             info.RedirectStandardInput = true
             info.RedirectStandardOutput = true
@@ -112,6 +135,18 @@ internal class TestProcess {
             if cwd != "" {
                 info.WorkingDirectory = cwd
             }
+            return info
+        }
+
+        internal func Run(
+            exe string,
+            args[]string,
+            env Dictionary[string, string],
+            input string? = nil,
+            cwd string = "",
+            seconds int32 = 120
+        ) Result {
+            let info = StartInfo(exe, args, env, cwd)
             using let process = Process.Start(info) ?? throw Exception("Cannot start " + exe)
             using let outputReader = StreamReader(process.StandardOutput.BaseStream, UTF8Encoding(false), false)
             let output = Chan[string](1)

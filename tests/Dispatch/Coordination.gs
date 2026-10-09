@@ -56,7 +56,6 @@ internal partial class CoordinationFlow : CoordinationFixture {
                 "EffortDeclarations",
                 "ManagedModelPolicy",
                 "ModelPolicyAuthority",
-                "Compatibility",
                 "ProtectedExternal",
                 "ProtectedCoordinator",
                 "ProtectedManaged",
@@ -122,105 +121,51 @@ internal partial class CoordinationFlow : CoordinationFixture {
                         Console.WriteLine("PASS V2 " + name)
                         continue
                     }
-                    case "Compatibility" {
-                        Compatibility(binary)
-                        Console.WriteLine("PASS V2 " + name)
-                        continue
-                    }
                 }
                 using let test = CoordinationFlow(binary)
                 test.Initialize(
-                    approve: name != "ProtectedExternal" &&
+                    approve: name != "LeaseTakeover" &&
+                        name != "ProtectedExternal" &&
                         name != "ProtectedManaged" &&
                         name != "ReceiptEvidence" &&
                         name != "InterruptedVerification"
                 )
-                switch name {
-                    case "LeaseStalePublication" {
-                        test.LeaseStalePublication()
-                    }
-                    case "LeasePublicationRace" {
-                        test.LeasePublicationRace()
-                    }
-                    case "LeaseFencing" {
-                        test.LeaseFencing()
-                    }
-                    case "LeaseReceipts" {
-                        test.LeaseReceipts()
-                    }
-                    case "LeasePauseExecution" {
-                        test.LeaseExecution("pause")
-                    }
-                    case "LeaseReleaseExecution" {
-                        test.LeaseExecution("release")
-                    }
-                    case "LeaseExecution" {
-                        test.LeaseExecution()
-                    }
-                    case "LeaseReplayAndLegacy" {
-                        test.LeaseReplayAndLegacy()
-                    }
-                    case "LeaseTakeover" {
-                        test.LeaseTakeover()
-                    }
-                    case "SimultaneousClaims" {
-                        test.SimultaneousClaims()
-                    }
-                    case "SimultaneousClaimsMissingParticipant" {
-                        test.SimultaneousClaimsMissingParticipant()
-                    }
-                    case "ReplayAndInterruptedState" {
-                        test.ReplayAndInterruptedState()
-                    }
-                    case "InterruptedVerification" {
-                        test.InterruptedVerification()
-                    }
-                    case "ExternalPublication" {
-                        test.ExternalPublication()
-                    }
-                    case "ProtectedExternal" {
-                        test.ProtectedExternal()
-                    }
-                    case "ProtectedManaged" {
-                        test.ProtectedManaged()
-                    }
-                    case "ReceiptEvidence" {
-                        test.ReceiptEvidence()
-                    }
-                    case "CanonicalExternal" {
-                        test.CanonicalExternal()
-                    }
-                    case "CanonicalSubmit" {
-                        test.CanonicalSubmit()
-                    }
-                    case "ExpiryAndRevocation" {
-                        test.ExpiryAndRevocation()
-                    }
-                    case "InvalidEvents" {
-                        test.InvalidEvents()
-                    }
-                    case "InterruptedWrite" {
-                        test.InterruptedWrite()
-                    }
-                    case "PublicationRevocation" {
-                        test.PublicationRevocation()
-                    }
-                    case "ExpiryDuringPublication" {
-                        test.ExpiryDuringPublication()
-                    }
-                    case "EvictedReplay" {
-                        test.EvictedReplay()
-                    }
-                    case "SetupRelease" {
-                        test.SetupRelease()
-                    }
-                    case "TokateExecution" {
-                        test.TokateExecution()
-                    }
-                    case "DeclarationRestrictions" {
-                        test.DeclarationRestrictions()
-                    }
+                let execute async (CoordinationFlow) -> void = switch name {
+                    case "LeaseStalePublication": async (value CoordinationFlow) -> value.LeaseStalePublication()
+                    case "LeasePublicationRace": async (value CoordinationFlow) -> value.LeasePublicationRace()
+                    case "LeaseFencing": async (value CoordinationFlow) -> value.LeaseFencing()
+                    case "LeaseReceipts": async (value CoordinationFlow) -> value.LeaseReceipts()
+                    case "LeasePauseExecution": async (value CoordinationFlow) -> value.LeaseExecution("pause")
+                    case "LeaseReleaseExecution": async (value CoordinationFlow) -> value.LeaseExecution("release")
+                    case "LeaseExecution": async (value CoordinationFlow) -> value.LeaseExecution()
+                    case "LeaseReplayAndLegacy": async (value CoordinationFlow) -> value.LeaseReplayAndLegacy()
+                    case "LeaseTakeover": async (value CoordinationFlow) -> value.LeaseTakeover()
+                    case "SimultaneousClaims": async (value CoordinationFlow) -> value.SimultaneousClaims()
+                    case "SimultaneousClaimsMissingParticipant": async (
+                        value CoordinationFlow
+                    ) -> value.SimultaneousClaimsMissingParticipant()
+                    case "ReplayAndInterruptedState": async (
+                        value CoordinationFlow
+                    ) -> value.ReplayAndInterruptedState()
+                    case "InterruptedVerification": async (value CoordinationFlow) -> value.InterruptedVerification()
+                    case "ExternalPublication": async (value CoordinationFlow) -> value.ExternalPublication()
+                    case "ProtectedExternal": async (value CoordinationFlow) -> value.ProtectedExternal()
+                    case "ProtectedManaged": async (value CoordinationFlow) -> value.ProtectedManaged()
+                    case "ReceiptEvidence": async (value CoordinationFlow) -> value.ReceiptEvidence()
+                    case "CanonicalExternal": async (value CoordinationFlow) -> value.CanonicalExternal()
+                    case "CanonicalSubmit": async (value CoordinationFlow) -> value.CanonicalSubmit()
+                    case "ExpiryAndRevocation": async (value CoordinationFlow) -> value.ExpiryAndRevocation()
+                    case "InvalidEvents": async (value CoordinationFlow) -> value.InvalidEvents()
+                    case "InterruptedWrite": async (value CoordinationFlow) -> value.InterruptedWrite()
+                    case "PublicationRevocation": async (value CoordinationFlow) -> value.PublicationRevocation()
+                    case "ExpiryDuringPublication": async (value CoordinationFlow) -> value.ExpiryDuringPublication()
+                    case "EvictedReplay": async (value CoordinationFlow) -> value.EvictedReplay()
+                    case "SetupRelease": async (value CoordinationFlow) -> value.SetupRelease()
+                    case "TokateExecution": async (value CoordinationFlow) -> value.TokateExecution()
+                    case "DeclarationRestrictions": async (value CoordinationFlow) -> value.DeclarationRestrictions()
+                    default: throw Exception("Unknown coordination case: " + name)
                 }
+                await execute(test)
                 test.Flow.AutomationAttribution()
                 Console.WriteLine("PASS V2 " + name)
             }

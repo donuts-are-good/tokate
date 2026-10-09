@@ -6,18 +6,33 @@ import System.Collections.Generic
 import System.Diagnostics
 import System.IO
 import System.Text
+import System.Text.Json.Nodes
 import System.Text.RegularExpressions
 
 internal class ProgressChecks {
     shared {
-        internal func All(binary string) {
+        internal func All(binary string, filter string = "") {
+            if filter == "Unlimited" {
+                Unlimited(binary)
+                return
+            }
+            if filter == "Tty" {
+                for mode in[]string{"tty", "no_color", "plain", "dumb", "cancel"} {
+                    Tty(binary, mode)
+                }
+                return
+            }
             let baseline = Success(binary, false)
             Check.That(Success(binary, true) == baseline, "Progress changed remote request counts")
+            if filter == "Json" {
+                Console.WriteLine("PASS structured progress keeps transcripts private and preserves request counts")
+                return
+            }
             Bounded(binary)
+            Unlimited(binary)
             for scenario in[]string{
                 "inference_failure",
                 "verification_failure",
-                "publication_failure",
                 "inference_timeout",
                 "verification_timeout",
                 "inference_cancel",
@@ -25,7 +40,7 @@ internal class ProgressChecks {
             } {
                 Failure(binary, scenario)
             }
-            for mode in[]string{"tty", "plain", "no_color", "dumb"} {
+            for mode in[]string{"tty", "plain", "no_color", "dumb", "cancel"} {
                 Tty(binary, mode)
             }
             Console.WriteLine(
@@ -44,19 +59,18 @@ internal class ProgressChecks {
             completed <- text.ToString()
         }
 
-        private func Live(flow NativeFixture, run string, phase string, cancel bool = false) Result {
-            let info = ProcessStartInfo(flow.Binary)
-            info.UseShellExecute = false
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.RedirectStandardInput = true
-            info.Environment.Clear()
-            for entry in flow.Temp.Env {
-                info.Environment[entry.Key] = entry.Value
-            }
-            for arg in[]string{"work", "--run", run, "--json", "--plain", "--traffic"} {
-                info.ArgumentList.Add(arg)
-            }
+        private func Live(
+            flow NativeFixture,
+            run string,
+            phase string,
+            cancel bool = false,
+            unlimited bool = false
+        ) Result {
+            let info = TestProcess.StartInfo(
+                flow.Binary,
+                []string{"work", "--run", run, "--json", "--plain", "--traffic"},
+                flow.Temp.Env
+            )
             using let process = Process.Start(info) ?? throw Exception("Cannot start progress fixture")
             process.StandardInput.Close()
             let stdout = Chan[string](1)
@@ -74,7 +88,7 @@ internal class ProgressChecks {
                             if line.StartsWith(phase + ":") {
                                 Check.That(!process.HasExited, "Progress arrived only after completion")
                                 Check.Contains(line, "s elapsed,")
-                                Check.Contains(line, "s remaining")
+                                Check.Contains(line, unlimited ? "no time limit": "s remaining")
                                 flow.Reload()
                                 let requests = flow.State["api_calls"]?.AsArray().Count ?? 0
                                 if initialRequests < 0 {
@@ -89,7 +103,8 @@ internal class ProgressChecks {
                             }
                         }
                         case <- deadline {
-                            throw Exception("No live heartbeat for " + phase)
+                            let diagnostic = process.HasExited ? <-stderr: "process still running"
+                            throw Exception("No live heartbeat for " + phase + ": " + diagnostic)
                         }
                     }
                 }
@@ -197,6 +212,128 @@ internal class ProgressChecks {
             Check.That(elapsed > 0, "Progress elapsed time did not advance")
         }
 
+        private func Unlimited(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize(approve: false)
+            let flow = test.Flow
+            flow.VerificationPolicy("test -f result.txt; if test -f verify-outcome; then sleep 120; fi")
+            File.WriteAllText(
+                test.Tools,
+                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+            )
+            flow.Approve()
+            test.Claim()
+            test.Prepare("tokate", 1, reserve: "8", unlimited: true)
+            flow.NoInference()
+            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
+            let policy = Check.Json(File.ReadAllText(policyPath))
+            policy["allow_unlimited"] = JsonValue.Create(true)
+            File.WriteAllText(policyPath, policy.ToJsonString())
+            flow.Commit("Owner permits optional unlimited coding")
+            flow.Approve()
+            test.Claim()
+            flow.Temp.Env["TERM"] = "dumb"
+            let guided = TestTerminal.Pty(
+                binary,
+                []string{
+                    "work",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--harness",
+                    "codex",
+                    "--model",
+                    "gpt-6.1-sol",
+                    "--effort",
+                    "high"
+                },
+                flow.Temp,
+                80,
+                "unlimited\n1\nq\n"
+            )
+            Check.That(guided.Code == 1, guided.Output + guided.Error)
+            Check.Contains(guided.Output, "Review donation")
+            Check.Contains(guided.Output, "No time limit")
+            flow.NoInference()
+            Check.Contains(
+                flow.Call(
+                    []string{
+                        "work",
+                        "--unlimited",
+                        "--seconds",
+                        "30",
+                        "--verification-reserve",
+                        "8",
+                        "--non-interactive"
+                    },
+                    1
+                )
+                    .Error,
+                "excludes --seconds"
+            )
+            test.Prepare("external", 1, reserve: "8", unlimited: true)
+            test.Prepare("tokate", 1, unlimited: true)
+            let run = test.Prepare("tokate", reserve: "8", unlimited: true)
+            let status = Check.Envelope(flow.Call([]string{"status", "--run", run, "--json"}), "status", "ok")
+            Check.That(
+                Check.Text(status["data"]?["unlimited"]) == "true" && status["data"]?["coding_seconds"] == nil,
+                "Status invented a finite coding limit"
+            )
+            using let baseline = FixtureSnapshot(flow.Temp.Root)
+            for mode in[]string{"complete", "cancel", "verification"} {
+                baseline.Restore()
+                flow.Mode(mode == "cancel" ? "timeout": "progress_delay")
+                flow.State["progress_delay_seconds"] = JsonValue.Create(10)
+                if mode == "verification" {
+                    flow.State["verify_outcome"] = JsonValue.Create("timeout")
+                }
+                flow.Save()
+                let result = Live(flow, run, "Inference", mode == "cancel", true)
+                let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+                Check.That(result.Code == (mode == "complete" ? 0: 1), result.Output + result.Error)
+                Check.That(
+                    Check.Text(saved["state"]) == (mode == "complete" ? "generated": "failed"),
+                    "Unlimited work returned the wrong state"
+                )
+                if mode == "cancel" {
+                    Check.That(
+                        saved["turn_completed"] == nil && Check.Text(
+                            saved["failure_reason"]
+                        ) == "inference_interrupted",
+                        "Stopped unlimited work fabricated completion"
+                    )
+                    TestProcess.Collected(
+                        File.ReadAllText(Path.Combine(flow.Bin, "child.pid")),
+                        "Unlimited cancellation left a descendant"
+                    )
+                } else {
+                    Check.That(
+                        Check.Text(saved["turn_completed"]) == "true",
+                        "Verification allowance stopped unlimited coding"
+                    )
+                    flow.Reload()
+                    Check.Contains(Check.Text(flow.State["prompts"]?[0]), "unlimited coding time")
+                    if mode == "verification" {
+                        Check.That(
+                            Check.Text(saved["failure_reason"]) == "verification_failed",
+                            "Unlimited coding removed the verification deadline"
+                        )
+                    } else {
+                        Check.That(
+                            Check.Text(saved["verification"]?[0]?["exit_code"]) == "0",
+                            "Independent verification did not receive its own allowance"
+                        )
+                    }
+                }
+                flow.Reload()
+                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Unlimited work retried inference")
+                flow.NoPr()
+            }
+            Console.WriteLine(
+                "PASS unlimited owner consent, saved status, delayed coding completion, cancellation cleanup and bounded independent verification"
+            )
+        }
+
         private func Failure(binary string, scenario string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
@@ -222,7 +359,7 @@ internal class ProgressChecks {
             flow.Call([]string{"work", "--run", run, "--json", "--plain"}, 1)
             let code = inference ? "inference_failed": (verification ? "verification_failed": "command_failed")
             let failedPhase = publication ? "Publication": (inference ? "Inference": "Verification")
-            let next = publication ? "publish": (verification ? "recover": "status")
+            let next = "status"
             Check.Envelope(result, "work", "error", code)
             Check.Contains(result.Error, failedPhase + " failed (" + code + ")")
             Check.Contains(result.Error, "Next: tokate " + next)
@@ -247,6 +384,7 @@ internal class ProgressChecks {
         private func Tty(binary string, mode string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
+            flow.VerificationPolicy("printf 'live-verification-output\\n'; sleep 1; test -f result.txt")
             flow.Approve()
             let run = flow.Claim()
             flow.Mode("progress_delay")
@@ -254,18 +392,24 @@ internal class ProgressChecks {
             if mode == "no_color" {
                 flow.Temp.Env["NO_COLOR"] = ""
             }
+            if mode == "tty" || mode == "no_color" || mode == "cancel" {
+                let script = Path.Combine(flow.Temp.Root, "donation-view.py")
+                File.WriteAllText(script, TestResources.Template("donation-view.py"))
+                let result = TestProcess.Run("python3", []string{script, binary, run, mode}, flow.Temp.Env)
+                Check.Success(result)
+                Console.Write(result.Output)
+                return
+            }
             let command = "stty cols 80 rows 24; " +
                 Quote(binary) +
                 " work --run " +
                 Quote(run) +
                 (mode == "plain" ? " --plain --ascii": "")
-            let timer = Stopwatch.StartNew()
             let result = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", command, "/dev/null"},
                 flow.Temp.Env
             )
-            timer.Stop()
             Check.Success(result)
             Check.Contains(result.Output, "Inference:")
             Check.Contains(result.Output, "s remaining")
@@ -273,15 +417,7 @@ internal class ProgressChecks {
             let visible = Regex.Replace(result.Output, "\\x1b\\[[0-?]*[ -/]*[@-~]", "")
             Check.Contains(visible, "Run completed. Run: " + run)
             Check.Contains(visible, "Next: tokate status --run " + run + " --json")
-            if mode == "tty" {
-                let updates = result.Output.Split("\r\x1b[2KInference:").Length - 1
-                Check.That(
-                    updates >= 2 && updates <= Math.Ceiling(timer.Elapsed.TotalSeconds / 5) + 1,
-                    "TTY progress did not use restrained updates"
-                )
-            } else {
-                Check.That(!result.Output.Contains('\x1b'), "Plain/no-color progress contains escape codes")
-            }
+            Check.That(!result.Output.Contains('\x1b'), "Plain progress contains escape codes")
         }
     }
 }

@@ -18,19 +18,23 @@ internal class TerminalProgress : IDisposable {
     private let Budget RuntimeBudget
     private let Total RuntimeBudget?
     private let Interactive bool
+    private let Live bool
 
     internal init(phase string, budget RuntimeBudget, total RuntimeBudget? = nil) {
         Phase = Terminal.Clean(phase).Replace('\n', ' ')
         Budget = budget
         Total = total
-        Interactive = Terminal.Rich(true) && Terminal.Width(true) >= 80
+        Live = DonationView.Start()
+        Interactive = !Live && Terminal.Rich(true) && Terminal.Width(true) >= 80
         Draw()
         go Update()
     }
 
     private func Draw() {
         let value = Phase + ": " + Budget.Status() + (Total == nil ? "": "; total " + (Total?.Left() ?? "") + " left")
-        if Interactive {
+        if Live {
+            DonationView.Status(value)
+        } else if Interactive {
             let width = Terminal.Width(true) - 1
             Console.Error.Write("\r\x1b[2K" + value.Substring(0, Math.Min(width, value.Length)))
         } else {
@@ -40,7 +44,7 @@ internal class TerminalProgress : IDisposable {
 
     private func Update() {
         try {
-            var interval int32 = 5
+            var interval int32 = Live ? 1: 5
             while true {
                 using let tick = after(TimeSpan.FromSeconds(interval))
                 select {
@@ -49,7 +53,7 @@ internal class TerminalProgress : IDisposable {
                     }
                     case <- tick {
                         Draw()
-                        if !Interactive {
+                        if !Interactive && !Live {
                             interval = Math.Min(86400, interval * 2)
                         }
                     }
@@ -141,22 +145,12 @@ internal class Terminal {
         private func Accent(color string) string {
             let background = Environment.GetEnvironmentVariable("COLORFGBG") ?? ""
             let dark = background.EndsWith(";0") || background.EndsWith(";8")
-            switch color {
-                case "green" {
-                    return dark ? "#b0bfa6": Sage
-                }
-                case "red" {
-                    return dark ? "#d99a7d": Terracotta
-                }
-                case "yellow" {
-                    return dark ? "#e2bb80": Gold
-                }
-                case "cyan" {
-                    return dark ? "#a9bdd9": Blue
-                }
-                default {
-                    return "default"
-                }
+            return switch color {
+                case "green": dark ? "#b0bfa6": Sage
+                case "red": dark ? "#d99a7d": Terracotta
+                case "yellow": dark ? "#e2bb80": Gold
+                case "cyan": dark ? "#a9bdd9": Blue
+                default: "default"
             }
         }
 
@@ -179,6 +173,13 @@ internal class Terminal {
         }
 
         internal func Message(text string, color string = "green", error bool = false) {
+            if DonationView.Active() {
+                DonationView.Append(text)
+                return
+            }
+            if WizardScreen.Pending(text) {
+                return
+            }
             let stderr = error || PublicOutput.Enabled
             let value = Clean(PublicOutput.Enabled ? PublicOutput.Prose(text): text)
             let width = (stderr ? Console.IsErrorRedirected: Console.IsOutputRedirected) ? int32.MaxValue: Width(stderr)
@@ -203,7 +204,7 @@ internal class Terminal {
         }
 
         internal func Foreground() bool -> Array.IndexOf(
-            []string{"work", "recover", "external", "amend", "repair", "publish", "submit"},
+            []string{"work", "recover", "external", "amend", "submit"},
             PublicOutput.Command
         ) >= 0
 
@@ -466,7 +467,7 @@ internal class Terminal {
                 Message("Bounded snapshot: some data was omitted.", "yellow")
             }
             let work = J.Items(J.Get(value, "work"))
-            let pending = J.Items(J.Get(value, "pending_requests")).Count
+            let pending = J.Count(J.Get(value, "pending_requests"))
             if remote != "observed" || work.Count == 0 || pending > 0 {
                 StatusAction(J.Get(value, "next"))
             }
@@ -500,6 +501,7 @@ internal class Terminal {
                 Row("Issue URL", J.Text(task, "url"))
                 for draft in J.Items(J.Get(task, "drafts")) {
                     Row("PR", J.Text(draft, "url"))
+                    Row("Contribution", J.Text(draft, "lifecycle").Replace('_', ' '))
                     Row("Receipt", J.Text(draft, "receipt"))
                 }
             }
@@ -568,7 +570,7 @@ internal class Terminal {
 
         internal func Json(value JsonElement, title string) {
             if PublicOutput.Enabled {
-                PublicOutput.ResultData = PublicOutput.Select(
+                PublicOutput.ResultData = J.Select(
                     value,
                     "reservation,lease,donor,actor,expires,status,attempt,pr,url,head"
                 )

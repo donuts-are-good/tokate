@@ -10,7 +10,8 @@ internal class Args {
     internal var Command string = "help"
     internal var Help bool = false
     internal var Subject string = ""
-    internal var IssueUrl string = ""
+    internal var Target string = ""
+    internal var Guided bool
     internal var SavedDefaults JsonElement
     internal init(args[]string) {
         if args.Length == 0 {
@@ -33,8 +34,8 @@ internal class Args {
             if !word.StartsWith("-") {
                 if (Command == "help" || Command == "completion" || Command == "defaults") && Subject == "" {
                     Subject = word
-                } else if Cli.Find(Command).Has("issue") && IssueUrl == "" && word.StartsWith("https://") {
-                    IssueUrl = word
+                } else if Cli.Find(Command).Has("repo") && Target == "" {
+                    Target = word
                 } else {
                     throw Exception("Unexpected argument: " + word)
                 }

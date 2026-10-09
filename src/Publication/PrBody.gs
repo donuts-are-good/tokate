@@ -8,6 +8,25 @@ import System.Text.RegularExpressions
 
 internal class PrBody {
     shared {
+        internal func ValidateTemplate(text string) {
+            for key in[]string{
+                "issue",
+                "report",
+                "donor",
+                "model",
+                "effort",
+                "seconds",
+                "base",
+                "policy",
+                "usage",
+                "receipt"
+            } {
+                if !text.Contains("{{" + key + "}}") {
+                    throw Exception("PR template must contain {{" + key + "}}")
+                }
+            }
+        }
+
         internal func Template(repo string, revision string, policy Policy) string {
             let custom = GitHub.Api(
                 "repos/" + repo + "/contents/.github/tokate-pr.md?ref=" + Uri.EscapeDataString(revision),
@@ -19,7 +38,7 @@ internal class PrBody {
                     throw Exception("Expected a small repository PR template")
                 }
                 text = Encoding.UTF8.GetString(Convert.FromBase64String(J.Text(custom, "content")))
-                OwnerApproval.ValidateTemplate(text)
+                ValidateTemplate(text)
             }
             return text + (J.Text(policy.Value, "pr_text") == "" ? "": "\n\n{{pr_text}}\n")
         }
@@ -27,74 +46,6 @@ internal class PrBody {
         internal func Render(template string, values Dictionary[string, string], policy JsonElement) string {
             values["pr_text"] = J.Text(policy, "pr_text")
             return Regex.Replace(template, "\\{\\{([a-z_]+)\\}\\}", (match Match) -> values[match.Groups[1].Value])
-        }
-
-        internal func OriginalReport(metadata JsonElement) string {
-            var report = "Donor-declared contribution source: " + J.Text(metadata, "source") +
-                ". The coordinator did not observe coding execution. Local verification pass is donor-reported to the coordinator. Owner CI and review must validate this exact commit."
-            let correction = J.Get(metadata, "correction")
-            if correction.ValueKind != JsonValueKind.Undefined {
-                let tools = J.Get(correction, "tools")
-                let editing = J.Items(tools).Count == 0 ? "manual/unknown editing": "donor-reported tools " + J.Write(
-                    tools
-                )
-                let seconds = J.Number(correction, "seconds").ToString()
-                report += " Explicit correction " + J.Text(correction, "uuid") +
-                    ": " +
-                    editing +
-                    ". Original source/tools, model and usage declarations describe the original completed turn only. Correction editing is separate. " +
-                    "Exact-commit local verification is reported by the donor; the coordinator did not observe it. Separate verification budget: " +
-                    seconds +
-                    " seconds."
-            }
-            return report
-        }
-
-        internal func VerificationReport(run Data, record JsonElement) string {
-            let count = Verification.Results(run, record)
-            let recovery = run.Flag(
-                "recovered"
-            ) ? "The original run failed independent verification. Explicit verification-only recovery passed all original checks without new inference. Original total runtime was not recorded.\n\n": ""
-            let imported = V1Continuation.Has(run) ? ContinuationReport(J.Get(run.Element(), "continuation")): ""
-            return recovery +
-                imported +
-                "Generated a patch for the approved issue. Independent owner verification: " +
-                count.ToString() + "/" + count.ToString() +
-                " checks passed.\n\nReview the changes against the issue's acceptance criteria and limitations."
-        }
-
-        internal func LegacyVerificationReport(run Data, record JsonElement, receipt JsonElement) string {
-            let report = VerificationReport(run, record)
-            let correction = J.Get(receipt, "correction")
-            if correction.ValueKind == JsonValueKind.Undefined {
-                return report
-            }
-            let tools = J.Get(correction, "tools")
-            let editing = J.Items(tools).Count == 0 ? "manual/unknown editing (no tools declared)":
-            "donor-reported correction tools: " + J.Write(tools)
-            return "Explicit donor correction " + J.Text(correction, "uuid") +
-                ": " +
-                editing +
-                ". Original model, effort, execution runtime and reported usage cover only the original completed turn; correction edits are not attributed to that model. " +
-                "Tokate observed independent verification locally on exact corrected commit " +
-                J.Text(correction, "head") + ", tree " + J.Text(correction, "tree") +
-                ". Separate verification budget: " +
-                J
-                .Number(correction, "seconds").ToString() + " seconds.\n\n" + report
-        }
-
-        internal func ManagedReport(run Data, record JsonElement) string {
-            let count = Verification.Results(run, record)
-            return PublicSummary.Report(
-                PublicSummary.ForHead(run, run.Text("commit")),
-                "Tokate observed locally: " + count.ToString() + "/" + count.ToString() +
-                    " checks passed on this candidate."
-            ) +
-                (
-                run.Flag("recovered") ?
-                "\n- Recovery: original verification failed; verification-only recovery passed without new inference.": ""
-            ) +
-                (V1Continuation.Has(run) ? "\n\n" + ContinuationReport(J.Get(run.Element(), "continuation")).Trim(): "")
         }
 
         internal func CoordinatedReport(metadata JsonElement) string {
@@ -120,13 +71,14 @@ internal class PrBody {
                     " second verification budget; original declarations cover only the original completed turn." +
                     PublicSummary.Tools(J.Get(correction, "tools"), "Donor-reported correction tools")
             }
-            return report
+            let prior = J.Get(metadata, "predecessor")
+            return report + (prior.ValueKind == JsonValueKind.Undefined ? "": "\n\n" + ContinuationReport(prior).Trim())
         }
 
         internal func ContinuationReport(
             prior JsonElement
-        ) string -> "Fresh v1 attempt seeded from unpublished interrupted attempt " +
-            J.Text(prior, "id") + " under predecessor approval " + J.Text(prior, "approval") +
+        ) string -> "Fresh attempt seeded from unpublished interrupted attempt " +
+            J.Text(prior, "attempt") + " under predecessor approval " + J.Text(prior, "approval") +
             ". Preserved origin state: " +
             J.Text(prior, "state") + "; failure: " + J.Text(prior, "failure_reason") +
             ". Prior donor-reported tool: " +
@@ -135,30 +87,6 @@ internal class PrBody {
             "effort"
         ) +
             ". The predecessor is not retroactively successful. Missing prior usage, reports and verification are not reconstructed. Usage and checks below describe the new attempt; all checks cover the complete final diff from the original approved base.\n\n"
-
-        internal func AmendmentReport(receipt JsonElement) string {
-            let prior = J.Get(receipt, "predecessor")
-            let origin = prior.ValueKind == JsonValueKind.Undefined ? "": ContinuationReport(prior)
-            let amendment = J.Get(receipt, "amendment")
-            let report = Amendment.Summary(
-                J.Text(amendment, "previous"),
-                J.Text(receipt, "head"),
-                J.Number(amendment, "seconds"),
-                J.Get(amendment, "tools"),
-                J.Get(amendment, "summary"),
-                true
-            ) +
-                (origin == "" ? "": "\n\n" + origin.Trim())
-            let repair = J.Get(receipt, "repair")
-            if repair.ValueKind == JsonValueKind.Undefined {
-                return report
-            }
-            if J.Text(repair, "id") == J.Text(amendment, "id") {
-                return report + "\n\n" + Repair.Summary(repair)
-            }
-            return report + "\n\nEarlier repair on " + J.Text(repair, "head") +
-                ": original private state was unavailable. Its independent verification covered that earlier commit only; original logs, usage and verification were not reconstructed."
-        }
 
         internal func Receipt(body string) JsonElement -> RequestData.Parse(ReceiptText(body))
 
@@ -192,13 +120,9 @@ internal class PrBody {
             text +
             "\n<!-- tokate-report:end -->"
 
-        internal func ReportText(body string, legacy string) string {
+        internal func ReportText(body string) string {
             let prefix = "<!-- tokate-report:start -->"
             let suffix = "<!-- tokate-report:end -->"
-            if !body.Contains(prefix) {
-                Unique(body, legacy)
-                return legacy
-            }
             let start = Unique(body, prefix) + prefix.Length
             let end = Unique(body, suffix)
             if end < start {
@@ -207,34 +131,25 @@ internal class PrBody {
             return body.Substring(start, end - start).Trim()
         }
 
-        internal func Owned(body string, legacy string) string -> ReportText(body, legacy) +
-            "\n" +
-            RequestData.Canonical(Receipt(body))
+        internal func Owned(body string) string -> ReportText(body) + "\n" + RequestData.Canonical(Receipt(body))
 
-        internal func ReplaceBody(body string, oldReport string, report string, receipt JsonElement) string {
+        internal func ReplaceBody(body string, report string, receipt JsonElement) string {
             let prefix = "<!-- tokate-report:start -->"
             let suffix = "<!-- tokate-report:end -->"
-            var start int32
-            var length int32
-            if body.Contains(prefix) {
-                start = Unique(body, prefix)
-                let end = Unique(body, suffix)
-                if end <= start {
-                    throw Exception("Malformed Tokate report region")
-                }
-                length = end + suffix.Length - start
-            } else {
-                start = Unique(body, oldReport)
-                length = oldReport.Length
+            let start = Unique(body, prefix)
+            let end = Unique(body, suffix)
+            if end <= start {
+                throw Exception("Malformed Tokate report region")
             }
+            let length = end + suffix.Length - start
             let updated = body.Remove(start, length).Insert(start, Report(report))
-            start = Unique(updated, "<!-- tokate-receipt:")
-            let end = updated.IndexOf(" -->", start, StringComparison.Ordinal)
-            if end < 0 {
+            let receiptStart = Unique(updated, "<!-- tokate-receipt:")
+            let receiptEnd = updated.IndexOf(" -->", receiptStart, StringComparison.Ordinal)
+            if receiptEnd < 0 {
                 throw Exception("Malformed Tokate receipt")
             }
-            return updated.Remove(start, end + 4 - start).Insert(
-                start,
+            return updated.Remove(receiptStart, receiptEnd + 4 - receiptStart).Insert(
+                receiptStart,
                 "<!-- tokate-receipt:" + J.Write(receipt) + " -->"
             )
         }

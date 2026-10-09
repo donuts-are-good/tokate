@@ -63,7 +63,7 @@ main() {
     case "$tokate_action" in install|update|uninstall) ;; *) fail 'Use install, update, or uninstall.' ;; esac
     [ "$#" -le 2 ] || fail 'Too many arguments.'
     tokate_os=$(uname -s)
-    [ "$tokate_os" = Linux ] || fail "Unsupported operating system: $tokate_os. Tokate requires Linux x86_64 with glibc 2.34+; Windows and macOS are not supported."
+    [ "$tokate_os" = Linux ] || fail "Unsupported operating system: $tokate_os. Tokate requires Linux x86_64 with glibc 2.34+ or Alpine musl; Windows and macOS are not supported."
     [ -n "${HOME:-}" ] && [ "${HOME#/}" != "$HOME" ] || fail 'HOME must be an absolute path.'
     tokate_shell=$(printenv SHELL 2>/dev/null) || tokate_shell=
     tokate_bin="$HOME/.local/bin/tokate"
@@ -83,6 +83,15 @@ main() {
         printf 'Tokate removed. Saved runs and shell setup markers were kept.\n'
         return
     fi
+    if [ -r /etc/os-release ]; then
+        while IFS= read -r tokate_release_line; do
+            case "$tokate_release_line" in
+                ID=nixos|ID=\"nixos\"|ID=\'nixos\')
+                    fail 'On NixOS, use nix profile add github:obselate/tokate. Existing installation was kept.'
+                    ;;
+            esac
+        done < /etc/os-release
+    fi
     if [ -z "$tokate_shell" ] && command -v getent >/dev/null 2>&1; then
         if tokate_uid=$(id -u 2>/dev/null) && tokate_account=$(getent passwd "$tokate_uid" 2>/dev/null); then
             tokate_shell=${tokate_account##*:}
@@ -90,18 +99,23 @@ main() {
     fi
     tokate_arch=$(uname -m)
     [ "$tokate_arch" = x86_64 ] || fail "Unsupported architecture: $tokate_arch. Install on Linux x86_64; ARM64 is not supported."
-    tokate_libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail 'Cannot detect glibc. Tokate requires Linux x86_64 with glibc 2.34+; musl is not supported.'
-    case "$tokate_libc" in
-        'glibc '*) ;;
-        *) fail "Unsupported libc: $tokate_libc. Tokate requires glibc 2.34+; musl is not supported." ;;
-    esac
-    tokate_libc=${tokate_libc#glibc }
-    tokate_major=${tokate_libc%%.*}
-    tokate_minor=${tokate_libc#*.}
-    tokate_minor=${tokate_minor%%.*}
-    case "$tokate_major" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
-    case "$tokate_minor" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
-    [ "$tokate_major" -gt 2 ] || { [ "$tokate_major" -eq 2 ] && [ "$tokate_minor" -ge 34 ]; } || fail "Unsupported glibc version: $tokate_libc. Use a system with glibc 2.34 or newer. Existing installation was kept."
+    tokate_runtime=linux-x64
+    if [ -f /lib/ld-musl-x86_64.so.1 ]; then
+        tokate_runtime=linux-musl-x64
+    else
+        tokate_libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail 'Cannot detect glibc or the Alpine x86_64 musl loader.'
+        case "$tokate_libc" in
+            'glibc '*) ;;
+            *) fail "Unsupported libc: $tokate_libc. Tokate requires glibc 2.34+ or Alpine x86_64 musl." ;;
+        esac
+        tokate_libc=${tokate_libc#glibc }
+        tokate_major=${tokate_libc%%.*}
+        tokate_minor=${tokate_libc#*.}
+        tokate_minor=${tokate_minor%%.*}
+        case "$tokate_major" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
+        case "$tokate_minor" in ''|*[!0-9]*) fail "Cannot parse glibc version: $tokate_libc. Tokate requires glibc 2.34+." ;; esac
+        [ "$tokate_major" -gt 2 ] || { [ "$tokate_major" -eq 2 ] && [ "$tokate_minor" -ge 34 ]; } || fail "Unsupported glibc version: $tokate_libc. Use a system with glibc 2.34 or newer. Existing installation was kept."
+    fi
     for tokate_tool in curl tar sha256sum mktemp install; do
         command -v "$tokate_tool" >/dev/null 2>&1 || fail "Install $tokate_tool first."
     done
@@ -112,7 +126,7 @@ main() {
     tokate_release=$(download --output /dev/null --write-out '%{url_effective}' https://github.com/obselate/tokate/releases/latest)
     tokate_tag=${tokate_release##*/}
     printf '%s\n' "$tokate_tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail 'Could not resolve a stable Tokate release.'
-    tokate_bundle="tokate-${tokate_tag#v}-linux-x64"
+    tokate_bundle="tokate-${tokate_tag#v}-$tokate_runtime"
     tokate_url="https://github.com/obselate/tokate/releases/download/$tokate_tag/$tokate_bundle.tar.gz"
     printf 'Downloading Tokate %s...\n' "${tokate_tag#v}"
     download --output "$tokate_tmp/archive.tar.gz" "$tokate_url"

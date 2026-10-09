@@ -7,8 +7,8 @@ import System.Security.Cryptography
 import System.Text
 import System.Text.Json
 
-internal class Data {
-    internal let Fields Dictionary[string, Object?] = Dictionary[string, Object?]()
+internal class Data(fields Dictionary[string, Object?]? = nil) {
+    internal let Fields Dictionary[string, Object?] = fields ?? Dictionary[string, Object?]()
     internal func Text(key string) string -> J.Text(Field(key), key)
 
     internal func Number(key string) int32 -> J.Number(Field(key), key)
@@ -23,7 +23,7 @@ internal class Data {
     internal func Element() JsonElement -> J.Parse(J.Write(Fields))
 
     internal func Save(directory string) {
-        Preparation.ControlPaths(directory)
+        RunStorage.ControlPaths(directory)
         Write(Path.Combine(directory, "run.json"))
     }
 
@@ -33,13 +33,15 @@ internal class Data {
     }
     shared {
         internal func Load(directory string) Data {
-            Preparation.ControlPaths(directory)
+            RunStorage.ControlPaths(directory)
             return Read(Path.Combine(directory, "run.json"))
         }
 
-        internal func Read(path string) Data {
+        internal func Read(path string) Data -> From(J.Parse(File.ReadAllText(path)))
+
+        internal func From(value JsonElement) Data {
             let result = Data()
-            for field in J.Parse(File.ReadAllText(path)).EnumerateObject() {
+            for field in value.EnumerateObject() {
                 result.Fields[field.Name] = field.Value.Clone()
             }
             return result

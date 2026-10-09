@@ -5,7 +5,12 @@ import System.IO
 
 internal class RepositoryFaults {
     shared {
-        internal func Reject(flow NativeFixture, run string, args[]string) {
+        internal func Reject(
+            flow NativeFixture,
+            run string,
+            args[]string,
+            repositoryError string = "Donor access authority"
+        ) {
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
             for fault in[]string{
                 "fork_owner_id",
@@ -47,6 +52,9 @@ internal class RepositoryFaults {
                     }
                     case "repo_full_name" {
                         value = "\"owner/other\""
+                    }
+                    case "repo_id" {
+                        message = repositoryError
                     }
                 }
                 flow.State[fault] = Check.Json(value)

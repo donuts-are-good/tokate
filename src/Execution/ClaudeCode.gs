@@ -181,7 +181,7 @@ internal class ClaudeCode {
                     throw Exception("Claude runtime and profile must be outside the selected checkout.")
                 }
             }
-            let boundary = NativeBoundary.Start(true, "/tmp/tokate-agent", "/tmp/tokate-tools")
+            let boundary = ClaudeBoundary.Start(true, "/tmp/tokate-agent", "/tmp/tokate-tools")
             for entry in EnvironmentControls() {
                 boundary.AddRange([]string{"--setenv", entry.Key, entry.Value})
             }
@@ -198,14 +198,14 @@ internal class ClaudeCode {
                     "/tokate-profile"
                 }
             )
-            NativeBoundary.Repository(boundary, repository)
+            ClaudeBoundary.Repository(boundary, repository)
             boundary.AddRange([]string{"--", "/tokate-runtime/claude"})
             return boundary.ToArray()
         }
 
         private func Native(binary string, profile string, args[]string, budget RuntimeBudget) CommandResult {
             ManagedPolicy()
-            let boundary = NativeBoundary.Start(false, "/tmp/tokate-agent", "/tmp/tokate-tools")
+            let boundary = ClaudeBoundary.Start(false, "/tmp/tokate-agent", "/tmp/tokate-tools")
             for entry in EnvironmentControls() {
                 boundary.AddRange([]string{"--setenv", entry.Key, entry.Value})
             }

@@ -1,0 +1,47 @@
+name: Alpine
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: alpine-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  musl:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Permit user namespaces in the test container
+        run: |
+          sudo tee /etc/apparmor.d/tokate-alpine-tests <<'EOF'
+          abi <abi/4.0>,
+          profile tokate-alpine-tests flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/tokate-alpine-tests
+      - name: Build and test on Alpine as an ordinary user
+        run: |
+          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=tokate-alpine-tests \
+            --security-opt systempaths=unconfined \
+            -v "$PWD:/src" -w /src \
+            mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 \
+            /bin/sh -ec '
+              apk add --no-cache bash clang build-base zlib-dev git github-cli curl coreutils findutils tar util-linux-misc bubblewrap nodejs npm python3
+              adduser -D tester
+              chown -R tester:tester /src
+              su -s /bin/bash tester -c "bash scripts/alpine-ci.sh"
+            '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tokate-linux-musl-x64
+          path: |
+            artifacts/tokate-*-linux-musl-x64.tar.gz
+            artifacts/tokate-*-linux-musl-x64.tar.gz.sha256
+          if-no-files-found: error

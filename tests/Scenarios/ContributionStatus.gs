@@ -1,10 +1,7 @@
 package TokateTests
 
-import Gsharp.Concurrency
 import System
-import System.Diagnostics
 import System.IO
-import System.Text
 import System.Text.Json.Nodes
 
 internal class ContributionStatusChecks {
@@ -50,12 +47,6 @@ internal class ContributionStatusChecks {
             let waiting = Row(Read(test))
             Check.That(Check.Text(waiting["state"]) == "approval_waiting", "Absent approval is ready")
             test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
-            let path = Path.Combine(test.Flow.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(path))
-            policy["approval_scope"] = JsonValue.Create("task")
-            policy["eligibility"] = JsonValue.Create("trusted")
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Trusted status policy")
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
             let needsRequest = Row(Read(test))
             Check.That(
@@ -405,6 +396,257 @@ internal class ContributionStatusChecks {
             )
         }
 
+        private func Close(test CoordinationFixture, merged bool = true, deleted bool = false) {
+            test.Flow.Reload()
+            let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+            pull["state"] = JsonValue.Create("closed")
+            pull["merged"] = JsonValue.Create(merged)
+            pull["merged_at"] = merged ? JsonValue.Create("2026-10-01T00:00:00Z"): nil
+            test.Flow.Save()
+            if deleted {
+                test.Flow.Git(
+                    "-C",
+                    Path.Combine(test.Flow.Bin, "fork"),
+                    "update-ref",
+                    "-d",
+                    "refs/heads/" + Check.Text(pull["head"]?["ref"])
+                )
+            }
+        }
+
+        private func Historical(binary string) {
+            using let published = PublishedContribution.Create(binary, external: true)
+            let test = published.Coordination
+            for merged in[]bool{true, false} {
+                for deleted in[]bool{false, true} {
+                    published.Restore()
+                    Close(test, merged, deleted)
+                    let result = Read(test, index: true)
+                    let row = Row(result)
+                    let lifecycle = merged ? "merged": "closed_unmerged"
+                    Check.That(
+                        Check.Text(row["state"]) == lifecycle + "_contribution",
+                        "Closed contribution lifecycle omitted"
+                    )
+                    Check.That(
+                        Check.Text(row["drafts"]?[0]?["binding"]) == "historical" && Check.Text(
+                            row["drafts"]?[0]?["lifecycle"]
+                        ) == lifecycle,
+                        "History required a live donor branch"
+                    )
+                    Check.Contains(Check.Text(row["drafts"]?[0]?["receipt"]), "current readiness is not established")
+                    Check.Contains(Check.Text(row["next"]?["action"]), "remaining open issue")
+                    Check.That(
+                        Check.Text(row["next"]?["command"]?[1]) == "issue",
+                        "History suggested completion or PR review"
+                    )
+                    for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                        let path = Check.Text(call["path"])
+                        Check.That(
+                            !path.StartsWith("repos/donor/project/git/ref/heads/") && !path.Contains("/check-runs?") &&
+                                !path.Contains("/reviews?"),
+                            "History used current branch or readiness authority"
+                        )
+                    }
+                    let human = test.Flow.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--plain"})
+                    Check.Contains(human.Output, "State: " + (lifecycle + "_contribution").Replace('_', ' '))
+                    Check.Contains(human.Output, "Contribution: " + lifecycle.Replace('_', ' '))
+                    Check.Contains(human.Output, Check.Text(row["next"]?["action"]))
+                    let owner = Row(Read(test, owner: true))
+                    Check.That(
+                        Check.Text(owner["state"]) == Check.Text(row["state"]) && owner["next"]?.ToJsonString() == row[
+                            "next"
+                        ]?.ToJsonString(),
+                        "Owner and donor history or next actions differ"
+                    )
+                }
+            }
+            for stale in[]string{"issue", "revoked", "expired"} {
+                published.Restore()
+                Close(test, deleted: true)
+                if stale == "issue" {
+                    test.Flow.Reload()
+                    (test.Flow.State["issue"] ?? throw Exception("Missing issue"))["title"] = JsonValue.Create(
+                        "Remaining work changed"
+                    )
+                    test.Flow.Save()
+                } else if stale == "revoked" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    value["revoked"] = JsonValue.Create(true)
+                    test.RewriteState(value)
+                } else {
+                    test.Expire()
+                }
+                let row = Row(Read(test))
+                Check.That(
+                    Check.Text(row["state"]) == "merged_contribution",
+                    "Stale execution authority hid historical merge"
+                )
+                Check.That(
+                    stale == "expired" || Check.Text(row["approval_status"]) == "stale",
+                    "History revived stale approval"
+                )
+                Check.That(
+                    Check.Text(row["next"]?["command"]?[1]) == "issue",
+                    "History granted work or publication authority"
+                )
+            }
+            for mismatch in[]string{
+                "repository",
+                "repository_id",
+                "pr",
+                "donor",
+                "actor",
+                "head",
+                "fork",
+                "fork_id",
+                "branch",
+                "receipt",
+                "recorded"
+            } {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let head = pull["head"] ?? throw Exception("Missing head")
+                let upstream = pull["base"]?["repo"] ?? throw Exception("Missing upstream")
+                if mismatch == "repository" {
+                    upstream["full_name"] = JsonValue.Create("other/project")
+                } else if mismatch == "repository_id" {
+                    upstream["id"] = JsonValue.Create(3)
+                } else if mismatch == "pr" {
+                    let response = pull.DeepClone()
+                    response["number"] = JsonValue.Create(11)
+                    test.Flow.State["pull_response_override"] = response
+                } else if mismatch == "donor" || mismatch == "actor" {
+                    let owner = head["repo"]?["owner"] ?? throw Exception("Missing donor")
+                    owner[mismatch == "donor" ? "login": "id"] = mismatch == "donor" ? JsonValue.Create(
+                        "other"
+                    ): JsonValue.Create(456)
+                } else if mismatch == "head" || mismatch == "branch" {
+                    head[mismatch == "head" ? "sha": "ref"] = JsonValue.Create(
+                        mismatch == "head" ? String('a', 40): "other"
+                    )
+                } else if mismatch == "fork" || mismatch == "fork_id" {
+                    (head["repo"] ?? throw Exception("Missing fork"))[
+                        mismatch == "fork" ? "full_name": "id"
+                    ] = mismatch == "fork" ? JsonValue.Create("donor/other"): JsonValue.Create(3)
+                } else if mismatch == "receipt" {
+                    pull["body"] = JsonValue.Create(
+                        Check.Text(pull["body"]).Replace("\"donor\":\"donor\"", "\"donor\":\"other\"")
+                    )
+                }
+                test.Flow.Save()
+                if mismatch == "recorded" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    (value["contribution"]?["metadata"] ?? throw Exception("Missing metadata"))[
+                        "head"
+                    ] = JsonValue.Create(String('a', 40))
+                    test.RewriteState(value)
+                }
+                let row = Row(
+                    Read(test, mismatch == "repository" || mismatch == "repository_id" || mismatch == "pr" ? 1: 0)
+                )
+                Check.That(
+                    Check.Text(row["state"]) == "binding_mismatch" || Check.Text(row["state"]) == "unavailable",
+                    "Mismatched history was accepted: " + mismatch
+                )
+                Check.That(
+                    row["drafts"]?.AsArray().Count == 0 || Check.Text(row["drafts"]?[0]?["lifecycle"]) != "merged",
+                    "Mismatched history displayed a merge"
+                )
+            }
+            for missing in[]string{"merged", "fork", "remote_fork", "receipt", "ambiguous_receipt", "contribution"} {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                if missing == "merged" {
+                    pull.AsObject().Remove("merged")
+                } else if missing == "fork" {
+                    (pull["head"] ?? throw Exception("Missing head"))["repo"] = nil
+                } else if missing == "remote_fork" {
+                    test.Flow.State["missing_fork"] = JsonValue.Create(true)
+                } else if missing == "receipt" || missing == "ambiguous_receipt" {
+                    pull["body"] = JsonValue.Create(
+                        missing == "receipt" ? "Missing receipt": Check.Text(pull["body"]) + "\n" + Check.Text(
+                            pull["body"]
+                        )
+                    )
+                }
+                test.Flow.Save()
+                if missing == "contribution" {
+                    let value = test.State()["state"] ?? throw Exception("Missing state")
+                    value["contribution"] = nil
+                    test.RewriteState(value)
+                }
+                let row = Row(Read(test, missing == "merged" ? 0: 1))
+                Check.That(
+                    Check.Text(row["state"]) == "unknown" || Check.Text(row["state"]) == "unavailable",
+                    "Missing history became a known lifecycle: " + missing
+                )
+            }
+            for changed in[]string{"merged", "state", "head", "base", "body"} {
+                published.Restore()
+                Close(test, deleted: true)
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let patch = JsonObject()
+                if changed == "merged" {
+                    patch["merged"] = JsonValue.Create(false)
+                    patch["merged_at"] = nil
+                } else if changed == "head" || changed == "base" {
+                    let part = pull[changed]?.DeepClone() ?? throw Exception("Missing PR identity")
+                    part[changed == "head" ? "sha": "ref"] = JsonValue.Create(
+                        changed == "head" ? String('a', 40): "release"
+                    )
+                    patch[changed] = part
+                } else {
+                    patch[changed] = JsonValue.Create(changed == "state" ? "open": "Changed receipt")
+                }
+                test.Flow.State["pull_read_effect"] = patch
+                test.Flow.Save()
+                let row = Row(Read(test))
+                Check.That(
+                    Check.Text(row["state"]) == "stale_remote_data" && Check.Text(
+                        row["drafts"]?[0]?["lifecycle"]
+                    ) == "unknown",
+                    "Changed remote history was presented as current"
+                )
+                Check.That(
+                    Check.Text(row["next"]?["command"]?[1]) == "status",
+                    "Changed history did not request a refresh"
+                )
+            }
+            for mismatch in[]string{"deleted", "moved"} {
+                published.Restore()
+                test.Flow.Reload()
+                let pull = test.Flow.State["pulls"]?[0] ?? throw Exception("Missing PR")
+                let branch = "refs/heads/" + Check.Text(pull["head"]?["ref"])
+                if mismatch == "deleted" {
+                    test.Flow.Git("-C", Path.Combine(test.Flow.Bin, "fork"), "update-ref", "-d", branch)
+                } else {
+                    (pull["head"] ?? throw Exception("Missing head"))["sha"] = JsonValue.Create(String('a', 40))
+                    test.Flow.Save()
+                }
+                let row = Row(Read(test))
+                Check.That(Check.Text(row["state"]) == "binding_mismatch", "Open PR bypassed live exact-head binding")
+            }
+            published.Restore()
+            test.Flow.Reload()
+            (test.Flow.State["issue"] ?? throw Exception("Missing issue"))["title"] = JsonValue.Create(
+                "Open work changed"
+            )
+            test.Flow.Save()
+            let staleOpen = Row(Read(test))
+            Check.That(
+                Check.Text(staleOpen["approval_status"]) == "stale" && Check.Text(
+                    staleOpen["state"]
+                ) == "approval_waiting",
+                "Open PR revived stale approval"
+            )
+        }
+
         private func Discovery(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -454,7 +696,7 @@ internal class ContributionStatusChecks {
             )
         }
 
-        private func LegacyAndTerminal(binary string) {
+        private func TerminalOutput(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
             let structured = Read(test)
@@ -462,7 +704,7 @@ internal class ContributionStatusChecks {
             let raw = Check.Json(legacy.Output)
             Check.That(raw.ToJsonString() == structured["data"]?.ToJsonString(), "Terminal and structured facts differ")
             test.Flow.Temp.Env["TERM"] = "xterm-256color"
-            let narrow = TerminalOutput.Pty(
+            let narrow = TestTerminal.Pty(
                 binary,
                 []string{"status", "--repo", "owner/project", "--issue", "1", "--plain"},
                 test.Flow.Temp,
@@ -473,68 +715,11 @@ internal class ContributionStatusChecks {
             Check.Contains(narrow.Output, "State: reservation needed")
             Check.Contains(narrow.Output, "Role: donor")
             Check.That(!narrow.Output.Contains('\u001b'), "Narrow plain status contains escapes")
-            using let v1 = NativeFixture(binary)
-            v1.Initialize()
-            v1.Approve()
-            let status = Check.Envelope(
-                v1.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--json"}),
-                "status",
-                "ok"
-            )
-            Check.That(Check.Text(Row(status)["approval_status"]) == "current", "Legacy remote approval unsupported")
-            v1.Call([]string{"access", "--repo", "owner/project", "--operation", "request", "--issue", "1"})
-            let requested = Check.Envelope(
-                v1.Call([]string{"status", "--repo", "owner/project", "--issue", "1", "--json"}, owner: true),
-                "status",
-                "ok"
-            )
-            Check.That(
-                Check.Text(requested["data"]?["next"]?["command"]?[5]) == "init",
-                "Absent access authority produced an unusable list command"
-            )
-        }
-
-        private func Frames(reader StreamReader, frames Chan[string], completed Chan[Exception?]) {
-            var failure Exception? = nil
-            try {
-                let prompt = "tokate> "
-                let text = StringBuilder()
-                var matched int32
-                while true {
-                    let next = reader.Read()
-                    if next < 0 {
-                        break
-                    }
-                    let value = Convert.ToChar(next)
-                    text.Append(value)
-                    matched = value == prompt[matched]? matched + 1: (value == prompt[0]? 1: 0)
-                    if matched == prompt.Length {
-                        frames <- text.ToString()
-                        text.Clear()
-                        matched = 0
-                    }
-                }
-            } catch (error Exception) {
-                failure = error
-            }
-            completed <- failure
-        }
-
-        private func Frame(frames Chan[string]) string {
-            select {
-                case let value = <- frames {
-                    return value
-                }
-                case <- after(TimeSpan.FromSeconds(30)) {
-                    throw Exception("Interactive status did not reach its next prompt")
-                }
-            }
         }
 
         private func RepeatedReads(binary string) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
-            test.Flow.Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
             test.Flow.Reload()
             let title = Check.Text(test.Flow.State["issue"]?["title"])
             let issue = test.Flow.State["issue"] ?? throw Exception("Missing issue")
@@ -555,94 +740,47 @@ internal class ContributionStatusChecks {
             test.Flow.Save()
             test.Flow.ResetTraffic()
             test.Flow.Temp.Env["TERM"] = "dumb"
-            let start = ProcessStartInfo("/usr/bin/script")
-            start.UseShellExecute = false
-            start.RedirectStandardInput = true
-            start.RedirectStandardOutput = true
-            start.RedirectStandardError = true
-            start.WorkingDirectory = test.Flow.Temp.Root
-            start.Environment.Clear()
-            for entry in test.Flow.Temp.Env {
-                start.Environment[entry.Key] = entry.Value
+            let args = []string{"status", "--repo", "owner/project", "--plain"}
+            let truncated = Check.Success(TestTerminal.Pty(binary, args, test.Flow.Temp, 120))
+            TestTerminal.Save("status-truncated", truncated)
+            Check.Contains(truncated, "Bounded snapshot: some data was omitted.")
+            Check.Contains(truncated, "Review donor access and grant eligibility if appropriate.")
+            Check.Contains(truncated, "Command: tokate access --repo owner/project --operation list --issue 1")
+            test.Flow.Reload()
+            let current = test.Flow.State["issue"] ?? throw Exception("Missing issue")
+            current["title"] = JsonValue.Create(title)
+            test.Flow.State["fault_path"] = JsonValue.Create("user")
+            test.Flow.State["faults"] = Check.Json("[{\"status\":403}]")
+            test.Flow.State["fault_index"] = JsonValue.Create(0)
+            test.Flow.Save()
+            let failure = TestTerminal.Pty(binary, args, test.Flow.Temp, 120)
+            Check.That(failure.Code == 1, "Failed status read did not report failure")
+            let failed = failure.Output
+            TestTerminal.Save("status-failed", failed)
+            Check.Contains(failed, "unavailable; partial facts only")
+            Check.Contains(failed, "GitHub read failed (HTTP 403).")
+            Check.Contains(failed, "Issue: #1 " + title)
+            Check.That(!failed.Contains("Bounded snapshot:"), "Failed status read retained earlier truncation")
+            test.Flow.Reload()
+            test.Flow.State["fault_path"] = nil
+            test.Flow.State["comments"] = Check.Json("{}")
+            test.Flow.Save()
+            let healthy = Check.Success(TestTerminal.Pty(binary, args, test.Flow.Temp, 120))
+            TestTerminal.Save("status-healthy", healthy)
+            Check.Contains(healthy, "State: reservation needed")
+            Check.Contains(healthy, "Role: donor")
+            Check.That(
+                !healthy.Contains("unavailable") && !healthy.Contains("Bounded snapshot:") && !healthy.Contains(
+                    "Review donor access"
+                ) &&
+                    !healthy.Contains("Oversized title"),
+                "Healthy status read retained failed or truncated facts or actions"
+            )
+            test.Flow.Reload()
+            for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
+                Check.That(Check.Text(call["method"]) == "GET", "Repeated status reads wrote to GitHub")
             }
-            for arg in[]string{
-                "-q",
-                "-e",
-                "-c",
-                "stty cols 120 rows 24; exec '" + binary.Replace("'", "'\"'\"'") + "'",
-                "/dev/null"
-            } {
-                start.ArgumentList.Add(arg)
-            }
-            using let process = Process.Start(start) ?? throw Exception("Cannot start interactive status")
-            let frames = Chan[string](4)
-            let completed = Chan[Exception?](1)
-            let stderr = Chan[string](1)
-            go Frames(process.StandardOutput, frames, completed)
-            go TestProcess.Read(process.StandardError, stderr)
-            var readFailure Exception? = nil
-            var diagnostics = ""
-            try {
-                process.StandardInput.WriteLine("owner/project")
-                process.StandardInput.Flush()
-                let truncated = Frame(frames)
-                TerminalOutput.Save("interactive-status-truncated", truncated)
-                Check.Contains(truncated, "Bounded snapshot: some data was omitted.")
-                Check.Contains(truncated, "Review donor access and grant eligibility if appropriate.")
-                Check.Contains(truncated, "Command: tokate access --repo owner/project --operation list --issue 1")
-                test.Flow.Reload()
-                let current = test.Flow.State["issue"] ?? throw Exception("Missing issue")
-                current["title"] = JsonValue.Create(title)
-                test.Flow.State["fault_path"] = JsonValue.Create("user")
-                test.Flow.State["faults"] = Check.Json("[{\"status\":403}]")
-                test.Flow.State["fault_index"] = JsonValue.Create(0)
-                test.Flow.Save()
-                process.StandardInput.WriteLine("refresh")
-                process.StandardInput.Flush()
-                let failed = Frame(frames)
-                TerminalOutput.Save("interactive-status-failed", failed)
-                Check.Contains(failed, "unavailable; partial facts only")
-                Check.Contains(failed, "GitHub read failed (HTTP 403).")
-                Check.Contains(failed, "Issue: #1 " + title)
-                Check.That(!failed.Contains("Bounded snapshot:"), "Failed refresh retained earlier truncation")
-                test.Flow.Reload()
-                test.Flow.State["fault_path"] = nil
-                test.Flow.State["comments"] = Check.Json("{}")
-                test.Flow.Save()
-                process.StandardInput.WriteLine("refresh")
-                process.StandardInput.Flush()
-                let healthy = Frame(frames)
-                TerminalOutput.Save("interactive-status-healthy", healthy)
-                Check.Contains(healthy, "State: reservation needed")
-                Check.Contains(healthy, "Role: donor")
-                Check.That(
-                    !healthy.Contains("unavailable") && !healthy.Contains("Bounded snapshot:") && !healthy.Contains(
-                        "Review donor access"
-                    ) &&
-                        !healthy.Contains("Oversized title"),
-                    "Healthy refresh retained failed or truncated status facts or actions"
-                )
-                process.StandardInput.WriteLine("exit")
-                process.StandardInput.Flush()
-                process.StandardInput.Close()
-                Check.That(process.WaitForExit(10000), "Interactive status did not exit")
-                test.Flow.Reload()
-                for call in test.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                    Check.That(Check.Text(call["method"]) == "GET", "Interactive status wrote to GitHub")
-                }
-                test.Flow.NoInference()
-            } finally {
-                if !process.HasExited {
-                    process.Kill(true)
-                    process.WaitForExit()
-                }
-                readFailure = <-completed
-                diagnostics = <-stderr
-            }
-            if let failure = readFailure {
-                throw failure
-            }
-            Check.That(process.ExitCode == 0, diagnostics)
+            test.Flow.NoInference()
         }
 
         internal func All(binary string) {
@@ -650,11 +788,12 @@ internal class ContributionStatusChecks {
             Leases(binary)
             Drafts(binary)
             Published(binary)
+            Historical(binary)
             Discovery(binary)
-            LegacyAndTerminal(binary)
+            TerminalOutput(binary)
             RepeatedReads(binary)
             Console.WriteLine(
-                "PASS remote status access, discovery, leases, drafts, checks, stale authority, API failures, repeated reads, roles, narrow terminals and JSON"
+                "PASS remote status access, discovery, leases, drafts, checks, historical lifecycle, stale authority, API failures, repeated status invocations, roles, narrow terminals and JSON"
             )
         }
     }

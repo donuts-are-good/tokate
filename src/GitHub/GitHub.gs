@@ -63,15 +63,6 @@ internal class GitHub {
             return false
         }
 
-        internal func Assigned(issue JsonElement, donor string) bool {
-            let people = J.Items(J.Get(issue, "assignees"))
-            return people.Count == 1 && String.Equals(
-                J.Text(people[0], "login"),
-                donor,
-                StringComparison.OrdinalIgnoreCase
-            )
-        }
-
         internal func Fingerprint(issue JsonElement) string -> Data.Hash(
             J.Write(map[string, Object?]{"title": J.Text(issue, "title"), "body": J.Text(issue, "body")})
         )

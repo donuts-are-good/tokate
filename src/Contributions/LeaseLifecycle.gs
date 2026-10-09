@@ -24,9 +24,6 @@ internal class LeaseLifecycle {
             ) == "released" {
                 throw CliFailure("stale_approval", "Lease expired, released or belongs to another numeric donor")
             }
-            if !Supported(value) {
-                return
-            }
             let identity = J.Get(value, "identity")
             var id Guid
             var lease Guid
@@ -63,7 +60,7 @@ internal class LeaseLifecycle {
         }
 
         internal func Fence(state CoordinationState, attempt string) {
-            if Supported(state.Value()) && attempt != J.Text(J.Get(state.Value(), "reservation"), "attempt") {
+            if attempt != J.Text(J.Get(state.Value(), "reservation"), "attempt") {
                 throw CliFailure("stale_approval", "Publication attempt fence was invalidated or replaced")
             }
         }

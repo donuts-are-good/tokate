@@ -2,10 +2,14 @@ package TokateTests
 
 import System
 import System.IO
+import System.Runtime.InteropServices
 import System.Text.Json.Nodes
 
 internal class ReleaseTools {
     shared {
+        internal func Runtime() string -> RuntimeInformation.RuntimeIdentifier.StartsWith("linux-musl") ?
+        "linux-musl-x64": "linux-x64"
+
         internal func ShellFixture(name string, args[]string, root string) int32 {
             if name == "id" {
                 Check.That(args.Length == 1 && args[0] == "-u", "Unexpected account identity lookup")
@@ -70,13 +74,15 @@ internal class ReleaseTools {
             let archive = Path.Combine(root, "release.tar.gz")
             if url.EndsWith(".sha256") {
                 let hash = Check.Text(state["mode"]) == "checksum-fail" ? String('0', 64): Check.Hash(archive)
-                File.WriteAllText(output, hash + "  tokate-" + tag.Substring(1) + "-linux-x64.tar.gz\n")
+                File.WriteAllText(output, hash + "  tokate-" + tag.Substring(1) + "-" + Runtime() + ".tar.gz\n")
             } else {
                 Check.That(
                     url == "https://github.com/obselate/tokate/releases/download/" + tag + "/tokate-" + tag.Substring(
                         1
                     ) +
-                        "-linux-x64.tar.gz",
+                        "-" +
+                        Runtime() +
+                        ".tar.gz",
                     "Unexpected release URL"
                 )
                 File.Copy(archive, output, true)

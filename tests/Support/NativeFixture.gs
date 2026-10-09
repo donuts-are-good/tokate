@@ -9,7 +9,6 @@ import System.Globalization
 import System.IO
 import System.Net
 import System.Net.Sockets
-import System.Reflection
 import System.Text.Json.Nodes
 
 internal open class NativeFixture : IDisposable {
@@ -48,25 +47,12 @@ internal open class NativeFixture : IDisposable {
         Save()
     }
 
-    shared {
-        internal func Template(name string) string {
-            using let stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(
-                "TokateTests.templates." + name
-            )
-            if stream == nil {
-                throw Exception("Missing fixture template")
-            }
-            using let reader = StreamReader(stream)
-            return reader.ReadToEnd()
-        }
-    }
-
-    internal func Initialize() {
+    internal func Initialize(access bool = true) {
         Git("init", "-b", "main", Upstream)
         Git("-C", Upstream, "config", "maintenance.autoDetach", "false")
         Directory.CreateDirectory(Path.Combine(Upstream, ".github"))
-        File.WriteAllText(Path.Combine(Upstream, ".github/tokate.json"), Template("tokate.json"))
-        File.WriteAllText(Path.Combine(Upstream, ".github/tokate-pr.md"), Template("tokate-pr.md"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate.json"), TestResources.Template("tokate.json"))
+        File.WriteAllText(Path.Combine(Upstream, ".github/tokate-pr.md"), TestResources.Template("tokate-pr.md"))
         let path = Path.Combine(Upstream, ".github/tokate.json")
         let policy = Check.Json(File.ReadAllText(path))
         Check.That(Check.Text(policy["max_seconds"]) == "3600", "New policy budget must be 3600 seconds")
@@ -75,6 +61,9 @@ internal open class NativeFixture : IDisposable {
         Commit("Initial")
         Git("clone", "--bare", Upstream, Path.Combine(Bin, "fork"))
         Git("-C", Path.Combine(Bin, "fork"), "config", "maintenance.autoDetach", "false")
+        if access {
+            OwnerAccess()
+        }
     }
 
     internal func ReleaseReady(hosted bool = true) {
@@ -124,6 +113,12 @@ internal open class NativeFixture : IDisposable {
         return Check.Success(TestProcess.Run("/usr/bin/git", args, env))
     }
 
+    internal func DonorGit(checkout string, args ...string) string {
+        let command = List[string]{"-C", checkout, "-c", "user.name=Donor", "-c", "user.email=donor@example.test"}
+        command.AddRange(args)
+        return Git(command.ToArray())
+    }
+
     internal func Commit(message string) {
         Git("-C", Upstream, "add", ".")
         Git("-C", Upstream, "-c", "user.name=Fixture", "-c", "user.email=test@example.test", "commit", "-m", message)
@@ -147,8 +142,109 @@ internal open class NativeFixture : IDisposable {
         return result
     }
 
+    internal func OwnerAccess() {
+        if Git("-C", Upstream, "for-each-ref", "--format=%(refname)", "refs/heads/tokate/access") != "" {
+            return
+        }
+        Call([]string{"access", "--repo", "owner/project", "--operation", "init"}, owner: true)
+        for donor in[]string{"donor", "owner"} {
+            Call([]string{"access", "--repo", "owner/project", "--operation", "trust", "--donor", donor}, owner: true)
+        }
+    }
+
+    private func Acquiring(args[]string, env Dictionary[string, string], output Chan[Result]) {
+        output <- TestProcess.Run(Binary, args, env)
+    }
+
+    internal func Acquire(args[]string, code int32 = 0, owner bool = false, traffic bool = false) Result {
+        let env = Dictionary[string, string](Temp.Env)
+        env["GH_TOKEN"] = owner ? "fixture-owner": "fixture-donor"
+        File.WriteAllText(Path.Combine(Temp.Env["GH_CONFIG_DIR"], "identity"), owner ? "owner": "donor")
+        env["GITHUB_EVENT_NAME"] = "issue_comment"
+        let all = List[string](args)
+        if traffic {
+            all.Add("--traffic")
+        }
+        Reload()
+        let before = State["request_comments"]?.AsArray().Count ?? 0
+        let output = Chan[Result](1)
+        go Acquiring(all.ToArray(), env, output)
+        let deadline = DateTime.UtcNow.AddSeconds(30)
+        while true {
+            Reload()
+            let comments = State["request_comments"]?.AsArray()
+            if comments != nil && comments.Count > before {
+                let comment = comments[before] ?? throw Exception("Missing claim comment")
+                let path = Path.Combine(Temp.Root, "claim-event.json")
+                File.WriteAllText(
+                    path,
+                    Check.Map(
+                        "action",
+                        "created",
+                        "repository",
+                        Check.Map("full_name", "owner/project", "id", 1),
+                        "issue",
+                        Check.Map("number", 1),
+                        "comment",
+                        comment.DeepClone()
+                    )
+                        .ToJsonString()
+                )
+                Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
+                Call([]string{"coordinate", "--repo", "owner/project", "--event", path}, owner: true)
+                break
+            }
+            select {
+                case let result = <- output {
+                    Check.That(result.Code == code, result.Output + result.Error)
+                    return result
+                }
+                case <- after(TimeSpan.FromMilliseconds(20)) { }
+            }
+            Check.That(DateTime.UtcNow < deadline, "Claim did not reach coordinator")
+        }
+        let result = <-output
+        Check.That(result.Code == code, result.Output + result.Error)
+        return result
+    }
+
+    internal func Body() string {
+        Reload()
+        return Check.Text(State["pulls"]?[0]?["body"])
+    }
+
+    internal func Publish(run string) {
+        Call([]string{"submit", "--run", run})
+        CoordinatePosted()
+        Call([]string{"submit", "--run", run})
+    }
+
+    internal func CoordinatePosted() {
+        Reload()
+        let comments = State["request_comments"]?.AsArray() ?? throw Exception("Missing request")
+        let comment = comments[comments.Count - 1] ?? throw Exception("Missing request comment")
+        let path = Path.Combine(Temp.Root, "publication-event.json")
+        File.WriteAllText(
+            path,
+            Check.Map(
+                "action",
+                "created",
+                "repository",
+                Check.Map("full_name", "owner/project", "id", 1),
+                "issue",
+                Check.Map("number", 1),
+                "comment",
+                comment.DeepClone()
+            )
+                .ToJsonString()
+        )
+        Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
+        Call([]string{"coordinate", "--repo", "owner/project", "--event", path}, owner: true)
+    }
+
     internal func Approve(baseBranch string = "") {
-        let args = List[string]{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"}
+        OwnerAccess()
+        let args = List[string]{"approve", "--repo", "owner/project", "--issue", "1"}
         if baseBranch != "" {
             args.AddRange([]string{"--base-branch", baseBranch})
         }
@@ -205,7 +301,7 @@ internal open class NativeFixture : IDisposable {
         effort string = "high",
         reserve string = ""
     ) string {
-        let result = Call(ClaimArgs(seconds, model, effort, reserve, network), code)
+        let result = Acquire(ClaimArgs(seconds, model, effort, reserve, network), code)
         let index = result.Output.LastIndexOf("Run: ")
         return index < 0 ? "": result.Output.Substring(index + 5).Trim()
     }
@@ -281,6 +377,56 @@ internal open class NativeFixture : IDisposable {
             Commit("Owner selects model policy")
         }
         Git("-C", Path.Combine(Bin, "fork"), "fetch", Upstream, "main")
+    }
+
+    internal func StartTreeTraffic() {
+        ResetTraffic()
+        File.WriteAllText(Path.Combine(Bin, "local-tree-heads.txt"), "")
+    }
+
+    internal func TreeTraffic(previous string, grants int32, later bool, local bool) {
+        Reload()
+        let heads = File.ReadAllLines(Path.Combine(Bin, "local-tree-heads.txt"))
+        let previousTree = Git("-C", Path.Combine(Bin, "fork"), "rev-parse", previous + "^{tree}")
+        var localPasses int32
+        for head in heads {
+            if head == previous {
+                localPasses++
+            }
+        }
+        var remotePasses int32
+        var upstreamTrees int32
+        var forkTrees int32
+        for call in State["api_calls"]?.AsArray() ?? JsonArray() {
+            let path = Check.Text(call["path"])
+            if !path.Contains("/git/trees/") || !path.EndsWith("?recursive=1", StringComparison.Ordinal) {
+                continue
+            }
+            if path.StartsWith("repos/owner/project/", StringComparison.Ordinal) {
+                upstreamTrees++
+            } else {
+                forkTrees++
+            }
+            if path == "repos/donor/project/git/trees/" + previousTree + "?recursive=1" {
+                remotePasses++
+            }
+        }
+        let candidateTrees = 2 * grants + (later ? 1: 0)
+        if local {
+            Check.That(localPasses > 0, "Missing local synchronization pass")
+            Check.That(heads.Length == localPasses * candidateTrees, "Repeated local tree materialization")
+        } else {
+            Check.That(heads.Length == 0 && remotePasses == 1, "Missing isolated remote synchronization pass")
+            Check.That(forkTrees == candidateTrees, "Repeated remote candidate tree materialization")
+            Check.That(upstreamTrees == grants + 1, "Repeated repository baseline tree materialization")
+        }
+        Console.WriteLine(
+            "Tree traffic: grants=" + grants.ToString() + " later=" + later.ToString() +
+                " local_passes=" +
+                localPasses.ToString() + " local_trees=" + heads.Length.ToString() +
+                " upstream_trees=" +
+                upstreamTrees.ToString() + " fork_trees=" + forkTrees.ToString()
+        )
     }
 
     internal func ResetTraffic() {
@@ -363,6 +509,7 @@ internal open class NativeFixture : IDisposable {
 
     internal func ETags(mode string) {
         Reload()
+        State["etag_path"] = JsonValue.Create("repos/owner/project/issues/1")
         State["etag_initial_prefix"] = JsonValue.Create(mode == "weak" || mode == "weak-to-strong" ? "W/": "")
         State["etag_returned_prefix"] = JsonValue.Create(mode == "weak" || mode == "strong-to-weak" ? "W/": "")
         State["etag_initial"] = nil
@@ -371,12 +518,12 @@ internal open class NativeFixture : IDisposable {
         Save()
     }
 
-    internal func ApproveSelf() -> Call(
-        []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "owner"},
-        owner: true
-    )
+    internal func ApproveSelf() {
+        OwnerAccess()
+        Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
+    }
 
-    internal func SameRepositoryClaim(code int32 = 0) Result -> Call(
+    internal func SameRepositoryClaim(code int32 = 0) Result -> Acquire(
         ClaimArgs(fork: "owner/project"),
         code,
         owner: true,

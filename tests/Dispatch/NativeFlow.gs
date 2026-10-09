@@ -24,60 +24,53 @@ internal partial class NativeFlow : NativeFixture {
 
         internal func All(binary string, selected string = "", parallel bool = false) {
             var matched bool
-            for name in[]string{
-                "HelpAndArguments",
-                "MissingTools",
-                "DoctorToolchain",
-                "OwnerWithoutCodex",
-                "StructuredContract",
-                "StructuredFailures",
-                "CrossAccountFlow",
-                "OwnerPolicy",
-                "ModelPolicyModes",
-                "ModelPolicyMalformed",
-                "FailedReassignment",
-                "MissingFork",
-                "VerificationReserve",
-                "DefaultBudget",
-                "HigherOwnerBudget",
-                "LowerOwnerBudget",
-                "IssueEdit",
-                "Revocation",
-                "Timeout",
-                "ManagedCancellation",
-                "Reapproval",
-                "PolicyEdit",
-                "WorkflowEdit",
-                "ProtectedEntrypoint",
-                "ProtectedRecovery",
-                "ProtectedPublication",
-                "EmptyProtectedPaths",
-                "ReceiptEvidence",
-                "GitEvidence",
-                "RepositoryConfig",
-                "NoPatch",
-                "TemporaryIsolation",
-                "TemporaryHomeRejected",
-                "OutputBoundary",
-                "ToolAuthentication",
-                "ConditionalClaim",
-                "ConditionalValidators",
-                "ConditionalApproval",
-                "ReadTraffic",
-                "MutationTraffic",
-                "PublicationFailures",
-                "ExistingPublication",
-                "CanonicalVerification",
-                "CanonicalPublication",
-                "RepositoryIdentity",
-                "PublicationRevocation",
-                "BackgroundCleanup",
-                "UnsupportedSandbox",
-                "DisposableVerification",
-                "VerificationBoundary",
-                "VerificationNetwork",
-                "VerificationRecovery"
+            for test in[]TestCase[NativeFlow]{
+                TestCase[NativeFlow]("MissingTools", async (value NativeFlow) -> value.MissingTools()),
+                TestCase[NativeFlow]("DoctorToolchain", async (value NativeFlow) -> value.DoctorToolchain()),
+                TestCase[NativeFlow]("OwnerWithoutCodex", async (value NativeFlow) -> value.OwnerWithoutCodex()),
+                TestCase[NativeFlow]("StructuredContract", async (value NativeFlow) -> value.StructuredContract()),
+                TestCase[NativeFlow]("StructuredFailures", async (value NativeFlow) -> value.StructuredFailures()),
+                TestCase[NativeFlow]("CrossAccountFlow", async (value NativeFlow) -> value.CrossAccountFlow()),
+                TestCase[NativeFlow]("ModelPolicyMalformed", async (value NativeFlow) -> value.ModelPolicyMalformed()),
+                TestCase[NativeFlow]("MissingFork", async (value NativeFlow) -> value.MissingFork()),
+                TestCase[NativeFlow]("VerificationReserve", async (value NativeFlow) -> ReserveChecks.All(binary)),
+                TestCase[NativeFlow]("ManagedCancellation", async (value NativeFlow) -> value.ManagedCancellation()),
+                TestCase[NativeFlow]("EmptyProtectedPaths", async (value NativeFlow) -> value.EmptyProtectedPaths()),
+                TestCase[NativeFlow]("GitEvidence", async (value NativeFlow) -> value.GitEvidence()),
+                TestCase[NativeFlow]("RepositoryConfig", async (value NativeFlow) -> value.RepositoryConfig()),
+                TestCase[NativeFlow]("TemporaryIsolation", async (value NativeFlow) -> value.TemporaryIsolation()),
+                TestCase[NativeFlow](
+                    "TemporaryHomeRejected",
+                    async (value NativeFlow) -> value.TemporaryHomeRejected()
+                ),
+                TestCase[NativeFlow]("OutputBoundary", async (value NativeFlow) -> value.OutputBoundary()),
+                TestCase[NativeFlow]("ToolAuthentication", async (value NativeFlow) -> value.ToolAuthentication()),
+                TestCase[NativeFlow]("ConditionalClaim", async (value NativeFlow) -> value.ConditionalClaim()),
+                TestCase[NativeFlow](
+                    "ConditionalValidators",
+                    async (value NativeFlow) -> value.ConditionalValidators()
+                ),
+                TestCase[NativeFlow]("ConditionalApproval", async (value NativeFlow) -> value.ConditionalApproval()),
+                TestCase[NativeFlow]("ReadTraffic", async (value NativeFlow) -> value.ReadTraffic()),
+                TestCase[NativeFlow]("MutationTraffic", async (value NativeFlow) -> value.MutationTraffic()),
+                TestCase[NativeFlow](
+                    "CanonicalVerification",
+                    async (value NativeFlow) -> value.CanonicalVerification()
+                ),
+                TestCase[NativeFlow](
+                    "RepositoryIdentity",
+                    async (value NativeFlow) -> RepositoryIdentityChecks.All(binary)
+                ),
+                TestCase[NativeFlow]("BackgroundCleanup", async (value NativeFlow) -> value.BackgroundCleanup()),
+                TestCase[NativeFlow]("UnsupportedSandbox", async (value NativeFlow) -> value.UnsupportedSandbox()),
+                TestCase[NativeFlow](
+                    "DisposableVerification",
+                    async (value NativeFlow) -> DisposableVerificationChecks.All(binary)
+                ),
+                TestCase[NativeFlow]("VerificationBoundary", async (value NativeFlow) -> value.VerificationBoundary()),
+                TestCase[NativeFlow]("VerificationNetwork", async (value NativeFlow) -> value.VerificationNetwork()),
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
@@ -92,12 +85,8 @@ internal partial class NativeFlow : NativeFixture {
                 if Array.IndexOf(
                     []string{
                         "StructuredFailures",
-                        "ModelPolicyModes",
-                        "ProtectedPublication",
                         "GitEvidence",
-                        "PublicationFailures",
                         "CanonicalVerification",
-                        "CanonicalPublication",
                         "ConditionalClaim",
                         "ConditionalApproval",
                         "VerificationNetwork",
@@ -108,167 +97,7 @@ internal partial class NativeFlow : NativeFixture {
                 ) < 0 {
                     flow.Initialize()
                 }
-                switch name {
-                    case "HelpAndArguments" {
-                        flow.HelpAndArguments()
-                    }
-                    case "MissingTools" {
-                        flow.MissingTools()
-                    }
-                    case "DoctorToolchain" {
-                        flow.DoctorToolchain()
-                    }
-                    case "OwnerWithoutCodex" {
-                        flow.OwnerWithoutCodex()
-                    }
-                    case "StructuredFailures" {
-                        flow.StructuredFailures()
-                    }
-                    case "StructuredContract" {
-                        flow.StructuredContract()
-                    }
-                    case "CrossAccountFlow" {
-                        flow.CrossAccountFlow()
-                    }
-                    case "OwnerPolicy" {
-                        flow.OwnerPolicy()
-                    }
-                    case "ModelPolicyModes" {
-                        flow.ModelPolicyModes()
-                    }
-                    case "ModelPolicyMalformed" {
-                        flow.ModelPolicyMalformed()
-                    }
-                    case "FailedReassignment" {
-                        flow.FailedReassignment()
-                    }
-                    case "MissingFork" {
-                        flow.MissingFork()
-                    }
-                    case "VerificationReserve" {
-                        ReserveChecks.All(binary)
-                    }
-                    case "DefaultBudget" {
-                        flow.DefaultBudget()
-                    }
-                    case "HigherOwnerBudget" {
-                        flow.DefaultBudget(7200)
-                    }
-                    case "LowerOwnerBudget" {
-                        flow.DefaultBudget(30, "30")
-                    }
-                    case "IssueEdit" {
-                        flow.IssueEdit()
-                    }
-                    case "Revocation" {
-                        flow.Revocation()
-                    }
-                    case "ManagedCancellation" {
-                        flow.ManagedCancellation()
-                    }
-                    case "Timeout" {
-                        flow.Timeout()
-                    }
-                    case "Reapproval" {
-                        flow.Reapproval()
-                    }
-                    case "PolicyEdit" {
-                        flow.PolicyEdit()
-                    }
-                    case "WorkflowEdit" {
-                        flow.WorkflowEdit()
-                    }
-                    case "ProtectedEntrypoint" {
-                        flow.ProtectedEntrypoint()
-                    }
-                    case "ProtectedRecovery" {
-                        flow.ProtectedRecovery()
-                    }
-                    case "ProtectedPublication" {
-                        flow.ProtectedPublication()
-                    }
-                    case "EmptyProtectedPaths" {
-                        flow.EmptyProtectedPaths()
-                    }
-                    case "ReceiptEvidence" {
-                        flow.ReceiptEvidence()
-                    }
-                    case "GitEvidence" {
-                        flow.GitEvidence()
-                    }
-                    case "RepositoryConfig" {
-                        flow.RepositoryConfig()
-                    }
-                    case "NoPatch" {
-                        flow.NoPatch()
-                    }
-                    case "TemporaryIsolation" {
-                        flow.TemporaryIsolation()
-                    }
-                    case "TemporaryHomeRejected" {
-                        flow.TemporaryHomeRejected()
-                    }
-                    case "OutputBoundary" {
-                        flow.OutputBoundary()
-                    }
-                    case "ToolAuthentication" {
-                        flow.ToolAuthentication()
-                    }
-                    case "ConditionalClaim" {
-                        flow.ConditionalClaim()
-                    }
-                    case "ConditionalValidators" {
-                        flow.ConditionalValidators()
-                    }
-                    case "ConditionalApproval" {
-                        flow.ConditionalApproval()
-                    }
-                    case "ReadTraffic" {
-                        flow.ReadTraffic()
-                    }
-                    case "MutationTraffic" {
-                        flow.MutationTraffic()
-                    }
-                    case "ExistingPublication" {
-                        flow.ExistingPublication()
-                    }
-                    case "PublicationFailures" {
-                        flow.PublicationFailures()
-                    }
-                    case "CanonicalVerification" {
-                        flow.CanonicalVerification()
-                    }
-                    case "CanonicalPublication" {
-                        flow.CanonicalPublication()
-                    }
-                    case "RepositoryIdentity" {
-                        RepositoryIdentityChecks.All(binary)
-                    }
-                    case "PublicationRevocation" {
-                        flow.PublicationRevocation()
-                    }
-                    case "BackgroundCleanup" {
-                        flow.BackgroundCleanup()
-                    }
-                    case "UnsupportedSandbox" {
-                        flow.UnsupportedSandbox()
-                    }
-                    case "DisposableVerification" {
-                        DisposableVerificationChecks.All(binary)
-                    }
-                    case "VerificationBoundary" {
-                        flow.VerificationBoundary()
-                    }
-                    case "VerificationRecovery" {
-                        flow.VerificationRecovery()
-                    }
-                    case "VerificationNetwork" {
-                        flow.VerificationNetwork()
-                    }
-                    default {
-                        throw Exception("Unknown test: " + name)
-                    }
-                }
+                test.Run(flow)
                 flow.AutomationAttribution()
                 Console.WriteLine("PASS " + name)
             }

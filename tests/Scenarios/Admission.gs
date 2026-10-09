@@ -39,8 +39,11 @@ internal class AdmissionChecks {
             if let text = message {
                 policy["close_message"] = JsonValue.Create(text)
             }
-            File.WriteAllText(path, policy.ToJsonString())
-            test.Flow.Commit("Owner admission configuration")
+            let configured = policy.ToJsonString()
+            if File.ReadAllText(path) != configured {
+                File.WriteAllText(path, configured)
+                test.Flow.Commit("Owner admission configuration")
+            }
             test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, owner: true)
         }
 
@@ -181,26 +184,6 @@ internal class AdmissionChecks {
                 )
                 Admit(test, mode == "open" ? "open": "closed")
             }
-            using let legacy = CoordinationFixture(binary)
-            legacy.Flow.Initialize()
-            legacy.Flow.Approve()
-            Pull(legacy, "Fixes #1")
-            Admit(legacy, "open")
-            Target(legacy, "other")
-            Admit(legacy, "closed", action: "edited")
-            Target(legacy, "main")
-            legacy.Flow.Call([]string{"revoke", "--repo", "owner/project", "--issue", "1"}, owner: true)
-            Reopen(legacy)
-            Admit(legacy, "closed", action: "reopened")
-            using let assigned = CoordinationFixture(binary)
-            assigned.Initialize()
-            Pull(assigned, "Fixes #1")
-            Admit(assigned, "open")
-            assigned.Flow.Reload()
-            let task = assigned.Flow.State["issue"] ?? throw Exception("Missing issue")
-            task["assignees"] = Check.Json("[{\"login\":\"outsider\",\"id\":124}]")
-            assigned.Flow.Save()
-            Admit(assigned, "closed", action: "edited")
         }
 
         private func Coordinator(binary string) {
@@ -256,17 +239,7 @@ internal class AdmissionChecks {
             let work = Path.Combine(test.Flow.Temp.Root, "donor-work")
             File.AppendAllText(Path.Combine(work, "result.txt"), "Amended\n")
             test.Flow.Git("-C", work, "add", "result.txt")
-            test.Flow.Git(
-                "-C",
-                work,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Amend result"
-            )
+            test.Flow.DonorGit(work, "commit", "-m", "Amend result")
             let amended = test.Flow.Git("-C", work, "rev-parse", "HEAD")
             test.Flow.Git("-C", work, "push", Path.Combine(test.Flow.Bin, "fork"), "HEAD:refs/heads/" + branch)
             test.Flow.Reload()
@@ -517,7 +490,7 @@ internal class AdmissionChecks {
                 owner: true
             )
             Check.That(!File.Exists(output), "Missing event policy enabled automatic closure")
-            let central = NativeFixture.Template("coordinator.yml")
+            let central = TestResources.Template("coordinator.yml")
             Check.Contains(central, "contents: read")
             Check.Contains(central, "admit --repo")
             Check.That(

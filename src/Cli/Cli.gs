@@ -7,73 +7,53 @@ import System.IO
 import System.Text
 import System.Text.RegularExpressions
 
-internal class CliOption {
-    internal let Name string
-    internal let Value string
-    internal let Description string
-    internal let Choices string
-    internal init(name string, value string, description string, choices string = "") {
-        Name = name
-        Value = value
-        Description = description
-        Choices = choices
-    }
+internal class CliOption(name string, value string, description string, choices string = "") {
+    internal let Name string = name
+    internal let Value string = value
+    internal let Description string = description
+    internal let Choices string = choices
 
-    internal func Describe(command string) string {
-        if command == "external" && Name == "seconds" {
-            return "Separate positive verification budget, at most the owner limit; required only for correction"
-        }
-        if command == "external" && Name == "tools" {
-            return "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
-        }
-        if command == "repair" && Name == "run" {
-            return "Separate saved repair evidence directory; initially empty, reused on explicit resume"
-        }
-        if command == "repair" && Name == "path" {
-            return "Clean, self-contained candidate checkout; required and separate from repair evidence"
-        }
-        if (command == "work" || command == "claim") && Name == "seconds" {
-            return "Budget 1..86400 seconds; v2 required; v1 default: min(3600, owner limit)"
-        }
-        return (command == "amend" || command == "repair") && Name == "seconds" ?
-        "Separate positive verification budget; required, at most the owner limit": Description.Replace(
-            "{{seconds}}",
-            command == "recover" ? "300": "min(3600, owner limit)"
-        )
+    internal func Describe(command string) string -> switch Name {
+        case "yes" when command == "doctor": "Confirm the listed missing-package and harness installations; no inference"
+        case "yes" when(
+            command == "init" || command == "coordinator-setup"
+        ): "Apply the reviewed configuration files; no inference"
+        case "non-interactive" when(
+            command == "init" || command == "coordinator-setup"
+        ): "Never prompt; supply missing choices explicitly; preview unless --yes is given"
+        case "seconds" when command == "external": "Separate positive verification budget, at most the owner limit; required only for correction"
+        case "tools" when command == "external": "Complete cumulative donor-reported tools JSON; retain prior rows, required only for correction"
+        case "seconds" when(command == "work" || command == "claim"): "Explicit budget 1..86400 seconds"
+        case "seconds" when command == "amend":
+        "Separate positive verification budget; required, at most the owner limit"
+        default: Description.Replace("{{seconds}}", command == "recover" ? "300": "min(3600, owner limit)")
     }
 }
 
-internal class CliCommand {
-    internal let Name string
-    internal let Options string
-    internal let Required string
-    internal let Summary string
-    internal let Usage string
-    internal let Example string
-    internal let Effects string
-    internal init(
-        name string,
-        options string,
-        required string,
-        summary string,
-        usage string,
-        example string,
-        effects string = "local_read"
-    ) {
-        Name = name
-        Options = options
-        Required = required
-        Summary = summary
-        Usage = usage
-        Example = example
-        Effects = effects
-    }
+internal class CliCommand(
+    name string,
+    options string,
+    required string,
+    summary string,
+    usage string,
+    example string,
+    effects string = "local_read"
+) {
+    internal let Name string = name
+    internal let Options string = options
+    internal let Required string = required
+    internal let Summary string = summary
+    internal let Usage string = usage
+    internal let Example string = example
+    internal let Effects string = effects
 
     internal func Has(name string) bool -> ("," + Options + ",help,traffic,json,plain,ascii,").Contains(
         "," + name + ","
     )
 
     internal func Needs(name string) bool -> ("," + Required + ",").Contains("," + name + ",")
+
+    internal prop SupportsSavedRun bool -> Name == "work" || Name == "checks" || Name == "prepare" || Name == "status"
 
     internal func ConflictsWithRun(name string) bool -> name != "run" &&
         name != "help" &&
@@ -100,9 +80,10 @@ internal class Cli {
             CliOption("claude-profile", "DIR", "Private clean native-login profile; metadata and native status only"),
             CliOption("sole-use", "", "Attest this native-login profile is solely used for Claude capability checks"),
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
-            CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
+            CliOption("managed", "", "Diagnose the selected managed harness and sandbox; default scope"),
             CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
             CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
+            CliOption("fix", "", "Offer installation or an existing path for missing prerequisites"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
             CliOption(
@@ -123,6 +104,11 @@ internal class Cli {
                 "Whitelist map of exact models to effort arrays; absent declares no effort control"
             ),
             CliOption(
+                "allowed-tools",
+                "TOOLS",
+                "Allowed managed tools, comma-separated: codex (Subscription), pi (Local); omitted preserves policy"
+            ),
+            CliOption(
                 "eligibility",
                 "MODE",
                 "Task eligibility; new repositories default to trusted",
@@ -138,11 +124,6 @@ internal class Cli {
                 "TEXT",
                 "Optional literal admission message reserved for later admission integration"
             ),
-            CliOption(
-                "upgrade",
-                "",
-                "Explicitly upgrade legacy policy to task-scoped version 2 while preserving restrictions"
-            ),
             CliOption("scope", "SCOPE", "Requested donor access; default issue", "issue trust"),
             CliOption("donor", "LOGIN", "Donor login; @me uses your signed-in account"),
             CliOption(
@@ -153,6 +134,7 @@ internal class Cli {
             CliOption("model", "MODEL", "Owner-approved model"),
             CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
             CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
+            CliOption("harness-path", "FILE", "Existing harness executable at an absolute custom path"),
             CliOption("profile", "NAME", "Named local donor profile; explicit compatible choices override it"),
             CliOption("endpoint", "URL", "Private pi no-auth loopback Chat Completions base URL"),
             CliOption("pi-root", "DIR", "Donor-installed pi node_modules directory; no installation"),
@@ -173,22 +155,26 @@ internal class Cli {
             ),
             CliOption("seconds", "N", "Budget in seconds, 1..86400; default: {{seconds}}"),
             CliOption(
+                "unlimited",
+                "",
+                "No coding time limit when owner permits; requires --verification-reserve and excludes --seconds"
+            ),
+            CliOption(
                 "verification-reserve",
                 "N",
-                "Managed verification reserve in seconds; positive and smaller than total; default: 0"
+                "Verification seconds; required with --unlimited, otherwise reserved within --seconds; default: 0"
             ),
             CliOption("fork", "LOGIN/REPO", "Explicit donor fork; otherwise discover one or create it once"),
-            CliOption("runs", "DIR", "Run storage; default: ~/.local/state/tokate/runs"),
+            CliOption(
+                "runs",
+                "DIR",
+                "Run storage; default: tokate/runs under XDG_STATE_HOME, or ~/.local/state/tokate/runs"
+            ),
             CliOption("run", "DIR", "Saved run directory"),
             CliOption(
                 "continue-from",
                 "DIR",
-                "Explicitly import unpublished interrupted same-donor v1 work into a fresh approved attempt"
-            ),
-            CliOption(
-                "continue-approval",
-                "SHA",
-                "Owner v1 continuation grant naming the current unrevoked predecessor approval; preserves its original base"
+                "Import stopped unpublished same-donor managed work into a fresh active attempt"
             ),
             CliOption("allow-network", "", "Allow network if owner permits; default: off"),
             CliOption("path", "DIR", "Repository directory; default: current directory"),
@@ -231,10 +217,10 @@ internal class Cli {
             ),
             CliCommand(
                 "doctor",
-                "owner,managed,external,auth,non-interactive",
+                "owner,managed,external,auth,harness,harness-path,pi-root,node,fix,yes",
                 "",
-                "Check the selected role locally; no login required unless --auth, no inference.",
-                "[--owner|--managed|--external] [--auth] [--non-interactive]",
+                "Check prerequisites; --fix offers confirmed setup; no inference.",
+                "[--owner|--managed|--external] [--harness codex|pi] [--auth] [--fix [--yes]]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -258,7 +244,7 @@ internal class Cli {
             ),
             CliCommand(
                 "defaults",
-                "profile,harness,provider,model,effort,endpoint,pi-root,node",
+                "profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path",
                 "",
                 "Local nonsecret donor choices; set infers known harness/provider pairs, default codex/openai; no discovery or inference.",
                 "set [--profile NAME] --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
@@ -267,7 +253,7 @@ internal class Cli {
             ),
             CliCommand(
                 "select",
-                "repo,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive",
+                "repo,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive",
                 "repo",
                 "Select under current owner policy and offline harness capabilities; no inference or reservation.",
                 "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
@@ -276,7 +262,7 @@ internal class Cli {
             ),
             CliCommand(
                 "init",
-                "repo,path,model-policy,models,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,upgrade,non-interactive,yes",
+                "repo,path,model-policy,models,allowed-tools,eligibility,verification,required-checks,base-branch,network,seconds,reservation-seconds,pr-text,close-message,non-interactive,yes",
                 "repo",
                 "Preview and confirm owner policy and a pinned shared workflow; preserve existing customization.",
                 "[--repo OWNER/REPO] [--path DIR] [options]",
@@ -325,10 +311,10 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,allow-network,runs",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,yes",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
-                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       tokate prepare --run DIR",
+                "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       [--continue-from DIR --seconds N --verification-reserve N --yes]\n       tokate prepare --run DIR",
                 "prepare --issue 42 --state SHA --source external --tools tools.json"
                 ,
                 effects: "local_read local_write github_read github_write"
@@ -369,15 +355,6 @@ internal class Cli {
                 "--repo OWNER/REPO --grant SHA",
                 "revoke-sync --repo owner/project --grant G",
                 effects: "local_read github_read github_write"
-            ),
-            CliCommand(
-                "repair",
-                "repo,pr,run,path,commit,sync,seconds,allow-network",
-                "repo,pr,run,path,commit,sync,seconds",
-                "Verify and repair a v1 draft PR when original private state is unavailable; no inference.",
-                "--repo OWNER/REPO --pr N --run EVIDENCE_DIR --path CHECKOUT --commit SHA --sync GRANT --seconds N [--allow-network]",
-                "repair --repo owner/project --pr 10 --run /path/to/repair --path /path/to/checkout --commit C --sync G --seconds 300",
-                effects: "local_read local_write github_read github_write"
             ),
             CliCommand(
                 "amend",
@@ -429,21 +406,11 @@ internal class Cli {
             ),
             CliCommand(
                 "approve",
-                "repo,issue,donor,base-branch,continue-approval",
+                "repo,issue,base-branch",
                 "repo,issue",
-                "Write GitHub task approval and label; legacy scope also requires one donor assignment.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--donor LOGIN] [--base-branch BRANCH | --continue-approval SHA]",
-                "approve https://github.com/owner/project/issues/42 --donor donor"
-                ,
-                effects: "local_read github_read github_write"
-            ),
-            CliCommand(
-                "assign",
-                "repo,issue,donor,base-branch",
-                "repo,issue,donor",
-                "Replace approval and donor on an approved issue on GitHub; no inference.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] --donor LOGIN [--base-branch BRANCH]",
-                "assign --repo owner/project --issue 42 --donor donor"
+                "Write GitHub task approval and label; no donor assignment.",
+                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO] [--base-branch BRANCH]",
+                "approve https://github.com/owner/project/issues/42"
                 ,
                 effects: "local_read github_read github_write"
             ),
@@ -459,7 +426,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,fork,runs,allow-network,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
@@ -469,10 +436,10 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,fork,runs,allow-network,run,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,unlimited,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
-                "Run the saved managed harness selection and verify.\nV1: publish a draft PR. V2: save a commit, then use submit.",
-                "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [--yes] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
+                "Run the selected coding harness, verify work and show the publication step. Uses donor inference.",
+                "[OWNER/REPO | ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--profile NAME | --model MODEL --effort EFFORT] [--seconds N] [options]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
                 "work --repo owner/project --issue 42 --model MODEL --effort high"
                 ,
                 effects: "local_read local_write github_read github_write inference"
@@ -481,19 +448,9 @@ internal class Cli {
                 "recover",
                 "run,seconds,prepare,commit,tools,summary",
                 "run",
-                "Recover completed work without inference. Explicit corrections require preparation and a separate budget.",
-                "--run DIR [--seconds N]\n       tokate recover --run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
-                "recover --run /path/to/run --seconds 300"
-                ,
-                effects: "local_read local_write github_read github_write"
-            ),
-            CliCommand(
-                "publish",
-                "run",
-                "run",
-                "Push and publish a v1 draft PR from a successful run; no inference.",
-                "--run DIR",
-                "publish --run /path/to/run"
+                "Prepare or verify an explicit correction to completed work; no inference.",
+                "--run DIR --prepare\n       tokate recover --run DIR --commit SHA --seconds N [--tools FILE] [--summary FILE]",
+                "recover --run /path/to/run --prepare"
                 ,
                 effects: "local_read local_write github_read github_write"
             ),
@@ -530,7 +487,7 @@ internal class Cli {
                 "checks",
                 "run,repo,pr,watch,timeout",
                 "repo,pr",
-                "Read GitHub PR checks; --run also saves results locally. Exit: 0 passed, 8 pending, 1 failed.",
+                "Read receipt, public report, exact-head CI, dependency and freshness gates with required owner actions; --run also saves results locally. Exit: 0 machine gates passed, 8 pending, 1 failed. Owners retain acceptance and merge.",
                 "[--repo OWNER/REPO] --pr N [--watch] [--timeout N]\n       tokate checks --run DIR [--watch] [--timeout N]",
                 "checks --run /path/to/run --watch"
                 ,
@@ -598,10 +555,7 @@ internal class Cli {
                     }
                 }
                 inputs.Add(command.Required == "" ? []string{}: command.Required.Split(','))
-                if command.Name == "work" ||
-                    command.Name == "checks" ||
-                    command.Name == "prepare" ||
-                    command.Name == "status" {
+                if command.SupportsSavedRun {
                     inputs.Add([]string{"run"})
                 }
                 let effects = map[string, Object?]{}
@@ -649,7 +603,11 @@ internal class Cli {
                 } else if command.Name == "completion" {
                     []string{"bash|zsh|fish"}
                 } else if command.Has("issue") {
-                    []string{"ISSUE_URL"}
+                    []string{"OWNER/REPO|REPO_URL|ISSUE_URL"}
+                } else if command.Has("pr") {
+                    []string{"OWNER/REPO|REPO_URL|PR_URL"}
+                } else if command.Has("repo") {
+                    []string{"OWNER/REPO|REPO_URL"}
                 } else {
                     []string{}
                 }
@@ -662,10 +620,19 @@ internal class Cli {
                         "operations": modes,
                         "required_inputs": inputs,
                         "repository_inputs": command.Has("repo") ? (
-                            command.Has("issue") ? []string{"repo", "issue_url", "local_github_remote"}: []string{
+                            command.Has("issue") ? []string{
                                 "repo",
+                                "repository_argument",
+                                "issue_url",
                                 "local_github_remote"
-                            }
+                            }:
+                            command.Has("pr") ? []string{
+                                "repo",
+                                "repository_argument",
+                                "pr_url",
+                                "local_github_remote"
+                            }:
+                            []string{"repo", "repository_argument", "local_github_remote"}
                         ): []string{},
                         "exclusive_run_inputs": conflicts,
                         "effects": effects,
@@ -709,17 +676,25 @@ internal class Cli {
             if name == "" {
                 text.AppendLine("Tokate " + ApplicationInfo.Version() + " (toh-KAH-teh)")
                 text.AppendLine("Donate AI usage to approved GitHub issues.\n\nUsage: tokate <command> [options]\n")
+                text.AppendLine("Run tokate for guided setup, donations and saved work.\n")
+                let common = HashSet[string](
+                    "init work claim submit status checks access defaults doctor update".Split(' ')
+                )
+                let specialist = List[string]()
                 for command in Commands {
+                    if !common.Contains(command.Name) {
+                        specialist.Add(command.Name)
+                        continue
+                    }
                     if width < 80 {
                         OptionHelp(text, command.Name, command.Summary.Replace("\n", " "), width)
                     } else {
                         text.AppendLine("  " + command.Name.PadRight(18) + command.Summary.Replace("\n", " "))
                     }
                 }
+                text.AppendLine("\nMore commands: " + String.Join(", ", specialist) + ".")
                 text.AppendLine("\nUse tokate <command> --help, tokate help <command>, or -h for details.")
-                text.AppendLine(
-                    "Value options accept --name=value. Issue URLs and unique local GitHub remotes supply --repo."
-                )
+                text.AppendLine("Use OWNER/REPO, a GitHub issue/PR URL, or a unique local GitHub remote for context.")
                 text.AppendLine(
                     "Explicit --repo OWNER/REPO and --issue N remain available. PRs are drafts; owners review and merge."
                 )
@@ -745,7 +720,18 @@ internal class Cli {
                 if command.Has("issue") {
                     text.AppendLine("An issue URL can replace --repo and --issue.")
                 }
-                if name == "work" || name == "checks" || name == "prepare" || name == "status" {
+                if command.Has("pr") {
+                    text.AppendLine("A PR URL can replace --repo and --pr.")
+                }
+                if command.Has("repo") {
+                    text.AppendLine("OWNER/REPO or a repository URL can replace --repo.")
+                }
+                if name == "work" || name == "claim" {
+                    text.AppendLine(
+                        "In a terminal, missing task, tool and budget choices are guided. Redirected input and --json never prompt."
+                    )
+                }
+                if command.SupportsSavedRun {
                     text.AppendLine(
                         name == "status" ? "Use --run DIR alone for offline status without GitHub or harness tools. Repository status is bounded and may report truncation; blocked work and failed CI still exit 0 after a successful read.":
                         name == "prepare" ? "Use --run DIR only for recorded preparation before coding; it never resumes coding.":
@@ -777,16 +763,30 @@ internal class Cli {
             return numbers
         }
 
-        internal func Validate(args Args) {
+        internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
-            if args.Get("continue-approval") != "" && args.Get("base-branch") != "" {
-                throw Exception("--continue-approval derives its original target and excludes --base-branch")
+            if args.Get("unlimited") == "true" {
+                if args.Get("seconds") != "" || args.Get("continue-from") != "" ||
+                    (args.Command == "prepare" && args.Get("source") != "tokate") {
+                    throw Exception(
+                        "--unlimited requires fresh managed work and excludes --seconds and --continue-from"
+                    )
+                }
+                if !guided && !args.Help {
+                    args.Need("verification-reserve")
+                }
             }
             if args.Get("continue-from") != "" && !args.Help {
                 args.Need("seconds")
                 args.Need("verification-reserve")
+                if args.Command == "prepare" && args.Get("source") != "tokate" {
+                    throw Exception("--continue-from requires --source tokate")
+                }
             }
             if args.Command == "doctor" {
+                if args.Get("yes") == "true" && args.Get("fix") != "true" {
+                    throw Exception("doctor --yes requires --fix")
+                }
                 var scopes int32
                 for key in[]string{"owner", "managed", "external"} {
                     if args.Get(key) == "true" {
@@ -796,8 +796,22 @@ internal class Cli {
                 if scopes > 1 {
                     throw Exception("Choose one doctor scope: --owner, --managed or --external")
                 }
+                if args.Get("harness") != "" && args.Get("harness") != "codex" && args.Get("harness") != "pi" {
+                    throw Exception("Managed diagnostics support codex or pi")
+                }
+                for key in[]string{"harness", "harness-path", "pi-root", "node"} {
+                    if scopes > 0 && args.Get("managed") != "true" && args.Get(key) != "" {
+                        throw Exception("Harness options require managed diagnostics")
+                    }
+                }
+                if args.Get("harness") != "pi" && (args.Get("pi-root") != "" || args.Get("node") != "") {
+                    throw Exception("Pi runtime options require --harness pi")
+                }
             }
             if args.Command == "recover" {
+                if !args.Help && args.Get("prepare") != "true" && args.Get("commit") == "" {
+                    throw Exception("Recover requires --prepare or --commit SHA with --seconds N")
+                }
                 if args.Get("prepare") == "true" &&
                     (
                     args.Get("commit") != "" || args.Get("seconds") != "" || args.Get("tools") != "" || args.Get(
@@ -816,20 +830,14 @@ internal class Cli {
                     throw Exception("--tools requires an explicit corrected --commit")
                 }
             }
-            if args.Get("run") != "" &&
-                (
-                args.Command == "work" ||
-                    args.Command == "checks" ||
-                    args.Command == "prepare" ||
-                    args.Command == "status"
-            ) {
+            if args.Get("run") != "" && command.SupportsSavedRun {
                 for key in args.Values.Keys {
                     if command.ConflictsWithRun(key.Substring(2)) {
                         throw Exception("--run conflicts with " + key)
                     }
                 }
-                if args.IssueUrl != "" {
-                    throw Exception("--run conflicts with an issue URL")
+                if args.Target != "" {
+                    throw Exception("--run conflicts with a repository or task argument")
                 }
             }
             if args.Get("verification-reserve") != "" && args.Command == "prepare" && args.Get("source") != "tokate" {
@@ -851,6 +859,11 @@ internal class Cli {
             for key in[]string{"path", "run", "runs", "file", "tools", "summary", "event", "output", "continue-from"} {
                 if args.Get(key) != "" {
                     Path.GetFullPath(args.Get(key))
+                }
+            }
+            for key in[]string{"harness-path", "pi-root", "node"} {
+                if args.Get(key) != "" {
+                    LocalPaths.RuntimePath(args.Need(key))
                 }
             }
             if args.Get("donor") != "" && args.Get("donor") != "@me" {
@@ -883,7 +896,7 @@ internal class Cli {
                     throw Exception("Invalid value for --" + key)
                 }
             }
-            for key in[]string{"state", "commit", "grant", "upstream", "sync", "continue-approval"} {
+            for key in[]string{"state", "commit", "grant", "upstream", "sync"} {
                 if args.Get(key) != "" {
                     RepositoryIdentity.CommitSha(args.Get(key))
                 }
@@ -912,11 +925,20 @@ internal class Cli {
                 if args.Subject == "set" {
                     DonorDefaults.NormalizePair(args)
                 }
-                for key in[]string{"harness", "provider", "model", "effort", "endpoint", "pi-root", "node"} {
+                for key in[]string{
+                    "harness",
+                    "provider",
+                    "model",
+                    "effort",
+                    "endpoint",
+                    "pi-root",
+                    "node",
+                    "harness-path"
+                } {
                     if args.Subject == "set" {
                         if key == "harness" || key == "provider" || key == "model" || key == "effort" {
                             args.Need(key)
-                        } else if args.Get("harness") != "pi" && args.Get(key) != "" {
+                        } else if key != "harness-path" && args.Get("harness") != "pi" && args.Get(key) != "" {
                             throw Exception("Pi runtime options require the pi harness")
                         }
                     } else if args.Get(key) != "" {
@@ -935,6 +957,7 @@ internal class Cli {
                     "endpoint",
                     "pi-root",
                     "node",
+                    "harness-path",
                     "availability",
                     "non-interactive"
                 } {
@@ -943,13 +966,10 @@ internal class Cli {
                     }
                 }
             }
-            if args.Get("run") != "" &&
-                (
-                args.Command == "work" ||
-                    args.Command == "checks" ||
-                    args.Command == "prepare" ||
-                    args.Command == "status"
-            ) {
+            if args.Get("run") != "" && command.SupportsSavedRun {
+                return
+            }
+            if guided && (args.Command == "work" || args.Command == "claim") && args.Get("continue-from") == "" {
                 return
             }
             for option in Options {

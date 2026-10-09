@@ -28,90 +28,9 @@ func ContinuationMode(descriptor int32, mode uint32) int32;
 @DllImport("libc", EntryPoint: "renameat", SetLastError: true)
 func ContinuationRenameAt(source int32, sourcePath string, target int32, targetPath string) int32;
 
-internal class V1Continuation {
+internal class ContinuationImport {
     shared {
         private let Limit int32 = 32 * 1024 * 1024
-
-        internal func Has(run Data) bool -> run.Text("continuation_source") != ""
-
-        internal func Confirm(args Args, selection JsonElement) {
-            let confirmed = map[string, Object?]{}
-            for field in selection.EnumerateObject() {
-                confirmed[field.Name] = field.Value.Clone()
-            }
-            confirmed["source"] = "explicit continuation import"
-            DonorSelection.Confirm(args, J.Parse(J.Write(confirmed)))
-        }
-
-        internal func SupportedApproval(approval JsonElement) {
-            if J.Number(approval, "version") != 1 || !Decree.HasSnapshot(approval) || J.Text(
-                approval,
-                "authority_branch"
-            ) == "" ||
-                J.Text(approval, "nonce") == "" {
-                throw Exception(
-                    "Continuation requires a v1 approval with explicit base, authority and owner-instruction evidence; unsupported legacy state is preserved"
-                )
-            }
-            RepositoryIdentity.CommitSha(J.Text(approval, "base"))
-            RepositoryIdentity.Branch(J.Text(approval, "base_branch"))
-            Decree.Validate(J.Get(approval, "decree"))
-        }
-
-        internal func BindIdentity(prior JsonElement, key string, value JsonElement) int64 {
-            let identity = RepositoryIdentity.PositiveId(value)
-            let expected = J.Get(prior, key)
-            if expected.ValueKind != JsonValueKind.Undefined && RepositoryIdentity.PositiveId(expected) != identity {
-                throw CliFailure("stale_approval", "Continuation changed predecessor binding: " + key)
-            }
-            return identity
-        }
-
-        internal func Grant(record JsonElement, priorSha string, donorId JsonElement) JsonElement {
-            let approval = J.Get(record, "approval")
-            SupportedApproval(approval)
-            if J.Text(approval, "predecessor_approval") != RepositoryIdentity.CommitSha(priorSha) || J.Text(
-                record,
-                "sha"
-            ) == priorSha ||
-                RepositoryIdentity.PositiveId(J.Get(approval, "donor_id")) != RepositoryIdentity.PositiveId(donorId) {
-                throw CliFailure(
-                    "stale_approval",
-                    "Import requires fresh owner continuation approval naming this predecessor and the same numeric donor"
-                )
-            }
-            let prior = J.Parse(GitHub.FileAt(J.Text(approval, "repo"), ".github/tokate-approval.json", priorSha))
-            SupportedApproval(prior)
-            BindIdentity(prior, "donor_id", J.Get(approval, "donor_id"))
-            BindIdentity(prior, "repo_id", J.Get(approval, "repo_id"))
-            for key in[]string{
-                "version",
-                "repo",
-                "issue",
-                "donor",
-                "base",
-                "base_branch",
-                "authority_branch",
-                "issue_hash",
-                "policy_hash",
-                "template_hash",
-                "decree"
-            } {
-                if !RequestData.Same(J.Get(approval, key), J.Get(prior, key)) {
-                    throw CliFailure("stale_approval", "Continuation changed predecessor binding: " + key)
-                }
-            }
-            if J.Text(approval, "nonce") == J.Text(prior, "nonce") {
-                throw Exception("Continuation requires a new approval nonce")
-            }
-            let info = GitHub.Api("repos/" + J.Text(approval, "repo"))
-            if RepositoryIdentity.PositiveId(J.Get(info, "id")) != RepositoryIdentity.PositiveId(
-                J.Get(approval, "repo_id")
-            ) {
-                throw Exception("Continuation repository identity changed")
-            }
-            return prior
-        }
 
         internal func SourceLease(directory string) FileStream {
             LocalPaths.DirectoryPath(directory)
@@ -119,121 +38,12 @@ internal class V1Continuation {
                 throw Exception("Unsupported source lease state; source is preserved")
             }
             try {
-                return Preparation.Lease(directory)
+                return RunStorage.Lease(directory)
             } catch (error IOException) {
                 throw Exception(
                     "Source attempt is active or leased; stop it and explicitly retry this command after its lease is released",
                     error
                 )
-            }
-        }
-
-        internal func Source(directory string, run Data, record JsonElement) Data {
-            let source = Data()
-            for field in J.Parse(Metadata(directory)).EnumerateObject() {
-                source.Fields[field.Name] = field.Value.Clone()
-            }
-            let state = source.Text("state")
-            if source.Number("version") != 1 || source.Number("preparation_version") != 1 ||
-                (source.Text("source") != "" && source.Text("source") != "tokate") ||
-                source.Text("codex_version") == "" || source.Flag("turn_completed") || source.Text(
-                "harness"
-            ) != "codex" ||
-                source.Text("provider") != "openai" || (state != "failed" && state != "running") || source.Text(
-                "failure_stage"
-            ) != "inference" ||
-                (state == "failed" && source.Text("failure_reason") != "inference_interrupted") ||
-                source.Text("commit") != "" || source.Number("pr") != 0 || source.Text("pr_url") != "" || File.Exists(
-                Path.Combine(directory, "correction.json")
-            ) {
-                throw Exception(
-                    "Source must be stopped, unpublished interrupted same-donor v1 managed work; unsupported legacy or completed work is preserved"
-                )
-            }
-            let viewer = GitHub.Api("user")
-            if !RepositoryIdentity.SameDonor(viewer, source) || !RepositoryIdentity.SameDonor(viewer, run) ||
-                !RepositoryIdentity.SameRepo(source.Text("repo"), run.Text("repo")) || source.Number(
-                "issue"
-            ) != run.Number("issue") {
-                throw Exception("Continuation source has a different donor, repository or issue")
-            }
-            let prior = Grant(record, source.Text("approval"), J.Get(source.Element(), "donor_id"))
-            if source.Text("base") != J.Text(prior, "base") || source.Text("base_branch") != J.Text(
-                prior,
-                "base_branch"
-            ) ||
-                source.Text("policy_hash") != J.Text(prior, "policy_hash") || source.Text("branch") != "tokate/issue-" +
-                source
-                .Number("issue").ToString() + "-" + source.Text("approval").Substring(0, 12) {
-                throw Exception("Interrupted source differs from immutable predecessor approval")
-            }
-            if !Regex.IsMatch(source.Text("id"), "^[0-9a-f]{32}$") {
-                throw Exception("Unsupported source attempt identity")
-            }
-            Preparation.Source(Path.Combine(directory, "checkout"), source)
-            let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(source.Text("repo")))
-            let head = GitHub.Api("repos/" + RepositoryIdentity.Repo(source.Text("head_repo")))
-            let repoId = RepositoryIdentity.PositiveId(J.Get(upstream, "id"))
-            if repoId != RepositoryIdentity.PositiveId(J.Get(source.Element(), "preparation_repo_id")) ||
-                repoId != RepositoryIdentity.PositiveId(J.Get(J.Get(record, "approval"), "repo_id")) ||
-                RepositoryIdentity.PositiveId(J.Get(head, "id")) != RepositoryIdentity.PositiveId(
-                J.Get(source.Element(), "preparation_head_id")
-            ) {
-                throw Exception("Interrupted source repository identity changed; source is preserved")
-            }
-            RepositoryAccess.ValidateRepository(
-                source.Text("repo"),
-                source.Text("head_repo"),
-                J.Get(source.Element(), "donor_id"),
-                head,
-                upstream: upstream
-            )
-            if Publication.Pulls(source).Count != 0 {
-                throw Exception("Published contributions cannot be imported")
-            }
-            let reference = GitHub.Api(
-                "repos/" + RepositoryIdentity.Repo(source.Text("head_repo")) + "/git/ref/heads/" + Uri.EscapeDataString(
-                    source.Text("branch")
-                )
-            )
-            if J.Text(J.Get(reference, "object"), "sha") != source.Text("base") {
-                throw Exception("Prior branch changed or was published; source is preserved")
-            }
-            return source
-        }
-
-        internal func Provenance(source Data) JsonElement -> J.Parse(
-            J.Write(
-                map[string, Object?]{
-                    "id": source.Text("id"),
-                    "approval": source.Text("approval"),
-                    "base": source.Text("base"),
-                    "donor_id": J.Get(source.Element(), "donor_id"),
-                    "state": source.Text("state"),
-                    "failure_reason": source.Text("failure_reason"),
-                    "model": source.Text("model"),
-                    "effort": source.Text("effort"),
-                    "harness": source.Text("harness"),
-                    "provider": source.Text("provider")
-                }
-            )
-        )
-
-        internal func Receipt(prior JsonElement, manifestHash string, approval JsonElement) {
-            RequestData.Keys(prior, "id,approval,base,donor_id,state,failure_reason,model,effort,harness,provider")
-            if !Regex.IsMatch(J.Text(prior, "id"), "^[0-9a-f]{32}$") || !Regex.IsMatch(
-                manifestHash,
-                "^[0-9a-f]{64}$"
-            ) ||
-                J.Text(prior, "approval") != J.Text(approval, "predecessor_approval") || J.Text(
-                prior,
-                "base"
-            ) != J.Text(approval, "base") || RepositoryIdentity.PositiveId(
-                J.Get(prior, "donor_id")
-            ) != RepositoryIdentity.PositiveId(J.Get(approval, "donor_id")) ||
-                (J.Text(prior, "state") != "failed" && J.Text(prior, "state") != "running") ||
-                (J.Text(prior, "state") == "failed" && J.Text(prior, "failure_reason") != "inference_interrupted") {
-                throw Exception("Invalid interrupted-origin receipt provenance")
             }
         }
 
@@ -623,7 +433,6 @@ internal class V1Continuation {
                 if Excluded(path) {
                     throw Exception("Tracked generated or credential path changes cannot be imported: " + path)
                 }
-                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 var mode = "deleted"
                 var content = ""
                 var blob = ""
@@ -652,6 +461,7 @@ internal class V1Continuation {
                 if hasOriginal && original == current {
                     continue
                 }
+                ProtectedPaths.Check(J.Get(record, "policy"), J.Get(record, "approval"), path)
                 entries.Add(map[string, Object?]{"path": path, "mode": mode, "blob": blob, "content": content})
             }
             return J.Parse(J.Write(entries))
@@ -681,10 +491,10 @@ internal class V1Continuation {
         internal func Capture(directory string, run Data, record JsonElement) {
             let sourceDirectory = run.Text("continuation_source")
             using let sourceLease = SourceLease(sourceDirectory)
-            let source = Source(sourceDirectory, run, record)
+            let source = AttemptContinuation.Source(sourceDirectory, run, record)
             let sourceText = Metadata(sourceDirectory)
             if Data.Hash(sourceText) != run.Text("continuation_source_metadata_sha256") || !RequestData.Same(
-                Provenance(source),
+                AttemptContinuation.Provenance(source),
                 J.Get(run.Element(), "continuation")
             ) {
                 throw Exception(
@@ -693,9 +503,6 @@ internal class V1Continuation {
             }
             let evidence = Evidence(sourceDirectory)
             let entries = Scan(Path.Combine(sourceDirectory, "checkout"), source, record, true)
-            if entries.GetArrayLength() == 0 {
-                throw Exception("No supported preserved changes to import")
-            }
             if !RequestData.Same(evidence, Evidence(sourceDirectory)) || !RequestData.Same(
                 entries,
                 Scan(Path.Combine(sourceDirectory, "checkout"), source, record, true)
@@ -708,7 +515,7 @@ internal class V1Continuation {
                     "version": 1,
                     "source_metadata": sourceText,
                     "evidence": evidence,
-                    "predecessor": Provenance(source),
+                    "predecessor": AttemptContinuation.Provenance(source),
                     "entries": entries
                 }
             )
@@ -728,7 +535,7 @@ internal class V1Continuation {
                     throw Exception("Capture manifest changed during preparation; inspect this saved run")
                 }
             }
-            run.Fields["continuation"] = Provenance(source)
+            run.Fields["continuation"] = AttemptContinuation.Provenance(source)
             run.Fields["continuation_manifest_sha256"] = Data.Hash(manifest)
             run.Fields["continuation_phase"] = "captured"
             run.Save(directory)
@@ -773,7 +580,7 @@ internal class V1Continuation {
 
         internal func Check(directory string, run Data, record JsonElement, allowPartial bool = false) {
             let manifest = Manifest(directory, run)
-            Grant(record, J.Text(J.Get(manifest, "predecessor"), "approval"), J.Get(run.Element(), "donor_id"))
+            CheckSource(run, record, manifest)
             let checkout = Path.Combine(directory, "checkout")
             let staged = Commands.GitResult(checkout, []string{"diff", "--cached", "--quiet", run.Text("base"), "--"})
             if staged.Code != 0 || staged.Truncated || staged.ReadFailed {
@@ -838,6 +645,28 @@ internal class V1Continuation {
             Check(directory, run, record)
             run.Fields["continuation_phase"] = "imported"
             run.Save(directory)
+        }
+
+        private func CheckSource(run Data, record JsonElement, manifest JsonElement) {
+            let directory = run.Text("continuation_source")
+            using let lease = SourceLease(directory)
+            let source = AttemptContinuation.Source(directory, run, record)
+            if Metadata(directory) != J.Text(manifest, "source_metadata") || Data.Hash(Metadata(directory)) != run.Text(
+                "continuation_source_metadata_sha256"
+            ) ||
+                !RequestData.Same(AttemptContinuation.Provenance(source), J.Get(manifest, "predecessor")) ||
+                !RequestData.Same(Evidence(directory), J.Get(manifest, "evidence")) || !RequestData.Same(
+                Scan(Path.Combine(directory, "checkout"), source, record, true),
+                J.Get(manifest, "entries")
+            ) ||
+                !RequestData.Same(
+                Scan(Path.Combine(directory, "checkout"), source, record, true),
+                J.Get(manifest, "entries")
+            ) ||
+                !RequestData
+                .Same(Evidence(directory), J.Get(manifest, "evidence")) {
+                throw Exception("Source evidence changed since continuation capture; preserved import cannot resume")
+            }
         }
     }
 }

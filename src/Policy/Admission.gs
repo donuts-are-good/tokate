@@ -136,11 +136,6 @@ internal class Admission {
                     issues.Add(issue)
                 }
             }
-            let legacy = Regex.Match(J.Text(J.Get(pull, "head"), "ref"), "^tokate/issue-([0-9]+)-[0-9a-f]{12}$")
-            var legacyIssue int32
-            if legacy.Success && Int32.TryParse(legacy.Groups[1].Value, out legacyIssue) && legacyIssue > 0 {
-                issues.Add(legacyIssue)
-            }
             if issues.Count != 1 {
                 return 0
             }
@@ -170,7 +165,7 @@ internal class Admission {
                 }
             }
             let access = AccessState.Load(repo, repoId, missing: true)
-            let mode = policy.Eligibility == "" ? "trusted": policy.Eligibility
+            let mode = policy.Eligibility
             if !bot && access.Allows(actor, mode) {
                 return true
             }
@@ -189,50 +184,7 @@ internal class Admission {
                 state = CoordinationState.Load(repo, issue, missing: true)
             }
             if state.Sha == "" {
-                if bot {
-                    return false
-                }
-                let reference = GitHub.Api(
-                    "repos/" + repo + "/git/ref/heads/" + OwnerApproval.ApprovalRef(issue),
-                    missing: true
-                )
-                if reference.ValueKind == JsonValueKind.Undefined {
-                    return false
-                }
-                let approval = RequestData.Parse(
-                    GitHub.FileAt(
-                        repo,
-                        ".github/tokate-approval.json",
-                        RepositoryIdentity.CommitSha(J.Text(J.Get(reference, "object"), "sha"))
-                    ),
-                    1024 * 1024
-                )
-                Authority(approval, repo, issue, 1)
-                if J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
-                    return false
-                }
-                if !String.Equals(J.Text(approval, "donor"), login, StringComparison.OrdinalIgnoreCase) ||
-                    !access.Allows(actor, mode, issue, assigned: true) {
-                    return false
-                }
-                let task = GitHub.Api("repos/" + repo + "/issues/" + issue.ToString(), missing: true)
-                if task.ValueKind == JsonValueKind.Undefined || J.Text(task, "state") != "open" || J.Get(
-                    task,
-                    "pull_request"
-                )
-                    .ValueKind != JsonValueKind.Undefined ||
-                    !GitHub.HasLabel(task) || !GitHub.Assigned(task, login) {
-                    return false
-                }
-                try {
-                    OwnerApproval.Approved(repo, issue, login)
-                    return true
-                } catch (error CliFailure) {
-                    if error.Code == "stale_approval" {
-                        return false
-                    }
-                    throw error
-                }
+                return false
             }
             let value = state.Value()
             let approval = J.Get(value, "approval")
@@ -240,15 +192,9 @@ internal class Admission {
                 .ValueKind != JsonValueKind.False {
                 throw Exception("Malformed coordination revocation state")
             }
-            Authority(approval, repo, issue, 2)
+            Authority(approval, repo, issue)
             if J.Text(J.Get(pull, "base"), "ref") != J.Text(approval, "base_branch") {
                 return false
-            }
-            var taskScoped bool = false
-            try {
-                taskScoped = AccessState.Task(approval)
-            } catch (error Exception) {
-                throw Exception("Malformed trusted admission eligibility", error)
             }
             if bot {
                 let binding = DonorBinding(repo, pull, state)
@@ -261,16 +207,7 @@ internal class Admission {
                     return true
                 }
             }
-            if !access.Allows(
-                actor,
-                mode,
-                issue,
-                assigned: !taskScoped && String.Equals(
-                    J.Text(approval, "donor"),
-                    login,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            ) {
+            if !access.Allows(actor, mode, issue) {
                 return false
             }
             let task = GitHub.Api("repos/" + repo + "/issues/" + issue.ToString(), missing: true)
@@ -445,7 +382,7 @@ internal class Admission {
                     throw Exception("Malformed canonical contribution reference")
                 }
                 let state = CoordinationState.At(repo, issue, J.Text(J.Get(reference, "object"), "sha"))
-                Authority(J.Get(state.Value(), "approval"), repo, issue, 2)
+                Authority(J.Get(state.Value(), "approval"), repo, issue)
                 if DonorBinding(repo, pull, state).ValueKind == JsonValueKind.Undefined {
                     continue
                 }
@@ -457,25 +394,21 @@ internal class Admission {
             return result
         }
 
-        private func Authority(approval JsonElement, repo string, issue int32, version int32) {
-            if J.Number(approval, "version") != version || J.Number(approval, "issue") != issue ||
+        private func Authority(approval JsonElement, repo string, issue int32) {
+            if J.Number(approval, "version") != 2 || J.Number(approval, "issue") != issue ||
                 !RepositoryIdentity
                 .SameRepo(J.Text(approval, "repo"), repo) {
                 throw Exception("Malformed trusted admission approval identity")
             }
             RepositoryIdentity.CommitSha(J.Text(approval, "base"))
             RepositoryIdentity.Branch(J.Text(approval, "base_branch"))
-            if J.Get(approval, "authority_branch").ValueKind != JsonValueKind.Undefined {
-                RepositoryIdentity.Branch(J.Text(approval, "authority_branch"))
-            }
+            RepositoryIdentity.Branch(J.Text(approval, "authority_branch"))
             for key in[]string{"policy_hash", "template_hash", "issue_hash"} {
                 if !Regex.IsMatch(J.Text(approval, key), "^[0-9a-f]{64}$") {
                     throw Exception("Malformed trusted admission approval digest")
                 }
             }
-            if !AccessState.Task(approval) {
-                RepositoryIdentity.Login(J.Text(approval, "donor"))
-            }
+            AccessState.Task(approval)
         }
     }
 }

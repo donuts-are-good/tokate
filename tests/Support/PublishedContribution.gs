@@ -23,14 +23,14 @@ internal class PublishedContribution : IDisposable {
     shared {
         internal func Create(
             binary string,
-            v2 bool = false,
+            external bool = false,
             synchronization bool = false,
             baseBranch string = "",
             mutating bool = false
         ) PublishedContribution {
             let coordination = CoordinationFixture(binary)
             try {
-                let run = v2 ? V2Original(
+                let run = external ? PublishRun(
                     coordination,
                     synchronization: synchronization,
                     baseBranch: baseBranch
@@ -78,44 +78,18 @@ internal class PublishedContribution : IDisposable {
             File.WriteAllText(policyPath, policy.ToJsonString())
             flow.Commit("Owner checks")
             flow.Git("-C", Path.Combine(flow.Bin, "fork"), "fetch", flow.Upstream, "main")
-            let approve = List[string]{
-                "approve",
-                "--repo",
-                "owner/project",
-                "--issue",
-                "1",
-                "--donor",
-                owner ? "owner": "donor"
-            }
             if baseBranch != "" {
                 flow.Git("-C", flow.Upstream, "branch", baseBranch)
-                approve.AddRange([]string{"--base-branch", baseBranch})
             }
-            flow.Call(approve.ToArray(), owner: true)
-            let claim = flow.Call(
-                []string{
-                    "claim",
-                    "--repo",
-                    "owner/project",
-                    "--issue",
-                    "1",
-                    "--model",
-                    "gpt-6.1-sol",
-                    "--effort",
-                    "high",
-                    "--seconds",
-                    "20",
-                    "--runs",
-                    Path.Combine(flow.Temp.Root, "runs")
-                },
-                owner: owner
-            )
-            let run = claim.Output.Substring(claim.Output.LastIndexOf("Run: ") + 5).Trim()
+            flow.Approve(baseBranch)
+            let claimed = flow.Acquire(flow.ClaimArgs(seconds: "20"), owner: owner)
+            let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
             flow.Call([]string{"work", "--run", run}, owner: owner)
+            flow.Publish(run)
             return run
         }
 
-        internal func V2Original(
+        internal func PublishRun(
             flow CoordinationFixture,
             native bool = false,
             modelPolicy string = "",
@@ -144,17 +118,8 @@ internal class PublishedContribution : IDisposable {
                 flow.Flow.Commit("External amendment effort policy")
             }
             flow.Flow.Approve(baseBranch)
-            flow.Flow.Reload()
-            var approvals int32
-            for call in flow.Flow.State["api_calls"]?.AsArray() ?? JsonArray() {
-                if Check.Text(call["method"]) == "POST" && Check.Text(
-                    call["path"]
-                ) == "repos/owner/project/issues/1/assignees" {
-                    approvals++
-                }
-            }
-            Check.That(approvals == 1, "Published fixture repeated approval before claiming")
-            let claim = flow.Claim(baseBranch != "")
+            let claim = flow.ClaimRequest()
+            flow.Coordinate(flow.Event(claim))
             if native {
                 File.WriteAllText(
                     flow.Tools,
@@ -166,13 +131,50 @@ internal class PublishedContribution : IDisposable {
                 flow.Flow.Call([]string{"work", "--run", run})
             } else {
                 let commit = flow.Candidate(claim)
-                flow.Flow.Call([]string{"external", "--run", run, "--commit", commit})
+                flow.Flow.Call(
+                    []string{
+                        "external",
+                        "--run",
+                        run,
+                        "--commit",
+                        commit,
+                        "--summary",
+                        Summary(flow.Flow, commit, "Add a result containing the external contribution text.")
+                    }
+                )
             }
             flow.Flow.Call([]string{"submit", "--run", run})
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
+            let contribution = flow.State()["state"]?["contribution"] ?? throw Exception("Missing contribution")
+            Check.That(
+                Check.Text(contribution["actor"]) == "123" && Check.Text(contribution["donor"]) == "donor" &&
+                    Check.Text(contribution["metadata"]?["fork"]) == "donor/project",
+                "Task publication lost canonical numeric donor and fork"
+            )
+            flow.Flow.Reload()
+            Check.That(flow.Flow.State["issue"]?["assignees"]?.AsArray().Count == 0, "Task fixture assigned donor")
             return run
+        }
+
+        internal func Summary(flow NativeFixture, commit string, change string) string {
+            let path = Path.Combine(flow.Temp.Root, "public-summary-" + Guid.NewGuid().ToString("N") + ".json")
+            File.WriteAllText(
+                path,
+                Check.Map(
+                    "head",
+                    JsonValue.Create(commit),
+                    "changes",
+                    Check.Json("[\"" + change + "\"]"),
+                    "verification",
+                    Check.Json("[\"Fixture content check passed.\"]"),
+                    "limitations",
+                    Check.Json("[]")
+                )
+                    .ToJsonString()
+            )
+            return path
         }
 
         private func SetupOwner(flow NativeFixture) {

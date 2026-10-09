@@ -20,7 +20,7 @@ internal class Installer {
             }
             File.WriteAllText(Path.Combine(tools, "account-shell"), accountShell ?? "")
             let version = Check.Success(TestProcess.Run(binary, []string{"--version"}, temp.Env)).Substring(7)
-            let bundleName = "tokate-" + version + "-linux-x64"
+            let bundleName = "tokate-" + version + "-" + ReleaseTools.Runtime()
             let bundle = Path.Combine(temp.Root, bundleName)
             Directory.CreateDirectory(bundle)
             File.Copy(binary, Path.Combine(bundle, "tokate"))
@@ -226,6 +226,9 @@ internal class Installer {
                     File.WriteAllText(profile, "keep-profile")
                 }
                 for i in 0 ... cases.Length / 3 {
+                    if i > 0 && ReleaseTools.Runtime() == "linux-musl-x64" {
+                        continue
+                    }
                     File.WriteAllText(
                         statePath,
                         Check.Map("os", "Linux", "arch", cases[i * 3], "libc", cases[i * 3 + 1]).ToJsonString()

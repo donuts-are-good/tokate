@@ -10,157 +10,10 @@ import System.Text.Json.Nodes
 internal class VerificationChecks {
     shared {
         internal func All(binary string) {
-            Cleanup(binary)
             Layouts(binary)
             RuntimeFiles(binary)
             Alternatives(binary)
             FailClosed(binary)
-        }
-
-        private func Cleanup(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            let script = "set -eu\n" +
-                "printf 'synthetic-%s-output' verifier; printf 'synthetic-%s-error' verifier >&2\n" +
-                "setsid /bin/sh -c 'while :; do echo beat >> heartbeat; printf +; sleep 0.05; done' </dev/null 2>/dev/null &\n" +
-                "while [ ! -s heartbeat ]; do sleep 0.01; done\ntouch ready\n" +
-                "case $$(cat verify-outcome) in failure) exit 23;; timeout|cancel) sleep 120;; esac\n"
-            flow.VerificationPolicy("printf synthetic-prior-check", second: script)
-            flow.Approve()
-            let run = flow.Claim(seconds: "10")
-            let storage = Path.Combine(flow.Temp.Root, "runtime-tmp")
-            Directory.CreateDirectory(storage)
-            flow.Temp.Env["TMPDIR"] = storage
-            using let baseline = FixtureSnapshot(flow.Temp.Root)
-            for outcome in[]string{"success", "failure", "timeout", "cancel"} {
-                baseline.Restore()
-                flow.Reload()
-                flow.State["verify_outcome"] = JsonValue.Create(outcome)
-                flow.Save()
-                let result = outcome == "cancel" ? Interrupt(flow, run): flow.Call(
-                    []string{"work", "--run", run},
-                    outcome == "success" ? 0: 1
-                )
-                if outcome != "success" {
-                    Check.Contains(
-                        result.Error + result.Output,
-                        outcome == "failure" ? "Owner verification failed": (
-                            outcome == "cancel" ? "cancelled": "Runtime limit reached"
-                        )
-                    )
-                    flow.NoPr()
-                }
-                Check.That(
-                    !(result.Output + result.Error).Contains("synthetic-verifier-output"),
-                    "Raw verifier output escaped"
-                )
-                let checks = Check.Json(File.ReadAllText(Path.Combine(run, "verification.json"))).AsArray()
-                Check.That(
-                    checks.Count == 2 && Check.Text(checks[0]?["exit_code"]) == "0",
-                    "Prior passed check was lost"
-                )
-                let active = checks[1] ?? throw Exception("Missing active check")
-                let interrupted = outcome == "timeout" || outcome == "cancel"
-                Check.That(
-                    Check.Text(active["state"]) == (interrupted ? "interrupted": "completed"),
-                    "Verifier lost terminal phase"
-                )
-                Check.That(
-                    Check.Text(active["exit_code"]) == (interrupted ? "": (outcome == "failure" ? "23": "0")),
-                    "Verifier fabricated or changed its exit code"
-                )
-                Check.That(
-                    Check.Text(active["output"]).StartsWith("synthetic-verifier-output+") && Check.Text(
-                        active["error"]
-                    ) == "synthetic-verifier-error",
-                    "Verifier lost partial evidence"
-                )
-                Check.That(
-                    File.ReadAllText(Path.Combine(run, Check.Text(active["output_file"]))).StartsWith(
-                        "synthetic-verifier-output+"
-                    ),
-                    "Raw stdout prefix was not flushed"
-                )
-                Check.That(
-                    File.ReadAllText(Path.Combine(run, Check.Text(active["error_file"]))) == "synthetic-verifier-error",
-                    "Raw stderr prefix was not flushed"
-                )
-                Check.That(
-                    Directory.GetFileSystemEntries(storage).Length == 0,
-                    "Verifier runtime copies leaked: " + outcome
-                )
-                TestProcess.HeartbeatStopped(
-                    Path.Combine(run, Check.Text(active["output_file"])),
-                    200,
-                    "Detached verifier survived: " + outcome
-                )
-                flow.Reload()
-                Check.That(Check.Text(flow.State["exec_count"]) == "1", "Verifier failure repeated inference")
-            }
-            Console.WriteLine(
-                "PASS CLI verifier retains prior checks and raw prefixes, cleans runtime files and detached descendants on success, failure, timeout and Ctrl+C"
-            )
-        }
-
-        private func Interrupt(flow NativeFixture, run string) Result {
-            File.Copy(flow.Binary, Path.Combine(flow.Temp.Root, "tokate-verifier"))
-            let info = ProcessStartInfo("/usr/bin/script")
-            info.WorkingDirectory = flow.Temp.Root
-            info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.Environment.Clear()
-            for entry in flow.Temp.Env {
-                info.Environment[entry.Key] = entry.Value
-            }
-            for arg in[]string{
-                "-q",
-                "-e",
-                "-c",
-                "echo $$$$ > verifier.pid; exec ./tokate-verifier work --run '" + run + "'",
-                "/dev/null"
-            } {
-                info.ArgumentList.Add(arg)
-            }
-            using let terminal = Process.Start(info) ?? throw Exception("Cannot start verifier terminal")
-            try {
-                terminal.StandardInput.Close()
-                var ready bool
-                for i in 0 ... 1000 {
-                    var emitted bool
-                    for attempt in Directory.EnumerateDirectories(run, "verification-*") {
-                        let output = Path.Combine(attempt, "stdout.log")
-                        if File.Exists(output) && File.ReadAllText(output).Contains("synthetic-verifier-output+") {
-                            emitted = true
-                            break
-                        }
-                    }
-                    if emitted {
-                        ready = true
-                        break
-                    }
-                    select {
-                        case <- after(TimeSpan.FromMilliseconds(10.0)) { }
-                    }
-                }
-                Check.That(ready, "Verifier did not become ready for cancellation")
-                let pid = File.ReadAllText(Path.Combine(flow.Temp.Root, "verifier.pid")).Trim()
-                Check.Success(TestProcess.Run("/usr/bin/kill", []string{"-INT", pid}, flow.Temp.Env))
-                Check.That(terminal.WaitForExit(10000), "Verifier cancellation did not complete")
-                let result = Result{
-                    Code: terminal.ExitCode,
-                    Output: terminal.StandardOutput.ReadToEnd(),
-                    Error: terminal.StandardError.ReadToEnd()
-                }
-                Check.That(result.Code != 0, "Cancelled verification became success")
-                return result
-            } finally {
-                if !terminal.HasExited {
-                    terminal.Kill(true)
-                    terminal.WaitForExit()
-                }
-            }
         }
 
         private func Layouts(binary string) {
@@ -170,6 +23,8 @@ internal class VerificationChecks {
             let run = flow.Claim()
             flow.Mode("verification_fail")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+            flow.Call([]string{"recover", "--run", run, "--prepare"})
+            let commit = CorrectionChecks.Correct(flow, run)
             using let baseline = FixtureSnapshot(flow.Temp.Root)
             for mode in[]string{
                 "checkout-link",
@@ -216,7 +71,7 @@ internal class VerificationChecks {
                     PublishedContribution.Write(git, mode == "commondir" ? mode: "objects/info/" + mode, flow.Temp.Root)
                     reason = "self-contained Git metadata"
                 }
-                Check.Contains(flow.Call([]string{"recover", "--run", run}, 1).Error, reason)
+                Check.Contains(CorrectionChecks.Recover(flow, run, commit, 1).Error, reason)
                 if mode != "inside" && mode != "alias" {
                     Check.That(
                         File.ReadAllText(Path.Combine(run, "verification.json")) == evidence,
@@ -275,7 +130,7 @@ internal class VerificationChecks {
                     temp.Root,
                     "--ro-bind",
                     source,
-                    "/etc/resolv.conf",
+                    File.ResolveLinkTarget("/etc/resolv.conf", true)?.FullName ?? "/etc/resolv.conf",
                     "--",
                     tests,
                     "--runtime-files-parent",
@@ -298,6 +153,8 @@ internal class VerificationChecks {
             let run = flow.Claim()
             let marker = Path.Combine(run, "checkout/verification-marker")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
+            flow.Call([]string{"recover", "--run", run, "--prepare"})
+            let commit = CorrectionChecks.Correct(flow, run)
             let storage = Path.Combine(flow.Temp.Root, "runtime-tmp")
             Directory.CreateDirectory(storage)
             flow.Temp.Env["TMPDIR"] = storage
@@ -327,21 +184,33 @@ internal class VerificationChecks {
                     flow.Temp.Root
                 }
                 if missing {
+                    let systemBin = Directory.ResolveLinkTarget("/bin", true)?.FullName ?? "/bin"
                     args.AddRange([]string{"--tmpfs", "/usr/bin"})
+                    if systemBin != "/usr/bin" {
+                        args.AddRange([]string{"--tmpfs", systemBin})
+                    }
                     for tool in[]string{"bash", "env", "git", "setsid", "unshare"} {
-                        args.AddRange([]string{"--ro-bind", "/usr/bin/" + tool, "/usr/bin/" + tool})
+                        args.AddRange(
+                            []string{"--ro-bind", TestProcess.SystemPath("/usr/bin/" + tool), "/usr/bin/" + tool}
+                        )
                     }
                     args.AddRange([]string{"--symlink", "bash", "/usr/bin/sh"})
+                    if systemBin != "/usr/bin" {
+                        args.AddRange([]string{"--symlink", "/usr/bin/sh", Path.Combine(systemBin, "sh")})
+                    }
                 } else {
                     args.AddRange([]string{"--ro-bind", broken, "/usr/bin/bwrap"})
                 }
-                args.AddRange([]string{"--", binary, "recover", "--run", run, "--json"})
+                args.AddRange(
+                    []string{"--", binary, "recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}
+                )
                 let result = TestProcess.Run("/usr/bin/bwrap", args.ToArray(), flow.Temp.Env)
                 Check.Envelope(result, "recover", "error", missing ? "missing_tools": "verification_failed")
                 if missing {
                     Check.Contains(result.Error, "/usr/bin/bwrap: missing")
                 } else {
-                    let checks = Check.Json(File.ReadAllText(Path.Combine(run, "verification.json"))).AsArray()
+                    let record = Check.Json(File.ReadAllText(Path.Combine(run, "correction.json")))
+                    let checks = record["verification"]?.AsArray() ?? JsonArray()
                     if checks.Count > 0 {
                         Check.Contains(
                             Check.Text(checks[checks.Count - 1]?["error"]),

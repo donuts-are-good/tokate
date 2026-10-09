@@ -15,10 +15,15 @@ import time
 
 parser = argparse.ArgumentParser(description='Real installed pi against a synthetic server; no inference')
 parser.add_argument('--pi-root', required=True, type=Path)
-parser.add_argument('--node', default='/usr/bin/node')
+parser.add_argument('--node', default=shutil.which('node'))
 parser.add_argument('--tests', default='artifacts/tests/tokate-tests')
 parser.add_argument('--binary', default='artifacts/linux-x64/tokate')
+parser.add_argument('--catalog-only', action='store_true')
+parser.add_argument('--case', action='append', dest='cases', help='Run only a named system scenario')
 args = parser.parse_args()
+if not args.node:
+    parser.error('Node is not on PATH; supply --node with the installed executable')
+args.node = str(Path(args.node).resolve(strict=True))
 package = args.pi_root / '@earendil-works/pi-coding-agent/package.json'
 if not package.is_file():
     parser.error('Real pi installation is required; this probe never installs packages')
@@ -28,6 +33,10 @@ if metadata.get('name') != '@earendil-works/pi-coding-agent' or not metadata.get
 node_version = subprocess.check_output([args.node, '--version'], env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, text=True, timeout=10).strip()
 print('Pi proof versions: ' + metadata['version'] + ', Node ' + node_version, flush=True)
 length_cases = ['incomplete', 'continued', 'repeated', 'truncated-tool', 'identity', 'usage', 'length-cancel', 'length-timeout']
+catalog_cases = ['catalog-missing', 'catalog-substituted', 'catalog-malformed', 'catalog-duplicate', 'catalog-duplicate-id',
+                 'catalog-invalid-id', 'catalog-whitespace-id', 'catalog-invalid-metadata', 'catalog-oversized', 'catalog-chunked',
+                 'catalog-redirect', 'catalog-unreachable', 'catalog-deadline', 'catalog-metadata',
+                 'catalog-recheck-substituted', 'catalog-recheck-unreachable', 'catalog-recheck-malformed']
 partial_text = 'PRIVATE_PARTIAL_LENGTH_SENTINEL ' + 'é' * 35000 + ' RETAINED_LENGTH_CONTEXT_SENTINEL'
 continuation_instruction = 'Continue the existing approved work and return a complete concise final report.'
 thinking_text = 'PRIVATE_THINKING_CONTENT_SENTINEL'
@@ -74,15 +83,67 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        self.send_response(204)
+        if self.path != '/v1/models':
+            assert self.path == '/', 'Metadata followed a redirect or scanned another path'
+            self.send_response(204)
+            self.end_headers()
+            return
+        self.server.catalog_calls += 1
+        assert self.headers.get('Authorization') is None, 'Metadata sent authentication'
+        case = self.server.case
+        if case.startswith('catalog-recheck-'):
+            case = case.replace('catalog-recheck-', 'catalog-') if self.server.catalog_calls == 2 else ''
+        if case == 'catalog-unreachable':
+            self.close_connection = True
+            self.connection.close()
+            return
+        if case == 'catalog-redirect':
+            self.send_response(302)
+            self.send_header('Location', '/PRIVATE_CATALOG_SENTINEL')
+            self.end_headers()
+            return
+        entry = {'id': 'synthetic/model:exact', 'private': 'PRIVATE_CATALOG_SENTINEL'}
+        if case == 'catalog-substituted':
+            entry['id'] = 'synthetic/model:other'
+        if case == 'catalog-invalid-id':
+            entry.pop('id')
+        if case == 'catalog-whitespace-id':
+            entry['id'] += '\n'
+        if case == 'catalog-invalid-metadata':
+            entry['digest'] = 'PRIVATE_CATALOG_SENTINEL\n'
+        if case == 'catalog-metadata':
+            entry.update(runtime_version='1.2.3', digest='sha256:abc123', quantization='Q4_K_M', context_window=7, supports_tools=False)
+        body = json.dumps({'object': 'list', 'data': [] if case == 'catalog-missing' else [entry]}).encode()
+        if case == 'catalog-malformed':
+            body = b'{PRIVATE_CATALOG_SENTINEL'
+        if case == 'catalog-duplicate':
+            body = b'{"data":[{"id":"PRIVATE_CATALOG_SENTINEL","id":"synthetic/model:exact"}]}'
+        if case == 'catalog-duplicate-id':
+            body = json.dumps({'data': [entry, entry]}).encode()
+        if case in ['catalog-oversized', 'catalog-chunked']:
+            body = b' ' * (1024 * 1024 + 1)
+        self.send_response(200)
+        if case != 'catalog-chunked':
+            self.send_header('Content-Length', str(len(body)))
         self.end_headers()
+        if case == 'catalog-deadline':
+            self.server.catalog_release.wait(15)
+            return
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self.close_connection = True
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
         self.server.calls += 1
         assert self.path == '/v1/chat/completions'
         assert body['model'] == 'synthetic/model:exact'
-        assert 'reasoning_effort' not in body
+        if self.server.case == 'reasoning':
+            assert body.get('reasoning_effort') == 'medium', 'Selected high effort did not use the configured Pi mapping'
+        else:
+            assert 'reasoning_effort' not in body
         compacting = not body.get('tools')
         if compacting:
             assert self.server.case in ['compact', 'compact-failed']
@@ -164,7 +225,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.racer.start()
         private, outside = fixture['private'], fixture['outside']
         code = f"""from pathlib import Path
-import socket
+import socket, ssl
+assert ssl.create_default_context().get_ca_certs(), 'System HTTPS trust store is unavailable'
+try:
+    with open(ssl.get_default_verify_paths().cafile, 'ab'):
+        pass
+except OSError:
+    pass
+else:
+    raise AssertionError('System HTTPS trust store is writable')
 for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
     try:
         Path(path).read_bytes()
@@ -180,8 +249,10 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
                    ('read', {'path': '.git/config'}), ('read', {'path': '/tokate-control/models.json'}),
                    ('bash', {'command': 'python3 -c ' + shlex.quote(code) + ' || echo BOUNDARY_FAILURE', 'timeout': 4}),
                    ('bash', {'command': "setsid sh -c 'sleep 2; touch timeout-escaped' & wait", 'timeout': 0.2})]
-        if self.server.case == 'cancel':
+        if self.server.case in ['cancel', 'unlimited-cancel']:
             planned = [('bash', {'command': "touch running; setsid sh -c 'sleep 2; touch cancel-escaped' & wait"})]
+        elif self.server.case == 'unlimited':
+            planned = [('bash', {'command': 'sleep 10; printf final > result.txt'})]
         elif self.server.case == 'off':
             planned += [('read', {'path': path}) for path in ['race-leaf', 'race-dir/models.json'] * 4]
             planned += [('write', {'path': 'race-leaf', 'content': 'synthetic-safe-update'})]
@@ -215,11 +286,14 @@ for path in [{private!r}, '.git/config', '/tokate-control/models.json']:
 with Server(('127.0.0.1', 0), Handler) as server:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     port = server.server_address[1]
-    for case in ['off', 'on', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel']:
+    cases = args.cases or (catalog_cases if args.catalog_only else ['reasoning', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed', *length_cases, 'empty', 'cancel', *catalog_cases])
+    for case in cases:
         with tempfile.TemporaryDirectory(prefix='tokate-pi-proof-', dir='/var/tmp') as directory:
             root = Path(directory)
             server.root = root
             server.calls = 0
+            server.catalog_calls = 0
+            server.catalog_release = threading.Event()
             server.compactions = 0
             server.input_tokens = 0
             server.output_tokens = 0
@@ -238,7 +312,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
             env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'TOKATE_TEST_ROOT': str(fixture_root),
                    'TOKATE_BINARY': str(Path(args.binary).resolve())}
             command = [args.tests, '--pi-proof', str(args.pi_root.resolve()), args.node, directory, f'http://127.0.0.1:{port}/v1', case]
-            if case in ['cancel', 'length-cancel']:
+            if case in ['cancel', 'length-cancel', 'unlimited-cancel']:
                 process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
                 deadline = time.monotonic() + 45
                 fixture = None
@@ -246,7 +320,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 while time.monotonic() < deadline and process.poll() is None:
                     if (root / 'fixture.json').exists():
                         fixture = json.loads((root / 'fixture.json').read_text())
-                        ready = (Path(fixture['checkout']) / 'running').exists() if case == 'cancel' else server.length_waiting.is_set()
+                        ready = (Path(fixture['checkout']) / 'running').exists() if case in ['cancel', 'unlimited-cancel'] else server.length_waiting.is_set()
                         if ready:
                             break
                     time.sleep(0.1)
@@ -283,9 +357,11 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 assert saved['observed_invocation']['node_version'] == node_version, 'Node version evidence is incorrect'
                 assert server.calls == 1, 'Cancellation scheduled another provider request'
             else:
+                started = time.monotonic()
                 try:
                     result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=150)
                 finally:
+                    server.catalog_release.set()
                     server.release_length.set()
                     if case == 'length-timeout' and server.length_waiting.is_set():
                         assert server.length_finished.wait(5), 'Expired length response did not settle'
@@ -293,15 +369,23 @@ with Server(('127.0.0.1', 0), Handler) as server:
                     if server.racer:
                         server.racer.join(timeout=5)
                 assert result.returncode == 0, f'{case}: {result.stdout}\n{result.stderr}'
+                if case.startswith('catalog-') and case != 'catalog-metadata':
+                    assert server.calls == 0, 'Unavailable metadata reached inference'
+                    assert server.catalog_calls == (2 if case.startswith('catalog-recheck-') else 1), 'Metadata was retried or omitted'
+                    if case == 'catalog-deadline':
+                        assert time.monotonic() - started < 25, 'Metadata deadline was not bounded'
+                    assert not server.errors, server.errors
+                    print('PASS native Pi workflow ' + case, flush=True)
+                    continue
                 if case in ['compact', 'compact-failed']:
                     assert server.compactions > 0, 'Pi did not compact its configured context'
                 elif case in ['continued', 'repeated']:
                     assert server.calls == 3, f'{case}: expected one tool-write prelude and two responses at the length boundary'
                     assert server.compactions == 0, 'Length continuation changed the compaction threshold'
-                elif case not in ['off', 'on']:
+                elif case not in ['reasoning', 'off', 'on', 'unlimited', 'catalog-metadata']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
                 saved = json.loads((root / 'result.json').read_text())
-                if case in ['off', 'on', 'compact', 'continued']:
+                if case in ['reasoning', 'off', 'on', 'unlimited', 'compact', 'continued', 'catalog-metadata']:
                     assert saved['usage']['input_tokens'] == server.input_tokens, 'Usage omitted context compaction'
                     assert saved['usage']['output_tokens'] == server.output_tokens, 'Usage omitted context compaction'
                 if case in ['incomplete', 'repeated', 'truncated-tool']:
@@ -311,6 +395,7 @@ with Server(('127.0.0.1', 0), Handler) as server:
                     assert saved['state'] == 'failed' and saved['failure_reason'] == 'inference_interrupted', 'Deadline fabricated completion'
                     assert 'Runtime limit' in saved['error'], 'Original coding deadline was not retained'
             assert not server.errors, server.errors
+            assert server.catalog_calls == (3 if case in ['off', 'reasoning'] else 2), 'Metadata selection/launch checks were omitted or retried'
             if case in length_cases:
                 evidence = json.loads((root / 'result.json').read_text())
                 events = [json.loads(line) for line in evidence['events'].splitlines()]

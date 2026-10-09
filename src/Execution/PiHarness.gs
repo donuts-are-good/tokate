@@ -7,32 +7,140 @@ import System.Diagnostics
 import System.IO
 import System.Runtime.InteropServices
 import System.Text.Json
+import System.Text.RegularExpressions
 
 internal class PiHarness {
     shared {
-        internal func Runtime(args Args) {
-            if !OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64 || !File.Exists(
-                "/usr/bin/bwrap"
+        private func Activity(line string) {
+            let value = J.Parse(line)
+            if J.Text(value, "type") != "pi.event" {
+                return
+            }
+            let event = J.Text(value, "event")
+            if event == "assistant_end" && J.Text(value, "text") != "" {
+                DonationView.Append("Assistant: " + J.Text(value, "text"))
+            } else if event == "tool_execution_start" {
+                let args = J.Get(value, "args")
+                let detail = J.Text(args, "command") == "" ? J.Text(args, "path"): J.Text(args, "command")
+                DonationView.Append(J.Text(value, "tool") + ": " + detail)
+            } else if event == "tool_execution_end" {
+                for item in J.Items(J.Get(J.Get(value, "result"), "content")) {
+                    if J.Text(item, "type") == "text" {
+                        DonationView.Append(J.Text(item, "text"))
+                    }
+                }
+                if J.Bool(value, "is_error") {
+                    DonationView.Append("Tool failed: " + J.Text(value, "tool"))
+                }
+            } else if event == "compaction_end" || event == "length_continuation" {
+                DonationView.Append(event == "compaction_end" ? "Context compacted": "Continuing truncated response")
+            }
+        }
+
+        private func ManagedRuntime(cli string, args Args) string {
+            let store = NixRuntime.Root(cli)
+            let nixRoot = Path.Combine(store, "lib/pi/node_modules")
+            if store != "" && cli == Path.Combine(store, "bin/pi") && Directory.Exists(nixRoot) {
+                if args.Get("node") == "" {
+                    let nodes = HashSet[string](StringComparer.Ordinal)
+                    for path in NixRuntime.Paths([]string{cli}, Directory.GetCurrentDirectory()) {
+                        let candidate = Path.Combine(path, "bin/node")
+                        if LocalPaths.Executable(candidate) {
+                            nodes.Add(LocalPaths.CanonicalPath(candidate))
+                        }
+                    }
+                    if nodes.Count != 1 {
+                        throw Exception(
+                            "Select --node explicitly; the Pi Nix closure does not identify one Node runtime."
+                        )
+                    }
+                    for node in nodes {
+                        args.Values["--node"] = node
+                    }
+                }
+                return nixRoot
+            }
+            var agent = Directory.GetParent(cli)?.Parent?.FullName ?? ""
+            if cli != Path.Combine(agent, "bin/pi") || !File.Exists(
+                Path.Combine(agent, "install/managed-install.json")
             ) {
+                agent = LocalPaths.PiDirectory()
+            }
+            let markerPath = Path.Combine(agent, "install/managed-install.json")
+            if !File.Exists(markerPath) && FileInfo(markerPath).LinkTarget == nil {
+                throw Exception(
+                    "Cannot locate the Pi SDK from this launcher. Select its installed node_modules directory with --pi-root."
+                )
+            }
+            let install = LocalPaths.DirectoryPath(Path.Combine(agent, "install"))
+            let versionPath = Path.Combine(install, "current-version")
+            if FileInfo(markerPath).LinkTarget != nil || FileInfo(versionPath).LinkTarget != nil {
+                throw Exception("Pi installation metadata must be regular files")
+            }
+            let marker = RequestData.FileData(markerPath, 16384)
+            let entrypoint = J.Get(marker, "entrypoint")
+            let entryPath = J.Text(entrypoint, "path")
+            if J.Text(marker, "kind") != "pi-managed-install" || J.Number(marker, "schemaVersion") != 1 || J.Text(
+                marker,
+                "layout"
+            ) != "releases-v1" ||
+                (J.Text(entrypoint, "type") != "script" && J.Text(entrypoint, "type") != "symlink") ||
+                !Path.IsPathFullyQualified(entryPath) || LocalPaths.CanonicalPath(entryPath) != cli {
+                throw Exception("Unsupported Pi installation metadata; provide --pi-root and --node explicitly")
+            }
+            if FileInfo(versionPath).Length < 1 || FileInfo(versionPath).Length > 128 {
+                throw Exception("Invalid managed Pi version file")
+            }
+            let version = File.ReadAllText(versionPath)
+            if !Regex.IsMatch(version, "^[A-Za-z0-9._+-]+\\r?\\n?\\z") || version.Trim() == "." ||
+                version.Trim() == ".." {
+                throw Exception("Invalid managed Pi version file")
+            }
+            if args.Get("node") == "" {
+                var data = Environment.GetEnvironmentVariable("XDG_DATA_HOME") ?? ""
+                if data == "" {
+                    data = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                        ".local/share"
+                    )
+                }
+                let node = Path.Combine(data, "pi-node/current/bin/node")
+                if Path.IsPathFullyQualified(data) && LocalPaths.Executable(node) {
+                    args.Values["--node"] = node
+                }
+            }
+            return Path.Combine(install, "releases", version.Trim(), "node_modules")
+        }
+
+        internal func Runtime(args Args) {
+            if !OperatingSystem.IsLinux() ||
+                RuntimeInformation.ProcessArchitecture != Architecture.X64 ||
+                !LocalPaths
+                .Executable(LocalPaths.SystemTool("bwrap")) {
                 throw Exception("Managed pi requires verified Linux x64 bubblewrap isolation; no host fallback")
+            }
+            if args.Get("harness-path") != "" && !LocalPaths.Executable(
+                LocalPaths.RuntimePath(args.Need("harness-path"))
+            ) {
+                throw Exception("The selected Pi executable is missing or not executable; check --harness-path")
             }
             var root = args.Get("pi-root")
             if root == "" {
-                let executable = Startup.Find("pi")
+                let executable = LocalPaths.Harness("pi", args.Get("harness-path"))
                 if executable == "" {
                     throw Exception("Install pi or supply --pi-root pointing to its existing node_modules directory")
                 }
+                if !LocalPaths.Executable(executable) {
+                    throw Exception("The selected Pi executable is missing or not executable; check --harness-path")
+                }
                 let cli = LocalPaths.CanonicalPath(executable)
                 let installedPackage = Directory.GetParent(cli)?.Parent?.Parent?.FullName ?? ""
-                if cli != Path.Combine(installedPackage, "dist/bundle/cli.js") || Path.GetFileName(
+                root = cli == Path.Combine(installedPackage, "dist/bundle/cli.js") && Path.GetFileName(
                     installedPackage
-                ) != "pi-coding-agent" ||
-                    Path.GetFileName(Path.GetDirectoryName(installedPackage) ?? "") != "@earendil-works" {
-                    throw Exception(
-                        "Unsupported pi executable layout; provide the installed node_modules directory explicitly"
-                    )
-                }
-                root = Path.GetDirectoryName(Path.GetDirectoryName(installedPackage) ?? "") ?? ""
+                ) == "pi-coding-agent" &&
+                    Path.GetFileName(Path.GetDirectoryName(installedPackage) ?? "") == "@earendil-works" ?
+                Path.GetDirectoryName(Path.GetDirectoryName(installedPackage) ?? "") ?? "":
+                ManagedRuntime(cli, args)
             }
             root = LocalPaths.DirectoryPath(root)
             if Path.GetFileName(root) != "node_modules" {
@@ -46,7 +154,9 @@ internal class PiHarness {
                 .Exists(Path.Combine(packagePath, "dist/index.js")) {
                 throw Exception("The installed pi SDK package layout is required")
             }
-            let node = LocalPaths.CanonicalPath(args.Get("node") == "" ? Startup.Find("node"): args.Need("node"))
+            let node = LocalPaths.CanonicalPath(
+                args.Get("node") == "" ? LocalPaths.FindTrusted("node"): args.Need("node")
+            )
             if !File.Exists(node) || !Path.IsPathFullyQualified(node) {
                 throw Exception("An existing Node runtime is required; Tokate never installs one")
             }
@@ -67,7 +177,9 @@ internal class PiHarness {
             }
             Runtime(args)
             PiBoundary.Probe(args.Need("pi-root"), args.Need("node"))
-            let limits = PiBoundary.ModelLimits(args.Need("pi-root"), args.Need("node"), model, endpoint)
+            let limits = PiBoundary.ModelSettings(args.Need("pi-root"), args.Need("node"), model, endpoint)
+            PiBoundary.CheckEffort(limits, effort)
+            let catalog = PiCatalog.Read(args.Need("node"), model, endpoint)
             return J.Parse(
                 J.Write(
                     map[string, Object?]{
@@ -78,9 +190,10 @@ internal class PiHarness {
                         "source": source,
                         "policy_hash": policy.Digest,
                         "policy_eligible": true,
-                        "capability": "pi SDK import and isolated noninteractive session probe; absent effort only",
-                        "availability": "unknown",
-                        "availability_evidence": "Exact donor-selected model; no endpoint or inference probe",
+                        "capability": "pi SDK model capabilities and isolated noninteractive session probe",
+                        "availability": "advertised",
+                        "availability_evidence": "Selected endpoint advertises the exact model ID; weights and coding capability are unverified",
+                        "endpoint_catalog": catalog,
                         "context_window": J.Number(limits, "contextWindow"),
                         "max_tokens": J.Number(limits, "maxTokens")
                     }
@@ -107,26 +220,21 @@ internal class PiHarness {
             let continuationLimit = continueTruncated ? 1: 0
             let timer = Stopwatch.StartNew()
             let coding = RuntimeBudget(timer, run.Number("seconds") - run.Number("verification_reserve"))
-            Preparation.Ready(directory, run)
+            WorkspacePreparation.Ready(directory, run)
             let runtime = PiBoundary.Probe(run.Text("pi_root"), run.Text("pi_node"), coding)
             let endpoint = PiBoundary.Endpoint(run.Text("pi_endpoint"))
-            let limits = PiBoundary.ModelLimits(
+            let limits = PiBoundary.ModelSettings(
                 run.Text("pi_root"),
                 run.Text("pi_node"),
                 run.Text("model"),
                 endpoint,
                 coding
             )
+            PiBoundary.CheckEffort(limits, run.Text("effort"))
             let checkout = Path.Combine(directory, "checkout")
             let control = Path.Combine(directory, "pi-control-" + Guid.NewGuid().ToString("N"))
             try {
-                PiBoundary.Control(
-                    control,
-                    run.Text("model"),
-                    endpoint,
-                    J.Number(limits, "contextWindow"),
-                    J.Number(limits, "maxTokens")
-                )
+                PiBoundary.Control(control, run.Text("model"), endpoint, limits)
                 let args = PiBoundary.Boundary(checkout, run.Text("pi_root"), run.Text("pi_node"), control, true)
                 args.AddRange(
                     []string{
@@ -137,52 +245,66 @@ internal class PiHarness {
                         run.Text("model"),
                         run.Flag("network") ? "true": "false",
                         "",
-                        continueTruncated ? "true": "false"
+                        continueTruncated ? "true": "false",
+                        run.Text("effort")
                     }
                 )
-                ContributionClaim.Recheck(run)
-                Preparation.Ready(directory, run)
-                run.Fields["state"] = "running"
-                run.Fields["failure_stage"] = "inference"
-                run.Fields["failure_reason"] = "inference_failed"
-                run.Fields["pi_version"] = J.Text(runtime, "version")
-                run.Fields["observed_invocation"] = map[string, Object?]{
-                    "harness": "pi",
-                    "sdk_version": J.Text(runtime, "version"),
-                    "node_version": J.Text(runtime, "node"),
-                    "provider": "local-chat-completions",
-                    "model": run.Text("model"),
-                    "effort": "absent",
-                    "context_window": J.Number(limits, "contextWindow"),
-                    "max_tokens": J.Number(limits, "maxTokens"),
-                    "length_continuation_limit": continuationLimit
-                }
-                run.Save(directory)
-                if continueTruncated {
-                    Terminal.Step("Pi may continue one truncated response within the original coding budget.")
-                }
+                ContributionAuthority.Recheck(run)
+                WorkspacePreparation.Ready(directory, run)
                 try {
+                    run.Fields["failure_stage"] = "endpoint_check"
+                    run.Fields["failure_reason"] = "endpoint_unavailable"
+                    run.Fields["endpoint_catalog"] = PiCatalog.Read(
+                        run.Text("pi_node"),
+                        run.Text("model"),
+                        endpoint,
+                        coding
+                    )
+                    run.Fields["state"] = "running"
+                    run.Fields["failure_stage"] = "inference"
+                    run.Fields["failure_reason"] = "inference_failed"
+                    run.Fields["pi_version"] = J.Text(runtime, "version")
+                    run.Fields["observed_invocation"] = map[string, Object?]{
+                        "harness": "pi",
+                        "sdk_version": J.Text(runtime, "version"),
+                        "node_version": J.Text(runtime, "node"),
+                        "provider": "local-chat-completions",
+                        "model": run.Text("model"),
+                        "effort": run.Text("effort"),
+                        "context_window": J.Number(limits, "contextWindow"),
+                        "max_tokens": J.Number(limits, "maxTokens"),
+                        "length_continuation_limit": continuationLimit
+                    }
+                    run.Save(directory)
+                    if continueTruncated {
+                        Terminal.Step("Pi may continue one truncated response within the original coding budget.")
+                    }
                     PublicOutput.FailureCode = "inference_failed"
                     var result CommandResult
                     {
                         using let progress = TerminalProgress(
                             "Pi inference",
                             coding,
-                            RuntimeBudget(timer, run.Number("seconds"))
+                            RuntimeBudget(timer, run.Flag("unlimited") ? 0: run.Number("seconds"))
                         )
+                        var activity Action[string]? = nil
+                        if DonationView.Active() {
+                            activity = line -> Activity(line)
+                        }
                         result = Commands.Run(
-                            "/usr/bin/bwrap",
+                            LocalPaths.NeedSystemTool("bwrap", checkout),
                             args.ToArray(),
                             checkout,
                             prompt,
-                            run.Number("seconds"),
+                            run.Flag("unlimited") ? 0: run.Number("seconds"),
                             isolated: true,
                             cancellation: Chan[bool](1),
                             strictOutput: true,
                             outputPath: Path.Combine(directory, "events.jsonl"),
                             errorPath: Path.Combine(directory, "stderr.log"),
                             budget: coding,
-                            pidNamespace: true
+                            pidNamespace: true,
+                            outputLine: activity
                         )
                     }
                     run.Fields["output_truncated"] = result.OutputTruncated
@@ -191,7 +313,13 @@ internal class PiHarness {
                     if result.Code != 0 || result.Truncated || result.ReadFailed {
                         throw Exception(PiEvidence.Failure(result.Output))
                     }
-                    let usage = PiEvidence.Completed(directory, result.Output, run.Text("model"), continuationLimit)
+                    let usage = PiEvidence.Completed(
+                        directory,
+                        result.Output,
+                        run.Text("model"),
+                        run.Text("effort"),
+                        continuationLimit
+                    )
                     run.Fields["turn_completed"] = true
                     run.Fields["usage"] = usage
                     run.Fields[
@@ -211,15 +339,10 @@ internal class PiHarness {
                     )
                 } catch (error Exception) {
                     if run.Text("failure_stage") == "inference" {
-                        if error is CommandInterrupted interrupted {
+                        if let result = Commands.InterruptedResult(error) {
                             run.Fields["failure_reason"] = "inference_interrupted"
-                            run.Fields["output_truncated"] = interrupted.Result.OutputTruncated
-                            run.Fields["error_truncated"] = interrupted.Result.ErrorTruncated
-                        }
-                        if error is CommandInputInterrupted interruptedInput {
-                            run.Fields["failure_reason"] = "inference_interrupted"
-                            run.Fields["output_truncated"] = interruptedInput.Result.OutputTruncated
-                            run.Fields["error_truncated"] = interruptedInput.Result.ErrorTruncated
+                            run.Fields["output_truncated"] = result.OutputTruncated
+                            run.Fields["error_truncated"] = result.ErrorTruncated
                         }
                     }
                     run.Fields["state"] = "failed"

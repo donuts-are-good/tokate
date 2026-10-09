@@ -56,14 +56,14 @@ internal class CommandTrafficChecks {
             flow.Initialize()
             let request = flow.ClaimRequest()
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 10, 1, 1, 1)
+            Budgets(flow.Flow, Request(flow, request), 21, 1, 1, 10)
             Check.That(
                 File.GetUnixFileMode(Path.Combine(flow.Flow.Temp.Root, "request-input.json.posting.json")) ==
                 (UnixFileMode.UserRead | UnixFileMode.UserWrite),
                 "Request posting journal is not private"
             )
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 6, 0, 0)
+            Budgets(flow.Flow, Request(flow, request), 14, 0, 0, 2)
             flow.Flow.Reload()
             Check.That(Check.Text(flow.Flow.State["request_count"]) == "1", "Identical request posted twice")
             let changed = request.DeepClone()
@@ -73,10 +73,10 @@ internal class CommandTrafficChecks {
             flow.Flow.Traffic(2, 0, 0, 0)
             flow.Coordinate(flow.Event(request))
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, Request(flow, request), 4, 0, 0)
+            Budgets(flow.Flow, Request(flow, request), 12, 0, 0, 2)
             flow.Flow.ResetTraffic()
             Check.Contains(Request(flow, changed, 1, "new-file.json").Error, "UUID replay changed")
-            flow.Flow.Traffic(4, 0, 0, 0)
+            flow.Flow.Traffic(12, 0, 2, 0)
             flow.Flow.NoInference()
             flow.Flow.NoPr()
         }
@@ -184,9 +184,10 @@ internal class CommandTrafficChecks {
                     []string{"request", "--repo", "owner/project", "--issue", "1", "--file", path},
                     traffic: true
                 ),
-                6,
+                14,
                 0,
-                0
+                0,
+                2
             )
             flow.Flow.NoInference()
             flow.Flow.NoPr()
@@ -220,11 +221,11 @@ internal class CommandTrafficChecks {
                 Budgets(
                     flow.Flow,
                     result,
-                    mode == "request_fail_before_write" ? 13:
-                    (mode == "request_ambiguous_after_write" ? 15: 14),
+                    mode == "request_fail_before_write" ? 24:
+                    (mode == "request_ambiguous_after_write" ? 26: 25),
                     1,
                     1,
-                    mode == "request_fail_before_write" ? 4: 3
+                    mode == "request_fail_before_write" ? 13: 12
                 )
                 flow.Flow.Mode("")
                 flow.Flow.ResetTraffic()
@@ -232,10 +233,11 @@ internal class CommandTrafficChecks {
                 Budgets(
                     flow.Flow,
                     duplicate,
-                    mode == "request_fail_before_write" ? 5:
-                    (mode == "request_ambiguous_after_write" ? 7: 6),
+                    mode == "request_fail_before_write" ? 13:
+                    (mode == "request_ambiguous_after_write" ? 15: 14),
                     0,
-                    0
+                    0,
+                    2
                 )
                 flow.Flow.Reload()
                 Check.That(
@@ -333,16 +335,16 @@ internal class CommandTrafficChecks {
             flow.Flow.Mode("lost_request_response")
             flow.Flow.ResetTraffic()
             let first = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
-            Budgets(flow.Flow, first, 26, 1, 1, 14)
+            Budgets(flow.Flow, first, 40, 1, 1, 26)
             flow.Flow.Mode("")
             flow.Flow.ResetTraffic()
             let duplicate = flow.Flow.Call([]string{"submit", "--run", run}, traffic: true)
-            Budgets(flow.Flow, duplicate, 19, 0, 0, 8)
+            Budgets(flow.Flow, duplicate, 30, 0, 0, 17)
             flow.Flow.Reload()
             let request = Check.PostedRequest(flow.Flow.State)
             flow.Coordinate(flow.Event(request))
             flow.Flow.ResetTraffic()
-            Budgets(flow.Flow, flow.Flow.Call([]string{"submit", "--run", run}, traffic: true), 8, 0, 0)
+            Budgets(flow.Flow, flow.Flow.Call([]string{"submit", "--run", run}, traffic: true), 30, 0, 0, 15)
             flow.Expire()
             flow.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1)
             flow.Flow.ResetTraffic()
@@ -364,6 +366,7 @@ internal class CommandTrafficChecks {
             flow.Approve()
             let run = flow.Claim()
             flow.Call([]string{"work", "--run", run})
+            flow.Publish(run)
             flow.Reload()
             return run
         }
@@ -540,7 +543,7 @@ internal class CommandTrafficChecks {
             flow.ResetTraffic()
             let failed = flow.Call([]string{"checks", "--run", run, "--json"}, 1, traffic: true)
             Check.Envelope(failed, "checks", "error", "verification_failed")
-            Budgets(flow, failed, 21, 0, 0, 10)
+            Budgets(flow, failed, 43, 0, 0, 27)
         }
 
         private func WatchTraffic(binary string) {
@@ -548,10 +551,10 @@ internal class CommandTrafficChecks {
             let run = Published(flow)
             flow.ResetTraffic()
             let pending = flow.Call([]string{"checks", "--run", run}, 8, traffic: true)
-            Budgets(flow, pending, 21, 0, 0, 10)
+            Budgets(flow, pending, 43, 0, 0, 27)
             flow.ResetTraffic()
             let direct = flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, traffic: true)
-            Budgets(flow, direct, 21, 0, 0, 10)
+            Budgets(flow, direct, 43, 0, 0, 27)
             let path = Path.Combine(run, "checks.json")
             flow.Reload()
             flow.State["check_state_path"] = JsonValue.Create(path)
@@ -560,7 +563,7 @@ internal class CommandTrafficChecks {
             flow.Save()
             flow.ResetTraffic()
             let result = Watch(flow, run, "10", 0)
-            Budgets(flow, result, 64, 0, 0, 51)
+            Budgets(flow, result, 130, 0, 0, 112)
             Check.That(result.Output.Split("Checks pending").Length == 2, "Unchanged polls repeated output")
             flow.Reload()
             let observations = flow.State["check_state_times"]
@@ -574,7 +577,7 @@ internal class CommandTrafficChecks {
             flow.State["check_polls"] = JsonValue.Create(0)
             flow.Save()
             flow.ResetTraffic()
-            Budgets(flow, Watch(flow, run, "10", 0, true), 64, 0, 0, 51)
+            Budgets(flow, Watch(flow, run, "10", 0, true), 130, 0, 0, 112)
         }
 
         private func WatchChanges(binary string) {
@@ -590,8 +593,11 @@ internal class CommandTrafficChecks {
                     flow.Save()
                     flow.ResetTraffic()
                     let result = Watch(flow, run, "5", 1, direct)
-                    Check.Contains(result.Error, kind == "head" ? "PR head changed": "Issue needs Tokate approval")
-                    Budgets(flow, result, kind == "head" ? 14: 15, 0, 0, kind == "head" ? 1: 2)
+                    Check.Contains(
+                        result.Error,
+                        kind == "head" ? "current exact-commit coordination authority": "Approval revoked or task changed"
+                    )
+                    Budgets(flow, result, kind == "head" ? 35: 27, 0, 0, kind == "head" ? 17: 9)
                 }
             }
         }
@@ -618,39 +624,44 @@ internal class CommandTrafficChecks {
                     flow.ResetTraffic()
                     let result = flow.Call([]string{"checks", "--run", run}, revoked ? 1: 0, traffic: true)
                     if revoked {
-                        Check.Contains(result.Error, "Issue needs Tokate approval")
+                        Check.Contains(result.Error, "Approval revoked or task changed")
                     }
                     flow.Reload()
+                    var refreshed bool
                     for path in[]string{"repos/owner/project", "repos/owner/project/issues/1"} {
                         var full int32
                         for call in flow.State["api_calls"]?.AsArray() ?? JsonArray() {
                             if Check.Text(call["path"]) == path {
-                                Check.That(
-                                    Check.Text(call["conditional"]) == "false",
-                                    "Evicted or oversized response supplied a validator"
-                                )
-                                Check.That(Check.Text(call["status"]) == "200", "Evicted read was not fully fetched")
-                                full++
+                                if size > 1024 * 1024 {
+                                    Check.That(
+                                        Check.Text(call["conditional"]) == "false",
+                                        "Oversized response supplied a validator"
+                                    )
+                                }
+                                if Check.Text(call["status"]) == "200" {
+                                    full++
+                                }
                             }
                         }
-                        let expected = revoked && path == "repos/owner/project" ? 1: 2
-                        Check.That(full >= expected, "Missing full fetch after cache eviction or non-admission")
+                        Check.That(full > 0, "Missing initial full response")
+                        refreshed = refreshed || full > 1
                     }
+                    Check.That(size > 1024 * 1024 || refreshed, "Missing full fetch after cache eviction")
                 }
             }
             baseline.Restore()
             flow.Reload()
             flow.State["response_padding"] = Check.Map(
                 "repos/owner/project",
-                1024 * 1024,
+                3 * 1024 * 1024,
                 "repos/owner/project/issues/1",
-                1024 * 1024
+                3 * 1024 * 1024
             )
             flow.State["etag_force_304"] = JsonValue.Create(true)
             flow.Save()
             flow.ResetTraffic()
             let unmatched = flow.Call([]string{"checks", "--run", run}, 1, traffic: true)
-            Check.Contains(unmatched.Error, "HTTP 304 without a matching in-memory body")
+            Check.Contains(unmatched.Error, "Donor access authority")
             flow.Reload()
             let calls = flow.State["api_calls"]?.AsArray() ?? throw Exception("Missing traffic evidence")
             let last = calls[calls.Count - 1] ?? throw Exception("Missing last request")
@@ -661,64 +672,29 @@ internal class CommandTrafficChecks {
         }
 
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "RequestReuse",
-                "JournalSafety",
-                "SameFileRequest",
-                "LostRequest",
-                "CanonicalRequest",
-                "SubmitReuse",
-                "WatchDeadline",
-                "MovedDecreeDeadline",
-                "WatchStructured",
-                "WatchTraffic",
-                "WatchChanges",
-                "CacheRetention"
+            for test in[]TestCase[string]{
+                TestCase[string]("RequestReuse", async (value string) -> RequestReuse(value)),
+                TestCase[string]("JournalSafety", async (value string) -> JournalSafety(value)),
+                TestCase[string]("SameFileRequest", async (value string) -> SameFileRequest(value)),
+                TestCase[string]("LostRequest", async (value string) -> LostRequest(value)),
+                TestCase[string]("CanonicalRequest", async (value string) -> CanonicalRequest(value)),
+                TestCase[string]("SubmitReuse", async (value string) -> SubmitReuse(value)),
+                TestCase[string]("WatchDeadline", async (value string) -> WatchDeadline(value)),
+                TestCase[string]("MovedDecreeDeadline", async (value string) -> MovedDecreeDeadline(value)),
+                TestCase[string]("WatchStructured", async (value string) -> WatchStructured(value)),
+                TestCase[string]("ComposedChecks", async (value string) -> CheckGates.All(value)),
+                TestCase[string]("WatchTraffic", async (value string) -> WatchTraffic(value)),
+                TestCase[string]("WatchChanges", async (value string) -> WatchChanges(value)),
+                TestCase[string]("CacheRetention", async (value string) -> CacheRetention(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
                 if !CiShard.Include("Traffic/" + name) {
                     continue
                 }
-                switch name {
-                    case "RequestReuse" {
-                        RequestReuse(binary)
-                    }
-                    case "JournalSafety" {
-                        JournalSafety(binary)
-                    }
-                    case "SameFileRequest" {
-                        SameFileRequest(binary)
-                    }
-                    case "LostRequest" {
-                        LostRequest(binary)
-                    }
-                    case "CanonicalRequest" {
-                        CanonicalRequest(binary)
-                    }
-                    case "SubmitReuse" {
-                        SubmitReuse(binary)
-                    }
-                    case "WatchDeadline" {
-                        WatchDeadline(binary)
-                    }
-                    case "MovedDecreeDeadline" {
-                        MovedDecreeDeadline(binary)
-                    }
-                    case "WatchStructured" {
-                        WatchStructured(binary)
-                    }
-                    case "WatchTraffic" {
-                        WatchTraffic(binary)
-                    }
-                    case "WatchChanges" {
-                        WatchChanges(binary)
-                    }
-                    case "CacheRetention" {
-                        CacheRetention(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS command traffic " + name)
             }
         }

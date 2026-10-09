@@ -7,53 +7,14 @@ import System.Text.Json
 
 internal class DonorSelection {
     shared {
-        internal func Capabilities() Dictionary[string, HashSet[string]] {
-            let executable = CodexRuntime.Resolve()
-            let home = Path.Combine(Path.GetTempPath(), "tokate-models-" + Guid.NewGuid().ToString("N"))
-            Directory.CreateDirectory(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
-            try {
-                let prefix = List[string]{
-                    "-i",
-                    "PATH=/usr/local/bin:/usr/bin:/bin",
-                    "HOME=" + home,
-                    "CODEX_HOME=" + home,
-                    executable
-                }
-                let help = List[string](prefix)
-                help.AddRange([]string{"exec", "--help"})
-                let controls = Commands.Run("/usr/bin/env", help.ToArray(), home, seconds: 10, isolated: true)
-                for flag in[]string{"--model", "--config", "--ignore-user-config", "--strict-config"} {
-                    if controls.Code != 0 || !controls.Output.Contains(flag) {
-                        throw Exception(
-                            "Native Codex does not expose the required explicit controls; no compatible pair"
-                        )
-                    }
-                }
-                let catalog = List[string](prefix)
-                catalog.AddRange([]string{"debug", "models", "--bundled"})
-                let result = Commands.Run("/usr/bin/env", catalog.ToArray(), home, seconds: 10, isolated: true)
-                if result.Code != 0 {
-                    throw Exception("Cannot verify offline Codex model/effort capabilities; availability is unknown")
-                }
-                let models = Dictionary[string, HashSet[string]](StringComparer.Ordinal)
-                let value = RequestData.Parse(result.Output, 4 * 1024 * 1024)
-                for model in J.Items(J.Get(value, "models")) {
-                    let efforts = HashSet[string](StringComparer.Ordinal)
-                    for level in J.Items(J.Get(model, "supported_reasoning_levels")) {
-                        efforts.Add(J.Text(level, "effort"))
-                    }
-                    models[J.Text(model, "slug")] = efforts
-                }
-                return models
-            } finally {
-                Directory.Delete(home, true)
-            }
-        }
-
         internal func Interactive(args Args) bool -> !PublicOutput.Enabled && args.Get("non-interactive") != "true" &&
             !Console.IsInputRedirected &&
             !Console.IsOutputRedirected &&
             !Console.IsErrorRedirected
+
+        internal func Supported(value JsonElement) bool ->
+        (J.Text(value, "harness") == "codex" && J.Text(value, "provider") == "openai") ||
+            (J.Text(value, "harness") == "pi" && J.Text(value, "provider") == "local-chat-completions")
 
         internal func ApplyDefaults(args Args) {
             if args.Get("run") != "" ||
@@ -80,11 +41,9 @@ internal class DonorSelection {
             args.SavedDefaults = saved
             let harness = J.Text(saved, "harness")
             let provider = J.Text(saved, "provider")
-            let supported = (harness == "codex" && provider == "openai") ||
-                (harness == "pi" && provider == "local-chat-completions")
             let compatible = (args.Get("harness") == "" || args.Get("harness") == harness) &&
                 (args.Get("provider") == "" || args.Get("provider") == provider)
-            if !supported || !compatible {
+            if !Supported(saved) || !compatible {
                 if profile != "" {
                     throw Exception(
                         "Named donor profile conflicts with the selected managed harness/provider. No inference started."
@@ -92,7 +51,7 @@ internal class DonorSelection {
                 }
                 return
             }
-            for key in[]string{"harness", "provider", "endpoint", "pi-root", "node"} {
+            for key in[]string{"harness", "provider", "endpoint", "pi-root", "node", "harness-path"} {
                 if args.Get(key) == "" && J.Text(saved, key) != "" {
                     args.Values["--" + key] = J.Text(saved, key)
                 }
@@ -100,6 +59,7 @@ internal class DonorSelection {
         }
 
         internal func Resolve(args Args, policy Policy) JsonElement {
+            DonorDefaults.NormalizePair(args)
             let harness = args.Get("harness", "codex")
             let provider = args.Get("provider", "openai")
             if args.Get("continue-truncated") == "true" && harness != "pi" {
@@ -113,7 +73,7 @@ internal class DonorSelection {
                     "Unsupported managed harness/provider: choose codex/openai explicitly. No inference started."
                 )
             }
-            if harness != "pi" && J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider) {
+            if harness != "pi" && !policy.AllowsTool(harness, provider) {
                 throw Exception(
                     "No eligible pair: codex/openai is rejected by current exact owner tool restrictions. No inference started."
                 )
@@ -125,7 +85,7 @@ internal class DonorSelection {
             var effort = args.Get("effort", compatible ? J.Text(saved, "effort"): "")
             let explicitPair = args.Get("model") != "" || args.Get("effort") != ""
             var overridden = explicitPair
-            for key in[]string{"endpoint", "pi-root", "node"} {
+            for key in[]string{"endpoint", "pi-root", "node", "harness-path"} {
                 overridden = overridden || (args.Get(key) != "" && args.Get(key) != J.Text(saved, key))
             }
             var source = args.Get("profile") != "" ? "saved donor profile " + args.Get("profile") +
@@ -141,7 +101,7 @@ internal class DonorSelection {
                 }
                 return PiHarness.Select(args, policy, source)
             }
-            let capabilities = Capabilities()
+            let capabilities = CodexRuntime.Capabilities(args.Get("harness-path"))
             var availability = args.Get("availability", "unknown")
             let unavailable = availability == "unavailable" ? model: ""
             let choices = SortedDictionary[string, JsonElement](StringComparer.Ordinal)
@@ -231,6 +191,32 @@ internal class DonorSelection {
         }
 
         internal func Confirm(args Args, selection JsonElement) {
+            if args.Guided && args.Get("yes") != "true" {
+                Terminal.Heading(args.Command == "claim" ? "Confirm reservation request": "Confirm donation")
+                Terminal.Row("Task", args.Need("repo") + " #" + args.Need("issue"))
+                Terminal.Row("Tool", J.Text(selection, "harness") + " / " + J.Text(selection, "provider"))
+                Terminal.Row("Model", J.Text(selection, "model") + " / " + J.Text(selection, "effort"))
+                Terminal.Row(
+                    "Budget",
+                    (
+                        args.Get("unlimited") == "true" ? "Unlimited coding; ": args.Need("seconds") +
+                            " seconds total; "
+                    ) +
+                        args.Get("verification-reserve", "0") + " reserved for verification"
+                )
+                Terminal.Row("Command network", args.Get("allow-network") == "true" ? "allowed": "denied")
+                Terminal.Row("Availability", J.Text(selection, "availability"))
+                Console.Error.Write(
+                    args.Command == "claim" ? "Post this claim without inference? [y/N] ": "Post this claim and start this donation when accepted? [y/N] "
+                )
+                if !String.Equals(Console.ReadLine(), "y", StringComparison.OrdinalIgnoreCase) {
+                    throw Exception("Donation was not confirmed. No claim or inference was started.")
+                }
+                if args.Command == "work" {
+                    args.Values["--yes"] = "true"
+                }
+                return
+            }
             let source = J.Text(selection, "source")
             if args.Get("yes") == "true" ||
                 source == "explicit invocation" ||
@@ -259,8 +245,8 @@ internal class DonorSelection {
 
         internal func Revalidate(run Data, policy Policy) {
             let selected = J.Get(run.Element(), "selection")
-            if selected.ValueKind == JsonValueKind.Undefined {
-                return
+            if selected.ValueKind != JsonValueKind.Object {
+                throw Exception("Managed runs require saved selection metadata; start a fresh claim")
             }
             let harness = J.Text(selected, "harness")
             let provider = J.Text(selected, "provider")
@@ -284,11 +270,11 @@ internal class DonorSelection {
             if J.Text(selected, "policy_hash") != policy.Digest ||
                 harness != "codex" ||
                 provider != "openai" ||
-                (J.Number(policy.Value, "version") != 1 && !policy.AllowsTool(harness, provider)) {
+                (!policy.AllowsTool(harness, provider)) {
                 throw Exception(failure)
             }
             policy.Validate(run.Text("model"), run.Text("effort"), run.Number("seconds"), run.Flag("network"))
-            let capabilities = Capabilities()
+            let capabilities = CodexRuntime.Capabilities(run.Text("harness_path"))
             var supported HashSet[string]
             if !capabilities.TryGetValue(run.Text("model"), out supported) || !supported.Contains(run.Text("effort")) {
                 throw Exception("Saved model/effort is no longer compatible with native Codex. No retry or fallback.")

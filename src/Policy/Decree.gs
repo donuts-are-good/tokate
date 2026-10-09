@@ -125,9 +125,6 @@ internal class Decree {
         }
 
         internal func CheckCurrent(repo string, revision string, approval JsonElement) {
-            if !HasSnapshot(approval) {
-                return
-            }
             let approved = Validate(J.Get(approval, "decree"))
             if revision == J.Text(approval, "base") {
                 return

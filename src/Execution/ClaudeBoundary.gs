@@ -3,7 +3,7 @@ package Tokate
 import System.Collections.Generic
 import System.IO
 
-internal class NativeBoundary {
+internal class ClaudeBoundary {
     shared {
         internal func Start(network bool, home string, temporary string) List[string] {
             let args = List[string]{
