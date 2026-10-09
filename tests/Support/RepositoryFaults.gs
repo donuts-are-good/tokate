@@ -47,7 +47,6 @@ internal class RepositoryFaults {
                     }
                     case "repo_full_name" {
                         value = "\"owner/other\""
-                        message = "Donor access authority"
                     }
                     case "repo_id" {
                         message = "Donor access authority"

@@ -631,7 +631,7 @@ internal class CorrectionChecks {
             let corrected = Correct(flow, run)
             Recover(flow, run, corrected)
             Check.That(Directory.GetDirectories(run, "correction-*").Length == 2, "Interrupted attempt evidence lost")
-            Once(flow, 1)
+            Once(flow)
         }
 
         private func ChangedCandidate(binary string) {

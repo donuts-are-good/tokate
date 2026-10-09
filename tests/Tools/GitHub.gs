@@ -49,7 +49,7 @@ internal partial class Fixture {
                 initial ||
                 (custom && Check.Text(State["etag_force_304"]) == "true" && reads > 1)
         )
-        if custom && unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
+        if unchanged && Check.Text(State["mode"]).StartsWith("after_304_") {
             let issue = State["issue"] ?? throw Exception("Missing issue")
             if Check.Text(State["mode"]) == "after_304_edit" {
                 issue["title"] = JsonValue.Create("Edited after live revalidation")

@@ -826,7 +826,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         Flow.Mode("")
         Flow.ResetTraffic()
         let result = Coordinate(path, traffic: true)
-        Flow.Traffic(34, 3, 22, 0, result)
+        Flow.Traffic(58, 3, 42, 0, result)
         Flow.Reload()
         Check.That(Flow.State["pulls"]?.AsArray().Count == 1, "Interrupted publication duplicated PR")
         Check.That(
@@ -835,7 +835,7 @@ internal partial class CoordinationFlow : CoordinationFixture {
         )
         Flow.ResetTraffic()
         let duplicate = Coordinate(path, traffic: true)
-        Flow.Traffic(4, 0, 0, 0, duplicate)
+        Flow.Traffic(12, 0, 2, 0, duplicate)
         Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
         Flow.Call([]string{"checks", "--repo", "owner/project", "--pr", "10"}, 8, owner: true)
         Expire()
