@@ -365,6 +365,60 @@ internal class PreparationChecks {
             }
         }
 
+        private func GuidedReservation(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            test.Claim()
+            let flow = test.Flow
+            flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "state")
+            flow.Temp.Env["TERM"] = "dumb"
+            flow.Temp.Env["NO_COLOR"] = "1"
+            let root = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
+            flow.Call(
+                []string{
+                    "prepare",
+                    "--repo",
+                    "owner/project",
+                    "--issue",
+                    "1",
+                    "--state",
+                    Check.Text(test.State()["sha"]),
+                    "--source",
+                    "external",
+                    "--tools",
+                    test.Tools,
+                    "--seconds",
+                    "30",
+                    "--runs",
+                    root
+                }
+            )
+            let run = Directory.GetDirectories(root)[0]
+            let path = Path.Combine(run, "run.json")
+            let before = File.ReadAllText(path)
+            let result = TestTerminal.Pty(binary, []string{}, flow.Temp, 80, "3\n1\n2\n1\n\n3\nq\n")
+            Check.Success(result)
+            Check.Contains(result.Output, "Manage reservation")
+            Check.Contains(result.Output, "Pause reservation")
+            Check.Contains(result.Output, "Reservation request pending")
+            flow.Reload()
+            Check.That(
+                Check.Text(flow.State["request_count"]) == "1",
+                "Reservation menu posted more than the selected request"
+            )
+            flow.CoordinatePosted()
+            flow.Call([]string{"request", "--run", run, "--operation", "pause"})
+            Check.That(File.ReadAllText(path) == before, "Guided reservation changed execution history")
+            let paused = TestTerminal.Pty(binary, []string{}, flow.Temp, 80, "3\n1\n2\n4\n3\nq\n")
+            Check.Success(paused)
+            Check.Contains(paused.Output, "Resume reservation")
+            Check.That(!paused.Output.Contains("Pause reservation"), "Paused menu still offered pause")
+            flow.Reload()
+            Check.That(Check.Text(flow.State["request_count"]) == "1", "Canceled reservation menu posted a request")
+            flow.NoInference()
+            flow.NoPr()
+        }
+
         private func Partial(binary string, resume bool = false) {
             using let test = CoordinationFixture(binary)
             test.Initialize()
@@ -1471,6 +1525,7 @@ internal class PreparationChecks {
                 TestCase[string]("Guided", async (value string) -> Guided(value)),
                 TestCase[string]("ExternalClaim", async (value string) -> ExternalClaim(value)),
                 TestCase[string]("Reservation", async (value string) -> Reservation(value)),
+                TestCase[string]("GuidedReservation", async (value string) -> GuidedReservation(value)),
                 TestCase[string]("Partial", async (value string) -> Partial(value)),
                 TestCase[string]("PartialResume", async (value string) -> Partial(value, true)),
                 TestCase[string]("Handoff", async (value string) -> Handoff(value)),
