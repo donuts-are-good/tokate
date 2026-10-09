@@ -731,6 +731,7 @@ internal class Amendment {
             run.Fields["amendments"] = history
             Synchronization.Keep(run.Fields, Synchronization.History(amendment.Element()))
             run.Fields["commit"] = amendment.Text("commit")
+            run.Fields.Remove("incomplete")
             Publication.SavePr(directory, run, pull)
             Terminal.Message(
                 "Verified amendment published; original evidence: " + Path.Combine(directory, "original-evidence")

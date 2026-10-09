@@ -442,6 +442,46 @@ internal class PreparationChecks {
                 ) != "passed",
                 "Incomplete draft became ready"
             )
+            flow.Reload()
+            let body = Check.Text(flow.State["pulls"]?[0]?["body"])
+            (flow.State["pulls"]?[0] ?? throw Exception("Missing draft"))["body"] = JsonValue.Create(
+                body.Replace(",\"incomplete\":true", "")
+            )
+            flow.Save()
+            flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, 1)
+            flow.Reload()
+            (flow.State["pulls"]?[0] ?? throw Exception("Missing draft"))["body"] = JsonValue.Create(body)
+            flow.Save()
+            File.WriteAllText(Path.Combine(checkout, "result.txt"), "Completed work\n")
+            flow.Git("-C", checkout, "add", "result.txt")
+            flow.DonorGit(checkout, "commit", "-m", "Complete partial work")
+            let completed = flow.Git("-C", checkout, "rev-parse", "HEAD")
+            let args = []string{
+                "amend",
+                "--run",
+                run,
+                "--commit",
+                completed,
+                "--seconds",
+                "30",
+                "--summary",
+                PublishedContribution.Summary(flow, completed, "Complete the interrupted contribution.")
+            }
+            flow.Call(args)
+            flow.Reload()
+            let amendment = flow.State["request_comments"]?[1] ?? throw Exception("Missing completion request")
+            test.Coordinate(PostedEvent(test, amendment))
+            flow.Call(args)
+            flow.Reload()
+            Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "Completion created another PR")
+            Check.That(
+                Check.Json(File.ReadAllText(path))["incomplete"] == nil,
+                "Completed run retained incomplete status"
+            )
+            Check.That(
+                Check.Text(flow.State["pulls"]?[0]?["title"]) == "Implement fixture",
+                "Completion retained generated incomplete title"
+            )
             Check.That(Check.Text(flow.State["exec_count"]) == "1", "Partial publication restarted inference")
         }
 

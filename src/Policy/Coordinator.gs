@@ -410,9 +410,14 @@ internal class Coordinator {
                     throw Exception("PR body changed before amendment write")
                 }
                 AccessState.Check(repo, number, J.Get(record, "approval"), actor)
+                let changes = map[string, Object?]{"body": updated}
+                let title = J.Text(J.Get(record, "issue"), "title")
+                if RequestData.Incomplete(old) && J.Text(fresh, "title") == "Incomplete: " + title {
+                    changes["title"] = title
+                }
                 GitHub.Api(
                     "repos/" + repo + "/pulls/" + J.Number(metadata, "pr").ToString(),
-                    map[string, Object?]{"body": updated},
+                    changes,
                     "PATCH",
                     expires: CoordinationState.Unix(reservation, "expires")
                 )
