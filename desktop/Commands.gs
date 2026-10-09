@@ -20,6 +20,27 @@ class CommandResult {
 func SignalCommand(pid int32, signal int32) int32;
 
 class CommandRunner {
+    shared {
+        private let runningGate Object = Object()
+        private let running HashSet[CommandRunner] = HashSet[CommandRunner]()
+        private var closing bool
+
+        func Shutdown() {
+            let pending = List[CommandRunner]()
+            lock runningGate {
+                closing = true
+                pending.AddRange(running)
+            }
+            for runner in pending {
+                runner.Stop()
+            }
+            let timer = Stopwatch.StartNew()
+            for runner in pending {
+                runner.FinishStop(Math.Max(0, 5000 - int32(timer.ElapsedMilliseconds)))
+            }
+        }
+    }
+
     private let gate Object = Object()
     private let diagnostics StringBuilder = StringBuilder()
     private var active Process?
@@ -49,10 +70,29 @@ class CommandRunner {
         }
     }
 
+    private func FinishStop(milliseconds int32) {
+        lock gate {
+            if let process = active {
+                try {
+                    if !process.HasExited && !process.WaitForExit(milliseconds) {
+                        SignalCommand(process.Id, 9)
+                    }
+                    SignalCommand(-process.Id, 9)
+                } catch (error InvalidOperationException) { }
+            }
+        }
+    }
+
     func Run(arguments[]string, tool string = "tokate", directory string = "", seconds int32 = 120) CommandResult {
         let result = CommandResult{}
         var catalogHome = ""
         try {
+            lock runningGate {
+                if closing {
+                    throw OperationCanceledException("Desktop is closing. Inspect saved state before trying again.")
+                }
+                running.Add(this)
+            }
             let start = ProcessStartInfo{
                 FileName: tool,
                 UseShellExecute: false,
@@ -177,6 +217,9 @@ class CommandRunner {
         } finally {
             lock gate {
                 active = nil
+            }
+            lock runningGate {
+                running.Remove(this)
             }
             if catalogHome != "" {
                 Directory.Delete(catalogHome, true)

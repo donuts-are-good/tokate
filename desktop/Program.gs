@@ -3,6 +3,22 @@ package TokateDesktop
 import Goo
 import System
 import System.IO
+import System.Runtime.InteropServices
+
+func StopOnSignal(window Window, signal PosixSignal) PosixSignalRegistration ->
+PosixSignalRegistration.Create(
+    signal,
+    context -> {
+        context.Cancel = true
+        CommandRunner.Shutdown()
+        window.TryPost(
+            () -> {
+                window.OnClosing = nil
+                window.RequestClose()
+            }
+        )
+    }
+)
 
 func Main() {
     Window.ConfigureApplication("Tokate", "0.2.102", "dev.tokate.desktop")
@@ -27,5 +43,22 @@ func Main() {
         Background: Color.Parse("#F3E7D4"),
     }
     root.Attach(window)
-    window.Run()
+    try {
+        window.Open()
+        using let terminate PosixSignalRegistration? = OperatingSystem.IsLinux() ? StopOnSignal(
+            window,
+            PosixSignal.SIGTERM
+        ): nil
+        using let hangup PosixSignalRegistration? = OperatingSystem.IsLinux() ? StopOnSignal(
+            window,
+            PosixSignal.SIGHUP
+        ): nil
+        using let interrupt PosixSignalRegistration? = OperatingSystem.IsLinux() ? StopOnSignal(
+            window,
+            PosixSignal.SIGINT
+        ): nil
+        window.Run()
+    } finally {
+        CommandRunner.Shutdown()
+    }
 }

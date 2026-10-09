@@ -553,7 +553,68 @@ func TestCommandLifecycle() {
     }
 }
 
+func RunShutdownJob(runner CommandRunner, marker string, ignore bool, finished Chan[CommandResult]) {
+    let trap = ignore ? "trap '' INT": "trap 'exit 0' INT"
+    finished <- runner.Run(
+        []string{
+            "-c",
+            trap + "; sleep 30 </dev/null >/dev/null 2>&1 & printf '%s' \"$$!\" > \"$1\"; while :; do sleep .05; done",
+            "fixture",
+            marker
+        },
+        "/bin/sh",
+        seconds: 0
+    )
+}
+
+func TestDesktopShutdown() {
+    let root = Path.Combine(Path.GetTempPath(), "tokate-shutdown-" + Guid.NewGuid().ToString("N"))
+    Directory.CreateDirectory(root)
+    let finished = Chan[CommandResult](2)
+    try {
+        for index in 0 ... 2 {
+            go RunShutdownJob(CommandRunner(), Path.Combine(root, index.ToString()), index == 1, finished)
+        }
+        let startup = Stopwatch.StartNew()
+        using let pulse = tick(TimeSpan.FromMilliseconds(10))
+        while !File.Exists(Path.Combine(root, "0")) || !File.Exists(Path.Combine(root, "1")) {
+            Require(startup.Elapsed.TotalSeconds < 5, "Shutdown jobs did not start")
+            select {
+                case <- pulse { }
+            }
+        }
+        let shutdown = Stopwatch.StartNew()
+        CommandRunner.Shutdown()
+        for index in 0 ... 2 {
+            let result = <-finished
+            Require(result.Error.Contains("cancelled"), "Shutdown did not cancel its command")
+            let child = int32.Parse(File.ReadAllText(Path.Combine(root, index.ToString())))
+            try {
+                using let process = Process.GetProcessById(child)
+                Require(process.HasExited, "Shutdown left a command descendant running")
+            } catch (error ArgumentException) { }
+        }
+        Require(shutdown.Elapsed.TotalSeconds < 8, "Shutdown exceeded its cleanup deadline")
+        let rejected = CommandRunner().Run(
+            []string{"-c", "touch \"$1\"; printf '{}'", "fixture", Path.Combine(root, "late")},
+            "/bin/sh"
+        )
+        Require(
+            rejected.Error.Contains("closing") && !File.Exists(Path.Combine(root, "late")),
+            "Shutdown admitted a new command"
+        )
+    } finally {
+        CommandRunner.Shutdown()
+        Directory.Delete(root, true)
+    }
+}
+
 func Main(args[]string) {
+    if Array.IndexOf(args, "--shutdown") >= 0 {
+        TestDesktopShutdown()
+        Console.WriteLine("PASS: desktop shutdown stops commands and descendants")
+        return
+    }
     if Array.IndexOf(args, "--lifecycle") >= 0 {
         TestCommandLifecycle()
         Console.WriteLine("PASS: command descendants and timeout cleanup")
@@ -599,6 +660,7 @@ func Main(args[]string) {
     } finally {
         File.Delete(marker)
     }
+    TestDesktopShutdown()
     Console.WriteLine(
         "PASS: responsive layout, donation controls, saved contribution states, owner setup preservation, confirmation boundaries and cancellation"
     )
