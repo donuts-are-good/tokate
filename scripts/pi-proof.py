@@ -48,7 +48,7 @@ catalog_cases = ['catalog-missing', 'catalog-substituted', 'catalog-malformed', 
                  'catalog-invalid-id', 'catalog-whitespace-id', 'catalog-invalid-metadata', 'catalog-oversized', 'catalog-chunked',
                  'catalog-redirect', 'catalog-unreachable', 'catalog-deadline', 'catalog-metadata',
                  'catalog-recheck-substituted', 'catalog-recheck-unreachable', 'catalog-recheck-malformed']
-all_cases = ['reasoning', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed',
+all_cases = ['reasoning', 'reasoning-off', 'off', 'on', 'unlimited', 'unlimited-cancel', 'compact', 'compact-failed', 'failed', 'malformed',
              *length_cases, 'empty', 'cancel', *catalog_cases]
 cases = args.cases or (catalog_cases if args.catalog_only else all_cases)
 if not set(cases) <= set(all_cases):
@@ -161,8 +161,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.server.calls += 1
         assert self.path == '/v1/chat/completions'
         assert body['model'] == 'synthetic/model:exact'
-        if self.server.case == 'reasoning':
-            assert body.get('reasoning_effort') == 'medium', 'Selected high effort did not use the configured Pi mapping'
+        reasoning = self.server.case in ['reasoning', 'reasoning-off']
+        if reasoning:
+            assert body.get('reasoning_effort') == ('none' if self.server.case == 'reasoning-off' else 'medium'), 'Selected effort did not use the configured Pi mapping'
+            assert body['messages'][0]['role'] == 'developer', 'Configured developer role was ignored'
+            assert all('reasoning_content' in message for message in body['messages'] if message['role'] == 'assistant'), 'Configured assistant reasoning field was ignored'
         else:
             assert 'reasoning_effort' not in body
         compacting = not body.get('tools')
@@ -171,7 +174,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.server.compactions += 1
         else:
             assert sorted(t['function']['name'] for t in body['tools']) == ['bash', 'edit', 'read', 'write']
-            assert body['max_tokens'] == 8192, 'Configured output limit was ignored'
+            field = 'max_completion_tokens' if reasoning else 'max_tokens'
+            assert body[field] == 8192, 'Configured output-limit parameter was ignored'
+            assert ('max_tokens' if reasoning else 'max_completion_tokens') not in body, 'Output-limit parameter was substituted'
         assert self.headers.get('Authorization') in [None, 'Bearer tokate-no-auth'], 'Configured credentials escaped'
         text = json.dumps(body)
         assert 'PRIVATE_CREDENTIAL_SENTINEL' not in text
@@ -409,10 +414,10 @@ with Server(('127.0.0.1', 0), Handler) as server:
                 elif case in ['continued', 'repeated']:
                     assert server.calls == 3, f'{case}: expected one tool-write prelude and two responses at the length boundary'
                     assert server.compactions == 0, 'Length continuation changed the compaction threshold'
-                elif case not in ['reasoning', 'off', 'on', 'unlimited', 'catalog-metadata']:
+                elif case not in ['reasoning', 'reasoning-off', 'off', 'on', 'unlimited', 'catalog-metadata']:
                     assert server.calls == 1, f'{case}: automatic provider retry observed'
                 saved = json.loads((root / 'result.json').read_text())
-                if case in ['reasoning', 'off', 'on', 'unlimited', 'compact', 'continued', 'catalog-metadata']:
+                if case in ['reasoning', 'reasoning-off', 'off', 'on', 'unlimited', 'compact', 'continued', 'catalog-metadata']:
                     assert saved['usage']['input_tokens'] == server.input_tokens, 'Usage omitted context compaction'
                     assert saved['usage']['output_tokens'] == server.output_tokens, 'Usage omitted context compaction'
                 if case in ['incomplete', 'repeated', 'truncated-tool']:

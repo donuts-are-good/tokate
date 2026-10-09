@@ -84,6 +84,7 @@ internal class Cli {
                 "Installed unmodified native Claude Code executable; never installed implicitly"
             ),
             CliOption("claude-profile", "DIR", "Private clean native-login profile; metadata and native status only"),
+            CliOption("policy", "FILE", "Repository policy; default: .github/tokate.json in the selected checkout"),
             CliOption("sole-use", "", "Attest this native-login profile is solely used for Claude capability checks"),
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
             CliOption(
@@ -117,7 +118,7 @@ internal class Cli {
             CliOption(
                 "allowed-tools",
                 "TOOLS",
-                "Allowed managed tools, comma-separated: codex (Subscription), pi (Local); omitted preserves policy"
+                "Managed codex,pi preserves external permissions; exact harness/provider pairs replace the list"
             ),
             CliOption(
                 "eligibility",
@@ -143,7 +144,12 @@ internal class Cli {
                 "Owner-selected target; default: upstream default branch (prompt on a terminal)"
             ),
             CliOption("model", "MODEL", "Owner-approved model"),
-            CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
+            CliOption(
+                "effort",
+                "EFFORT",
+                "Owner-approved effort",
+                "off minimal low medium high xhigh max ultra absent"
+            ),
             CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
             CliOption("harness-path", "FILE", "Existing harness executable at an absolute custom path"),
             CliOption("profile", "NAME", "Named local donor profile; explicit compatible choices override it"),
@@ -225,11 +231,11 @@ internal class Cli {
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "claude-capabilities",
-                "claude,claude-profile,sole-use,model,effort,allow-network,file,path",
+                "claude,claude-profile,sole-use,model,effort,allow-network,file,path,policy",
                 "claude,claude-profile,model,effort",
                 "Check installed native Claude interfaces and personal login status without inference; managed execution stays disabled.",
-                "--claude FILE --claude-profile DIR --sole-use --model claude-opus-4-6 --effort high [--file REPORT]",
-                "claude-capabilities --claude /usr/local/bin/claude --claude-profile /private/native-login --sole-use --model claude-opus-4-6 --effort high",
+                "--claude FILE --claude-profile DIR --sole-use --model MODEL --effort EFFORT [--policy FILE] [--file REPORT]",
+                "claude-capabilities --claude /usr/local/bin/claude --claude-profile /private/native-login --sole-use --model MODEL --effort EFFORT",
                 effects: "local_read local_write"
             ),
             CliCommand(

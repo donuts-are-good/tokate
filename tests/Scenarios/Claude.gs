@@ -10,6 +10,11 @@ internal class ClaudeChecks {
         internal func All(binary string) {
             using let data = Temp()
             data.Tool("claude")
+            let policyPath = Path.Combine(data.Root, "tokate.json")
+            let policy = Check.Json(TestResources.Template("tokate.json"))
+            policy["models"] = Check.Json("{\"claude-opus-5-5\":[\"high\"]}")
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"claude\",\"provider\":\"anthropic\"}]")
+            Check.SaveJson(policyPath, policy)
             let profile = Path.Combine(data.Root, "profile")
             Directory.CreateDirectory(
                 profile,
@@ -40,17 +45,19 @@ internal class ClaudeChecks {
                 profile,
                 "--sole-use",
                 "--model",
-                "claude-opus-4-6",
+                "claude-opus-5-5",
                 "--effort",
                 "high",
-                "--json"
+                "--json",
+                "--policy",
+                policyPath
             }
             for plan in[]string{"pro", "max"} {
                 status["subscriptionType"] = JsonValue.Create(plan)
                 File.WriteAllText(statusPath, status.ToJsonString())
                 let result = TestProcess.Run(binary, words, data.Env)
-                let value = Check.Envelope(result, "claude-capabilities", "ok")["data"] ??
-                    throw Exception("Missing gate data")
+                let envelope = Check.Envelope(result, "claude-capabilities", "ok")
+                let value = envelope["data"] ?? throw Exception("Missing gate data")
                 Check.That(
                     value["auth_status"]?.AsObject().Count == 4 && Check.Text(
                         value["auth_status"]?["subscriptionType"]
@@ -65,9 +72,66 @@ internal class ClaudeChecks {
                     Check.Text(value["version"]) == "100.0.0 (Claude Code)",
                     "Gate pinned an exact native version"
                 )
-                Check.Contains(value["invocation"]?.ToJsonString() ?? "", "claude-opus-4-6")
+                Check.Contains(value["invocation"]?.ToJsonString() ?? "", "claude-opus-5-5")
                 Check.That(value["native_reports"] == nil, "Gate invented native reports")
             }
+            let checkout = Path.Combine(data.Root, "checkout")
+            Directory.CreateDirectory(Path.Combine(checkout, ".git"))
+            Directory.CreateDirectory(Path.Combine(checkout, ".github"))
+            File.Copy(policyPath, Path.Combine(checkout, ".github/tokate.json"))
+            let local = List[string](words)
+            local.RemoveRange(local.Count - 2, 2)
+            local.AddRange([]string{"--path", checkout})
+            Check.Envelope(TestProcess.Run(binary, local.ToArray(), data.Env), "claude-capabilities", "ok")
+            policy["models"] = Check.Json("{\"claude-sonnet-5-5\":[\"medium\"]}")
+            Check.SaveJson(policyPath, policy)
+            words[7] = "claude-sonnet-5-5"
+            words[9] = "medium"
+            let changed = Check.Envelope(TestProcess.Run(binary, words, data.Env), "claude-capabilities", "ok")["data"]
+            Check.That(
+                Check.Text(changed?["requested"]?["model"]) == words[7] && Check.Text(
+                    changed?["requested"]?["effort"]
+                ) == words[9],
+                "Changed owner model/effort policy did not reach the native invocation"
+            )
+            let invocation = List[string]()
+            for word in changed?["invocation"]?.AsArray() ?? throw Exception("Missing invocation") {
+                invocation.Add(Check.Text(word))
+            }
+            Check.That(invocation[invocation.IndexOf("--model") + 1] == words[7], "Native model was not selected")
+            Check.That(invocation[invocation.IndexOf("--effort") + 1] == words[9], "Native effort was not selected")
+            let settings = Check.Json(invocation[invocation.IndexOf("--settings") + 1])
+            Check.That(Check.Text(settings["availableModels"]?[0]) == words[7], "Native model restriction was fixed")
+            let changedReport = Path.Combine(data.Root, "selected.jsonl")
+            File.WriteAllText(
+                changedReport,
+                Check.Map("type", "system", "subtype", "init", "model", words[7], "effort", words[9]).ToJsonString() +
+                    "\n"
+            )
+            let reported = List[string](words)
+            reported.AddRange([]string{"--file", changedReport})
+            let evidence = Check.Envelope(
+                TestProcess.Run(binary, reported.ToArray(), data.Env),
+                "claude-capabilities",
+                "ok"
+            )
+            Check.That(
+                Check.Text(evidence["data"]?["native_reports"]?["model"]) == words[7] && Check.Text(
+                    evidence["data"]?["native_reports"]?["effort"]
+                ) == words[9],
+                "Matching reports were not accepted for the selected pair"
+            )
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"codex\",\"provider\":\"openai\"}]")
+            Check.SaveJson(policyPath, policy)
+            Check.Contains(
+                TestProcess.Run(binary, words, data.Env).Output,
+                "Claude/anthropic is not allowed by the repository policy"
+            )
+            policy["models"] = Check.Json("{\"claude-opus-5-5\":[\"high\"]}")
+            policy["allowed_tools"] = Check.Json("[{\"harness\":\"claude\",\"provider\":\"anthropic\"}]")
+            Check.SaveJson(policyPath, policy)
+            words[7] = "claude-opus-5-5"
+            words[9] = "high"
             for pair in[]string{
                 "loggedIn=false",
                 "loggedIn=true",
@@ -94,14 +158,17 @@ internal class ClaudeChecks {
                 rejected[9] = effort
                 let result = TestProcess.Run(binary, rejected.ToArray(), data.Env)
                 Check.That(
-                    result.Code == 1 && result.Output.Contains("explicit claude-opus-4-6/high"),
-                    "Unsupported effort was launched"
+                    result.Code == 1 && result.Output.Contains("not allowed by the repository policy"),
+                    "Disallowed effort was launched"
                 )
             }
             let alias = List[string](words)
             alias[7] = "opus"
             Check.That(
-                TestProcess.Run(binary, alias.ToArray(), data.Env).Output.Contains("explicit claude-opus-4-6/high"),
+                TestProcess
+                    .Run(binary, alias.ToArray(), data.Env)
+                    .Output
+                    .Contains("not allowed by the repository policy"),
                 "Model alias was not refused before native launch"
             )
             File.WriteAllText(mode, "missing")
@@ -130,7 +197,7 @@ internal class ClaudeChecks {
             )
             File.WriteAllText(
                 report,
-                "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-4-6\",\"permissionMode\":\"default\"}\n{\"type\":\"result\",\"usage\":{\"input_tokens\":12}}\n"
+                "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"claude-opus-5-5\",\"permissionMode\":\"default\"}\n{\"type\":\"result\",\"usage\":{\"input_tokens\":12}}\n"
             )
             let parsed = Check
                 .Envelope(TestProcess.Run(binary, withReport.ToArray(), data.Env), "claude-capabilities", "ok")[

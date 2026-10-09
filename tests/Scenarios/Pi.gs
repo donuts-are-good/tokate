@@ -252,6 +252,8 @@ internal class PiChecks {
                 mode == "usage" ||
                 mode == "length-cancel" ||
                 mode == "length-timeout"
+            let reasoning = mode == "reasoning" || mode == "reasoning-off"
+            let effort = mode == "reasoning-off" ? "off": reasoning ? "high": "absent"
             using let cleanup = interrupted ? nil: flow
             flow.Flow.Initialize(access: false)
             flow.Flow.Temp.Env["GITHUB_EVENT_NAME"] = "issue_comment"
@@ -259,6 +261,9 @@ internal class PiChecks {
             let policy = Check.Json(File.ReadAllText(policyPath))
             policy["model_policy"] = JsonValue.Create("whitelist")
             policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"absent\",\"minimal\",\"high\",\"xhigh\"]}")
+            if mode == "reasoning-off" {
+                policy["models"] = Check.Json("{\"synthetic/model:exact\":[\"off\"]}")
+            }
             policy["allowed_tools"] = Check.Json("[{\"harness\":\"pi\",\"provider\":\"local-chat-completions\"}]")
             policy["allow_network"] = JsonValue.Create(true)
             if unlimited {
@@ -286,15 +291,19 @@ internal class PiChecks {
             Directory.CreateDirectory(agentDir)
             flow.Flow.Temp.Env["PI_CODING_AGENT_DIR"] = agentDir
             let models = Check.Json(
-                "{\"providers\":{\"synthetic\":{\"api\":\"openai-completions\",\"authHeader\":false,\"apiKey\":\"PRIVATE_CREDENTIAL_SENTINEL\",\"models\":[{\"id\":\"synthetic/model:exact\",\"name\":\"Synthetic\",\"contextWindow\":65536,\"maxTokens\":4096,\"reasoning\":false,\"input\":[\"text\"]}]}}}"
+                "{\"providers\":{\"synthetic\":{\"api\":\"openai-completions\",\"authHeader\":false,\"apiKey\":\"PRIVATE_CREDENTIAL_SENTINEL\",\"models\":[{\"id\":\"synthetic/model:exact\",\"name\":\"Synthetic\",\"contextWindow\":65536,\"maxTokens\":4096,\"reasoning\":false,\"input\":[\"text\"],\"compat\":{\"maxTokensField\":\"max_tokens\"}}]}}}"
             )
             let provider = models["providers"]?["synthetic"] ?? throw Exception("Missing synthetic provider")
             provider["baseUrl"] = JsonValue.Create(endpoint)
-            if mode == "reasoning" {
+            if reasoning {
                 let model = provider["models"]?[0] ?? throw Exception("Missing reasoning model")
                 model["reasoning"] = JsonValue.Create(true)
-                model["thinkingLevelMap"] = Check.Json("{\"minimal\":null,\"high\":\"medium\",\"xhigh\":null}")
-                model["compat"] = Check.Json("{\"thinkingFormat\":\"openai\",\"supportsReasoningEffort\":true}")
+                model["thinkingLevelMap"] = Check.Json(
+                    "{\"off\":\"none\",\"minimal\":null,\"high\":\"medium\",\"xhigh\":null}"
+                )
+                model["compat"] = Check.Json(
+                    "{\"thinkingFormat\":\"openai\",\"supportsReasoningEffort\":true,\"maxTokensField\":\"max_completion_tokens\",\"supportsDeveloperRole\":true,\"requiresReasoningContentOnAssistantMessages\":true}"
+                )
             }
             let modelsPath = Path.Combine(agentDir, "models.json")
             File.WriteAllText(modelsPath, models.ToJsonString())
@@ -320,7 +329,7 @@ internal class PiChecks {
                 "--model",
                 "synthetic/model:exact",
                 "--effort",
-                mode == "reasoning" ? "high": "absent",
+                effort,
                 "--node",
                 node,
                 "--endpoint",
@@ -366,9 +375,9 @@ internal class PiChecks {
                 return
             }
             if mode == "reasoning" {
-                for effort in[]string{"absent", "minimal", "xhigh"} {
+                for unsupportedEffort in[]string{"absent", "minimal", "xhigh"} {
                     let rejected = args.ToArray()
-                    rejected[Array.IndexOf(rejected, "--effort") + 1] = effort
+                    rejected[Array.IndexOf(rejected, "--effort") + 1] = unsupportedEffort
                     Check.Contains(flow.Flow.Call(rejected, 1).Error, "does not support the selected reasoning effort")
                 }
                 flow.Flow.Temp.Env["TERM"] = "dumb"
@@ -406,6 +415,20 @@ internal class PiChecks {
                 Check.Contains(flow.Flow.Call([]string{"defaults", "read", "--profile", "reasoning"}).Output, "high")
             }
             if mode == "off" {
+                let model = provider["models"]?[0] ?? throw Exception("Missing model")
+                for invalidCompat in[]string{
+                    "{\"maxTokensField\":\"invalid\"}",
+                    "{\"supportsDeveloperRole\":\"yes\"}",
+                    "{\"apiKey\":\"PRIVATE_CREDENTIAL_SENTINEL\"}"
+                } {
+                    model["compat"] = Check.Json(invalidCompat)
+                    File.WriteAllText(modelsPath, models.ToJsonString())
+                    let rejected = flow.Flow.Call(args.ToArray(), 1)
+                    Check.Contains(rejected.Error, "Pi requires one configured local model")
+                    Check.That(!rejected.Error.Contains("PRIVATE_CREDENTIAL_SENTINEL"), "Unsupported metadata leaked")
+                }
+                model["compat"] = Check.Json("{\"maxTokensField\":\"max_tokens\"}")
+                File.WriteAllText(modelsPath, models.ToJsonString())
                 for option in[]string{"--effort", "--model", "--endpoint"} {
                     let rejected = args.ToArray()
                     rejected[Array.IndexOf(rejected, option) + 1] = "unsupported"
@@ -513,7 +536,7 @@ internal class PiChecks {
                     .ToJsonString()
             )
             let success = mode == "unlimited" ||
-                mode == "reasoning" ||
+                reasoning ||
                 mode == "off" ||
                 mode == "on" ||
                 mode == "compact" ||
@@ -601,7 +624,7 @@ internal class PiChecks {
                     .ToJsonString()
             )
             Check.That(
-                Check.Text(saved["effort"]) == (mode == "reasoning" ? "high": "absent") && Check.Text(
+                Check.Text(saved["effort"]) == effort && Check.Text(
                     saved["observed_invocation"]?["effort"]
                 ) == Check.Text(saved["effort"]),
                 "Pi lost selected effort"

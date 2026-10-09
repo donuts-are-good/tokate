@@ -198,6 +198,38 @@ internal class CheckGates {
             }
             test.Restore()
             Passing(test)
+            for state in[]string{"failure", "queued", "action_required"} {
+                test.Restore()
+                Passing(test)
+                flow.Reload()
+                flow.State["check_runs"] = Check.Map(
+                    "total_count",
+                    2,
+                    "check_runs",
+                    JsonArray(
+                        Check.Map("name", "verify", "status", "completed", "conclusion", "success"),
+                        Check.Map(
+                            "name",
+                            "experimental",
+                            "status",
+                            state == "queued" ? "queued": "completed",
+                            "conclusion",
+                            state
+                        )
+                    )
+                )
+                flow.Save()
+                let optional = Data(Read(test))
+                Gate(optional, "checks", "passed")
+                Check.That(Check.Text(optional["machine_status"]) == "passed", "Optional check blocked readiness")
+                Check.Contains(optional["checks"]?.ToJsonString() ?? "", "experimental")
+                Check.That(
+                    Check.Text(optional["owner_inspection_required"]) == (state == "action_required" ? "true": "false"),
+                    "Optional workflow inspection evidence was lost"
+                )
+            }
+            test.Restore()
+            Passing(test)
             flow.State["statuses"] = Check.Json("[{\"context\":\"verify\",\"state\":\"pending\"}]")
             flow.Save()
             Gate(Data(Read(test, 8)), "checks", "pending")

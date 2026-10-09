@@ -4,6 +4,7 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Text.Json
+import System.Text.RegularExpressions
 
 internal class OwnerSetup {
     shared {
@@ -114,7 +115,7 @@ internal class OwnerSetup {
                 }
                 Terminal.Message("Current allowed tools: " + String.Join(", ", current), error: true)
                 requested = Answer(
-                    "Allowed tools: codex (Subscription), pi (Local); comma-separated, Enter keeps current"
+                    "Managed tools: codex,pi keeps external permissions; use harness/provider pairs to replace all; Enter keeps current"
                 )
             }
             if requested == "" {
@@ -122,15 +123,27 @@ internal class OwnerSetup {
             }
             let selected = HashSet[string](StringComparer.Ordinal)
             let tools = List[Object]()
-            for name in requested.Split(',') {
-                let harness = name.Trim()
-                if harness != "codex" && harness != "pi" {
-                    throw Exception("Choose codex, pi, or codex,pi for allowed managed tools")
+            if !requested.Contains('/') {
+                for tool in J.Items(J.Get(value, "allowed_tools")) {
+                    if !DonorSelection.Supported(tool) && selected.Add(
+                        J.Text(tool, "harness") + "/" + J.Text(tool, "provider")
+                    ) {
+                        tools.Add(tool.Clone())
+                    }
                 }
-                if selected.Add(harness) {
-                    let pair = Args([]string{"defaults", "set", "--harness", harness})
-                    DonorDefaults.NormalizePair(pair)
-                    tools.Add(map[string, Object?]{"harness": harness, "provider": pair.Need("provider")})
+            }
+            for name in requested.Split(',') {
+                let parts = name.Trim().Split('/')
+                let harness = parts[0]
+                let provider = parts.Length == 2 ? parts[1]: DonorDefaults.Provider(harness)
+                if parts.Length > 2 || !Regex.IsMatch(harness, "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\\z") || !Regex.IsMatch(
+                    provider,
+                    "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\\z"
+                ) {
+                    throw Exception("Use codex, pi, or exact harness/provider pairs for allowed tools")
+                }
+                if selected.Add(harness + "/" + provider) {
+                    tools.Add(map[string, Object?]{"harness": harness, "provider": provider})
                 }
             }
             fields["allowed_tools"] = tools
@@ -275,9 +288,22 @@ internal class OwnerSetup {
                     let choice = WizardScreen.Choose(
                         "Allowed coding tools",
                         "Owners need neither tool installed.",
-                        []string{"Codex | Subscription", "Pi | Local", "Codex and Pi"}
+                        []string{
+                            "Codex | Subscription",
+                            "Pi | Local",
+                            "Codex and Pi",
+                            "Edit exact harness/provider pairs"
+                        }
                     )
-                    args.Values["--allowed-tools"] = choice == 1 ? "codex": choice == 2 ? "pi": "codex,pi"
+                    let pairs = List[string]()
+                    for tool in J.Items(J.Get(value, "allowed_tools")) {
+                        pairs.Add(J.Text(tool, "harness") + "/" + J.Text(tool, "provider"))
+                    }
+                    args.Values["--allowed-tools"] = choice == 4 ? Answer(
+                        "Allowed harness/provider pairs",
+                        String.Join(",", pairs)
+                    ):
+                    choice == 1 ? "codex": choice == 2 ? "pi": "codex,pi"
                     Tools(args, fields, false)
                     fields["allow_network"] = WizardScreen.Choose(
                         "Project network",

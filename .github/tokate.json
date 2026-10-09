@@ -1,6 +1,14 @@
 {
   "version": 2,
   "models": {
+    "claude-opus-5-5": [
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "claude-sonnet-5-5": [
+      "high"
+    ],
     "gpt-6.1-sol": [
       "high",
       "xhigh"
@@ -42,6 +50,10 @@
   "approval_scope": "task",
   "eligibility": "trusted",
   "allowed_tools": [
+    {
+      "harness": "claude",
+      "provider": "anthropic"
+    },
     {
       "harness": "codex",
       "provider": "openai"
