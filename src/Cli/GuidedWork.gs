@@ -273,10 +273,10 @@ internal class GuidedWork {
         }
 
         internal func Fill(args Args) {
-            if args.Help || !DonorSelection.Interactive(args) || args.Get("run") != "" || args.Get(
-                "continue-from"
+            if args.Help || args.Get("source") == "external" || !DonorSelection.Interactive(args) || args.Get(
+                "run"
             ) != "" ||
-                (args.Command != "work" && args.Command != "claim") {
+                args.Get("continue-from") != "" || (args.Command != "work" && args.Command != "claim") {
                 return
             }
             let guided = args.Get("repo") == "" || args.Get("issue") == "" ||

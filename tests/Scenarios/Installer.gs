@@ -7,6 +7,64 @@ import System.Text.Json.Nodes
 
 internal class Installer {
     shared {
+        internal func Skill(project string) {
+            using let temp = Temp()
+            let bundle = Path.Combine(temp.Root, "plugin")
+            Directory.CreateDirectory(Path.Combine(bundle, "tokate"))
+            let script = Path.Combine(bundle, "install.sh")
+            File.Copy(Path.Combine(project, "plugins/install.sh"), script)
+            let source = Path.Combine(bundle, "tokate/SKILL.md")
+            File.Copy(Path.Combine(project, "plugins/tokate/SKILL.md"), source)
+            let original = File.ReadAllText(source)
+            let homes = []string{".agents", ".claude", ".pi/agent", ".omp/agent", ".hermes"}
+            let harnesses = []string{"codex", "claude", "pi", "omp", "hermes"}
+            for i in 0 ... harnesses.Length {
+                let args = []string{script, harnesses[i]}
+                Check.Success(TestProcess.Run("/bin/sh", args, temp.Env))
+                let installed = Path.Combine(temp.Env["HOME"], homes[i], "skills/tokate/SKILL.md")
+                Check.That(File.ReadAllText(installed) == original, "Harness received a different donation skill")
+                Check.Success(TestProcess.Run("/bin/sh", args, temp.Env))
+                File.WriteAllText(source, original + "\nUpdated package.\n")
+                Check.Success(TestProcess.Run("/bin/sh", args, temp.Env))
+                Check.That(File.ReadAllText(installed) == File.ReadAllText(source), "Unmodified skill did not update")
+                File.WriteAllText(installed, "User-edited skill\n")
+                Check.That(
+                    TestProcess.Run("/bin/sh", args, temp.Env).Code == 1,
+                    "Installer replaced a user-edited skill"
+                )
+                Check.That(File.ReadAllText(installed) == "User-edited skill\n", "Edited skill was not preserved")
+                File.WriteAllText(source, original)
+            }
+            let custom = Path.Combine(temp.Root, "custom skills")
+            let customArgs = []string{script, "hermes", custom}
+            Check.Success(TestProcess.Run("/bin/sh", customArgs, temp.Env))
+            let target = Path.Combine(custom, "tokate/SKILL.md")
+            File.Delete(target)
+            File.CreateSymbolicLink(target, source)
+            Check.That(TestProcess.Run("/bin/sh", customArgs, temp.Env).Code == 1, "Installer followed a skill symlink")
+            Check.That(File.ReadAllText(source) == original, "Installer changed its source through a link")
+            let foreign = Path.Combine(temp.Root, "foreign/tokate")
+            Directory.CreateDirectory(foreign)
+            File.WriteAllText(Path.Combine(foreign, "SKILL.md"), "Existing skill\n")
+            Check.That(
+                TestProcess.Run("/bin/sh", []string{script, "codex", Path.GetDirectoryName(foreign) ?? ""}, temp.Env)
+                    .Code == 1,
+                "Installer replaced an unrelated skill"
+            )
+            temp.Env["OMP_PROFILE"] = "donor"
+            Check.That(
+                TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env).Code == 1,
+                "Installer guessed a named profile directory"
+            )
+            Check.That(
+                TestProcess.Run("/bin/sh", []string{script, "unknown"}, temp.Env).Code == 1,
+                "Installer accepted an unknown harness"
+            )
+            Console.WriteLine(
+                "PASS shared skill installation, updates, custom paths and preservation for five harnesses"
+            )
+        }
+
         internal func Lifecycle(project string, binary string, shell string = "/bin/bash", accountShell string? = nil) {
             using let temp = Temp()
             temp.Env["SHELL"] = shell
