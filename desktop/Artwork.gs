@@ -11,9 +11,30 @@ class Artwork : IDisposable {
     let Sun ImageSource = ImageSource.Decode(File.ReadAllBytes(Asset("sun.png")))
     let Moon ImageSource = ImageSource.Decode(File.ReadAllBytes(Asset("moon.png")))
     let Stone ImageSource = ImageSource.Decode(File.ReadAllBytes(Asset("stone-olive.png")))
-    let Donate Landscape = Landscape("donate")
-    let Project Landscape = Landscape("my-project")
-    let Saved Landscape = Landscape("saved-work")
+    private var donate Landscape?
+    private var project Landscape?
+    private var saved Landscape?
+    prop Donate Landscape {
+        get {
+            let image = donate ?? Landscape("donate")
+            donate = image
+            return image
+        }
+    }
+    prop Project Landscape {
+        get {
+            let image = project ?? Landscape("my-project")
+            project = image
+            return image
+        }
+    }
+    prop Saved Landscape {
+        get {
+            let image = saved ?? Landscape("saved-work")
+            saved = image
+            return image
+        }
+    }
     let Mark VectorAsset = Svg.Load(Asset("wordmark-sprig.svg"))
     let Program ShaderEffectProgram = ShaderEffectProgram.Load(
         Path.Combine(AppContext.BaseDirectory, "Shaders/fresco.goo-effect")
@@ -32,9 +53,9 @@ class Artwork : IDisposable {
         Sun.Dispose()
         Moon.Dispose()
         Stone.Dispose()
-        Donate.Dispose()
-        Project.Dispose()
-        Saved.Dispose()
+        donate?.Dispose()
+        project?.Dispose()
+        saved?.Dispose()
     }
 }
 
