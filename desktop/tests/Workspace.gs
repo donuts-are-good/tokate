@@ -3,6 +3,7 @@ package TokateDesktop
 import Goo
 import System
 import System.IO
+import System.Text.Json
 
 func Edit(window Window, host TestHost, adapter TestAccessibility, name string, value string) {
     let field = Find(adapter.Root, AccessibilityRole.TextInput, name) ?? throw Exception("Missing field: " + name)
@@ -255,6 +256,30 @@ func WorkspaceFlow() {
             "Unchanged policy restrictions were replaced"
         )
         Require(!File.Exists(Path.Combine(fixture, "applied")), "Preview applied configuration")
+        Choose(host, window, adapter, "Checks")
+        Edit(window, host, adapter, "Command", "printf \"quoted\"")
+        Choose(host, window, adapter, "Add command")
+        Edit(window, host, adapter, "Check name", "build \"linux\"")
+        Choose(host, window, adapter, "Add check")
+        Choose(host, window, adapter, "Permissions")
+        Choose(host, window, adapter, "Selected models")
+        Edit(window, host, adapter, "Model ID", "local-model")
+        Edit(window, host, adapter, "Efforts", "high,ultra")
+        Choose(host, window, adapter, "Add model")
+        Edit(window, host, adapter, "Model ID", "discarded-model")
+        Choose(host, window, adapter, "Add model")
+        Choose(host, window, adapter, "Remove discarded-model")
+        Choose(host, window, adapter, "Review")
+        Choose(host, window, adapter, "Preview setup")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Apply preview", enabled: true)
+        let updated = File.ReadAllLines(Path.Combine(fixture, "owner-args"))
+        using let commands = JsonDocument.Parse(updated[Array.IndexOf(updated, "--verification") + 1])
+        using let checks = JsonDocument.Parse(updated[Array.IndexOf(updated, "--required-checks") + 1])
+        using let models = JsonDocument.Parse(updated[Array.IndexOf(updated, "--models") + 1])
+        Require(commands.RootElement[2][2].GetString() == "printf \"quoted\"", "Command JSON lost quoting")
+        Require(checks.RootElement[1].GetString() == "build \"linux\"", "Check JSON lost quoting")
+        Require(models.RootElement.GetProperty("local-model")[1].GetString() == "ultra", "Model efforts changed")
+        Require(!models.RootElement.TryGetProperty("discarded-model", out _), "Removed model remained serialized")
         Choose(host, window, adapter, "Apply preview")
         Settle(host)
         Choose(host, window, adapter, "Go back")

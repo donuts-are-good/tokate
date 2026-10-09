@@ -5,6 +5,7 @@ import System
 import System.Collections.Generic
 import System.IO
 import System.Text.Json
+import System.Text.Json.Nodes
 
 partial class Desktop {
     private var ownerOpen bool
@@ -29,6 +30,30 @@ partial class Desktop {
     private let ownerChecks List[string] = List[string]()
     private let ownerCommands List[[]string] = List[[]string]()
     private let ownerModelMap Dictionary[string, List[string]] = Dictionary[string, List[string]]()
+
+    private func OwnerStrings(values IEnumerable[string]) JsonArray {
+        let result = JsonArray()
+        for value in values {
+            result.Add(JsonValue.Create(value) as JsonNode)
+        }
+        return result
+    }
+
+    private func OwnerModelsJson() string {
+        let result = JsonObject()
+        for item in ownerModelMap {
+            result[item.Key] = OwnerStrings(item.Value)
+        }
+        return result.ToJsonString()
+    }
+
+    private func OwnerCommandsJson() string {
+        let result = JsonArray()
+        for command in ownerCommands {
+            result.Add(OwnerStrings(command) as JsonNode)
+        }
+        return result.ToJsonString()
+    }
 
     private func
     OwnerChanged() {
@@ -579,7 +604,7 @@ partial class Desktop {
                                 "Remove " + key,
                                 () -> {
                                     ownerModelMap.Remove(key)
-                                    ownerModels = JsonSerializer.Serialize(ownerModelMap)
+                                    ownerModels = OwnerModelsJson()
                                     ownerModelPolicy = "whitelist"
                                     OwnerChanged()
                                 }
@@ -622,7 +647,7 @@ partial class Desktop {
                                     efforts.Add("absent")
                                 }
                                 ownerModelMap[ownerModel.Trim()] = efforts
-                                ownerModels = JsonSerializer.Serialize(ownerModelMap)
+                                ownerModels = OwnerModelsJson()
                                 ownerModelPolicy = "whitelist"
                                 ownerModel = ""
                                 ownerEffort = ""
@@ -877,17 +902,17 @@ partial class Desktop {
             }
             if ownerCommandsChanged {
                 args.Add("--verification")
-                args.Add(JsonSerializer.Serialize(ownerCommands))
+                args.Add(OwnerCommandsJson())
             }
             if ownerChecksChanged {
                 args.Add("--required-checks")
-                args.Add(JsonSerializer.Serialize(ownerChecks))
+                args.Add(OwnerStrings(ownerChecks).ToJsonString())
             }
             if ownerModelPolicy != "" {
                 args.Add("--model-policy")
                 args.Add(ownerModelPolicy)
                 if ownerModelPolicy == "whitelist" {
-                    ownerModels = JsonSerializer.Serialize(ownerModelMap)
+                    ownerModels = OwnerModelsJson()
                 }
             }
             if ownerMinutes != "" {

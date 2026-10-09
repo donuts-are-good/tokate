@@ -311,7 +311,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Codex did not restore Sol"
         )
         Activate(window, adapter, "Check selection & review")
-        AwaitControl(host, adapter, AccessibilityRole.Text, "Review")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Change details")
         Require(Find(adapter.Root, AccessibilityRole.Text, "III") != nil, "Step III numeral missing")
         Require(
             Find(adapter.Root, AccessibilityRole.Text, "Command completed.") == nil,
@@ -330,7 +330,7 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
             "Unlimited lost its verification limit"
         )
         Activate(window, adapter, "Check selection & review")
-        AwaitControl(host, adapter, AccessibilityRole.Text, "Review")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Reserve contribution")
         Activate(window, adapter, "Reserve contribution")
         Settle(host)
         Activate(window, adapter, "Send request")
@@ -516,6 +516,28 @@ func TestDesktop() {
     DonateFlow(host, window, adapter)
 }
 
+func AwaitChildStopped(pid int32) {
+    let clock = Stopwatch.StartNew()
+    using let pulse = tick(TimeSpan.FromMilliseconds(10))
+    while clock.Elapsed.TotalSeconds < 2 {
+        try {
+            let stat = File.ReadAllText("/proc/" + pid.ToString() + "/stat")
+            let state = stat[stat.LastIndexOf(')') + 2]
+            if state == 'Z' || state == 'X' {
+                return
+            }
+        } catch (error FileNotFoundException) {
+            return
+        } catch (error DirectoryNotFoundException) {
+            return
+        }
+        select {
+            case <- pulse { }
+        }
+    }
+    throw InvalidOperationException("Cancellation left a child process running")
+}
+
 func TestCommandLifecycle() {
     let marker = Path.Combine(Path.GetTempPath(), "tokate-child-" + Guid.NewGuid().ToString("N"))
     var child = 0
@@ -533,12 +555,7 @@ func TestCommandLifecycle() {
         )
         Require(result.Error.Contains("timed out"), "Lifecycle probe did not time out")
         child = int32.Parse(File.ReadAllText(marker))
-        var alive = false
-        try {
-            using let process = Process.GetProcessById(child)
-            alive = !process.HasExited
-        } catch (error ArgumentException) { }
-        Require(!alive, "Cancellation left a child process running")
+        AwaitChildStopped(child)
         Require(clock.Elapsed.TotalSeconds < 8, "Cancellation did not finish promptly")
     } finally {
         if child > 0 {
@@ -589,10 +606,7 @@ func TestDesktopShutdown() {
             let result = <-finished
             Require(result.Error.Contains("cancelled"), "Shutdown did not cancel its command")
             let child = int32.Parse(File.ReadAllText(Path.Combine(root, index.ToString())))
-            try {
-                using let process = Process.GetProcessById(child)
-                Require(process.HasExited, "Shutdown left a command descendant running")
-            } catch (error ArgumentException) { }
+            AwaitChildStopped(child)
         }
         Require(shutdown.Elapsed.TotalSeconds < 8, "Shutdown exceeded its cleanup deadline")
         let rejected = CommandRunner().Run(
