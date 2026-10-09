@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: latest
           package-manager-cache: false
-      - run: sudo apt-get update && sudo apt-get install -y bubblewrap clang zlib1g-dev
+      - run: sudo apt-get update && sudo apt-get install -y bubblewrap clang socat zlib1g-dev
       - name: Permit required command namespaces
         run: |
           sudo tee /etc/apparmor.d/tokate-commands <<'EOF'
@@ -82,6 +82,18 @@ jobs:
       - name: Prove latest Pi managed workflow without inference
         if: ${{ inputs.full == true }}
         run: python3 scripts/pi-proof.py --pi-root "$TOKATE_HARNESS_PREFIX/lib/node_modules" --node "$TOKATE_NODE"
+      - name: Prove latest native Claude capabilities without inference
+        if: ${{ inputs.full == true }}
+        run: |
+          python3 scripts/claude-download.py --output "$RUNNER_TEMP/claude"
+          python3 scripts/claude-proof.py --claude "$RUNNER_TEMP/claude" | tee "$RUNNER_TEMP/claude-proof.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() && inputs.full == true }}
+        with:
+          name: native-claude-proof
+          path: ${{ runner.temp }}/claude-proof.txt
+          if-no-files-found: ignore
+          retention-days: 7
       - run: git diff --check
       - name: Probe the real managed sandbox without inference
         if: ${{ inputs.full == true }}
