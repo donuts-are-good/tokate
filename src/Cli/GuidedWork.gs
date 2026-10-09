@@ -109,7 +109,9 @@ internal class GuidedWork {
                 if selected < names.Count {
                     let value = DonorDefaults.Read(names[selected])
                     for field in value.EnumerateObject() {
-                        args.Values["--" + field.Name] = field.Value.GetString() ?? ""
+                        if field.Name != "harness-path" || args.Get("harness-path") == "" {
+                            args.Values["--" + field.Name] = field.Value.GetString() ?? ""
+                        }
                     }
                     return
                 }
@@ -134,7 +136,11 @@ internal class GuidedWork {
             )
             args.Values["--harness"] = routes[tool - 1]
             DonorDefaults.NormalizePair(args)
+            Startup.Check(args)
             if args.Need("harness") == "pi" {
+                if args.Get("pi-root") == "" && args.Get("harness-path") == "" && LocalPaths.Harness("pi") == "" {
+                    MachineSetup.Harness(args)
+                }
                 args.Values["--endpoint"] = WizardScreen.Read(
                     "Local model",
                     "Use your existing model server or local tunnel.",
@@ -175,7 +181,7 @@ internal class GuidedWork {
                 let models = List[string]()
                 let efforts = List[string]()
                 labels.Clear()
-                for entry in CodexRuntime.Capabilities() {
+                for entry in CodexRuntime.Capabilities(args.Get("harness-path")) {
                     for effort in entry.Value {
                         if policy.Allows(entry.Key, effort) {
                             models.Add(entry.Key)
@@ -317,6 +323,7 @@ internal class GuidedWork {
             DonorSelection.ApplyDefaults(args)
             while true {
                 Terminal.Step("Checking the selected coding tool...")
+                Startup.Check(args)
                 let selection = DonorSelection.Resolve(args, policy)
                 let reserve = RuntimeBudget.Reserve(args, RuntimeBudget.ReadSeconds(args))
                 args.Values["--verification-reserve"] = reserve.ToString()

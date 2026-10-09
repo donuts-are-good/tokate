@@ -59,7 +59,7 @@ internal class DonorDefaults {
                 }
                 return JsonElement{}
             }
-            RequestData.Keys(value, "harness,provider,model,effort,endpoint,pi-root,node")
+            RequestData.Keys(value, "harness,provider,model,effort,endpoint,pi-root,node,harness-path")
             for field in value.EnumerateObject() {
                 if field.Value.ValueKind != JsonValueKind.String {
                     throw Exception("Donor profile fields must be strings")
@@ -76,26 +76,17 @@ internal class DonorDefaults {
                 PiBoundary.Endpoint(J.Text(value, "endpoint"))
                 for key in[]string{"pi-root", "node"} {
                     if J.Get(value, key).ValueKind != JsonValueKind.Undefined {
-                        RuntimePath(J.Text(value, key))
+                        LocalPaths.RuntimePath(J.Text(value, key))
                     }
                 }
             } else {
                 RequestData.Token(J.Text(value, "model"))
-                RequestData.Keys(value, "harness,provider,model,effort")
+                RequestData.Keys(value, "harness,provider,model,effort,harness-path")
+            }
+            if J.Text(value, "harness-path") != "" {
+                LocalPaths.RuntimePath(J.Text(value, "harness-path"))
             }
             return value
-        }
-
-        private func RuntimePath(value string) string {
-            if value.Length > 4096 || !Path.IsPathFullyQualified(value) {
-                throw Exception("Profile runtime overrides require bounded absolute paths")
-            }
-            for character in value {
-                if Char.IsControl(character) {
-                    throw Exception("Invalid profile runtime path")
-                }
-            }
-            return Path.GetFullPath(value)
         }
 
         private func Summary(value JsonElement) Object? -> value.ValueKind == JsonValueKind.Undefined ? nil:
@@ -158,9 +149,12 @@ internal class DonorDefaults {
                 choice["endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
                 for key in[]string{"pi-root", "node"} {
                     if args.Get(key) != "" {
-                        choice[key] = RuntimePath(args.Get(key))
+                        choice[key] = LocalPaths.RuntimePath(args.Get(key))
                     }
                 }
+            }
+            if args.Get("harness-path") != "" {
+                choice["harness-path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
             }
             let value = RequestData.Parse(J.Write(choice), 16 * 1024)
             Directory.CreateDirectory(

@@ -14,7 +14,7 @@ internal class ToolCheck {
 
 internal class Startup {
     shared {
-        internal func Scan(names[]string) List[ToolCheck] {
+        internal func Scan(names[]string, harnessPath string = "") List[ToolCheck] {
             let tools = List[ToolCheck]()
             for name in names {
                 let tool = ToolCheck{
@@ -22,7 +22,7 @@ internal class Startup {
                     Hint: switch name {
                         case "git": "Install Git and add git to PATH."
                         case "gh": "Install GitHub CLI and add gh to PATH."
-                        case "codex": "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported."
+                        case "codex": "Add native Linux x64 Codex or the @openai/codex npm launcher with its matching codex-linux-x64 native runtime to PATH; user-local installations are supported. Use --harness-path FILE for a custom location."
                         case "setsid": "Install util-linux and add setsid to PATH."
                         case "/usr/bin/setsid": "Install util-linux at /usr/bin/setsid for catalog probes and independent verification."
                         case "/usr/bin/env": "Install coreutils at /usr/bin/env for command cleanup and managed sandbox probes."
@@ -31,10 +31,13 @@ internal class Startup {
                         case "/usr/bin/bwrap": "Install bubblewrap at /usr/bin/bwrap for independent verification."
                         case "curl": "Install curl and add curl to PATH."
                         case "tar": "Install tar and add tar to PATH."
+                        case "/usr/bin/cp": "Install GNU coreutils at /usr/bin/cp for independent verification."
                         default: ""
                     }
                 }
-                tool.Path = name.StartsWith("/") ? (File.Exists(name) ? name: ""): LocalPaths.Find(name)
+                tool.Path = name == "codex" ? LocalPaths.Harness(name, harnessPath): name.StartsWith("/") ? (
+                    File.Exists(name) ? name: ""
+                ): LocalPaths.Find(name)
                 if tool.Path != "" {
                     tool.Status = "found"
                     tool.Detail = name.StartsWith("/") ?
@@ -57,8 +60,21 @@ internal class Startup {
             command == "work" ||
             (command == "prepare" && options?.Get("source") == "tokate")
 
-        private func Requirements(options Args)[]string {
+        internal func Requirements(options Args)[]string {
             let command = options.Command
+            if command == "doctor" {
+                let selected = Args(
+                    []string{
+                        options.Get("owner") == "true" ? "init": options.Get("external") == "true" ? "external": "work"
+                    }
+                )
+                for key in[]string{"harness", "harness-path", "pi-root", "node"} {
+                    if options.Get(key) != "" {
+                        selected.Values["--" + key] = options.Get(key)
+                    }
+                }
+                return Requirements(selected)
+            }
             if (command == "status" && options.Get("run") != "") || command == "defaults" {
                 return []string{}
             }
@@ -77,7 +93,8 @@ internal class Startup {
                     throw CliFailure("invalid_state", "External work uses external --run; inference is never launched")
                 }
             }
-            if command == "work" ||
+            if command == "init" ||
+                command == "work" ||
                 command == "claim" ||
                 command == "prepare" ||
                 command == "external" ||
@@ -103,6 +120,7 @@ internal class Startup {
             }
             if independent {
                 names.Add("/usr/bin/bwrap")
+                names.Add("/usr/bin/cp")
             }
             if command == "coordinator-setup" || command == "init" {
                 names.Add("curl")
@@ -134,7 +152,8 @@ internal class Startup {
                     let executable = tool.Name == "codex" && Path.GetFileName(
                         LocalPaths.CanonicalPath(tool.Path)
                     ) == "codex.js" ?
-                    CodexRuntime.Resolve(): tool.Path
+                    CodexRuntime.Resolve(tool.Path): tool.Path
+                    tool.Path = executable
                     let result = Commands.Run(
                         executable,
                         []string{"--version"},
@@ -183,9 +202,16 @@ internal class Startup {
             }
         }
 
-        internal func Check(options Args) {
-            let tools = Scan(Requirements(options))
+        internal func Inspect(options Args) List[ToolCheck] {
+            let harnessPath = options.Get("run") != "" && options.Command == "work" ?
+            Data.Load(Path.GetFullPath(options.Need("run"))).Text("harness_path"): options.Get("harness-path")
+            let tools = Scan(Requirements(options), harnessPath)
             ExecuteChecks(tools)
+            return tools
+        }
+
+        internal func Check(options Args) {
+            let tools = Inspect(options)
             let blockers = List[ToolCheck]()
             for tool in tools {
                 if tool.Status != "ready" {
@@ -193,6 +219,10 @@ internal class Startup {
                 }
             }
             if blockers.Count > 0 {
+                if MachineSetup.TryFix(options, blockers) {
+                    Check(options)
+                    return
+                }
                 PublicOutput.Tools(blockers)
                 Show(blockers, true)
                 throw CliFailure(
@@ -212,8 +242,14 @@ internal class Startup {
             }
             if Ready(tools, name) && Ready(tools, "setsid") {
                 try {
+                    var executable = name
+                    for tool in tools {
+                        if tool.Name == name {
+                            executable = tool.Path
+                        }
+                    }
                     let result = Commands.Run(
-                        name,
+                        executable,
                         codex ? []string{"login", "status"}: []string{"auth", "status", "--hostname", "github.com"},
                         seconds: 10,
                         harness: codex,
@@ -254,46 +290,63 @@ internal class Startup {
             let doctorScope = options.Get("owner") == "true" ? "owner": (
                 options.Get("external") == "true" ? "external": "managed"
             )
-            let tools = Scan(
-                doctorScope == "owner" ? []string{"setsid", "/usr/bin/env", "/usr/bin/unshare", "gh"}: (
-                    doctorScope == "external" ? []string{
-                        "setsid",
-                        "/usr/bin/env",
-                        "/usr/bin/unshare",
-                        "git",
-                        "gh",
-                        "/usr/bin/setsid",
-                        "/usr/bin/bwrap"
-                    }: []string{
-                        "setsid",
-                        "/usr/bin/env",
-                        "/usr/bin/unshare",
-                        "git",
-                        "gh",
-                        "codex",
-                        "/usr/bin/setsid",
-                        "bwrap"
-                    }
-                )
-            )
-            ExecuteChecks(tools)
+            let pi = doctorScope == "managed" && options.Get("harness") == "pi"
+            let tools = Inspect(options)
+            if options.Get("fix") == "true" && MachineSetup.TryFix(options, tools) {
+                return Doctor(options)
+            }
             if doctorScope != "owner" {
                 let sandbox = ToolCheck{
                     Name: "sandbox",
                     Status: "skipped",
-                    Hint: doctorScope == "external" ? "Install /usr/bin/bwrap and ensure independent verification namespaces are supported. Tokate does not change security settings.": "Ensure bubblewrap user namespaces and native Codex permission profiles are supported. Tokate does not change security settings.",
-                    Detail: doctorScope == "external" ? "Requires working setsid, /usr/bin/setsid and /usr/bin/bwrap.": "Requires working setsid, /usr/bin/setsid, /usr/bin/env, codex and bwrap."
+                    Hint: doctorScope == "external" ||
+                        pi ? "Install /usr/bin/bwrap and ensure independent verification namespaces are supported. Tokate does not change security settings.": "Ensure bubblewrap user namespaces and native Codex permission profiles are supported. Tokate does not change security settings.",
+                    Detail: doctorScope == "external" ||
+                        pi ? "Requires working setsid, /usr/bin/setsid and /usr/bin/bwrap.": "Requires working setsid, /usr/bin/setsid, /usr/bin/env, codex and bwrap."
                 }
-                var probe = Ready(tools, "setsid") && Ready(tools, "/usr/bin/setsid")
+                var probe = Ready(tools, "setsid") &&
+                    Ready(tools, "/usr/bin/setsid") &&
+                    Ready(tools, "/usr/bin/bwrap") &&
+                    Ready(tools, "/usr/bin/cp")
                 if probe {
-                    probe = doctorScope == "external" ? Ready(tools, "/usr/bin/bwrap"):
+                    probe = doctorScope == "external" || pi ? Ready(tools, "/usr/bin/bwrap"):
                     (Ready(tools, "codex") && Ready(tools, "bwrap") && Ready(tools, "/usr/bin/env"))
+                }
+                if pi && probe {
+                    let runtime = ToolCheck{
+                        Name: "pi",
+                        Hint: "Use --harness-path FILE, or --pi-root DIR and --node FILE for an existing installation."
+                    }
+                    let missingPi = options.Get("pi-root") == "" && options.Get("harness-path") == "" &&
+                        LocalPaths.Harness("pi") == ""
+                    try {
+                        PiHarness.Runtime(options)
+                        let versions = PiBoundary.Probe(options.Need("pi-root"), options.Need("node"))
+                        runtime.Path = options.Need("pi-root")
+                        runtime.Status = "ready"
+                        runtime.Detail = "Pi " + J.Text(versions, "version") + ", Node " + J.Text(versions, "node")
+                    } catch (error Exception) {
+                        runtime.Status = "failed"
+                        runtime.Detail = error.Message +
+                            (SetupUserId() == 0 ? ". If running as root, retry as a regular user.": "")
+                        if options.Get("fix") == "true" {
+                            Terminal.Message(error.Message, "yellow", true)
+                        }
+                        if options.Get("fix") == "true" && missingPi && MachineSetup.Harness(options) {
+                            return Doctor(options)
+                        }
+                        probe = false
+                    }
+                    tools.Add(runtime)
                 }
                 if probe {
                     try {
-                        let pinned = doctorScope == "external" ? Verification.Doctor(): Worker.Doctor()
+                        let pinned = doctorScope == "external" || pi ? Verification.Doctor(): Worker.Doctor(
+                            options.Get("harness-path")
+                        )
                         sandbox.Status = "ready"
-                        sandbox.Detail = doctorScope == "external" ? "Independent verification isolation, checkout writes, read-only Git and private temporary storage checked without Codex.": "Checkout and private /tmp writable. Control files and Git metadata unreadable."
+                        sandbox.Detail = doctorScope == "external" ||
+                            pi ? "Independent verification isolation, checkout writes, read-only Git and private temporary storage checked without Codex.": "Checkout and private /tmp writable. Control files and Git metadata unreadable."
                         if pinned {
                             sandbox.Detail += " Repository global.json SDK/MSBuild starts inside the sandbox."
                         }
@@ -324,7 +377,7 @@ internal class Startup {
             }
             if options.Get("auth") == "true" {
                 Authentication(tools, "gh")
-                if doctorScope == "managed" {
+                if doctorScope == "managed" && !pi {
                     Authentication(tools, "codex")
                 }
             }
@@ -351,6 +404,13 @@ internal class Startup {
                 }
             }
             if code != "" {
+                if code == "missing_tools" && options.Get("fix") != "true" {
+                    let action = List[string]{"tokate", "doctor", "--" + doctorScope, "--fix"}
+                    if options.Get("harness") != "" {
+                        action.AddRange([]string{"--harness", options.Get("harness")})
+                    }
+                    PublicOutput.Actions.Add(action.ToArray())
+                }
                 throw CliFailure(
                     code,
                     code == "verification_failed" ? "Required sandbox diagnostics failed. Follow the sandbox repair instructions above.": PublicOutput.Message(

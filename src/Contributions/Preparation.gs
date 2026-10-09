@@ -46,6 +46,9 @@ internal class Preparation {
 
         private func BoundIdentity(run Data, normalized bool = true) string {
             var identity = Identity(run, normalized)
+            if run.Text("harness_path") != "" {
+                identity = Data.Hash(identity + ":" + run.Text("harness_path"))
+            }
             if run.Text("attempt") != "" {
                 identity = Data.Hash(identity + ":" + run.Text("attempt"))
             }
@@ -110,7 +113,7 @@ internal class Preparation {
                     Reject(directory)
                 }
             }
-            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,unlimited,network,harness,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
+            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,unlimited,network,harness,harness_path,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
                 .Split(',') {
                 if !RequestData.Same(J.Get(pending.Element(), key), J.Get(run.Element(), key)) {
                     Reject(directory)

@@ -187,9 +187,14 @@ internal class Diagnostics {
             Check.That(!File.Exists(calls), "Offline commands started prerequisite probes")
             Call(binary, temp, []string{"work", "--run", saved}, "error", "invalid_state")
             Check.That(!File.Exists(calls), "Rejected external saved work probed managed tools")
+            let incomplete = Call(binary, temp, []string{"doctor", "--owner"}, "error", "missing_tools")
+            Check.That(Check.Text(Row(incomplete, "git")["status"]) == "missing", "Owner accepted missing Git")
+            for name in[]string{"git", "curl", "tar"} {
+                Tool(temp, name, "exit 0\n")
+            }
             let owner = Call(binary, temp, []string{"doctor", "--owner"})
             Check.That(
-                Check.Text(owner["data"]?["scope"]) == "owner" && owner["data"]?["tools"]?.AsArray().Count == 4,
+                Check.Text(owner["data"]?["scope"]) == "owner" && owner["data"]?["tools"]?.AsArray().Count == 7,
                 "Owner checked donor tools"
             )
             Check.That(Check.Text(owner["data"]?["authentication_requested"]) == "false", "Implicit authentication")
@@ -201,6 +206,9 @@ internal class Diagnostics {
             Directory.CreateDirectory(longTools)
             File.CreateSymbolicLink(Path.Combine(longTools, "setsid"), "/usr/bin/setsid")
             File.CreateSymbolicLink(Path.Combine(longTools, "gh"), Path.Combine(temp.Root, "bin/gh"))
+            for name in[]string{"git", "curl", "tar"} {
+                File.CreateSymbolicLink(Path.Combine(longTools, name), Path.Combine(temp.Root, "bin", name))
+            }
             temp.Env["PATH"] = longTools
             let longPath = Call(binary, temp, []string{"doctor", "--owner"})
             Check.That(
@@ -232,6 +240,7 @@ internal class Diagnostics {
             let tools = Path.Combine(temp.Root, "tools.json")
             File.WriteAllText(tools, "[]")
             File.Delete(Path.Combine(temp.Root, "bin/codex"))
+            File.Delete(Path.Combine(temp.Root, "bin/git"))
             File.WriteAllText(calls, "")
             let archive = Call(binary, temp, []string{"recover", "--run", saved, "--prepare"}, "error", "missing_tools")
             Check.That(
@@ -347,7 +356,13 @@ internal class Diagnostics {
             File.Copy("/usr/bin/setsid", runner)
             File.SetUnixFileMode(runner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
             File.WriteAllText(Path.Combine(flow.Temp.Root, "broken-helper"), "")
-            for helper in[]string{"/usr/bin/env", "/usr/bin/unshare", "/usr/bin/setsid", "/usr/bin/bwrap"} {
+            for helper in[]string{
+                "/usr/bin/env",
+                "/usr/bin/unshare",
+                "/usr/bin/setsid",
+                "/usr/bin/bwrap",
+                "/usr/bin/cp"
+            } {
                 let cleanup = helper == "/usr/bin/env" || helper == "/usr/bin/unshare"
                 let owner = Check.Envelope(
                     FixedCall(binary, flow, helper, []string{"doctor", "--owner"}),
@@ -370,7 +385,7 @@ internal class Diagnostics {
                     )
                     Check.Contains(Check.Text(discovery["error"]?["message"]), "PID namespace")
                 }
-                if helper != "/usr/bin/bwrap" {
+                if helper != "/usr/bin/bwrap" && helper != "/usr/bin/cp" {
                     let selection = Check.Envelope(
                         FixedCall(
                             binary,

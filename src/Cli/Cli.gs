@@ -14,6 +14,7 @@ internal class CliOption(name string, value string, description string, choices 
     internal let Choices string = choices
 
     internal func Describe(command string) string -> switch Name {
+        case "yes" when command == "doctor": "Confirm the listed missing-package and harness installations; no inference"
         case "yes" when(
             command == "init" || command == "coordinator-setup"
         ): "Apply the reviewed configuration files; no inference"
@@ -77,9 +78,10 @@ internal class Cli {
     shared {
         internal let Options[]CliOption = []CliOption{
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
-            CliOption("managed", "", "Diagnose managed Codex donor tools and sandbox; default scope"),
+            CliOption("managed", "", "Diagnose the selected managed harness and sandbox; default scope"),
             CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
             CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
+            CliOption("fix", "", "Offer installation or an existing path for missing prerequisites"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
             CliOption("issue", "N|URL", "Issue number or GitHub issue URL"),
             CliOption(
@@ -135,6 +137,7 @@ internal class Cli {
             CliOption("model", "MODEL", "Owner-approved model"),
             CliOption("effort", "EFFORT", "Owner-approved effort", "minimal low medium high xhigh max ultra absent"),
             CliOption("harness", "HARNESS", "Managed harness: codex or pi"),
+            CliOption("harness-path", "FILE", "Existing harness executable at an absolute custom path"),
             CliOption("profile", "NAME", "Named local donor profile; explicit compatible choices override it"),
             CliOption("endpoint", "URL", "Private pi no-auth loopback Chat Completions base URL"),
             CliOption("pi-root", "DIR", "Donor-installed pi node_modules directory; no installation"),
@@ -213,10 +216,10 @@ internal class Cli {
         internal let Commands[]CliCommand = []CliCommand{
             CliCommand(
                 "doctor",
-                "owner,managed,external,auth",
+                "owner,managed,external,auth,harness,harness-path,pi-root,node,fix,yes",
                 "",
-                "Check the selected role locally; no login required unless --auth, no inference.",
-                "[--owner|--managed|--external] [--auth]",
+                "Check prerequisites; --fix offers confirmed setup; no inference.",
+                "[--owner|--managed|--external] [--harness codex|pi] [--auth] [--fix [--yes]]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -240,7 +243,7 @@ internal class Cli {
             ),
             CliCommand(
                 "defaults",
-                "profile,harness,provider,model,effort,endpoint,pi-root,node",
+                "profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path",
                 "",
                 "Local nonsecret donor choices; set infers known harness/provider pairs, default codex/openai; no discovery or inference.",
                 "set [--profile NAME] --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
@@ -249,7 +252,7 @@ internal class Cli {
             ),
             CliCommand(
                 "select",
-                "repo,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive",
+                "repo,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive",
                 "repo",
                 "Select under current owner policy and offline harness capabilities; no inference or reservation.",
                 "[--repo OWNER/REPO] [--model MODEL --effort EFFORT] [options]",
@@ -307,7 +310,7 @@ internal class Cli {
             ),
             CliCommand(
                 "prepare",
-                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,yes",
+                "run,repo,issue,state,source,tools,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,fork,seconds,verification-reserve,unlimited,allow-network,runs,continue-from,yes",
                 "repo,issue,state,source",
                 "Prepare a fresh reserved v2 contribution, or resume recorded preparation; no inference, checks or publication.",
                 "[--repo OWNER/REPO] --issue N|URL --state SHA\n       --source external --tools FILE [options]\n       tokate prepare --issue N --state SHA --source tokate [selection options]\n       [--continue-from DIR --seconds N --verification-reserve N --yes]\n       tokate prepare --run DIR",
@@ -441,7 +444,7 @@ internal class Cli {
             ),
             CliCommand(
                 "claim",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,seconds,verification-reserve,unlimited,fork,runs,allow-network,continue-from",
                 "repo,issue",
                 "Check donor readiness, reserve approved work and prepare a saved claim; no inference or PR publication.",
                 "[ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--model MODEL --effort EFFORT] [options]\n       [--continue-from DIR --seconds N --verification-reserve N]",
@@ -451,7 +454,7 @@ internal class Cli {
             ),
             CliCommand(
                 "work",
-                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,unlimited,fork,runs,allow-network,run,continue-from",
+                "repo,issue,profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path,availability,non-interactive,yes,continue-truncated,seconds,verification-reserve,unlimited,fork,runs,allow-network,run,continue-from",
                 "repo,issue",
                 "Run the selected coding harness, verify work and show the publication step. Uses donor inference.",
                 "[OWNER/REPO | ISSUE_URL | --issue N|URL] [--repo OWNER/REPO]\n       [--profile NAME | --model MODEL --effort EFFORT] [--seconds N] [options]\n       tokate work --run DIR [--yes] [--non-interactive] [--continue-truncated]",
@@ -812,6 +815,9 @@ internal class Cli {
                 }
             }
             if args.Command == "doctor" {
+                if args.Get("yes") == "true" && args.Get("fix") != "true" {
+                    throw Exception("doctor --yes requires --fix")
+                }
                 var scopes int32
                 for key in[]string{"owner", "managed", "external"} {
                     if args.Get(key) == "true" {
@@ -820,6 +826,17 @@ internal class Cli {
                 }
                 if scopes > 1 {
                     throw Exception("Choose one doctor scope: --owner, --managed or --external")
+                }
+                if args.Get("harness") != "" && args.Get("harness") != "codex" && args.Get("harness") != "pi" {
+                    throw Exception("Managed diagnostics support codex or pi")
+                }
+                for key in[]string{"harness", "harness-path", "pi-root", "node"} {
+                    if scopes > 0 && args.Get("managed") != "true" && args.Get(key) != "" {
+                        throw Exception("Harness options require managed diagnostics")
+                    }
+                }
+                if args.Get("harness") != "pi" && (args.Get("pi-root") != "" || args.Get("node") != "") {
+                    throw Exception("Pi runtime options require --harness pi")
                 }
             }
             if args.Command == "recover" {
@@ -870,6 +887,11 @@ internal class Cli {
             for key in[]string{"path", "run", "runs", "file", "tools", "summary", "event", "output", "continue-from"} {
                 if args.Get(key) != "" {
                     Path.GetFullPath(args.Get(key))
+                }
+            }
+            for key in[]string{"harness-path", "pi-root", "node"} {
+                if args.Get(key) != "" {
+                    LocalPaths.RuntimePath(args.Need(key))
                 }
             }
             if args.Get("donor") != "" && args.Get("donor") != "@me" {
@@ -931,11 +953,20 @@ internal class Cli {
                 if args.Subject == "set" {
                     DonorDefaults.NormalizePair(args)
                 }
-                for key in[]string{"harness", "provider", "model", "effort", "endpoint", "pi-root", "node"} {
+                for key in[]string{
+                    "harness",
+                    "provider",
+                    "model",
+                    "effort",
+                    "endpoint",
+                    "pi-root",
+                    "node",
+                    "harness-path"
+                } {
                     if args.Subject == "set" {
                         if key == "harness" || key == "provider" || key == "model" || key == "effort" {
                             args.Need(key)
-                        } else if args.Get("harness") != "pi" && args.Get(key) != "" {
+                        } else if key != "harness-path" && args.Get("harness") != "pi" && args.Get(key) != "" {
                             throw Exception("Pi runtime options require the pi harness")
                         }
                     } else if args.Get(key) != "" {
@@ -954,6 +985,7 @@ internal class Cli {
                     "endpoint",
                     "pi-root",
                     "node",
+                    "harness-path",
                     "availability",
                     "non-interactive"
                 } {

@@ -5,6 +5,18 @@ import System.IO
 
 internal class LocalPaths {
     shared {
+        internal func RuntimePath(value string) string {
+            if value.Length > 4096 || !Path.IsPathFullyQualified(value) {
+                throw Exception("Runtime overrides require bounded absolute paths")
+            }
+            for character in value {
+                if Char.IsControl(character) {
+                    throw Exception("Invalid runtime path")
+                }
+            }
+            return Path.GetFullPath(value)
+        }
+
         internal func Executable(path string) bool {
             try {
                 return File.Exists(path) &&
@@ -28,6 +40,23 @@ internal class LocalPaths {
                 }
             }
             return ""
+        }
+
+        internal func Harness(name string, path string = "") string {
+            if path != "" {
+                return RuntimePath(path)
+            }
+            let found = Find(name)
+            if found != "" {
+                return found
+            }
+            let home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+            let candidate = Path.Combine(home, ".local/bin", name)
+            if Executable(candidate) {
+                return candidate
+            }
+            let managed = Path.Combine(home, ".pi/agent/bin/pi")
+            return name == "pi" && Executable(managed) ? managed: ""
         }
 
         internal func StateDirectory(legacy bool = false) string {

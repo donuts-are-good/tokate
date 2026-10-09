@@ -262,6 +262,7 @@ internal class V2Continuation {
                 "id",
                 "branch",
                 "harness",
+                "harness_path",
                 "provider",
                 "model",
                 "effort",
