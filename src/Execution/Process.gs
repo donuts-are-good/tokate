@@ -358,6 +358,7 @@ internal class Commands {
             errorLine Action[string]? = nil
         ) CommandResult {
             let info = ProcessStartInfo(isolated ? LocalPaths.NeedSystemTool("setsid", cwd): "setsid")
+            info.ArgumentList.Add("--wait")
             if !pidNamespace {
                 let unshare = LocalPaths.SystemTool("unshare", cwd)
                 let environment = LocalPaths.SystemTool("env", cwd)

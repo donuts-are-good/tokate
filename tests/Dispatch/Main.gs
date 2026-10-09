@@ -13,6 +13,9 @@ func Main(args[]string) int32 {
             return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
+        if name == "claude" {
+            return ClaudeTool.Run(args)
+        }
         if name == "id" || name == "getent" {
             return ReleaseTools.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
@@ -28,6 +31,9 @@ func Main(args[]string) int32 {
             "artifacts/linux-x64/tokate"
         )
         switch args.Length == 0 ? "": args[0] {
+            case "--claude" when args.Length == 1 {
+                ClaudeChecks.All(binary)
+            }
             case "--nix-runtime" when args.Length == 4 {
                 NixChecks.Run(binary, args[1], args[2], args[3])
             }

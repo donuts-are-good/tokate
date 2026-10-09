@@ -24,6 +24,9 @@ internal class SuiteCatalog {
                     if CiShard.Include("Diagnostics") {
                         Diagnostics.All(binary)
                     }
+                    if CiShard.Include("Claude") {
+                        ClaudeChecks.All(binary)
+                    }
                     if CiShard.Include("DonorSelection") {
                         DonorSelectionChecks.All(binary)
                     }
