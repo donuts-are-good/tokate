@@ -770,7 +770,7 @@ internal class Cli {
 
         internal func Validate(args Args, guided bool = false) {
             let command = Find(args.Command)
-            if args.Command == "request" {
+            if args.Command == "request" && !args.Help {
                 if args.Get("run") != "" {
                     if !LeaseLifecycle.Transition(args.Need("operation")) || args.Get("file") != "" || args.Get(
                         "repo"
