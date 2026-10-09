@@ -14,6 +14,8 @@ class SavedContribution {
     var Title string = ""
     var Remote JsonElement
     var RemoteError bool
+    var Error string = ""
+    var Refreshed bool
 }
 
 partial class Desktop {
@@ -21,7 +23,12 @@ partial class Desktop {
     private let savedPaths List[string] = List[string]()
     private var savedLoaded bool
     private var savedImport bool
-    private var savedSkipped int32
+    private let savedCache Dictionary[string, SavedContribution] = Dictionary[string, SavedContribution]()
+    private var savedPage int32 = 1
+    private var savedSelected bool
+    private var savedReading bool
+    private var savedRevision int32
+    private var savedReader SavedPageLoader?
     private var amendment bool
     private var amendmentCommit string = ""
     private var amendmentSummary string = ""
@@ -42,6 +49,15 @@ partial class Desktop {
     }
 
     private func SavedStatus(item SavedContribution) string {
+        if item.Error != "" {
+            return "Unavailable"
+        }
+        if item.Data.ValueKind != JsonValueKind.Object {
+            return "Loading"
+        }
+        if item.RemoteError && Number(item.Data, "pr") > 0 && item.Remote.ValueKind != JsonValueKind.Object {
+            return "Review unavailable"
+        }
         let remote = item.Remote
         if TextOf(remote, "state") == "MERGED" {
             return "Merged"
@@ -82,119 +98,104 @@ partial class Desktop {
     }
 
     private func Discover() {
-        activityAction = "Refresh contributions"
+        StopSavedUpdates()
         savedPaths.Clear()
-        savedWork.Clear()
+        savedCache.Clear()
         savedLoaded = true
-        savedSkipped = 0
         let previous = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local/state")
         let configured = Environment.GetEnvironmentVariable("XDG_STATE_HOME") ?? ""
         let current = Path.IsPathFullyQualified(configured) ? configured: previous
+        let seen = HashSet[string](StringComparer.Ordinal)
         try {
             if runDirectory != "" {
                 savedPaths.Add(runDirectory)
+                seen.Add(runDirectory)
             }
             for storage in current == previous ? []string{current}: []string{current, previous} {
                 let root = Path.Combine(storage, "tokate/runs")
                 if !Directory.Exists(root) || DirectoryInfo(root).LinkTarget != nil {
                     continue
                 }
-                for directory in Directory.EnumerateDirectories(root) {
-                    if savedPaths.Count >= 128 {
-                        break
-                    }
-                    if DirectoryInfo(directory).LinkTarget == nil && !savedPaths.Contains(directory) {
+                let paths = List[string](Directory.EnumerateDirectories(root))
+                paths.Sort(StringComparer.Ordinal)
+                for directory in paths {
+                    if DirectoryInfo(directory).LinkTarget == nil && seen.Add(directory) {
                         savedPaths.Add(directory)
                     }
                 }
             }
-            ReadSaved(0)
+            LoadSavedPage(savedPage)
         } catch (error Exception) {
             message = error.Message
         }
     }
 
-    private func ReadSaved(index int32) {
-        if index >= savedPaths.Count {
-            RefreshSaved(0)
-            return
-        }
-        let path = savedPaths[index]
-        Execute(
-            []string{"status", "--run", path},
-            result -> {
-                if result.ExitCode == 0 && result.Error == "" {
-                    let data = Field(result.Value, "data")
-                    if TextOf(data, "repo") != "" && Number(data, "issue") > 0 {
-                        savedWork.Add(
-                            SavedContribution{Path: path, Data: data, Actions: Field(result.Value, "next_actions")}
-                        )
-                    } else {
-                        savedSkipped++
-                    }
-                } else {
-                    savedSkipped++
-                }
-                if result.Error.StartsWith("Command cancelled") {
-                    return
-                }
-                ReadSaved(index + 1)
-            },
-            completeOnError: true
-        )
+    private func StopSavedUpdates() {
+        savedRevision++
+        savedReader?.Stop()
+        savedReader = nil
+        savedReading = false
     }
 
-    private func RefreshSaved(index int32) {
-        if index >= savedWork.Count {
-            message = savedSkipped > 0 ? savedSkipped.ToString() + " unreadable saved contributions.": ""
+    private func LoadSavedPage(page int32) {
+        StopSavedUpdates()
+        savedPage = Math.Clamp(page, 1, Math.Max(1, (savedPaths.Count + PageSize - 1) / PageSize))
+        savedSelected = false
+        savedWork.Clear()
+        let start = (savedPage - 1) * PageSize
+        for index in start ... Math.Min(savedPaths.Count, start + PageSize) {
+            let path = savedPaths[index]
+            savedWork.Add(savedCache.TryGetValue(path, out var cached) ? cached: SavedContribution{Path: path})
+        }
+        StartSavedUpdates(savedWork.ToArray())
+    }
+
+    private func StartSavedUpdates(items[]SavedContribution) {
+        let pending = List[SavedContribution]()
+        for item in items {
+            if !item.Refreshed {
+                pending.Add(item)
+            }
+        }
+        if pending.Count == 0 {
+            Rebuild()
             return
         }
-        let item = savedWork[index]
-        let repo = TextOf(item.Data, "repo")
-        let issue = TextOf(item.Data, "issue")
-        Execute(
-            []string{"api", "repos/" + repo + "/issues/" + issue},
-            result -> {
-                if result.Error.StartsWith("Command cancelled") {
+        let window = host ?? throw InvalidOperationException("The desktop window is not attached.")
+        let reader = SavedPageLoader()
+        savedReader = reader
+        savedReading = true
+        let revision = savedRevision
+        go ReadSavedPage(
+            reader,
+            window,
+            pending.ToArray(),
+            item -> {
+                if revision != savedRevision {
                     return
                 }
-                if result.ExitCode == 0 && result.Error == "" {
-                    item.Title = TextOf(result.Value, "title")
+                savedCache[item.Path] = item
+                for index in 0 ... savedWork.Count {
+                    if savedWork[index].Path == item.Path {
+                        savedWork[index] = item
+                    }
                 }
-                if Number(item.Data, "pr") == 0 {
-                    RefreshSaved(index + 1)
-                    return
-                }
-                Execute(
-                    []string{
-                        "pr",
-                        "view",
-                        TextOf(item.Data, "pr"),
-                        "--repo",
-                        repo,
-                        "--json",
-                        "state,reviewDecision,statusCheckRollup,url"
-                    },
-                    pull -> {
-                        if pull.Error.StartsWith("Command cancelled") {
-                            return
-                        }
-                        item.RemoteError = pull.ExitCode != 0 || pull.Error != ""
-                        if !item.RemoteError {
-                            item.Remote = pull.Value
-                        }
-                        RefreshSaved(index + 1)
-                    },
-                    "gh",
-                    completeOnError: true
-                )
+                Rebuild()
             },
-            "gh",
-            completeOnError: true
+            () -> {
+                if revision == savedRevision {
+                    savedReader = nil
+                    savedReading = false
+                    Rebuild()
+                }
+            }
         )
+        Rebuild()
     }
 
     private func SelectRun(data JsonElement, actions JsonElement, path string) {
+        StopSavedUpdates()
+        savedSelected = true
         run = data
         runDirectory = path
         runActions.Clear()
@@ -225,6 +226,7 @@ partial class Desktop {
         if String.IsNullOrWhiteSpace(runDirectory) {
             return
         }
+        StopSavedUpdates()
         Execute(
             []string{"status", "--run", runDirectory},
             result -> {
@@ -232,23 +234,19 @@ partial class Desktop {
                     return
                 }
                 let data = Field(result.Value, "data")
-                SelectRun(data, Field(result.Value, "next_actions"), runDirectory)
-                var found = false
-                for item in savedWork {
-                    if item.Path == runDirectory {
-                        item.Data = data
-                        item.Actions = Field(result.Value, "next_actions")
-                        found = true
-                    }
+                let item = SavedContribution{
+                    Path: runDirectory,
+                    Data: data,
+                    Actions: Field(result.Value, "next_actions")
                 }
-                if !found {
-                    savedWork.Add(
-                        SavedContribution{Path: runDirectory, Data: data, Actions: Field(result.Value, "next_actions")}
-                    )
+                savedCache[runDirectory] = item
+                if !savedPaths.Contains(runDirectory) {
+                    savedPaths.Add(runDirectory)
                 }
+                SelectRun(data, item.Actions, runDirectory)
                 savedLoaded = true
                 savedImport = false
-                RefreshSaved(0)
+                StartSavedUpdates([]SavedContribution{item})
             }
         )
     }
@@ -414,13 +412,64 @@ partial class Desktop {
         return panel
     }
 
+    private func SavedRow(item SavedContribution, index int32) Blob {
+        let identity = item
+            .Data
+            .ValueKind == JsonValueKind.Object ? TextOf(item.Data, "repo") +
+            " #" +
+            TextOf(item.Data, "issue"): "Saved contribution " +
+            (index + 1).ToString()
+        let title = Heading(item.Title == "" ? identity: item.Title, 24)
+        title.TextMaxLines = 2
+        let copy = Container{FlexGrow: 1, FlexBasis: 0, MinWidth: 0, Gap: 5}
+        if item.Title != "" {
+            copy.Children.Add(Label(identity, 16, true))
+        }
+        copy.Children.Add(title)
+        return Keyboard(
+            Button{
+                Key: item.Path,
+                MinHeight: 72,
+                Padding: 12,
+                FlexDirection: FlexDirection.Row,
+                AlignItems: AlignItems.Center,
+                Gap: 18,
+                BorderWidth: Edges{Bottom: 1},
+                BorderColor: Line(),
+                BackgroundColor: Color.Transparent,
+                Hover: Style{BackgroundColor: Paper()},
+                Focus: FocusStyle(),
+                Focusable: true,
+                Disabled: busy || item.Data.ValueKind != JsonValueKind.Object || item.Error != "",
+                Accessibility: Accessibility{
+                    Role: AccessibilityRole.Button,
+                    Name: "Saved " + identity,
+                    Description: item.Error
+                },
+                OnClick: () -> SelectRun(item.Data, item.Actions, item.Path),
+                copy,
+                StatusBadge(SavedStatus(item)),
+            }
+        )
+    }
+
     private func Saved() Blob {
         let body = Container{Gap: 20}
         body.Children.Add(Heading("Saved work", 38))
         body.Children.Add(
             Row(
                 []Blob{
-                    Action(savedLoaded ? "Refresh contributions": "Find saved work", () -> Discover(), true),
+                    Action(
+                        savedReading ? "Stop updating": savedLoaded ? "Refresh contributions": "Find saved work",
+                        () -> {
+                            if savedReading {
+                                StopSavedUpdates()
+                            } else {
+                                Discover()
+                            }
+                        },
+                        true
+                    ),
                     Action(
                         "Open saved run",
                         () -> {
@@ -450,43 +499,44 @@ partial class Desktop {
             )
             body.Children.Add(opening)
         }
-        var count = 0
-        for item in savedWork {
-            if SavedStatus(item) == "Merged" {
-                continue
-            }
-            count++
-            let current = item
-            let card = DonatePanel()
-            card.BorderColor = runDirectory == item.Path ? Accent(): Line()
-            let identity = TextOf(item.Data, "repo") + " #" + TextOf(item.Data, "issue")
-            card.Children.Add(Row([]Blob{Heading(identity, 27), StatusBadge(SavedStatus(item))}))
-            if item.Title != "" {
-                card.Children.Add(Heading(item.Title, 25))
-            }
-            if item.RemoteError {
-                card.Children.Add(Label("GitHub status unavailable", 17, true))
-            }
-            card.Children.Add(
+        if savedSelected {
+            body.Children.Add(
                 Row(
                     []Blob{
-                        Action(
-                            runDirectory == item.Path ? "Selected contribution": "View contribution",
-                            () -> SelectRun(current.Data, current.Actions, current.Path),
-                            disabled: runDirectory == item.Path
-                        )
+                        Action("Back to contributions", () -> LoadSavedPage(savedPage)),
+                        Action("Refresh status", () -> LoadRun()),
                     }
                 )
             )
-            body.Children.Add(card)
-            if runDirectory == item.Path {
-                body.Children.Add(SavedDetails())
+            body.Children.Add(SavedDetails())
+        } else if savedLoaded {
+            let table = TablePanel()
+            var visible = 0
+            for index in 0 ... savedWork.Count {
+                let item = savedWork[index]
+                if SavedStatus(item) == "Merged" {
+                    continue
+                }
+                visible++
+                table.Children.Add(SavedRow(item, index + (savedPage - 1) * PageSize))
             }
-        }
-        if savedLoaded && count == 0 && !busy {
-            let empty = DonatePanel()
-            empty.Children.Add(Heading("No unmerged contributions", 28))
-            body.Children.Add(empty)
+            if visible == 0 && !savedReading {
+                table.Children.Add(
+                    Label(
+                        savedPaths.Count == 0 ? "No saved contributions": "No unmerged contributions on this page",
+                        24
+                    )
+                )
+            }
+            body.Children.Add(table)
+            body.Children.Add(
+                PageNavigation(
+                    savedPage,
+                    savedPaths.Count,
+                    savedPaths.Count.ToString() + " saved runs",
+                    page -> LoadSavedPage(page)
+                )
+            )
         }
         return body
     }

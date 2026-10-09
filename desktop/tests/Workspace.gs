@@ -42,10 +42,13 @@ func WorkspaceFlow() {
     for name in[]string{"broken", "claimed", "failed", "amend", "merged"} {
         Directory.CreateDirectory(Path.Combine(storage, name))
     }
+    for index in 1 ... 25 {
+        Directory.CreateDirectory(Path.Combine(storage, "page-" + index.ToString("D3")))
+    }
     Script(
         bin,
         "tokate",
-        "case \"$$1\" in\nstatus)\n  case \"$$2\" in\n  --run)\n    name=$${3##*/}\n    case \"$$name\" in\n    claimed) state=claimed; issue=41; pr=0; reason='';;\n    failed) state=failed; issue=42; pr=0; reason=inference_failed;;\n    amend) state=published; issue=43; pr=3; reason='';;\n    merged) state=published; issue=44; pr=4; reason='';;\n    *) exit 1;;\n    esac\n    data=\"{\\\"run\\\":\\\"$$3\\\",\\\"repo\\\":\\\"owner/repo\\\",\\\"issue\\\":$$issue,\\\"state\\\":\\\"$$state\\\",\\\"pr\\\":$$pr,\\\"model\\\":\\\"gpt-6.1-sol\\\",\\\"effort\\\":\\\"high\\\",\\\"failure_reason\\\":\\\"$$reason\\\"}\"\n    ;;\n  *) data='{\"work\":[],\"access_status\":\"observed\"}';;\n  esac;;\npolicy) data='{\"policy\":{\"version\":2,\"model_policy\":\"unrestricted\",\"eligibility\":\"trusted\",\"allowed_tools\":[{\"harness\":\"codex\"}],\"verification\":[[\"dotnet\",\"test\"]],\"required_checks\":[\"build\"],\"max_seconds\":3600}}';;\naccess) data='{\"access_sha\":\"existing\",\"members\":[],\"pending\":[]}';;\ninit)\n  printf '%s\\n' \"$$@\" > FIXTURE/owner-args\n  printf 'Proposed complete file:\\nfixture policy\\n' >&2\n  case \" $$* \" in *' --yes '*) touch FIXTURE/applied;; esac\n  data='{\"applied\":false}';;\napprove) touch FIXTURE/approved; data='{}';;\n*) data='{}';;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"exit_code\":0,\"status\":\"ok\",\"data\":%s,\"next_actions\":[[\"tokate\",\"work\"]]}' \"$$1\" \"$$data\"\n"
+        "case \"$$1\" in\nstatus)\n  case \"$$2\" in\n  --run)\n    name=$${3##*/}\n    printf '%s\\n' \"$$3\" >> FIXTURE/saved-reads\n    if [ \"$$name\" = page-004 ]; then\n      touch FIXTURE/slow-started\n      trap 'exit 1' INT\n      while [ ! -e FIXTURE/release-page ]; do sleep .05; done\n    fi\n    case \"$$name\" in\n    claimed) state=claimed; issue=41; pr=0; reason='';;\n    failed) state=failed; issue=42; pr=0; reason=inference_failed;;\n    amend) state=published; issue=43; pr=3; reason='';;\n    merged) state=published; issue=44; pr=4; reason='';;\n    page-*) state=claimed; issue=50; pr=0; reason='';;\n    *) exit 1;;\n    esac\n    data=\"{\\\"run\\\":\\\"$$3\\\",\\\"repo\\\":\\\"owner/repo\\\",\\\"issue\\\":$$issue,\\\"state\\\":\\\"$$state\\\",\\\"pr\\\":$$pr,\\\"model\\\":\\\"gpt-6.1-sol\\\",\\\"effort\\\":\\\"high\\\",\\\"failure_reason\\\":\\\"$$reason\\\"}\"\n    ;;\n  *) data='{\"work\":[],\"access_status\":\"observed\"}';;\n  esac;;\npolicy) data='{\"policy\":{\"version\":2,\"model_policy\":\"unrestricted\",\"eligibility\":\"trusted\",\"allowed_tools\":[{\"harness\":\"codex\"}],\"verification\":[[\"dotnet\",\"test\"]],\"required_checks\":[\"build\"],\"max_seconds\":3600}}';;\naccess) data='{\"access_sha\":\"existing\",\"members\":[],\"pending\":[]}';;\ninit)\n  printf '%s\\n' \"$$@\" > FIXTURE/owner-args\n  printf 'Proposed complete file:\\nfixture policy\\n' >&2\n  case \" $$* \" in *' --yes '*) touch FIXTURE/applied;; esac\n  data='{\"applied\":false}';;\napprove) touch FIXTURE/approved; data='{}';;\n*) data='{}';;\nesac\nprintf '{\"schema_version\":1,\"command\":\"%s\",\"exit_code\":0,\"status\":\"ok\",\"data\":%s,\"next_actions\":[[\"tokate\",\"work\"]]}' \"$$1\" \"$$data\"\n"
             .Replace("FIXTURE", fixture)
     )
     Script(
@@ -82,6 +85,51 @@ func WorkspaceFlow() {
         Require(Find(adapter.Root, AccessibilityRole.Status, "Initial donation failed") != nil, "Missing failed state")
         Require(!FindText(adapter.Root, "owner/repo #44"), "Merged contribution remains active")
         Require(!FindText(adapter.Root, "LOCAL RUN DIRECTORIES"), "Saved work still exposes a folder list")
+        let firstReads = File.ReadAllLines(Path.Combine(fixture, "saved-reads"))
+        Require(firstReads.Length == 8, "Saved work eagerly loaded off-page runs")
+        Require(
+            !File.ReadAllText(Path.Combine(fixture, "saved-reads")).Contains("page-004"),
+            "Saved work prefetched page two"
+        )
+        Choose(host, window, adapter, "Next page")
+        let delayed = System.Diagnostics.Stopwatch.StartNew()
+        while !File.Exists(Path.Combine(fixture, "slow-started")) && delayed.Elapsed.TotalSeconds < 10 {
+            Settle(host)
+        }
+        Require(File.Exists(Path.Combine(fixture, "slow-started")), "Page two did not start loading")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Button, "Previous page")?.Disabled == false,
+            "Loading blocks pagination"
+        )
+        Choose(host, window, adapter, "Previous page")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Refresh contributions", enabled: true)
+        var claimReads = 0
+        for path in File.ReadAllLines(Path.Combine(fixture, "saved-reads")) {
+            if path.EndsWith("/claimed") {
+                claimReads++
+            }
+        }
+        Require(claimReads == 1, "Returning to a cached page reloaded its runs")
+        File.WriteAllText(Path.Combine(fixture, "release-page"), "release")
+        Require(
+            Find(adapter.Root, AccessibilityRole.Status, "Needs amendment") != nil,
+            "Stale page replaced the cached page"
+        )
+        Choose(host, window, adapter, "Next page")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Refresh contributions", enabled: true)
+        Require(
+            File.ReadAllLines(Path.Combine(fixture, "saved-reads")).Length <= 24,
+            "A page update loaded more than eight runs"
+        )
+        Choose(host, window, adapter, "Previous page")
+        let cachedReads = File.ReadAllLines(Path.Combine(fixture, "saved-reads")).Length
+        Choose(host, window, adapter, "Next page")
+        AwaitControl(host, adapter, AccessibilityRole.Button, "Refresh contributions", enabled: true)
+        Require(
+            File.ReadAllLines(Path.Combine(fixture, "saved-reads")).Length == cachedReads,
+            "Page cache did not retain completed updates"
+        )
+        Choose(host, window, adapter, "Previous page")
         Choose(host, window, adapter, "My project")
         Edit(window, host, adapter, "GitHub repository", "owner/repo")
         Choose(host, window, adapter, "Open project")

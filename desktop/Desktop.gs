@@ -93,6 +93,7 @@ partial class Desktop : Cell {
             if !busy {
                 approvalTimer?.Dispose()
                 approvalRunner?.Stop()
+                StopSavedUpdates()
                 return true
             }
             message = "A command is active. Cancel it before closing, then inspect the saved run."
@@ -380,11 +381,16 @@ partial class Desktop : Cell {
     }
 
     private func Navigate(next string) {
+        if page == "Saved work" && next != page {
+            StopSavedUpdates()
+        }
         page = next
         report = ""
         message = ""
         if next == "Saved work" && !savedLoaded && runDirectory == "" && !busy {
             Discover()
+        } else if next == "Saved work" && savedLoaded && !savedSelected && !busy {
+            LoadSavedPage(savedPage)
         }
     }
 
@@ -826,6 +832,7 @@ partial class Desktop : Cell {
         let donating = page == "Donate" && step == 3
         let live = donating && donationStarted
         let browsing = (page == "Donate" && step == 0 && donorIssues.Loaded) ||
+            (page == "Saved work" && savedLoaded && !savedSelected && !savedImport) ||
             (
             page == "My project" &&
                 ownerOpen &&

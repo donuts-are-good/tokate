@@ -17,7 +17,7 @@ class IssuePage {
 }
 
 partial class Desktop {
-    private let IssuePageSize int32 = 8
+    private let PageSize int32 = 8
 
     private func ApprovedIssue(issue JsonElement) bool {
         for label in Items(Field(issue, "labels")) {
@@ -63,7 +63,7 @@ partial class Desktop {
             "-f",
             "order=desc",
             "-f",
-            "per_page=" + IssuePageSize.ToString(),
+            "per_page=" + PageSize.ToString(),
             "-f",
             "page=" + page.ToString(),
         }
@@ -85,7 +85,7 @@ partial class Desktop {
                 }
                 let rows = numbered ? List[JsonElement]{result.Value}: Items(Field(result.Value, "items"))
                 for item in rows {
-                    if state.Rows.Count == IssuePageSize {
+                    if state.Rows.Count == PageSize {
                         break
                     }
                     if TextOf(item, "state") != "open" || Field(
@@ -153,7 +153,7 @@ partial class Desktop {
         return body
     }
 
-    private func IssueRows(state IssuePage, choose Action[JsonElement]) Blob {
+    private func TablePanel() Container {
         let panel = DonatePanel()
         panel.Padding = 8
         panel.Gap = 0
@@ -162,6 +162,11 @@ partial class Desktop {
         panel.FlexBasis = 0
         panel.MinHeight = 0
         panel.OverflowY = Overflow.Scroll
+        return panel
+    }
+
+    private func IssueRows(state IssuePage, choose Action[JsonElement]) Blob {
+        let panel = TablePanel()
         for issue in state.Rows {
             let selected = issue
             let title = TextOf(issue, "title")
@@ -202,18 +207,17 @@ partial class Desktop {
         return panel
     }
 
-    private func IssuePagination(state IssuePage, change Action[int32]) Blob {
-        let last = Math.Max(1, (Math.Min(1000, state.Total) + IssuePageSize - 1) / IssuePageSize)
+    private func IssuePagination(state IssuePage, change Action[int32]) Blob ->
+    PageNavigation(state.Page, Math.Min(1000, state.Total), state.Total.ToString() + " issues", change)
+
+    private func PageNavigation(page int32, total int32, summary string, change Action[int32]) Blob {
+        let last = Math.Max(1, (total + PageSize - 1) / PageSize)
         let pager = Row(
             []Blob{
-                Label(
-                    "Page " + state.Page.ToString() + " of " + last.ToString() + "  ·  " + state.Total.ToString() +
-                        " issues",
-                    17
-                ),
+                Label("Page " + page.ToString() + " of " + last.ToString() + "  ·  " + summary, 17),
                 Container{FlexGrow: 1},
-                Action("Previous page", () -> change(state.Page - 1), disabled: state.Page <= 1),
-                Action("Next page", () -> change(state.Page + 1), disabled: state.Page >= last),
+                Action("Previous page", () -> change(page - 1), disabled: page <= 1),
+                Action("Next page", () -> change(page + 1), disabled: page >= last),
             }
         )
         pager.FlexWrap = FlexWrap.NoWrap

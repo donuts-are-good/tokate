@@ -27,6 +27,7 @@ partial class Desktop {
     private var activityLines List[ActivityLine] = List[ActivityLine]()
 
     private func OpenDonation(value JsonElement, directory string, navigate bool = true) {
+        StopSavedUpdates()
         approvalTimer?.Dispose()
         approvalRunner?.Stop()
         approvalRunner = nil
