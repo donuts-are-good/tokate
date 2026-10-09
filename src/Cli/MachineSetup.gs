@@ -40,25 +40,41 @@ internal class MachineSetup {
                         if id == "arch" || id == "cachyos" {
                             return "/usr/bin/pacman"
                         }
+                        if id == "fedora" || id == "rhel" || id == "centos" || id == "rocky" || id == "almalinux" {
+                            return "/usr/bin/dnf"
+                        }
                     }
                 }
             }
             return ""
         }
 
-        private func Package(name string, arch bool) string -> switch name {
+        private func Package(name string, manager string) string -> switch name {
             case "git": "git"
-            case "gh": arch ? "github-cli": "gh"
+            case "gh": manager.EndsWith("pacman") ? "github-cli": "gh"
             case "curl": "curl"
             case "tar": "tar"
             case "bwrap": "bubblewrap"
             case "/usr/bin/bwrap": "bubblewrap"
-            case "setsid": "util-linux"
-            case "/usr/bin/setsid": "util-linux"
-            case "/usr/bin/unshare": "util-linux"
+            case "setsid": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
+            case "/usr/bin/setsid": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
+            case "/usr/bin/unshare": manager.EndsWith("dnf") ? "util-linux-core": "util-linux"
             case "/usr/bin/env": "coreutils"
             case "/usr/bin/cp": "coreutils"
             default: ""
+        }
+
+        private func PackageArguments(manager string, packages List[string])[]string {
+            let args = List[string]()
+            if manager.EndsWith("apt-get") {
+                args.AddRange([]string{"install", "-y", "--no-install-recommends"})
+            } else if manager.EndsWith("dnf") {
+                args.AddRange([]string{"install", "--assumeyes", "--setopt=install_weak_deps=False"})
+            } else {
+                args.AddRange([]string{"-Syu", "--needed", "--noconfirm"})
+            }
+            args.AddRange(packages)
+            return args.ToArray()
         }
 
         private func InstallPackages(manager string, packages List[string]) {
@@ -83,15 +99,17 @@ internal class MachineSetup {
                 if Installation.Execute(executable, update.ToArray()) != 0 {
                     throw CliFailure("missing_tools", "Package index update failed; existing installations were kept")
                 }
-                args.AddRange([]string{"install", "-y", "--no-install-recommends"})
-            } else {
-                args.AddRange([]string{"-Syu", "--needed", "--noconfirm"})
             }
-            args.AddRange(packages)
+            args.AddRange(PackageArguments(manager, packages))
             if Installation.Execute(executable, args.ToArray()) != 0 {
                 throw CliFailure(
                     "missing_tools",
-                    "Package installation did not complete. Rerun doctor to inspect what is still missing."
+                    "Package installation did not complete. Rerun doctor to inspect what is still missing." +
+                        (
+                        manager.EndsWith(
+                            "dnf"
+                        ) ? " Check that your configured repositories provide the listed packages. Tokate does not enable repositories or change security policy.": ""
+                    )
                 )
             }
         }
@@ -108,7 +126,7 @@ internal class MachineSetup {
                 if tool.Path != "" || tool.Name == "codex" {
                     continue
                 }
-                let packageName = Package(tool.Name, manager.EndsWith("pacman"))
+                let packageName = Package(tool.Name, manager)
                 if packageName != "" && !packages.Contains(packageName) {
                     packages.Add(packageName)
                     missing.Add(tool.Name)
@@ -126,11 +144,16 @@ internal class MachineSetup {
                     )
                     return false
                 }
+                let privilege = SetupUserId() == 0 ? "": "sudo " +
+                    (PublicOutput.Enabled || Console.IsInputRedirected ? "-n ": "")
+                let command = privilege + manager + " "
                 if !Confirm(
                     options,
                     "Not found: " + String.Join(", ", missing) +
-                        ". If already installed elsewhere, cancel and correct PATH. Install packages: " +
-                        String.Join(", ", packages) +
+                        ". If already installed elsewhere, cancel and correct PATH. Run: " +
+                        (manager.EndsWith("apt-get") ? command + "update, then ": "") +
+                        command +
+                        String.Join(" ", PackageArguments(manager, packages)) +
                         (
                         manager.EndsWith(
                             "pacman"
