@@ -3,7 +3,7 @@
 
 buildDotnetModule {
   pname = "tokate";
-  version = "0.3.0";
+  version = "0.3.1";
   src = source;
   projectFile = "Tokate.gsproj";
   dotnet-sdk = dotnetCorePackages.sdk_10_0;

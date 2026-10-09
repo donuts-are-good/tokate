@@ -28,6 +28,7 @@ fi
 test "$(readlink -f "$proof/profile")" = "$before"
 binary="$proof/profile/bin/tokate"
 "$binary" --version
+test "$("$binary" --version)" = "tokate $(nix eval --raw .#default.version)"
 (cd "$proof"; "$binary" doctor --external --json) > "$proof/external.json"
 (cd "$proof"; "$binary" doctor --managed --harness-path "$proof/tools/bin/codex" --json) > "$proof/managed.json"
 system_bin=$(readlink -f /bin)
