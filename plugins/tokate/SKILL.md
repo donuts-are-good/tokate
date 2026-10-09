@@ -7,6 +7,8 @@ description: Guide donor work on a Tokate-approved GitHub issue, inspect or resu
 
 Help a donor take an owner-approved issue to a verified draft PR using their selected harness. Work within the approved scope. The owner controls policy, acceptance and merging.
 
+Use the [donor guide](https://github.com/obselate/tokate/blob/main/docs/donors.md) for setup and model configuration, the [recovery guide](https://github.com/obselate/tokate/blob/main/docs/recovery.md) for corrections and continuations, and the [security guide](https://github.com/obselate/tokate/blob/main/docs/security.md) for data and isolation limits.
+
 ## Inspect the current state
 
 Use `tokate help --json` and `tokate help COMMAND --json` as the installed command authority. Use `--json` for operations. Read `status`, `error`, `data` and `next_actions`. A successful read can describe failed work. Pending is not accepted or complete. `next_actions` are options, not authorization. Inspect saved state before repeating any mutating command, including after an output error.
