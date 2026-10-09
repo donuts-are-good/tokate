@@ -13,6 +13,9 @@ func Main(args[]string) int32 {
             return ReleaseTools.Fixture(args, Path.GetDirectoryName(exe) ?? "")
         }
         let name = Path.GetFileName(exe)
+        if name == "claude" {
+            return ClaudeTool.Run(args)
+        }
         if name == "id" || name == "getent" {
             return ReleaseTools.ShellFixture(name, args, Path.GetDirectoryName(exe) ?? "")
         }
