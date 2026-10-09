@@ -10,7 +10,8 @@
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-    <Version>0.2.81</Version>
+    <RuntimeIdentifiers>linux-x64;linux-musl-x64</RuntimeIdentifiers>
+    <Version>0.3.1</Version>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.gs" />

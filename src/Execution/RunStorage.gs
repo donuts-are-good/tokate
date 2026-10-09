@@ -1,16 +1,124 @@
 package Tokate
 
 import System
+import System.Collections.Generic
 import System.IO
+import System.Text.Json
 
 internal class RunStorage {
     shared {
+        internal func Root() string -> Path.Combine(LocalPaths.StateDirectory(), "runs")
+
+        internal func ControlPaths(directory string) {
+            try {
+                LocalPaths.DirectoryPath(directory)
+            } catch (error Exception) {
+                throw Exception(error.Message + "; saved run directory: " + directory, error)
+            }
+            for name in[]string{".lock", "run.json", "run.json.tmp", "claim.posting.json"} {
+                let path = Path.Combine(directory, name)
+                if FileInfo(path).LinkTarget != nil {
+                    Reject(directory)
+                }
+                if File.Exists(path) || Directory.Exists(path) {
+                    let status = [256]byte
+                    if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
+                        (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
+                        (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
+                        BitConverter.ToUInt32(status, 16) != 1 {
+                        Reject(directory)
+                    }
+                }
+            }
+        }
+
+        internal func Lease(directory string) FileStream {
+            ControlPaths(directory)
+            return File.Open(
+                Path.Combine(directory, ".lock"),
+                FileMode.OpenOrCreate,
+                FileAccess.ReadWrite,
+                FileShare.None
+            )
+        }
+
+        private func Reject(path string) {
+            throw CliFailure(
+                "invalid_state",
+                "Preserved unidentified, dirty or divergent preparation at " +
+                    path +
+                    ". Inspect and move it aside explicitly, or use its original saved run; then use prepare --run DIR. No files or branches were replaced."
+            )
+        }
+
+        internal func Discover() JsonElement {
+            let rows = SortedDictionary[string, Object?](StringComparer.Ordinal)
+            var skipped int32
+            var scanned int32
+            var truncated bool
+            for storage in LocalPaths.StateDirectories() {
+                let root = Path.Combine(storage, "runs")
+                if !Directory.Exists(root) {
+                    continue
+                }
+                try {
+                    LocalPaths.DirectoryPath(root)
+                    for directory in Directory.EnumerateDirectories(root) {
+                        if scanned >= 128 {
+                            truncated = true
+                            break
+                        }
+                        scanned++
+                        try {
+                            RunStorage.ControlPaths(directory)
+                            let value = RequestData.FileData(Path.Combine(directory, "run.json"), 1024 * 1024)
+                            RepositoryIdentity.Repo(J.Text(value, "repo"))
+                            for key in[]string{"id", "repo", "donor", "model", "state"} {
+                                if J.Text(value, key).Length > 256 {
+                                    throw Exception("Saved contribution metadata is too long")
+                                }
+                            }
+                            if J.Number(value, "version") != 2 || J.Number(value, "issue") < 1 || J.Text(
+                                value,
+                                "state"
+                            ) == "" {
+                                throw Exception("Unsupported or incomplete saved contribution")
+                            }
+                            rows[directory] = map[string, Object?]{
+                                "run": directory,
+                                "storage": root == Root() ? "current": "previous",
+                                "id": J.Text(value, "id"),
+                                "repo": J.Text(value, "repo"),
+                                "issue": J.Number(value, "issue"),
+                                "donor": J.Text(value, "donor"),
+                                "model": J.Text(value, "model"),
+                                "state": J.Text(value, "state")
+                            }
+                        } catch (error Exception) {
+                            skipped++
+                        }
+                    }
+                } catch (error Exception) {
+                    skipped++
+                }
+                if truncated {
+                    break
+                }
+            }
+            return J.Parse(
+                J.Write(
+                    map[string, Object?]{"runs": List[Object?](rows.Values), "skipped": skipped, "truncated": truncated}
+                )
+            )
+        }
+
         private func Size(path string) int64 {
-            if FileInfo(path).LinkTarget != nil {
+            let info = FileInfo(path)
+            if info.LinkTarget != nil {
                 return 0
             }
-            if !Directory.Exists(path) {
-                return FileInfo(path).Length
+            if (info.Attributes & FileAttributes.Directory) == 0 || !Directory.Exists(path) {
+                return info.Length
             }
             var bytes int64
             for entry in Directory.EnumerateFileSystemEntries(path) {

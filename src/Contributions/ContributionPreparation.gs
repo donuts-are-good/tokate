@@ -6,7 +6,7 @@ import System.Diagnostics
 import System.IO
 import System.Text.Json
 
-internal class V2Preparation {
+internal class ContributionPreparation {
     shared {
         internal func Prepare(args Args) string {
             if args.Get("run") != "" {
@@ -25,15 +25,29 @@ internal class V2Preparation {
             Overlaps.RequireDependencies(repo, issue)
             let run = Plan(args, repo, issue, viewer, state, record, args.Need("source"))
             Bind(run, state)
-            let directory = Preparation.RunDirectory(
+            let directory = args.Get("continue-from") != "" ? AttemptContinuation.RunDirectory(
                 args,
-                run.Text("attempt") == "" ? run.Text("id"): run.Text("attempt")
-            )
+                run.Text("attempt")
+            ): WorkspacePreparation.RunDirectory(args, run.Text("attempt"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) {
                 throw Exception("Saved contribution already exists; inspect it instead of overwriting")
             }
-            Preparation.Select(run, args.Get("fork"))
+            WorkspacePreparation.Select(run, args.Get("fork"))
+            if args.Get("continue-from") != "" {
+                if run.Text("source") != "tokate" || run.Text("attempt") == "" {
+                    throw Exception("Continuation requires a managed v2 fresh active attempt")
+                }
+                let sourceDirectory = LocalPaths.DirectoryPath(args.Need("continue-from"))
+                using let sourceLease = ContinuationImport.SourceLease(sourceDirectory)
+                let source = AttemptContinuation.Source(sourceDirectory, run, record)
+                run.Fields["continuation_source"] = sourceDirectory
+                run.Fields["continuation"] = AttemptContinuation.Provenance(source)
+                run.Fields["continuation_source_metadata_sha256"] = Data.Hash(
+                    ContinuationImport.Metadata(sourceDirectory)
+                )
+                AttemptContinuation.Confirm(args, J.Get(run.Element(), "selection"))
+            }
             Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -41,10 +55,10 @@ internal class V2Preparation {
             if run.Text("source") == "tokate" {
                 Terminal.Step(RuntimeBudget.Description(run))
             }
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             Terminal.Step("Preparing contribution. Run: " + directory)
-            Preparation.Initialize(directory, run, args.Get("fork"))
-            Preparation.Complete(directory, run)
+            WorkspacePreparation.Initialize(directory, run, args.Get("fork"))
+            WorkspacePreparation.Complete(directory, run)
             Terminal.Message("Prepared contribution. Run: " + directory)
             return directory
         }
@@ -104,31 +118,37 @@ internal class V2Preparation {
                     "Published work is preserved; saved-checkout continuation remains unsupported until #14"
                 )
             }
-            let run = Data()
-            run.Fields["version"] = 2
-            run.Fields["repo"] = repo
-            run.Fields["issue"] = issue
-            run.Fields["donor"] = donor
-            run.Fields["donor_id"] = J.Get(viewer, "id")
-            run.Fields["head_repo"] = RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1]))
-            run.Fields["approval"] = J.Text(state.Value(), "approval_id")
-            run.Fields["base"] = J.Text(approval, "base")
-            run.Fields["base_branch"] = J.Text(approval, "base_branch")
-            run.Fields["policy_hash"] = J.Text(approval, "policy_hash")
-            run.Fields["source"] = source
-            run.Fields["tools"] = tools
-            if args.Command == "work" || args.Command == "claim" {
+            let run = Data(
+                map[string, Object?]{
+                    "version": 2,
+                    "repo": repo,
+                    "issue": issue,
+                    "donor": donor,
+                    "donor_id": J.Get(viewer, "id"),
+                    "head_repo": RepositoryIdentity.Repo(args.Get("fork", donor + "/" + repo.Split('/')[1])),
+                    "approval": J.Text(state.Value(), "approval_id"),
+                    "base": J.Text(approval, "base"),
+                    "base_branch": J.Text(approval, "base_branch"),
+                    "policy_hash": J.Text(approval, "policy_hash"),
+                    "source": source,
+                    "tools": tools
+                }
+            )
+            if (args.Command == "work" || args.Command == "claim") && args.Get("unlimited") != "true" {
                 args.Need("seconds")
             }
-            run.Fields["seconds"] = args.Number(
-                "seconds",
+            run.Fields["seconds"] = RuntimeBudget.ReadSeconds(
+                args,
                 Math.Min(3600, J.Number(J.Get(record, "policy"), "max_seconds")).ToString()
             )
+            if args.Get("unlimited") == "true" {
+                run.Fields["unlimited"] = true
+            }
             if args.Get("verification-reserve") != "" {
                 run.Fields["verification_reserve"] = RuntimeBudget.Reserve(args, run.Number("seconds"))
             }
             run.Fields["network"] = args.Get("allow-network") == "true"
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             if source == "tokate" {
                 let declared = J.Items(tools)[0]
                 run.Fields["model"] = J.Text(declared, "model")
@@ -136,12 +156,16 @@ internal class V2Preparation {
                 run.Fields["harness"] = J.Text(selection, "harness")
                 run.Fields["provider"] = J.Text(selection, "provider")
                 run.Fields["selection"] = selection
+                if args.Get("harness-path") != "" {
+                    run.Fields["harness_path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
+                }
                 if J.Text(selection, "harness") == "pi" {
                     run.Fields["pi_endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
                     run.Fields["pi_root"] = args.Need("pi-root")
                     run.Fields["pi_node"] = args.Need("node")
                 }
             }
+            RuntimeBudget.Validate(run)
             return run
         }
 
@@ -149,9 +173,7 @@ internal class V2Preparation {
             let reservation = J.Get(state.Value(), "reservation")
             run.Fields["id"] = J.Text(reservation, "reservation")
             run.Fields["state_sha"] = state.Sha
-            if LeaseLifecycle.Supported(state.Value()) {
-                run.Fields["attempt"] = J.Text(reservation, "attempt")
-            }
+            run.Fields["attempt"] = J.Text(reservation, "attempt")
             run.Fields["branch"] = "tokate/v2-" + run.Text("id")
         }
 
@@ -161,11 +183,10 @@ internal class V2Preparation {
             let branch = J.Text(info, "default_branch")
             let revision = GitHub.Branch(repo, branch)
             let policy = Policy.Load(repo, revision)
-            if J.Number(policy.Value, "version") == 1 {
-                return ContributionClaim.Claim(args, ValueTuple[string, string, Policy](branch, revision, policy))
-            }
             if args.Get("continue-from") != "" {
-                throw Exception("Version-2 claims cannot import version-1 work")
+                throw Exception(
+                    "For stopped v2 work, explicitly acquire a fresh attempt then use prepare --continue-from with its current --state; no claim was posted"
+                )
             }
             let issue = args.Number("issue")
             let viewer = GitHub.Api("user")
@@ -182,7 +203,7 @@ internal class V2Preparation {
             }
             Overlaps.RequireDependencies(repo, issue)
             let run = Plan(args, repo, issue, viewer, state, record, "tokate")
-            if args.Command == "work" {
+            if args.Command == "work" || args.Guided {
                 DonorSelection.Confirm(args, J.Get(run.Element(), "selection"))
             }
             let request = J.Parse(
@@ -200,7 +221,7 @@ internal class V2Preparation {
             run.Fields["claim_request"] = request
             run.Fields["requested_fork"] = args.Get("fork")
             run.Fields["state"] = "claim_pending"
-            let directory = Preparation.RunDirectory(args, J.Text(request, "uuid"))
+            let directory = WorkspacePreparation.RunDirectory(args, J.Text(request, "uuid"))
             PublicOutput.RunDirectory = directory
             if Directory.Exists(directory) || File.Exists(directory) || FileInfo(directory).LinkTarget != nil {
                 throw CliFailure("invalid_state", "Saved claim already exists; inspect its original run")
@@ -209,18 +230,18 @@ internal class V2Preparation {
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             )
-            using let lease = Preparation.Lease(directory)
-            Preparation.Pending(directory, run)
+            using let lease = RunStorage.Lease(directory)
+            WorkspacePreparation.Pending(directory, run)
             return Pending(directory, run, args)
         }
 
         internal func ResumePending(directory string, args Args) string {
             PublicOutput.RunDirectory = directory
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             if run.Text("state") != "claim_pending" {
                 if args.Command == "prepare" {
-                    Preparation.Complete(directory, run)
+                    WorkspacePreparation.Complete(directory, run)
                     Terminal.Message("Prepared contribution. Run: " + directory)
                 }
                 return directory
@@ -270,7 +291,7 @@ internal class V2Preparation {
                 run.Text("effort") != J.Text(J.Items(tools)[0], "effort") {
                 throw CliFailure("invalid_state", "Pending claim selection differs from its declared tool")
             }
-            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"))
+            policy.ValidateBudget(run.Number("seconds"), run.Flag("network"), run.Flag("unlimited"))
             RuntimeBudget.Validate(run)
             DonorSelection.Revalidate(run, policy)
             Overlaps.RequireDependencies(run.Text("repo"), run.Number("issue"))
@@ -363,11 +384,11 @@ internal class V2Preparation {
                 let outcome = RequestData.Recorded(state.Value(), J.Get(viewer, "id"), request)
                 Accepted(run, viewer, state, outcome)
                 Bind(run, state)
-                Preparation.Select(run, run.Text("requested_fork"))
-                Preparation.Promote(directory, run)
+                WorkspacePreparation.Select(run, run.Text("requested_fork"))
+                WorkspacePreparation.Promote(directory, run)
                 Terminal.Step(RuntimeBudget.Description(run))
                 Terminal.Step("Preparing contribution. Run: " + directory)
-                Preparation.Complete(directory, run)
+                WorkspacePreparation.Complete(directory, run)
                 Terminal.Message("Prepared contribution. Run: " + directory)
             } else {
                 PublicOutput.ResultData = PublicOutput.RunSummary(directory)

@@ -25,6 +25,38 @@ internal class CommandOutput {
     internal var Failure Exception?
 }
 
+internal class CommandLines {
+    private let Line StringBuilder = StringBuilder()
+    private let Observe Action[string]
+    private var Oversize bool
+
+    internal init(observe Action[string]) {
+        Observe = observe
+    }
+
+    internal func Flush() {
+        if !Oversize && Line.Length > 0 {
+            try {
+                Observe.Invoke(Line.ToString())
+            } catch (error Exception) { }
+        }
+        Line.Clear()
+        Oversize = false
+    }
+
+    internal func Add(buffer[]char, count int32) {
+        for i in 0 ... count {
+            if buffer[i] == '\n' {
+                Flush()
+            } else if Line.Length < 65536 {
+                Line.Append(buffer[i])
+            } else {
+                Oversize = true
+            }
+        }
+    }
+}
+
 internal class CommandInterrupted : Exception {
     internal let Result CommandResult
 
@@ -95,16 +127,22 @@ internal class RuntimeBudget {
         Seconds = seconds
     }
 
-    internal func Expired() bool -> Timer.Elapsed.TotalSeconds >= Seconds
+    internal func Expired() bool -> Seconds > 0 && Timer.Elapsed.TotalSeconds >= Seconds
 
-    internal func Left() string -> Math.Max(0, Math.Ceiling(Seconds - Timer.Elapsed.TotalSeconds)).ToString() + "s"
+    internal func Left() string -> Seconds == 0 ? "unlimited": Math.Max(
+        0,
+        Math.Ceiling(Seconds - Timer.Elapsed.TotalSeconds)
+    )
+        .ToString() + "s"
 
     internal func Status() string -> Math.Floor(Timer.Elapsed.TotalSeconds).ToString() +
         "s elapsed, " +
-        Left() +
-        " remaining"
+        (Seconds == 0 ? "no time limit": Left() + " remaining")
 
     internal func Remaining() int32 {
+        if Seconds == 0 {
+            return -1
+        }
         let remaining = Math.Floor(Seconds * 1000.0 - Timer.Elapsed.TotalMilliseconds)
         if remaining < 1 {
             throw Exception("Runtime allowance exhausted")
@@ -116,22 +154,44 @@ internal class RuntimeBudget {
     Commands.GitOutput(Commands.GitResult(checkout, args, budget: this))
 
     shared {
+        internal func ReadSeconds(args Args, fallback string = "") int32 -> args.Get("unlimited") == "true" ?
+        args.Number("verification-reserve"): args.Number("seconds", fallback)
+
         internal func Reserve(args Args, seconds int32) int32 {
             let reserve = args.Get("verification-reserve") == "" ? 0: args.Number("verification-reserve")
-            if reserve >= seconds {
+            if args.Get("unlimited") == "true" {
+                if reserve < 1 || reserve != seconds {
+                    throw Exception("Unlimited coding requires a separate positive verification budget")
+                }
+            } else if reserve >= seconds {
                 throw Exception("--verification-reserve must be strictly smaller than the total budget")
             }
             return reserve
         }
 
         internal func Validate(run Data) {
+            let unlimited = J.Get(run.Element(), "unlimited")
+            if unlimited.ValueKind != JsonValueKind.Undefined &&
+                unlimited.ValueKind != JsonValueKind.True &&
+                unlimited.ValueKind != JsonValueKind.False {
+                throw Exception("Invalid saved unlimited coding choice")
+            }
+            if run.Flag("unlimited") &&
+                (
+                run.Number("version") != 2 || run.Text("source") != "tokate" || run.Number(
+                    "verification_reserve"
+                ) < 1 ||
+                    run.Number("verification_reserve") != run.Number("seconds")
+            ) {
+                throw Exception("Unlimited coding requires managed v2 work and a separate positive verification budget")
+            }
             let field = J.Get(run.Element(), "verification_reserve")
             var reserve int32
             if field.ValueKind != JsonValueKind.Undefined &&
                 (
                 field.ValueKind != JsonValueKind.Number || !field.TryGetInt32(out reserve) ||
                     reserve < 1 ||
-                    reserve >= run.Number("seconds")
+                    (run.Flag("unlimited") ? reserve != run.Number("seconds"): reserve >= run.Number("seconds"))
             ) {
                 throw Exception("Invalid saved verification reserve")
             }
@@ -140,6 +200,9 @@ internal class RuntimeBudget {
         internal func Description(run Data) string {
             let total = run.Number("seconds")
             let reserve = run.Number("verification_reserve")
+            if run.Flag("unlimited") {
+                return "unlimited coding time; independent verification budget " + reserve.ToString() + "s"
+            }
             return "total allowance " + total.ToString() + "s, coding allowance " + (total - reserve).ToString() +
                 "s, verification reserve " +
                 reserve.ToString() + "s"
@@ -149,6 +212,12 @@ internal class RuntimeBudget {
 
 internal class Commands {
     shared {
+        internal func InterruptedResult(error Exception) CommandResult? -> switch error {
+            case interrupted is CommandInterrupted: interrupted.Result
+            case interrupted is CommandInputInterrupted: interrupted.Result
+            default: nil
+        }
+
         internal func Capture(path string) FileStream? {
             if path == "" {
                 return nil
@@ -170,10 +239,15 @@ internal class Commands {
             reader StreamReader,
             output Chan[CommandOutput],
             failed Chan[Exception],
-            capture FileStream? = nil
+            capture FileStream? = nil,
+            observe Action[string]? = nil
         ) {
             let result = CommandOutput()
             let text = StringBuilder()
+            var lines CommandLines? = nil
+            if let observer = observe {
+                lines = CommandLines(observer)
+            }
             try {
                 using let writer StreamWriter? = capture == nil ? nil: StreamWriter(
                     capture,
@@ -196,6 +270,7 @@ internal class Commands {
                     result.Truncated = result.Truncated || retained < count
                     if retained > 0 {
                         text.Append(buffer, 0, retained)
+                        lines?.Add(buffer, retained)
                         if writer != nil && result.Failure == nil {
                             try {
                                 writer.Write(buffer, 0, retained)
@@ -210,6 +285,7 @@ internal class Commands {
                 result.Failure = error
                 failed <- error
             }
+            lines?.Flush()
             result.Text = text.ToString()
             output <- result
         }
@@ -277,25 +353,31 @@ internal class Commands {
             outputPath string = "",
             errorPath string = "",
             budget RuntimeBudget? = nil,
-            pidNamespace bool = false
+            pidNamespace bool = false,
+            outputLine Action[string]? = nil,
+            errorLine Action[string]? = nil
         ) CommandResult {
-            let info = ProcessStartInfo(isolated ? "/usr/bin/setsid": "setsid")
+            let info = ProcessStartInfo(isolated ? LocalPaths.NeedSystemTool("setsid", cwd): "setsid")
             if !pidNamespace {
-                if !OperatingSystem.IsLinux() || !File.Exists("/usr/bin/unshare") || !File.Exists("/usr/bin/env") {
+                let unshare = LocalPaths.SystemTool("unshare", cwd)
+                let environment = LocalPaths.SystemTool("env", cwd)
+                if !OperatingSystem.IsLinux() || !LocalPaths.Executable(unshare) || !LocalPaths.Executable(
+                    environment
+                ) {
                     throw CliFailure(
                         "missing_tools",
-                        "Command cleanup requires Linux, /usr/bin/unshare, and /usr/bin/env",
+                        "Command cleanup requires Linux, unshare, and env",
                         summary: "PID namespace prerequisite is unavailable"
                     )
                 }
-                info.ArgumentList.Add("/usr/bin/unshare")
+                info.ArgumentList.Add(unshare)
                 info.ArgumentList.Add("--map-current-user")
                 info.ArgumentList.Add("--pid")
                 info.ArgumentList.Add("--fork")
                 info.ArgumentList.Add("--kill-child")
                 info.ArgumentList.Add("--mount-proc")
                 info.ArgumentList.Add("--")
-                info.ArgumentList.Add("/usr/bin/env")
+                info.ArgumentList.Add(environment)
                 info.ArgumentList.Add("-u")
                 info.ArgumentList.Add("LC_ALL")
                 info.ArgumentList.Add("--")
@@ -339,6 +421,12 @@ internal class Commands {
             if isolated {
                 info.Environment["PATH"] = "/usr/local/bin:/usr/bin:/bin"
             }
+            let certificates = LocalPaths.Certificates()
+            if certificates != "" {
+                info.Environment["SSL_CERT_FILE"] = certificates
+                info.Environment["GIT_SSL_CAINFO"] = certificates
+                info.Environment["CURL_CA_BUNDLE"] = certificates
+            }
             info.Environment["GH_HOST"] = "github.com"
             info.Environment["GH_PROMPT_DISABLED"] = "1"
             info.Environment["GIT_TERMINAL_PROMPT"] = "0"
@@ -360,7 +448,9 @@ internal class Commands {
             using let outputCapture = Capture(outputPath)
             using let errorCapture = Capture(errorPath)
             let requested = milliseconds > 0 ? milliseconds: seconds * 1000
-            let allowance = TimeSpan.FromMilliseconds(Math.Min(requested, budget?.Remaining() ?? requested))
+            let remaining = budget?.Remaining() ?? -1
+            let limit = requested > 0 && remaining > 0 ? Math.Min(requested, remaining): Math.Max(requested, remaining)
+            let allowance = TimeSpan.FromMilliseconds(limit > 0 ? limit: -1)
             let started = Chan[Process?](1)
             let exited = Chan[Exception?](1)
             let stdin = Chan[Exception?](1)
@@ -407,13 +497,13 @@ internal class Commands {
                 onCancel = handler
                 go Commands.Write(process.StandardInput, input, stdin)
                 inputStarted = true
-                go Commands.Read(reader, stdout, failed, outputCapture)
+                go Commands.Read(reader, stdout, failed, outputCapture, outputLine)
                 outputStarted = true
-                go Commands.Read(process.StandardError, stderr, failed, errorCapture)
+                go Commands.Read(process.StandardError, stderr, failed, errorCapture, errorLine)
                 errorStarted = true
                 ready = true
                 while !inputDone || !outputDone || !errorDone || !exitDone {
-                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                    if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     var failure Exception? = nil
@@ -454,7 +544,7 @@ internal class Commands {
                         }
                         default { }
                     }
-                    if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                    if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                         throw Exception("Runtime limit reached for " + exe)
                     }
                     if let error = failure {
@@ -500,7 +590,7 @@ internal class Commands {
                     }
                     default { }
                 }
-                if clock.Elapsed >= allowance || (budget?.Expired() ?? false) {
+                if (limit > 0 && clock.Elapsed >= allowance) || (budget?.Expired() ?? false) {
                     terminal = Exception("Runtime limit reached for " + exe)
                 }
             }
@@ -516,9 +606,15 @@ internal class Commands {
                 throw CommandInterrupted(error, result)
             }
             if !pidNamespace && result.Code != 0 {
+                for prefix in[]string{"setsid: failed to execute ", "unshare: failed to execute "} {
+                    if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
+                        throw CliFailure(
+                            "missing_tools",
+                            "A PID namespace command helper could not execute. Repair the helper, then run tokate doctor."
+                        )
+                    }
+                }
                 for prefix in[]string{
-                    "setsid: failed to execute /usr/bin/unshare:",
-                    "unshare: failed to execute /usr/bin/env:",
                     "unshare: unshare failed:",
                     "unshare: mount /proc failed:",
                     "unshare: mount proc on /proc failed:",
@@ -528,11 +624,7 @@ internal class Commands {
                     "unshare: setgroups failed:"
                 } {
                     if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
-                        throw CliFailure(
-                            "missing_tools",
-                            "Cannot start a PID namespace with /usr/bin/unshare",
-                            summary: "PID namespace prerequisite is unavailable"
-                        )
+                        throw LinuxSandbox.NamespaceFailure(result.Error)
                     }
                 }
             }

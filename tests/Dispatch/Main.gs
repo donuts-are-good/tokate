@@ -23,137 +23,119 @@ func Main(args[]string) int32 {
             return Fixture(Path.GetDirectoryName(exe) ?? "").Run(name, args)
         }
         let project = Directory.GetCurrentDirectory()
-        if args.Length == 5 && args[0] == "--omp-boundary" {
-            OmpProof.Boundary(args[1], args[2], args[3], args[4])
-            return 0
-        }
         let binary = Environment.GetEnvironmentVariable("TOKATE_BINARY") ?? Path.Combine(
             project,
             "artifacts/linux-x64/tokate"
         )
-        if args.Length == 6 && args[0] == "--pi-proof" {
-            PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
-            return 0
+        switch args.Length == 0 ? "": args[0] {
+            case "--omp-boundary" when args.Length == 5 {
+                OmpProof.Boundary(args[1], args[2], args[3], args[4])
+            }
+            case "--nix-runtime" when args.Length == 4 {
+                NixChecks.Run(binary, args[1], args[2], args[3])
+            }
+            case "--pi-runtime" when(args.Length == 1 || args.Length == 2) {
+                PiChecks.Runtime(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--pi-proof" when args.Length == 6 {
+                PiChecks.Run(binary, args[1], args[2], args[3], args[4], args[5])
+            }
+            case "--local-codex" when args.Length == 4 {
+                LocalCodex.All(binary, args[1], args[2], args[3])
+            }
+            case "--process" when args.Length == 1 {
+                ProcessChecks.All(binary)
+            }
+            case "--verification" when args.Length == 1 {
+                VerificationChecks.All(binary)
+            }
+            case "--protected-paths" when args.Length == 1 {
+                ProtectedPathChecks.All(binary)
+            }
+            case "--runtime-files-parent" when args.Length == 2 {
+                VerificationChecks.RuntimeFilesParent(binary, args[1])
+            }
+            case "--suite" when args.Length == 2 {
+                SuiteCatalog.Select(binary, args[1])
+            }
+            case "--diagnostics" when(args.Length == 1 || args.Length == 2) {
+                Diagnostics.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--overlaps" when args.Length == 1 {
+                OverlapChecks.All(binary)
+            }
+            case "--json-cli" when args.Length == 1 {
+                CliDiscovery.Structured(binary)
+            }
+            case "--saved-runs" when args.Length == 1 {
+                CliDiscovery.Saved(binary)
+            }
+            case "--progress" when(args.Length == 1 || args.Length == 2) {
+                ProgressChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--terminal" when args.Length == 1 {
+                TerminalOutput.All(binary)
+            }
+            case "--selection" when(args.Length == 1 || args.Length == 2) {
+                DonorSelectionChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--targets" when(args.Length == 1 || args.Length == 2) {
+                TargetBranches.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--preparation" when(args.Length == 1 || args.Length == 2) {
+                PreparationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--continuation" when(args.Length == 1 || args.Length == 2) {
+                AttemptContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--cli-setup" when args.Length == 1 {
+                CliDiscovery.Setup(binary)
+            }
+            case "--cli" when args.Length == 1 {
+                CliDiscovery.All(binary)
+            }
+            case "--cli-contract" when args.Length == 1 {
+                CliDiscovery.Contract(binary)
+            }
+            case "--cli-shell" when args.Length == 2 {
+                CliDiscovery.All(binary, args[1])
+            }
+            case "--shell" when args.Length == 2 {
+                Installer.Lifecycle(project, binary, args[1])
+                Console.WriteLine("PASS installer lifecycle for " + args[1])
+            }
+            case "--installer-shell-detection" when args.Length == 1 {
+                Installer.ShellDetection(project, binary)
+            }
+            case "--flow" when args.Length == 2 {
+                NativeFlow.All(binary, args[1])
+            }
+            case "--traffic-commands" when(args.Length == 1 || args.Length == 2) {
+                CommandTrafficChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--coordination" when(args.Length == 1 || args.Length == 2) {
+                CoordinationFlow.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--correction" when(args.Length == 1 || args.Length == 2) {
+                CorrectionChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--synchronizations" when(args.Length == 1 || args.Length == 2) {
+                SynchronizationChecks.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--public-descriptions" when(args.Length == 1 || args.Length == 2) {
+                PublicDescriptions.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--amendments" when(args.Length == 1 || args.Length == 2) {
+                AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            case "--decree" when(args.Length == 1 || args.Length == 2) {
+                DecreeFlow.All(binary, args.Length == 2 ? args[1]: "")
+            }
+            default {
+                Check.That(args.Length == 0, "Unknown test arguments: " + String.Join(" ", args))
+                SuiteCatalog.All(project, binary)
+            }
         }
-        if args.Length == 4 && args[0] == "--local-codex" {
-            LocalCodex.All(binary, args[1], args[2], args[3])
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--process" {
-            ProcessChecks.All(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--verification" {
-            VerificationChecks.All(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--protected-paths" {
-            ProtectedPathChecks.All(binary)
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--runtime-files-parent" {
-            VerificationChecks.RuntimeFilesParent(binary, args[1])
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--suite" {
-            SuiteCatalog.Select(binary, args[1])
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--diagnostics" {
-            Diagnostics.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--overlaps" {
-            OverlapChecks.All(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--json-cli" {
-            CliDiscovery.Structured(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--progress" {
-            ProgressChecks.All(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--terminal" {
-            TerminalOutput.All(binary)
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--selection" {
-            DonorSelectionChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--targets" {
-            TargetBranches.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--preparation" {
-            PreparationChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--continuation" {
-            ContinuationChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--cli-setup" {
-            CliDiscovery.Setup(binary)
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--cli" {
-            CliDiscovery.All(binary)
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--cli-shell" {
-            CliDiscovery.All(binary, args[1])
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--shell" {
-            Installer.Lifecycle(project, binary, args[1])
-            Console.WriteLine("PASS installer lifecycle for " + args[1])
-            return 0
-        }
-        if args.Length == 1 && args[0] == "--installer-shell-detection" {
-            Installer.ShellDetection(project, binary)
-            return 0
-        }
-        if args.Length == 2 && args[0] == "--flow" {
-            NativeFlow.All(binary, args[1])
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--traffic-commands" {
-            CommandTrafficChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--coordination" {
-            CoordinationFlow.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--correction" {
-            CorrectionChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--synchronizations" {
-            SynchronizationChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--public-descriptions" {
-            PublicDescriptions.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--amendments" {
-            AmendmentFlow.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--repairs" {
-            RepairChecks.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        if (args.Length == 1 || args.Length == 2) && args[0] == "--decree" {
-            DecreeFlow.All(binary, args.Length == 2 ? args[1]: "")
-            return 0
-        }
-        Check.That(args.Length == 0, "Unknown test arguments: " + String.Join(" ", args))
-        SuiteCatalog.All(project, binary)
         return 0
     } catch (error Exception) {
         Console.Error.WriteLine(error.ToString())

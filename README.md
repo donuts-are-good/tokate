@@ -4,13 +4,8 @@
 
 **toh-KAH-teh**. Put your spare AI usage to work for open source.
 
-An owner approves an issue. A donor runs it with their own accounts. Tokate checks the result and opens a draft PR for owner review.
-
-## Get started with your AI
-
-Give your coding assistant this prompt:
-
-> Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me set up Tokate. Establish whether I am an owner or donor, then guide me through the next step.
+An owner approves an issue. A donor runs it with their own accounts and tools.
+Tokate verifies the result and opens a draft PR for owner review.
 
 ## Install
 
@@ -18,31 +13,29 @@ Give your coding assistant this prompt:
 curl -qfsSL https://tokate.dev/install.sh | sh
 ```
 
-Installs for your user and sets up PATH. Open a new terminal if prompted.
-Update with `tokate update`. Remove with `tokate uninstall`, which keeps saved work.
+Open a new terminal if prompted. Use `tokate update` to update or `tokate uninstall`
+to remove the installation while keeping saved work.
 
-Requires **Linux x86_64 with glibc 2.34+** and public GitHub repositories. Tested observations cover Ubuntu 24.04 CI and a CachyOS rolling host; other distributions are not established. ARM64, musl, Windows and macOS are unsupported. Managed execution supports native Codex with a ChatGPT login, or [Pi local execution](docs/pi.md) with a pinned SDK/runtime and an existing no-auth loopback endpoint. See [prerequisites and support limits](docs/reference.md#install-and-check-support).
+Requires **Linux x86_64 with glibc 2.34+ or Alpine 3.24, and public GitHub repositories**.
+Windows, macOS and ARM64 are not supported. See [Nix](docs/nix.md) and
+[Alpine](docs/alpine.md) for distribution setup. Managed donations use
+native Codex with a ChatGPT login or Pi with a configured local model endpoint.
+Owners need neither harness nor an AI subscription.
 
-## For Owners:
+## Start here
 
-1. Follow the [owner guide](AGENTS.md#guide-a-repository-owner): check tools with `tokate doctor --owner --auth`, then run `tokate init --repo OWNER/REPO` in your repository.
-2. Review and commit the policy and pinned workflow with your project's existing checks. Setup requires a matching stable release with its hosted shared workflow; see [owner setup and Actions prerequisites](docs/reference.md#set-owner-policy-and-approve).
-3. Initialize access, approve task scope and trust donors or grant access to one issue. New setup defaults to version 2 and Trusted eligibility; newcomers request access before claiming work.
-4. Review the draft PR, receipt and [required checks](docs/reference.md#review-and-accept), then merge when satisfied.
+- **Owners:** [Set up the repository, approve tasks and review donations](docs/owners.md).
+- **Donors:** [Choose a tool, claim an issue and donate work](docs/donors.md).
+- **Existing work:** [Recover a run or update a PR](docs/recovery.md).
+- **Before running:** [Understand data access and isolation](docs/security.md).
+- **Source builders:** [Build, test and package Tokate](docs/development.md).
 
-## For Donors:
+Run `tokate` for guided donation, owner setup, repository status and saved work.
+`tokate work OWNER/REPO` offers available issues. Issue and PR links supply context.
+Use `tokate help COMMAND` for exact options. Scripts can use `--json` without prompts.
 
-1. Follow the [donor guide](AGENTS.md#guide-a-donor) for GitHub access and [Codex setup](docs/reference.md#prepare-donor-tools-and-defaults) or [Pi setup](docs/pi.md).
-2. Request access if needed, then [claim approved available work](docs/coordination-v2.md#requests-and-authoritative-state) through the coordinator.
-3. [Prepare, work and submit](docs/reference.md#run-and-inspect-work) with an allowed tool/model/effort selection and an agreed budget. Tokate discovers or creates your fork and verifies the result before coordinated draft publication.
+To get help from your coding assistant:
 
-Existing assignment-bound repositories remain supported; see [legacy operations](AGENTS.md#legacy-operations-and-recovery). Your accounts and AI usage stay under your control.
+> Read https://raw.githubusercontent.com/obselate/tokate/main/AGENTS.md and help me use Tokate as an owner or donor.
 
-For assistants, every command accepts explicit `--json`; `tokate help --json` lists
-arguments and effects. See the [versioned output contract](docs/reference.md#automate-commands).
-
-Use `tokate work --help`, `tokate help work` or `-h` for focused command help.
-You can pass an issue URL directly, or omit `--repo` when local remotes identify
-one GitHub repository. [Shell completion and input rules](docs/reference.md#find-a-command) cover Bash, Zsh and Fish.
-
-[Website](https://tokate.dev/) · [Releases](https://github.com/obselate/tokate/releases) · [Commands and recovery](docs/reference.md) · [Data transparency](docs/transparency.md) · [Build from source](docs/reference.md#build-and-verify-from-source) · [Issues](https://github.com/obselate/tokate/issues) · [MIT license](LICENSE)
+[Website](https://tokate.dev/) · [Releases](https://github.com/obselate/tokate/releases) · [Issues](https://github.com/obselate/tokate/issues) · [MIT license](LICENSE)

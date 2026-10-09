@@ -237,11 +237,13 @@ internal class DonorSelectionChecks {
                 flow.Initialize()
                 flow.Approve()
                 let args = List[string]{
-                    "work",
+                    "claim",
                     "--repo",
                     "owner/project",
                     "--issue",
                     "1",
+                    "--seconds",
+                    "30",
                     "--runs",
                     Path.Combine(flow.Temp.Root, "runs"),
                     "--non-interactive"
@@ -251,8 +253,10 @@ internal class DonorSelectionChecks {
                 } else {
                     args.AddRange([]string{"--model", "gpt-6.1-sol", "--effort", "high"})
                 }
+                let claimed = flow.Acquire(args.ToArray())
+                let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
                 flow.Mode("model_failure")
-                let result = TestProcess.Run(binary, args.ToArray(), flow.Temp.Env)
+                let result = flow.Call([]string{"work", "--run", run}, 1)
                 Check.That(result.Code == 1, "Synthetic model failure succeeded")
                 Check.Contains(result.Error, "Codex failed")
                 flow.Reload()
@@ -266,14 +270,32 @@ internal class DonorSelectionChecks {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
-            Set(flow)
-            let claimed = flow.Call(
+            let custom = Path.Combine(flow.Temp.Root, "custom-codex")
+            File.Move(Path.Combine(flow.Bin, "codex"), custom)
+            flow.Call(
+                []string{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high", "--harness-path", custom}
+            )
+            let defaults = File.ReadAllText(Settings(flow))
+            Check.Contains(defaults, custom)
+            Check.That(
+                !flow.Call([]string{"defaults", "read"}).Output.Contains(custom),
+                "Public defaults exposed harness path"
+            )
+            let invalid = flow.Call(
+                []string{"select", "--repo", "owner/project", "--harness-path", custom + "-missing", "--json"},
+                1
+            )
+            Check.Envelope(invalid, "select", "error", "missing_tools")
+            Check.That(File.ReadAllText(Settings(flow)) == defaults, "Invalid override changed saved defaults")
+            let claimed = flow.Acquire(
                 []string{
                     "claim",
                     "--repo",
                     "owner/project",
                     "--issue",
                     "1",
+                    "--seconds",
+                    "30",
                     "--runs",
                     Path.Combine(flow.Temp.Root, "runs")
                 }
@@ -281,6 +303,7 @@ internal class DonorSelectionChecks {
             let run = claimed.Output.Substring(claimed.Output.LastIndexOf("Run: ") + 5).Trim()
             let path = Path.Combine(run, "run.json")
             let original = File.ReadAllText(path)
+            Check.That(Check.Text(Check.Json(original)["harness_path"]) == custom, "Claim lost its custom harness path")
             Set(flow, effort: "xhigh")
             flow.Mode("capability_changed")
             Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "no longer compatible")
@@ -303,7 +326,7 @@ internal class DonorSelectionChecks {
             flow.NoPr()
         }
 
-        private func LegacyRun(binary string) {
+        private func MissingSelection(binary string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
@@ -314,17 +337,10 @@ internal class DonorSelectionChecks {
             saved.AsObject().Remove("harness")
             saved.AsObject().Remove("provider")
             File.WriteAllText(path, saved.ToJsonString())
-            Set(flow, effort: "xhigh")
-            flow.Mode("model_failure")
-            let result = TestProcess.Run(binary, []string{"work", "--run", run}, flow.Temp.Env)
-            Check.That(result.Code == 1, "Synthetic model failure succeeded")
-            Check.Contains(result.Error, "Codex failed")
-            flow.Reload()
-            Check.That(Check.Text(flow.State["exec_count"]) == "1", "Legacy run changed confirmation behavior")
-            Check.That(
-                Check.Text(Check.Json(File.ReadAllText(path))["effort"]) == "high",
-                "Legacy run used new preferences"
-            )
+            let original = File.ReadAllText(path)
+            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "require saved selection metadata")
+            Check.That(File.ReadAllText(path) == original, "Invalid selection changed saved work")
+            flow.NoInference()
         }
 
         private func InteractiveChoices(binary string) {
@@ -366,7 +382,7 @@ internal class DonorSelectionChecks {
                 flow.Temp.Root,
                 "runs"
             ) +
-                "'"
+                "' --harness codex --seconds 30 --plain"
             let declined = TestProcess.Run(
                 "/usr/bin/script",
                 []string{"-q", "-e", "-c", work, "/dev/null"},
@@ -384,8 +400,12 @@ internal class DonorSelectionChecks {
                 flow.Temp.Env,
                 "1\ny\n"
             )
-            Check.That(confirmed.Code == 1, "Synthetic model failure succeeded")
-            Check.Contains(confirmed.Output, "Codex failed")
+            Check.That(confirmed.Code == 8, "Confirmed claim did not wait for owner coordination")
+            Check.Contains(confirmed.Output, "Claim pending")
+            flow.NoInference()
+            flow.CoordinatePosted()
+            let run = Directory.GetDirectories(Path.Combine(flow.Temp.Root, "runs"))[0]
+            Check.Contains(flow.Call([]string{"work", "--run", run, "--yes"}, 1).Error, "Codex failed")
             flow.Reload()
             Check.That(
                 Check.Text(flow.State["exec_count"]) == "1",
@@ -597,6 +617,7 @@ internal class DonorSelectionChecks {
                 []string{"--provider=anthropic", "--model=gpt-6.1-sol", "--effort=high"},
                 []string{"--harness=pi", "--model=gpt-6.1-sol", "--effort=absent"},
                 []string{
+                    "--harness=codex",
                     "--provider=local-chat-completions",
                     "--model=gpt-6.1-sol",
                     "--effort=high",
@@ -718,9 +739,77 @@ internal class DonorSelectionChecks {
             flow.NoInference()
         }
 
+        private func StateLocation(binary string) {
+            using let temp = Temp()
+            temp.Env["PATH"] = "/empty"
+            for profile in[]string{"", "shared"} {
+                let args = List[string]{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "high"}
+                if profile != "" {
+                    args.AddRange([]string{"--profile", profile})
+                }
+                CliDiscovery.Call(binary, args.ToArray(), temp)
+            }
+            let previous = Path.Combine(temp.Env["HOME"], ".local/state/tokate")
+            let oldHash = Check.Hash(Path.Combine(previous, "donor-defaults.json"))
+            let stateHome = Path.Combine(temp.Root, "new state")
+            temp.Env["XDG_STATE_HOME"] = stateHome
+            Check.Contains(
+                CliDiscovery.Call(binary, []string{"defaults", "read", "--profile", "shared"}, temp).Output,
+                "high"
+            )
+            for profile in[]string{"", "shared"} {
+                let args = List[string]{"defaults", "set", "--model", "gpt-6.1-sol", "--effort", "xhigh"}
+                if profile != "" {
+                    args.AddRange([]string{"--profile", profile})
+                }
+                CliDiscovery.Call(binary, args.ToArray(), temp)
+            }
+            let current = Path.Combine(stateHome, "tokate")
+            Check.That(File.Exists(Path.Combine(current, "donor-defaults.json")), "State override was ignored")
+            Check.That(
+                Check.Hash(Path.Combine(previous, "donor-defaults.json")) == oldHash,
+                "Old defaults were migrated"
+            )
+            let listed = Check.Json(CliDiscovery.Call(binary, []string{"defaults", "list"}, temp).Output)
+            Check.That(listed["profiles"]?.AsObject().Count == 1, "Duplicate profile names were listed")
+            Check.That(
+                Check.Text(listed["profiles"]?["shared"]?["effort"]) == "xhigh",
+                "Old profile overrode current choice"
+            )
+            for invalid in[]string{"", "relative-state"} {
+                temp.Env["XDG_STATE_HOME"] = invalid
+                let read = Check.Json(CliDiscovery.Call(binary, []string{"defaults", "read"}, temp).Output)
+                Check.That(
+                    Check.Text(read["default"]?["effort"]) == "high",
+                    "Empty or relative state override changed lookup"
+                )
+            }
+            temp.Env["XDG_STATE_HOME"] = stateHome
+            CliDiscovery.Call(binary, []string{"defaults", "remove", "--profile", "shared"}, temp)
+            Check.That(
+                !File.Exists(Path.Combine(current, "donor-profiles/shared.json")) && !File.Exists(
+                    Path.Combine(previous, "donor-profiles/shared.json")
+                ),
+                "Removed profile reappeared from previous storage"
+            )
+            let path = Path.Combine(current, "donor-defaults.json")
+            File.Delete(path)
+            File.CreateSymbolicLink(path, Path.Combine(previous, "donor-defaults.json"))
+            CliDiscovery.Call(binary, []string{"defaults", "read"}, temp, 1)
+            Check.That(
+                Check.Hash(Path.Combine(previous, "donor-defaults.json")) == oldHash,
+                "Linked defaults were changed"
+            )
+            Console.WriteLine(
+                "PASS state directory override, previous profile lookup, precedence, explicit removal and link refusal"
+            )
+        }
+
         internal func All(binary string, selected string = "") {
             if selected != "" {
-                if selected == "Structured" {
+                if selected == "StateLocation" {
+                    StateLocation(binary)
+                } else if selected == "Structured" {
                     Structured(binary)
                     Console.WriteLine(
                         "PASS structured defaults/selection, availability and terminal no-prompt contract"
@@ -730,6 +819,9 @@ internal class DonorSelectionChecks {
                     Console.WriteLine(
                         "PASS unrestricted explicit/default/terminal selection, known controls and no fallback"
                     )
+                } else if selected == "InteractiveChoices" {
+                    InteractiveChoices(binary)
+                    Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
                 } else {
                     throw Exception("Unknown selection test group")
                 }
@@ -737,6 +829,7 @@ internal class DonorSelectionChecks {
             }
 
             Structured(binary)
+            StateLocation(binary)
             Console.WriteLine("PASS structured defaults/selection, availability and terminal no-prompt contract")
             LocalSettings(binary)
             Console.WriteLine("PASS donor defaults set/read/remove and nonsecret storage")
@@ -746,8 +839,8 @@ internal class DonorSelectionChecks {
             Console.WriteLine("PASS explicit and saved default work without repeated confirmation")
             ConfirmationAndRuns(binary)
             Console.WriteLine("PASS pinned runs, capability revalidation and no model fallback")
-            LegacyRun(binary)
-            Console.WriteLine("PASS legacy saved-run pair and behavior")
+            MissingSelection(binary)
+            Console.WriteLine("PASS missing saved selection is refused before inference")
             InteractiveChoices(binary)
             Console.WriteLine("PASS actual terminal selection and confirmation; zero inference before consent")
             VersionTwo(binary)

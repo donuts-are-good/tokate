@@ -8,26 +8,19 @@ import System.Text.Json.Nodes
 
 internal class DecreeFlow : IDisposable {
     internal let Flow NativeFixture
-    internal let V2 CoordinationFlow?
+    internal let Coordination CoordinationFixture
 
     internal init(binary string, version int32) {
-        if version == 2 {
-            let coordination = CoordinationFlow(binary)
-            V2 = coordination
-            Flow = coordination.Flow
-        } else {
-            Flow = NativeFixture(binary)
-        }
+        let coordination = CoordinationFixture(binary)
+        Coordination = coordination
+        Flow = coordination.Flow
     }
 
     public func Dispose() -> Flow.Dispose()
 
     internal func Initialize() {
-        if let coordination = V2 {
-            coordination.Initialize(approve: false)
-        } else {
-            Flow.Initialize()
-        }
+        Coordination.Initialize(approve: false)
+        Flow.OwnerAccess()
     }
 
     internal func Text(text string) {
@@ -36,89 +29,31 @@ internal class DecreeFlow : IDisposable {
         Flow.Git("-C", Path.Combine(Flow.Bin, "fork"), "fetch", Flow.Upstream, "main")
     }
 
-    internal func Approval() JsonNode {
-        if let coordination = V2 {
-            return coordination.State()["state"]?["approval"]?.DeepClone() ?? throw Exception("Missing approval")
-        }
-        return Check.Json(
-            Flow.Git("-C", Flow.Upstream, "show", "refs/heads/tokate/approvals/1:.github/tokate-approval.json")
-        )
-    }
+    internal func Approval() JsonNode -> Coordination.State()["state"]?["approval"]?.DeepClone() ??
+        throw Exception("Missing approval")
 
     internal func Rewrite(approval JsonNode) {
-        if let coordination = V2 {
-            let state = coordination.State()["state"] ?? throw Exception("Missing state")
-            state["approval"] = approval.DeepClone()
-            state["approval_id"] = JsonValue.Create(Check.FixtureDigest(approval))
-            coordination.RewriteState(state)
-            return
-        }
-        let previous = Flow.Git("-C", Flow.Upstream, "rev-parse", "refs/heads/tokate/approvals/1")
-        let path = Path.Combine(Flow.Temp.Root, "test-approval.json")
-        File.WriteAllText(path, approval.ToJsonString())
-        let blob = Flow.Git("-C", Flow.Upstream, "hash-object", "-w", path)
-        let env = Dictionary[string, string](Flow.Temp.Env)
-        for key in[]string{"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"} {
-            env.Remove(key)
-        }
-        env["GIT_INDEX_FILE"] = Path.Combine(Flow.Temp.Root, "approval.index")
-        Check.Success(TestProcess.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "read-tree", previous}, env))
-        Check.Success(
-            TestProcess.Run(
-                "/usr/bin/git",
-                []string{
-                    "-C",
-                    Flow.Upstream,
-                    "update-index",
-                    "--add",
-                    "--cacheinfo",
-                    "100644," + blob + ",.github/tokate-approval.json"
-                },
-                env
-            )
-        )
-        let tree = Check.Success(TestProcess.Run("/usr/bin/git", []string{"-C", Flow.Upstream, "write-tree"}, env))
-        let next = Flow.Git(
-            "-C",
-            Flow.Upstream,
-            "-c",
-            "user.name=Owner",
-            "-c",
-            "user.email=owner@example.test",
-            "commit-tree",
-            tree,
-            "-p",
-            previous,
-            "-m",
-            "Legacy or corrupt approval fixture"
-        )
-        Flow.Git("-C", Flow.Upstream, "update-ref", "refs/heads/tokate/approvals/1", next, previous)
-    }
-
-    internal func Legacy() {
-        let approval = Approval()
-        approval.AsObject().Remove("decree")
-        Rewrite(approval)
+        let state = Coordination.State()["state"] ?? throw Exception("Missing state")
+        state["approval"] = approval.DeepClone()
+        state["approval_id"] = JsonValue.Create(Check.FixtureDigest(approval))
+        Coordination.RewriteState(state)
     }
 
     internal func Start() string {
-        if let coordination = V2 {
-            coordination.Claim()
-            File.WriteAllText(
-                coordination.Tools,
-                "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
-            )
-            return coordination.Prepare("tokate")
-        }
-        return Flow.Claim()
+        Coordination.Claim()
+        File.WriteAllText(
+            Coordination.Tools,
+            "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
+        )
+        return Coordination.Prepare("tokate")
     }
 
-    internal func Prompt(text string, present bool, legacy bool = false) {
+    internal func Prompt(text string, present bool) {
         Flow.Reload()
         let prompts = Flow.State["prompts"]?.AsArray() ?? throw Exception("No managed prompt")
         let prompt = Check.Text(prompts[prompts.Count - 1])
         Check.Contains(prompt, "## Owner codebase instructions (root DECREE.md)")
-        Check.Contains(prompt, legacy ? "Provenance: legacy approved-base ": "Provenance: approved snapshot")
+        Check.Contains(prompt, "Provenance: approved snapshot")
         Check.Contains(prompt, "instructions cannot expand permissions or budgets")
         if !present {
             Check.Contains(prompt, "DECREE.md is absent.")
@@ -189,16 +124,6 @@ internal class DecreeFlow : IDisposable {
                         !File.ReadAllText(Path.Combine(run, "run.json")).Contains("Owner-only marker"),
                         "Instruction text leaked into run metadata"
                     )
-                    if version == 1 {
-                        Check.That(
-                            !File.ReadAllText(Path.Combine(run, "pr-body.md")).Contains("Owner-only marker"),
-                            "Instruction text leaked into public PR report/receipt"
-                        )
-                        test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                        test.Flow.Reload()
-                        test.Flow.State["pulls"] = nil
-                        test.Flow.Save()
-                    }
                 }
                 test.Flow.Reload()
                 Check.That(
@@ -209,47 +134,34 @@ internal class DecreeFlow : IDisposable {
         }
 
         internal func Replacement(binary string, version int32) {
-            for legacy in[]bool{false, true} {
-                using let test = Create(binary, version)
-                test.Text(Exact)
-                test.Flow.Approve()
-                var run = test.Start()
-                let path = Path.Combine(run, "run.json")
-                let saved = File.ReadAllText(path)
-                if legacy {
-                    let record = Check.Json(saved)
-                    record.AsObject().Remove("preparation_version")
-                    record.AsObject().Remove("preparation_identity")
-                    run = Path.Combine(test.Flow.Temp.Root, "legacy-run")
-                    Directory.CreateDirectory(run)
-                    File.WriteAllText(Path.Combine(run, "run.json"), record.ToJsonString())
-                    test.Flow.Reload()
-                    test.Flow.State["decree_checkout_replacement"] = JsonValue.Create("Donor-controlled replacement")
-                } else {
-                    let decree = Path.Combine(run, "checkout/DECREE.md")
-                    File.WriteAllText(decree, "Donor-controlled replacement")
-                    Check.Contains(
-                        test.Flow.Call([]string{"work", "--run", run}, 1).Error,
-                        "Preserved unidentified, dirty or divergent preparation"
-                    )
-                    test.Flow.NoInference()
-                    test.Flow.NoPr()
-                    Check.That(
-                        File.ReadAllText(decree) == "Donor-controlled replacement" && File.ReadAllText(path) == saved,
-                        "Rejected preparation changed donor work or its saved run"
-                    )
-                    File.WriteAllBytes(decree, Encoding.UTF8.GetBytes(Exact))
-                    test.Flow.Reload()
-                    test.Flow.State["decree_donor_change"] = JsonValue.Create(true)
-                }
-                test.Flow.Save()
-                Check.Contains(
-                    test.Flow.Call([]string{"work", "--run", run}, 1).Error,
-                    "Contribution changes approved root DECREE.md"
-                )
-                test.Prompt(Exact, true)
-                test.Flow.NoPr()
-            }
+            using let test = Create(binary, version)
+            test.Text(Exact)
+            test.Flow.Approve()
+            let run = test.Start()
+            let path = Path.Combine(run, "run.json")
+            let saved = File.ReadAllText(path)
+            let decree = Path.Combine(run, "checkout/DECREE.md")
+            File.WriteAllText(decree, "Donor-controlled replacement")
+            Check.Contains(
+                test.Flow.Call([]string{"work", "--run", run}, 1).Error,
+                "Preserved unidentified, dirty or divergent preparation"
+            )
+            test.Flow.NoInference()
+            test.Flow.NoPr()
+            Check.That(
+                File.ReadAllText(decree) == "Donor-controlled replacement" && File.ReadAllText(path) == saved,
+                "Rejected preparation changed donor work or its saved run"
+            )
+            File.WriteAllBytes(decree, Encoding.UTF8.GetBytes(Exact))
+            test.Flow.Reload()
+            test.Flow.State["decree_donor_change"] = JsonValue.Create(true)
+            test.Flow.Save()
+            Check.Contains(
+                test.Flow.Call([]string{"work", "--run", run}, 1).Error,
+                "Contribution changes approved root DECREE.md"
+            )
+            test.Prompt(Exact, true)
+            test.Flow.NoPr()
         }
 
         internal func Freshness(binary string, version int32) {
@@ -291,7 +203,7 @@ internal class DecreeFlow : IDisposable {
                     test.Flow.NoInference()
                     if change == "unsupported" {
                         let failure = test.Flow.Call(
-                            []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
+                            []string{"approve", "--repo", "owner/project", "--issue", "1"},
                             1,
                             true
                         )
@@ -379,11 +291,7 @@ internal class DecreeFlow : IDisposable {
                 )
                 test.Flow.Save()
                 test.Flow.ResetTraffic()
-                let failure = test.Flow.Call(
-                    []string{"approve", "--repo", "owner/project", "--issue", "1", "--donor", "donor"},
-                    1,
-                    true
-                )
+                let failure = test.Flow.Call([]string{"approve", "--repo", "owner/project", "--issue", "1"}, 1, true)
                 Check.That(
                     failure.Error.Contains("DECREE.md"),
                     "Unsupported " + kind + " did not report DECREE.md: " + failure.Error
@@ -412,48 +320,6 @@ internal class DecreeFlow : IDisposable {
             limit.Prompt(text, true)
         }
 
-        internal func LegacyDelivery(binary string, version int32) {
-            for present in[]bool{false, true} {
-                using let test = Create(binary, version)
-                if present {
-                    test.Text(Exact)
-                }
-                test.Flow.Approve()
-                test.Legacy()
-                let approved = test.Approval().ToJsonString()
-                let run = test.Start()
-                test.Text("Live target replacement\n")
-                test.Flow.Mode("decree-change")
-                test.Flow.Call([]string{"work", "--run", run})
-                test.Prompt(present ? Exact: "", present, true)
-                Check.That(test.Approval().ToJsonString() == approved, "Legacy approval was rewritten for delivery")
-                if version == 1 {
-                    test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                }
-            }
-            using let unsupported = Create(binary, version)
-            unsupported.Flow.Approve()
-            let path = Path.Combine(unsupported.Flow.Upstream, "DECREE.md")
-            File.CreateSymbolicLink(path, "source.md")
-            unsupported.Flow.Commit("Legacy base with unsupported instructions")
-            let approval = unsupported.Approval()
-            approval.AsObject().Remove("decree")
-            approval["base"] = JsonValue.Create(
-                unsupported.Flow.Git("-C", unsupported.Flow.Upstream, "rev-parse", "HEAD")
-            )
-            unsupported.Rewrite(approval)
-            unsupported.Flow.Git(
-                "-C",
-                Path.Combine(unsupported.Flow.Bin, "fork"),
-                "fetch",
-                unsupported.Flow.Upstream,
-                "main"
-            )
-            let run = unsupported.Start()
-            Check.Contains(unsupported.Flow.Call([]string{"work", "--run", run}, 1).Error, "regular Git blob")
-            unsupported.Flow.NoInference()
-        }
-
         internal func InvalidSnapshot(binary string, version int32) {
             using let test = Create(binary, version)
             test.Text(Exact)
@@ -462,9 +328,8 @@ internal class DecreeFlow : IDisposable {
             for kind in[]string{"hash", "text", "null", "absent", "uppercase"} {
                 baseline.Restore()
                 test.Flow.Reload()
-                if let coordination = test.V2 {
-                    coordination.Comment = 10
-                }
+                let coordination = test.Coordination
+                coordination.Comment = 10
                 let approval = test.Approval()
                 let snapshot = approval["decree"] ?? throw Exception("Missing snapshot")
                 if kind == "null" {
@@ -479,11 +344,7 @@ internal class DecreeFlow : IDisposable {
                     snapshot["present"] = JsonValue.Create(false)
                 }
                 test.Rewrite(approval)
-                if let coordination = test.V2 {
-                    coordination.Coordinate(coordination.Event(coordination.ClaimRequest()), 1)
-                } else {
-                    test.Flow.Claim(code: 1)
-                }
+                coordination.Coordinate(coordination.Event(coordination.ClaimRequest()), 1)
                 test.Flow.NoInference()
             }
         }
@@ -520,29 +381,6 @@ internal class DecreeFlow : IDisposable {
             }
         }
 
-        internal func LegacyRecovery(binary string) {
-            using let test = Create(binary, 1)
-            test.Text(Exact)
-            test.Flow.VerificationPolicy("test -f result.txt", second: "test ! -f .tokate-scratch/cache.json")
-            test.Flow.Approve()
-            test.Legacy()
-            let run = test.Start()
-            test.Flow.Mode("verification_recovery")
-            test.Flow.Reload()
-            test.Flow.State["decree_donor_change"] = JsonValue.Create(true)
-            test.Flow.Save()
-            Check.Contains(test.Flow.Call([]string{"work", "--run", run}, 1).Error, "Owner verification failed")
-            test.Prompt(Exact, true, true)
-            test.Flow.Call([]string{"recover", "--run", run})
-            test.Flow.Call([]string{"publish", "--run", run})
-            test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-            test.Flow.Reload()
-            Check.That(
-                Check.Text(test.Flow.State["exec_count"]) == "1",
-                "Legacy recovery/publication launched inference"
-            )
-        }
-
         internal func Change(checkout string, mode string) {
             let path = Path.Combine(checkout, "DECREE.md")
             if mode == "add" || mode == "change" {
@@ -558,134 +396,61 @@ internal class DecreeFlow : IDisposable {
 
         internal func DonorCommit(flow NativeFixture, checkout string) string {
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Donor instruction edit"
-            )
+            flow.DonorGit(checkout, "commit", "-m", "Donor instruction edit")
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
         internal func ExternalProtection(binary string) {
-            for legacy in[]bool{false, true} {
-                for mode in[]string{"add", "change", "delete", "rename-away", "rename-to"} {
-                    using let test = Create(binary, 2)
-                    let coordination = test.V2 ?? throw Exception("Missing v2")
-                    if mode != "add" && mode != "rename-to" {
-                        test.Text(Exact)
-                    }
-                    if mode == "rename-to" {
-                        File.WriteAllBytes(Path.Combine(test.Flow.Upstream, "other.md"), Encoding.UTF8.GetBytes(Exact))
-                        test.Flow.Commit("Owner rename source")
-                    }
-                    test.Flow.Approve()
-                    if legacy {
-                        test.Legacy()
-                    }
-                    let claim = coordination.Claim()
-                    let run = coordination.Prepare()
-                    coordination.Candidate(claim)
-                    let checkout = Path.Combine(test.Flow.Temp.Root, "donor-work")
-                    Change(checkout, mode)
-                    let commit = DonorCommit(test.Flow, checkout)
-                    test.Flow.Git(
-                        "-C",
-                        checkout,
-                        "push",
-                        Path.Combine(test.Flow.Bin, "fork"),
-                        "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
-                    )
-                    let external = test.Flow.Call([]string{"external", "--run", run, "--commit", commit}, legacy ? 0: 1)
-                    if !legacy {
-                        Check.Contains(external.Error, "changes approved root DECREE.md")
-                        Check.That(
-                            !File.Exists(Path.Combine(run, "verification.json")),
-                            "Protected external diff reached verification"
-                        )
-                    }
-                    let publication = coordination.PublishRequest(claim, commit)
-                    let result = coordination.Coordinate(coordination.Event(publication), legacy ? 0: 1)
-                    if !legacy {
-                        Check.Contains(result.Error, "changes approved root DECREE.md")
-                        test.Flow.NoPr()
-                    } else {
-                        test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
-                        test.Flow.Reload()
-                        Check.That(
-                            !Check.Text(test.Flow.State["pulls"]?[0]?["body"]).Contains("Owner-only marker"),
-                            "Legacy instruction text leaked into coordinator report/receipt"
-                        )
-                    }
-                    test.Flow.NoInference()
-                }
-            }
-        }
-
-        internal func PublicationProtection(binary string) {
             for mode in[]string{"add", "change", "delete", "rename-away", "rename-to"} {
-                using let test = Create(binary, 1)
+                using let test = Create(binary, 2)
+                let coordination = test.Coordination
                 if mode != "add" && mode != "rename-to" {
                     test.Text(Exact)
                 }
                 if mode == "rename-to" {
                     File.WriteAllBytes(Path.Combine(test.Flow.Upstream, "other.md"), Encoding.UTF8.GetBytes(Exact))
                     test.Flow.Commit("Owner rename source")
-                    test.Flow.Git("-C", Path.Combine(test.Flow.Bin, "fork"), "fetch", test.Flow.Upstream, "main")
                 }
                 test.Flow.Approve()
-                let run = test.Start()
-                test.Flow.Mode("push_fail")
-                test.Flow.Call([]string{"work", "--run", run}, 1)
-                let checkout = Path.Combine(run, "checkout")
+                let claim = coordination.Claim()
+                let run = coordination.Prepare()
+                coordination.Candidate(claim)
+                let checkout = Path.Combine(test.Flow.Temp.Root, "donor-work")
                 Change(checkout, mode)
                 let commit = DonorCommit(test.Flow, checkout)
-                let savedPath = Path.Combine(run, "run.json")
-                let saved = Check.Json(File.ReadAllText(savedPath))
-                saved["commit"] = JsonValue.Create(commit)
-                File.WriteAllText(savedPath, saved.ToJsonString())
-                File.WriteAllText(
-                    Path.Combine(run, "changes.patch"),
-                    test.Flow.Git("-C", checkout, "diff", "--binary", Check.Text(saved["base"]), commit) + "\n"
+                test.Flow.Git(
+                    "-C",
+                    checkout,
+                    "push",
+                    Path.Combine(test.Flow.Bin, "fork"),
+                    "HEAD:refs/heads/tokate/v2-" + Check.Text(claim["uuid"])
                 )
-                test.Flow.Mode("")
-                Check.Contains(
-                    test.Flow.Call([]string{"publish", "--run", run}, 1).Error,
-                    "changes approved root DECREE.md"
-                )
-                test.Flow.NoPr()
+                let external = test.Flow.Call([]string{"external", "--run", run, "--commit", commit}, 1)
+                Check.Contains(external.Error, "changes approved root DECREE.md")
                 Check.That(
-                    test.Flow.Git(
-                        "-C",
-                        Path.Combine(test.Flow.Bin, "fork"),
-                        "rev-parse",
-                        Check.Text(saved["branch"])
-                    ) ==
-                    Check.Text(saved["base"]),
-                    "Protected instructions reached remote publication"
+                    !File.Exists(Path.Combine(run, "verification.json")),
+                    "Protected external diff reached verification"
                 )
+                let publication = coordination.PublishRequest(claim, commit)
+                let result = coordination.Coordinate(coordination.Event(publication), 1)
+                Check.Contains(result.Error, "changes approved root DECREE.md")
+                test.Flow.NoPr()
+                test.Flow.NoInference()
             }
         }
 
         internal func All(binary string, selected string = "") {
             var matched bool
-            for name in[]string{
-                "Delivery",
-                "Replacement",
-                "Freshness",
-                "Unsupported",
-                "LegacyDelivery",
-                "InvalidSnapshot",
-                "ManagedProtection",
-                "LegacyRecovery",
-                "ExternalProtection",
-                "PublicationProtection"
+            for test in[]TestCase[int32]{
+                TestCase[int32]("Delivery", async (value int32) -> Delivery(binary, value)),
+                TestCase[int32]("Replacement", async (value int32) -> Replacement(binary, value)),
+                TestCase[int32]("Freshness", async (value int32) -> Freshness(binary, value)),
+                TestCase[int32]("Unsupported", async (value int32) -> Unsupported(binary, value)),
+                TestCase[int32]("InvalidSnapshot", async (value int32) -> InvalidSnapshot(binary, value)),
+                TestCase[int32]("ManagedProtection", async (value int32) -> ManagedProtection(binary, value)),
+                TestCase[int32]("ExternalProtection", async (value int32) -> ExternalProtection(binary)),
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
@@ -693,43 +458,8 @@ internal class DecreeFlow : IDisposable {
                 if name != "Freshness" && !CiShard.Include("Decree/" + name) {
                     continue
                 }
-                for version in[]int32{1, 2} {
-                    if (name == "ExternalProtection" && version != 2) ||
-                        ((name == "LegacyRecovery" || name == "PublicationProtection") && version != 1) {
-                        continue
-                    }
-                    switch name {
-                        case "Delivery" {
-                            Delivery(binary, version)
-                        }
-                        case "Replacement" {
-                            Replacement(binary, version)
-                        }
-                        case "Freshness" {
-                            Freshness(binary, version)
-                        }
-                        case "Unsupported" {
-                            Unsupported(binary, version)
-                        }
-                        case "LegacyDelivery" {
-                            LegacyDelivery(binary, version)
-                        }
-                        case "InvalidSnapshot" {
-                            InvalidSnapshot(binary, version)
-                        }
-                        case "ManagedProtection" {
-                            ManagedProtection(binary, version)
-                        }
-                        case "LegacyRecovery" {
-                            LegacyRecovery(binary)
-                        }
-                        case "ExternalProtection" {
-                            ExternalProtection(binary)
-                        }
-                        case "PublicationProtection" {
-                            PublicationProtection(binary)
-                        }
-                    }
+                for version in[]int32{2} {
+                    test.Run(version)
                     if name != "Freshness" {
                         Console.WriteLine("PASS DECREE v" + version.ToString() + " " + name)
                     }

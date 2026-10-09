@@ -63,18 +63,7 @@ internal class ProcessChecks {
         }
 
         private func CancelInput(flow NativeFixture, run string) Result {
-            let info = ProcessStartInfo(flow.Binary)
-            info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = true
-            info.RedirectStandardError = true
-            info.Environment.Clear()
-            for entry in flow.Temp.Env {
-                info.Environment[entry.Key] = entry.Value
-            }
-            for arg in[]string{"work", "--run", run} {
-                info.ArgumentList.Add(arg)
-            }
+            let info = TestProcess.StartInfo(flow.Binary, []string{"work", "--run", run}, flow.Temp.Env)
             using let process = Process.Start(info) ?? throw Exception("Cannot start input cancellation")
             process.StandardInput.Close()
             let output = Chan[string](1)

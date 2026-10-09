@@ -56,7 +56,7 @@ internal class Coordinator {
             if !text.StartsWith("/tokate ", StringComparison.Ordinal) {
                 throw Exception("Canonical comment is not a request")
             }
-            let request = RequestData.Parse(text.Substring(8))
+            let request = RequestData.CommentData(text)
             RequestData.Request(request)
             let state = CoordinationState.Load(repo, number)
             let binding = RequestData.Binding(actor, request)
@@ -67,7 +67,7 @@ internal class Coordinator {
                     if J.Text(old, "binding") != binding {
                         throw Exception("UUID replay changed actor or request contents")
                     }
-                    if J.Text(request, "action") != "release" && AccessState.Task(J.Get(initial, "approval")) {
+                    if J.Text(request, "action") != "release" {
                         state.Check(repo, number, donor, actor)
                     }
                     if J.Text(request, "action") == "amend" {
@@ -100,6 +100,10 @@ internal class Coordinator {
                     throw Exception("Contribution already published; use the recorded outcome or fresh owner approval")
                 }
                 let metadata = J.Get(request, "metadata")
+                AttemptContinuation.Declaration(metadata)
+                if J.Get(metadata, "predecessor").ValueKind != JsonValueKind.Undefined {
+                    AttemptContinuation.Authority(state, J.Get(metadata, "predecessor"))
+                }
                 Policy(J.Write(J.Get(record, "policy"))).ValidateTools(
                     J.Get(metadata, "tools"),
                     J.Text(metadata, "source")
@@ -127,6 +131,7 @@ internal class Coordinator {
                 if correction.ValueKind != JsonValueKind.Undefined {
                     receipt["correction"] = correction
                 }
+                AttemptContinuation.Keep(receipt, metadata)
                 let pulls = J.Items(
                     GitHub.Api(
                         "repos/" + repo + "/pulls?state=all&head=" + Uri.EscapeDataString(
@@ -149,13 +154,8 @@ internal class Coordinator {
                         !sameReceipt {
                         throw Exception("Existing PR differs from this contribution")
                     }
-                    let report = PrBody.ReportText(body, PrBody.OriginalReport(metadata))
-                    if report != PrBody.CoordinatedReport(metadata) &&
-                        (
-                        J.Get(metadata, "summary")
-                            .ValueKind != JsonValueKind.Undefined ||
-                            report != PrBody.OriginalReport(metadata)
-                    ) {
+                    let report = PrBody.ReportText(body)
+                    if report != PrBody.CoordinatedReport(metadata) {
                         throw Exception("Existing PR summary differs from this publication intent")
                     }
                 }
@@ -211,19 +211,17 @@ internal class Coordinator {
                 Revalidate(repo, number, state, actor, donor)
                 SyncProof(repo, record, updated, J.Get(request, "metadata"), J.Text(request, "expected"))
             }
-            if action == "claim" || LeaseLifecycle.Transition(action) || AccessState.Task(J.Get(updated, "approval")) {
-                let live = CoordinationState.Load(repo, number)
-                if live.Sha != state.Sha {
-                    throw CliFailure("stale_approval", "Coordination changed before reservation update")
-                }
-                if LeaseLifecycle.Transition(action) {
-                    LeaseLifecycle.Owner(live, actor)
-                }
-                if (action == "claim" || LeaseLifecycle.Transition(action)) && action != "release" {
-                    live.Check(repo, number, donor, actor)
-                } else if action != "release" {
-                    AccessState.Check(repo, number, J.Get(live.Value(), "approval"), actor)
-                }
+            let live = CoordinationState.Load(repo, number)
+            if live.Sha != state.Sha {
+                throw CliFailure("stale_approval", "Coordination changed before reservation update")
+            }
+            if LeaseLifecycle.Transition(action) {
+                LeaseLifecycle.Owner(live, actor)
+            }
+            if (action == "claim" || LeaseLifecycle.Transition(action)) && action != "release" {
+                live.Check(repo, number, donor, actor)
+            } else if action != "release" {
+                AccessState.Check(repo, number, J.Get(live.Value(), "approval"), actor)
             }
             try {
                 state.Write(
@@ -250,23 +248,23 @@ internal class Coordinator {
                     error
                 )
             }
-            if LeaseLifecycle.Transition(action) || AccessState.Task(J.Get(updated, "approval")) {
-                let acquired = CoordinationState.Load(repo, number)
-                if acquired.Sha != state.Sha {
-                    throw CliFailure(
-                        "stale_approval",
-                        "Coordination changed after reservation update; inspect current state"
-                    )
+            let acquired = CoordinationState.Load(repo, number)
+            if acquired.Sha != state.Sha {
+                throw CliFailure(
+                    "stale_approval",
+                    "Coordination changed after reservation update; inspect current state"
+                )
+            }
+            if action == "release" {
+                if !RequestData.Same(J.Get(acquired.Value(), "reservation"), J.Get(updated, "reservation")) || J.Text(
+                    J.Get(acquired.Value(), "reservation"),
+                    "status"
+                ) != "released" {
+                    throw Exception("Release outcome differs from recorded ownership evidence")
                 }
-                if action == "release" {
-                    if !RequestData.Same(J.Get(acquired.Value(), "reservation"), J.Get(updated, "reservation")) ||
-                        J.Text(J.Get(acquired.Value(), "reservation"), "status") != "released" {
-                        throw Exception("Release outcome differs from recorded ownership evidence")
-                    }
-                } else {
-                    acquired.Check(repo, number, donor, actor)
-                    LeaseLifecycle.Owner(acquired, actor)
-                }
+            } else {
+                acquired.Check(repo, number, donor, actor)
+                LeaseLifecycle.Owner(acquired, actor)
             }
             if J.Text(request, "action") == "amend" {
                 ReceiptVerification.Verify(repo, J.Number(J.Parse(J.Write(outcome)), "pr"))
@@ -345,6 +343,7 @@ internal class Coordinator {
                 J.Text(metadata, "head")
             )
             fields["amendment"] = Amendment.PublicRecord(amendment)
+            AttemptContinuation.Keep(fields, old)
             let correction = J.Get(old, "correction")
             if correction.ValueKind != JsonValueKind.Undefined {
                 fields["correction"] = correction
@@ -354,7 +353,7 @@ internal class Coordinator {
             let pull = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             let body = J.Text(pull, "body")
             let oldReceipt = PrBody.Receipt(body)
-            var report = Amendment.Summary(
+            let report = Amendment.Summary(
                 J.Text(metadata, "previous"),
                 J.Text(metadata, "head"),
                 J.Number(metadata, "seconds"),
@@ -373,18 +372,9 @@ internal class Coordinator {
             let oldCanonical = RequestData.Canonical(oldReceipt)
             let candidateCanonical = RequestData.Canonical(receipt)
             if oldCanonical == candidateCanonical {
-                let observedReport = PrBody.ReportText(body, PrBody.OriginalReport(old))
+                let observedReport = PrBody.ReportText(body)
                 if observedReport != report {
-                    if J.Get(metadata, "summary").ValueKind != JsonValueKind.Undefined || observedReport !=
-                    Amendment.LegacySummary(
-                        J.Text(metadata, "previous"),
-                        J.Text(metadata, "head"),
-                        J.Number(metadata, "seconds"),
-                        J.Get(metadata, "tools")
-                    ) {
-                        throw Exception("Candidate PR report differs from saved amendment intent")
-                    }
-                    report = observedReport
+                    throw Exception("Candidate PR report differs from saved amendment intent")
                 }
             }
             if oldCanonical != candidateCanonical {
@@ -401,21 +391,11 @@ internal class Coordinator {
                     false,
                     old
                 )
-                let legacyReport = retainedHistory.Count == 0 ? PrBody.OriginalReport(old):
-                Amendment.LegacySummary(
-                    J.Text(current, "previous"),
-                    J.Text(current, "head"),
-                    J.Number(current, "seconds"),
-                    J.Get(current, "tools")
-                )
-                let observedReport = PrBody.ReportText(body, PrBody.OriginalReport(old))
-                let priorSummary = retainedHistory.Count == 0 ? J.Get(old, "summary"):
-                J.Get(current, "summary")
-                if observedReport != previousReport &&
-                    (priorSummary.ValueKind != JsonValueKind.Undefined || observedReport != legacyReport) {
+                let observedReport = PrBody.ReportText(body)
+                if observedReport != previousReport {
                     throw Exception("Previous PR report differs from current contribution")
                 }
-                let updated = PrBody.ReplaceBody(body, PrBody.OriginalReport(old), report, receipt)
+                let updated = PrBody.ReplaceBody(body, report, receipt)
                 Revalidate(repo, number, state, actor, donor)
                 SyncProofHistory(repo, record, value, metadata, J.Text(request, "expected"), history)
                 RepositoryAccess.ValidateFork(repo, metadata, actor)
@@ -436,8 +416,7 @@ internal class Coordinator {
             RepositoryAccess.ValidateFork(repo, metadata, actor)
             let latest = Amendment.Pull(run, J.Number(metadata, "pr"), J.Text(metadata, "head"), "")
             if RequestData.Canonical(PrBody.Receipt(J.Text(latest, "body"))) != candidateCanonical || PrBody.ReportText(
-                J.Text(latest, "body"),
-                PrBody.OriginalReport(old)
+                J.Text(latest, "body")
             ) != report {
                 throw Exception("Physical PR receipt changed; amendment has no coordination authority")
             }
@@ -456,6 +435,7 @@ internal class Coordinator {
                 "tools": J.Get(metadata, "tools"),
                 "actor": actor,
                 "donor": donor,
+                "attempt": J.Text(J.Get(value, "reservation"), "attempt"),
                 "outcome": outcome,
                 "verification_provenance": "donor-reported; exact-commit owner CI required"
             }
@@ -466,9 +446,6 @@ internal class Coordinator {
                 entry["sync"] = J.Text(metadata, "sync")
             }
             Synchronization.Keep(entry, history)
-            if LeaseLifecycle.Supported(value) {
-                entry["attempt"] = J.Text(J.Get(value, "reservation"), "attempt")
-            }
             retainedHistory.Add(entry)
             state.Fields["amendments"] = retainedHistory
             return outcome
@@ -510,7 +487,8 @@ internal class Coordinator {
                 J.Text(metadata, "head"),
                 J.Text(metadata, "sync"),
                 expected,
-                J.Text(metadata, "previous")
+                J.Text(metadata, "previous"),
+                contribution: J.Get(state, "contribution")
             )
             if history.GetArrayLength() > 0 {
                 Synchronization.Remote(
@@ -544,7 +522,8 @@ internal class Coordinator {
                 J.Text(metadata, "head"),
                 J.Text(metadata, "sync"),
                 expected,
-                J.Text(metadata, "previous")
+                J.Text(metadata, "previous"),
+                contribution: J.Get(state, "contribution")
             )
         }
 

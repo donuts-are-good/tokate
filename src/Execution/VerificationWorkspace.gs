@@ -50,7 +50,7 @@ internal class VerificationWorkspace : IDisposable {
             let workspace = VerificationWorkspace(directory, budget)
             try {
                 let result = Commands.Run(
-                    "/usr/bin/cp",
+                    LocalPaths.NeedSystemTool("cp", directory),
                     []string{
                         "-a",
                         "--no-preserve=links",

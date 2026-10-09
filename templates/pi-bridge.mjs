@@ -3,8 +3,11 @@ import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 
-const [mode, cwd, modelId, commandNetwork, sentinel, continueTruncated = 'false'] = process.argv.slice(2);
+const [mode, cwd, modelId, commandNetwork, sentinel, continueTruncated = 'false', effort = 'absent'] = process.argv.slice(2);
 const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+const bash = process.env.TOKATE_BASH;
+const bwrap = process.env.TOKATE_BWRAP;
+if (!bash?.startsWith('/') || !bwrap?.startsWith('/')) throw new Error('Missing command isolation tools');
 const sdkPath = '/tokate-runtime/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
 const sdk = await import(sdkPath);
 if (typeof sdk.VERSION !== 'string' || !sdk.VERSION) throw new Error('Missing pi SDK version');
@@ -91,12 +94,15 @@ const shell = {
         if (signal?.aborted) return reject(new Error('aborted'));
         if (directory !== cwd) return reject(new Error('Unexpected shell directory'));
         const args = ['--die-with-parent', '--new-session', '--unshare-user', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--cap-drop', 'ALL', '--clearenv',
-            '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'HOME', '/tmp/tokate-home', '--setenv', 'TMPDIR', '/tmp/tokate-home',
+            '--setenv', 'PATH', process.env.PATH, '--setenv', 'HOME', '/tmp/tokate-home', '--setenv', 'TMPDIR', '/tmp/tokate-home',
             '--setenv', 'LANG', 'C.UTF-8', '--ro-bind', '/', '/', '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--dir', '/tmp/tokate-home', '--bind', cwd, cwd, '--tmpfs', `${cwd}/.git`, '--chmod', '000', `${cwd}/.git`,
             '--tmpfs', '/tokate-control', '--chmod', '000', '/tokate-control', '--chdir', cwd];
         if (commandNetwork !== 'true') args.push('--unshare-net');
-        args.push('--', '/bin/bash', '--noprofile', '--norc', '-c', command);
-        const child = spawn('/usr/bin/bwrap', args, { cwd, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
+        for (const key of ['SSL_CERT_FILE', 'GIT_SSL_CAINFO', 'CURL_CA_BUNDLE', 'NODE_EXTRA_CA_CERTS']) {
+            if (process.env[key]) args.push('--setenv', key, process.env[key]);
+        }
+        args.push('--', bash, '--noprofile', '--norc', '-c', command);
+        const child = spawn(bwrap, args, { cwd, env: {}, stdio: ['ignore', 'pipe', 'pipe'] });
         let expired = false;
         const stop = () => child.kill('SIGKILL');
         const timer = timeout === undefined ? undefined : setTimeout(() => { expired = true; stop(); }, timeout * 1000);
@@ -131,14 +137,16 @@ const runtime = await sdk.ModelRuntime.create({ authPath: '/tmp/tokate-agent/aut
     modelsStorePath: '/tmp/tokate-agent/models-store.json', allowModelNetwork: false, refreshOnCreate: false });
 if (typeof runtime.getModel !== 'function') throw new Error('Unsupported ModelRuntime capability');
 const model = runtime.getModel('tokate-local', modelId);
-if (!model || model.id !== modelId || model.provider !== 'tokate-local' || model.api !== 'openai-completions' || model.reasoning !== false) {
+if (!model || model.id !== modelId || model.provider !== 'tokate-local' || model.api !== 'openai-completions') {
     throw new Error('Exact model unavailable; no fallback');
 }
+const thinkingLevel = effort === 'absent' ? 'off' : effort;
+if (effort === 'absent' ? model.reasoning : !model.reasoning) throw new Error('Reasoning capability differs from selection');
 const customTools = [sdk.createReadToolDefinition(cwd, { operations: files, autoResizeImages: false }),
     sdk.createEditToolDefinition(cwd, { operations: files }), sdk.createWriteToolDefinition(cwd, { operations: files }),
     sdk.createBashToolDefinition(cwd, { operations: shell, exposeSessionEnvironment: false })];
-const { session, modelFallbackMessage } = await sdk.createAgentSession({ cwd, agentDir: '/tmp/tokate-agent', model, thinkingLevel: 'off',
-    scopedModels: [{ model, thinkingLevel: 'off' }], modelRuntime: runtime, resourceLoader: resources, tools: ['read', 'edit', 'write', 'bash'], customTools,
+const { session, modelFallbackMessage } = await sdk.createAgentSession({ cwd, agentDir: '/tmp/tokate-agent', model, thinkingLevel,
+    scopedModels: [{ model, thinkingLevel }], modelRuntime: runtime, resourceLoader: resources, tools: ['read', 'edit', 'write', 'bash'], customTools,
     sessionManager: sdk.SessionManager.inMemory(cwd), settingsManager: sdk.SettingsManager.inMemory({
         retry: { enabled: false, maxRetries: 0, provider: { maxRetries: 0 } },
         blockImages: true, cacheWarming: "off", defaultTools: ['read', 'edit', 'write', 'bash'],
@@ -150,7 +158,7 @@ try {
         typeof session.agent?.prepareRequest !== 'function' ||
         session.getActiveToolNames().sort().join(',') !== 'bash,edit,read,write' ||
         customTools.some(tool => session.getToolDefinition(tool.name) !== tool)) throw new Error('Unconstrained execution surface');
-    if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local') throw new Error('Pi substituted selection');
+    if (modelFallbackMessage || session.model?.id !== modelId || session.model?.provider !== 'tokate-local' || session.thinkingLevel !== thinkingLevel) throw new Error('Pi substituted selection');
     if (mode === 'probe') {
         let denied = 0;
         for (const path of [sentinel, `${cwd}/.git/config`, '/tokate-control/auth.json', '/tokate-control/models.json']) {
@@ -179,7 +187,7 @@ try {
             if (bytes > 4 * 1024 * 1024) throw new Error('Task input exceeds limit');
             chunks.push(chunk);
         }
-        emit({ type: 'pi.started', model: modelId, provider: 'local-chat-completions', effort: 'absent',
+        emit({ type: 'pi.started', model: modelId, provider: 'local-chat-completions', effort,
             length_continuation_limit: lengthContinuationLimit });
         let ended = 0;
         let failureReason;
@@ -222,7 +230,7 @@ try {
             const update = await previousPrepareRequest.call(session.agent, request, signal);
             guardRequest(signal);
             const selected = update?.model ?? request.model;
-            if (selected?.id !== modelId || selected?.provider !== 'tokate-local') {
+            if (selected?.id !== modelId || selected?.provider !== 'tokate-local' || (update?.thinkingLevel ?? request.thinkingLevel) !== thinkingLevel) {
                 fail('identity');
                 guardRequest(signal);
             }
@@ -248,6 +256,7 @@ try {
                 }
                 emit({ type: 'pi.event', event: 'assistant_end', stop_reason: message.stopReason, model: message.model,
                     provider: message.provider, response_model: message.responseModel ?? null, usage: message.usage,
+                    text: message.content.filter(x => x.type === 'text').map(x => x.text).join('\n').slice(0, 16384),
                     ...(message.stopReason === 'length' ? partialView(message.content) : {}) });
             }
             if (event.type === 'compaction_end') {
@@ -266,7 +275,7 @@ try {
         });
         try { await session.prompt(Buffer.concat(chunks).toString('utf8')); } catch { fail('error'); }
         if (ended !== 1) fail('incomplete');
-        if (session.model?.id !== modelId || session.model?.provider !== 'tokate-local') fail('identity');
+        if (session.model?.id !== modelId || session.model?.provider !== 'tokate-local' || session.thinkingLevel !== thinkingLevel) fail('identity');
         if (lastStopReason !== 'stop' || !report.trim()) fail('incomplete');
         const usage = usageView(session.getSessionStats().tokens);
         if (!usage) fail('usage');

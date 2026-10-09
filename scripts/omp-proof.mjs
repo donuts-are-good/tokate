@@ -266,7 +266,7 @@ try {
                     check(refused && !(await Bun.file(`${cwd}/unsupported-surface`).exists()), 'Unsupported service or async execution did not fail closed');
                 }
                 await execute('bash', { command: 'touch pty-fallback', pty: true, timeout: 3 });
-                if (await Bun.file(`${cwd}/pty-fallback`).exists()) blockers.push('Native bash silently falls back to embedded execution for unsupported PTY requests.');
+                if (await Bun.file(`${cwd}/pty-fallback`).exists()) blockers.push('Native bash executes an embedded fallback for unsupported PTY requests.');
                 emit({ type: 'omp.proof', mode, package: sdk.VERSION, bun: Bun.version, requests: received, blockers });
             } else if (mode.startsWith('command-')) {
                 const controller = new AbortController();

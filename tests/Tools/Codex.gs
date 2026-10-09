@@ -139,7 +139,7 @@ internal partial class Fixture {
             Console.Out.Flush()
             Console.Error.Write("synthetic-blocked-error")
             Console.Error.Flush()
-            let childInfo = ProcessStartInfo("/usr/bin/sleep")
+            let childInfo = ProcessStartInfo(TestProcess.SystemPath("/usr/bin/sleep"))
             childInfo.ArgumentList.Add("120")
             childInfo.RedirectStandardInput = true
             using let child = Process.Start(childInfo) ?? throw Exception("Cannot start blocked-input child")
@@ -176,11 +176,14 @@ internal partial class Fixture {
             let deadline = DateTime.UtcNow.AddSeconds(60)
             while !File.Exists(Path.Combine(Root, "continue-execution")) {
                 Check.That(DateTime.UtcNow < deadline, "Lifecycle execution rendezvous timed out")
-                System.Threading.Thread.Sleep(20)
+                select {
+                    case <- after(TimeSpan.FromMilliseconds(20)) { }
+                }
             }
         }
         if mode == "capture_write_failure" {
-            using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start capture child")
+            using let child = Process.Start(TestProcess.SystemPath("/usr/bin/sleep"), "120") ??
+                throw Exception("Cannot start capture child")
             File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.ChildIdentity(child))
             Console.Write(String('x', 131072))
             Console.Out.Flush()
@@ -200,6 +203,22 @@ internal partial class Fixture {
             return 0
         }
         if mode == "progress_delay" {
+            Console.WriteLine(
+                "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Coding transcript ready\"}}"
+            )
+            for i in 0 ... 45 {
+                Console.WriteLine(
+                    "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Activity line " +
+                        i.ToString() + "\"}}"
+                )
+            }
+            Console.WriteLine(
+                "{\"type\":\"item.started\",\"item\":{\"type\":\"command_execution\",\"command\":\"printf tool-output\"}}"
+            )
+            Console.WriteLine(
+                "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"status\":\"completed\",\"exit_code\":0,\"aggregated_output\":\"tool-output\\u001b]2;INJECTED_TITLE\\u0007\"}}"
+            )
+            Console.Out.Flush()
             let seconds = Int32.Parse(Check.Text(State["progress_delay_seconds"] ?? JsonValue.Create(6)))
             using let delay = after(TimeSpan.FromSeconds(seconds))
             select {
@@ -221,7 +240,8 @@ internal partial class Fixture {
             File.WriteAllText(sentinel, "private agent temporary data")
         }
         if mode == "timeout" || mode == "completed_timeout" || mode == "background" {
-            using let child = Process.Start("/usr/bin/sleep", "120") ?? throw Exception("Cannot start timeout fixture")
+            using let child = Process.Start(TestProcess.SystemPath("/usr/bin/sleep"), "120") ??
+                throw Exception("Cannot start timeout fixture")
             File.WriteAllText(Path.Combine(Root, "child.pid"), TestProcess.ChildIdentity(child))
             if mode == "timeout" || mode == "completed_timeout" {
                 let partialCheckout = args[Array.IndexOf(args, "--cd") + 1]
@@ -253,6 +273,10 @@ internal partial class Fixture {
             Save()
         }
         let checkout = args[Array.IndexOf(args, "--cd") + 1]
+        if mode == "incomplete_turn" && Check.Text(State["continuation_timeout"]) == "true" {
+            File.WriteAllText(Path.Combine(checkout, "tracked.txt"), "preserved\n")
+            File.WriteAllText(Path.Combine(checkout, "imported.txt"), "untracked\n")
+        }
         if State["verify_outcome"] != nil {
             File.WriteAllText(Path.Combine(checkout, "verify-outcome"), Check.Text(State["verify_outcome"]))
             Directory.CreateDirectory(Path.Combine(checkout, ".git/info"))

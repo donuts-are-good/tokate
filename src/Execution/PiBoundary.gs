@@ -25,15 +25,117 @@ internal class PiBoundary {
 
         internal func Boundary(checkout string, root string, node string, control string, network bool) List[string] {
             Verification.Validate(checkout)
+            let bash = LocalPaths.NeedSystemTool("bash", checkout)
+            let bwrap = LocalPaths.NeedSystemTool("bwrap", checkout)
+            let tools = NixRuntime.Tools(checkout, []string{node, bash, bwrap})
+            let runtime = List[string](tools)
+            runtime.Add(root)
             for path in[]string{root, node, control} {
                 if path == checkout || path.StartsWith(checkout + "/") {
                     throw Exception("Pi runtime and control files must be outside the writable checkout")
                 }
             }
-            return SdkBoundary.Args(checkout, root, node, control, network)
+            let args = List[string]{
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-user",
+                "--unshare-pid",
+                "--unshare-ipc",
+                "--unshare-uts",
+                "--cap-drop",
+                "ALL",
+                "--clearenv",
+                "--setenv",
+                "PATH",
+                NixRuntime.SearchPath(tools.ToArray()),
+                "--setenv",
+                "HOME",
+                "/tmp/tokate-agent",
+                "--setenv",
+                "TMPDIR",
+                "/tmp/tokate-tools",
+                "--setenv",
+                "LANG",
+                "C.UTF-8",
+                "--setenv",
+                "PI_OFFLINE",
+                "1",
+                "--setenv",
+                "TOKATE_BASH",
+                bash,
+                "--setenv",
+                "TOKATE_BWRAP",
+                bwrap
+            }
+            if !network {
+                args.Add("--unshare-net")
+            }
+            let certificates = LocalPaths.Certificates()
+            if certificates != "" {
+                for name in[]string{"SSL_CERT_FILE", "GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"} {
+                    args.AddRange([]string{"--setenv", name, certificates})
+                }
+            }
+            for path in[]string{"/usr/bin", "/usr/lib", "/usr/share", "/bin", "/lib", "/lib64"} {
+                if Directory.Exists(path) {
+                    args.AddRange([]string{"--ro-bind", path, path})
+                }
+            }
+            for path in NixRuntime.Paths(runtime.ToArray(), checkout) {
+                args.AddRange([]string{"--ro-bind", path, path})
+            }
+            for path in[]string{
+                "/etc/ld.so.cache",
+                "/etc/nsswitch.conf",
+                "/etc/hosts",
+                "/etc/resolv.conf",
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/ssl/cert.pem",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem"
+            } {
+                if File.Exists(path) {
+                    args.AddRange([]string{"--ro-bind", path, path})
+                }
+            }
+            args.AddRange(
+                []string{
+                    "--proc",
+                    "/proc",
+                    "--dev",
+                    "/dev",
+                    "--tmpfs",
+                    "/tmp",
+                    "--dir",
+                    "/tmp/tokate-agent",
+                    "--dir",
+                    "/tmp/tokate-tools",
+                    "--ro-bind",
+                    root,
+                    "/tokate-runtime/node_modules",
+                    "--ro-bind",
+                    node,
+                    "/tokate-node",
+                    "--ro-bind",
+                    control,
+                    "/tokate-control",
+                    "--bind",
+                    checkout,
+                    checkout,
+                    "--tmpfs",
+                    Path.Combine(checkout, ".git"),
+                    "--chmod",
+                    "000",
+                    Path.Combine(checkout, ".git"),
+                    "--chdir",
+                    checkout,
+                    "--"
+                }
+            )
+            return args
         }
 
-        internal func ModelLimits(
+        internal func ModelSettings(
             root string,
             node string,
             model string,
@@ -51,9 +153,9 @@ internal class PiBoundary {
                     "--map-current-user",
                     "--net",
                     "--",
-                    "/usr/bin/env",
+                    LocalPaths.NeedSystemTool("env"),
                     "-i",
-                    "PATH=/usr/bin:/bin",
+                    "PATH=" + NixRuntime.SearchPath(NixRuntime.Tools("", []string{node}).ToArray()),
                     "LANG=C.UTF-8",
                     "PI_OFFLINE=1"
                 }
@@ -62,9 +164,9 @@ internal class PiBoundary {
                         args.Add(key + "=" + value)
                     }
                 }
-                args.AddRange([]string{node, script, root, model})
+                args.AddRange([]string{node, "--experimental-import-meta-resolve", script, root, model})
                 let result = Commands.Run(
-                    "/usr/bin/unshare",
+                    LocalPaths.NeedSystemTool("unshare"),
                     args.ToArray(),
                     storage.FullName,
                     input: endpoint,
@@ -77,8 +179,8 @@ internal class PiBoundary {
                         "Pi requires one configured local model at the selected endpoint; no inference started"
                     )
                 }
-                let limits = RequestData.Parse(result.Output.Trim(), 1024)
-                RequestData.Keys(limits, "contextWindow,maxTokens")
+                let limits = RequestData.Parse(result.Output.Trim(), 4096)
+                RequestData.Keys(limits, "contextWindow,maxTokens,reasoning,thinkingLevelMap,compat,efforts")
                 let contextWindow = J.Number(limits, "contextWindow")
                 let maxTokens = J.Number(limits, "maxTokens")
                 if contextWindow < 1 || maxTokens < 1 || maxTokens > contextWindow {
@@ -90,7 +192,18 @@ internal class PiBoundary {
             }
         }
 
-        internal func Control(control string, model string, endpoint string, contextWindow int32, maxTokens int32) {
+        internal func CheckEffort(settings JsonElement, effort string) {
+            for level in J.Items(J.Get(settings, "efforts")) {
+                if level.GetString() == effort {
+                    return
+                }
+            }
+            throw Exception(
+                "Pi does not support the selected reasoning effort for this configured model; choose a supported level before starting"
+            )
+        }
+
+        internal func Control(control string, model string, endpoint string, settings JsonElement) {
             Directory.CreateDirectory(
                 control,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
@@ -110,10 +223,11 @@ internal class PiBoundary {
                                     map[string, Object?]{
                                         "id": model,
                                         "name": model,
-                                        "reasoning": false,
+                                        "reasoning": J.Get(settings, "reasoning"),
+                                        "thinkingLevelMap": J.Get(settings, "thinkingLevelMap"),
                                         "input": []string{"text"},
-                                        "contextWindow": contextWindow,
-                                        "maxTokens": maxTokens,
+                                        "contextWindow": J.Number(settings, "contextWindow"),
+                                        "maxTokens": J.Number(settings, "maxTokens"),
                                         "cost": map[string, Object?]{
                                             "input": 0,
                                             "output": 0,
@@ -122,7 +236,11 @@ internal class PiBoundary {
                                         },
                                         "compat": map[string, Object?]{
                                             "supportsDeveloperRole": false,
-                                            "supportsReasoningEffort": false,
+                                            "supportsReasoningEffort": J.Get(
+                                                J.Get(settings, "compat"),
+                                                "supportsReasoningEffort"
+                                            ),
+                                            "thinkingFormat": J.Text(J.Get(settings, "compat"), "thinkingFormat"),
                                             "maxTokensField": "max_tokens"
                                         }
                                     }
@@ -145,7 +263,14 @@ internal class PiBoundary {
                 File.WriteAllText(Path.Combine(checkout, ".git/config"), "synthetic-private")
                 File.WriteAllText(Path.Combine(storage.FullName, "credential-sentinel"), "synthetic-private")
                 let control = Path.Combine(storage.FullName, "control")
-                Control(control, "tokate-probe", "http://127.0.0.1:1/v1", 32768, 4096)
+                Control(
+                    control,
+                    "tokate-probe",
+                    "http://127.0.0.1:1/v1",
+                    J.Parse(
+                        "{\"contextWindow\":32768,\"maxTokens\":4096,\"reasoning\":false,\"thinkingLevelMap\":{},\"compat\":{\"supportsReasoningEffort\":false,\"thinkingFormat\":\"openai\"}}"
+                    )
+                )
                 let args = Boundary(checkout, root, node, control, false)
                 args.AddRange(
                     []string{
@@ -159,7 +284,7 @@ internal class PiBoundary {
                     }
                 )
                 let result = Commands.Run(
-                    "/usr/bin/bwrap",
+                    LocalPaths.NeedSystemTool("bwrap", checkout),
                     args.ToArray(),
                     checkout,
                     seconds: 30,
@@ -168,7 +293,8 @@ internal class PiBoundary {
                     pidNamespace: true
                 )
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
-                    throw Exception(
+                    throw LinuxSandbox.ProbeFailure(
+                        result,
                         "Pi SDK or outer/nested isolation probe failed. Update pi and Node, then retry the probe. No inference started"
                     )
                 }

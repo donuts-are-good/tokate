@@ -28,13 +28,8 @@ internal class DonorDefaults {
             return value
         }
 
-        internal func Location(profile string = "") string {
-            let directory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".local",
-                "state",
-                "tokate"
-            )
+        internal func Location(profile string = "", storage string = "") string {
+            let directory = storage == "" ? LocalPaths.StateDirectory(): storage
             let path = profile == "" ? Path.Combine(directory, "donor-defaults.json"):
             Path.Combine(directory, "donor-profiles", Name(profile) + ".json")
             var current = path
@@ -48,8 +43,15 @@ internal class DonorDefaults {
         }
 
         internal func Read(profile string = "") JsonElement {
-            let path = Location(profile)
-            if !File.Exists(path) {
+            var value JsonElement
+            for directory in LocalPaths.StateDirectories() {
+                let path = Location(profile, directory)
+                if File.Exists(path) {
+                    value = RequestData.FileData(path, 16 * 1024)
+                    break
+                }
+            }
+            if value.ValueKind == JsonValueKind.Undefined {
                 if profile != "" {
                     throw Exception(
                         "Named donor profile is missing; use defaults set --profile NAME. No inference started."
@@ -57,8 +59,7 @@ internal class DonorDefaults {
                 }
                 return JsonElement{}
             }
-            let value = RequestData.FileData(path, 16 * 1024)
-            RequestData.Keys(value, "harness,provider,model,effort,endpoint,pi-root,node")
+            RequestData.Keys(value, "harness,provider,model,effort,endpoint,pi-root,node,harness-path")
             for field in value.EnumerateObject() {
                 if field.Value.ValueKind != JsonValueKind.String {
                     throw Exception("Donor profile fields must be strings")
@@ -68,50 +69,47 @@ internal class DonorDefaults {
                 RequestData.Token(J.Text(value, key))
             }
             if J.Text(value, "harness") == "pi" {
-                if J.Text(value, "provider") != "local-chat-completions" || J.Text(value, "effort") != "absent" {
-                    throw Exception("Pi profiles require local-chat-completions and absent effort")
+                if J.Text(value, "provider") != "local-chat-completions" {
+                    throw Exception("Pi profiles require local-chat-completions")
                 }
                 RequestData.ModelIdentifier(J.Text(value, "model"))
                 PiBoundary.Endpoint(J.Text(value, "endpoint"))
                 for key in[]string{"pi-root", "node"} {
                     if J.Get(value, key).ValueKind != JsonValueKind.Undefined {
-                        RuntimePath(J.Text(value, key))
+                        LocalPaths.RuntimePath(J.Text(value, key))
                     }
                 }
             } else {
                 RequestData.Token(J.Text(value, "model"))
-                RequestData.Keys(value, "harness,provider,model,effort")
+                RequestData.Keys(value, "harness,provider,model,effort,harness-path")
+            }
+            if J.Text(value, "harness-path") != "" {
+                LocalPaths.RuntimePath(J.Text(value, "harness-path"))
             }
             return value
         }
 
-        private func RuntimePath(value string) string {
-            if value.Length > 4096 || !Path.IsPathFullyQualified(value) {
-                throw Exception("Profile runtime overrides require bounded absolute paths")
-            }
-            for character in value {
-                if Char.IsControl(character) {
-                    throw Exception("Invalid profile runtime path")
-                }
-            }
-            return Path.GetFullPath(value)
-        }
-
         private func Summary(value JsonElement) Object? -> value.ValueKind == JsonValueKind.Undefined ? nil:
-        PublicOutput.Select(value, "harness,provider,model,effort")
+        J.Select(value, "harness,provider,model,effort")
 
         internal func Run(args Args) JsonElement {
             let profile = args.Get("profile")
             if args.Subject == "list" {
                 let profiles = SortedDictionary[string, Object?](StringComparer.Ordinal)
-                let directory = Path.GetDirectoryName(Location("list")) ?? ""
-                if Directory.Exists(directory) {
-                    for path in Directory.EnumerateFiles(directory, "*.json") {
-                        if profiles.Count >= 128 {
-                            throw Exception("Donor profile list exceeds 128 entries")
+                var scanned int32
+                for storage in LocalPaths.StateDirectories() {
+                    let directory = Path.GetDirectoryName(Location("list", storage)) ?? ""
+                    if Directory.Exists(directory) {
+                        for path in Directory.EnumerateFiles(directory, "*.json") {
+                            scanned++
+                            if scanned > 128 {
+                                throw Exception("Donor profile list exceeds 128 entries")
+                            }
+                            let name = Name(Path.GetFileNameWithoutExtension(path))
+                            if !profiles.ContainsKey(name) {
+                                profiles.Add(name, Summary(Read(name)))
+                            }
                         }
-                        let name = Name(Path.GetFileNameWithoutExtension(path))
-                        profiles.Add(name, Summary(Read(name)))
                     }
                 }
                 return J.Parse(
@@ -128,8 +126,15 @@ internal class DonorDefaults {
             }
             let path = Location(profile)
             if args.Subject == "remove" {
-                let existed = File.Exists(path)
-                File.Delete(path)
+                let paths = List[string]()
+                for storage in LocalPaths.StateDirectories() {
+                    paths.Add(Location(profile, storage))
+                }
+                var existed bool
+                for candidate in paths {
+                    existed = existed || File.Exists(candidate)
+                    File.Delete(candidate)
+                }
                 return J.Parse(J.Write(map[string, Object?]{"profile": profile, "removed": existed}))
             }
             let choice = map[string, Object?]{}
@@ -138,15 +143,18 @@ internal class DonorDefaults {
                 RequestData.ModelIdentifier(args.Need(key)): RequestData.Token(args.Need(key))
             }
             if args.Get("harness") == "pi" {
-                if args.Get("provider") != "local-chat-completions" || args.Get("effort") != "absent" {
-                    throw Exception("Pi profiles require local-chat-completions and absent effort")
+                if args.Get("provider") != "local-chat-completions" {
+                    throw Exception("Pi profiles require local-chat-completions")
                 }
                 choice["endpoint"] = PiBoundary.Endpoint(args.Need("endpoint"))
                 for key in[]string{"pi-root", "node"} {
                     if args.Get(key) != "" {
-                        choice[key] = RuntimePath(args.Get(key))
+                        choice[key] = LocalPaths.RuntimePath(args.Get(key))
                     }
                 }
+            }
+            if args.Get("harness-path") != "" {
+                choice["harness-path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
             }
             let value = RequestData.Parse(J.Write(choice), 16 * 1024)
             Directory.CreateDirectory(

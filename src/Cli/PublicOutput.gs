@@ -16,6 +16,15 @@ internal class PublicOutput {
         internal var Truncated bool
         internal let Actions List[[]string] = List[[]string]()
 
+        internal func Reset(command string = "help") {
+            Command = command
+            RunDirectory = ""
+            FailureCode = "command_failed"
+            ResultData = nil
+            Truncated = false
+            Actions.Clear()
+        }
+
         internal func Prose(value string) string -> Prose(value, ref Truncated)
 
         internal func Prose(value string, ref truncated bool) string {
@@ -26,50 +35,20 @@ internal class PublicOutput {
             return value.Substring(0, Char.IsHighSurrogate(value[2047]) ? 2047: 2048)
         }
 
-        internal func Select(value JsonElement, keys string) Dictionary[string, Object?] {
-            let result = map[string, Object?]{}
-            for key in keys.Split(',') {
-                let item = J.Get(value, key)
-                if item.ValueKind == JsonValueKind.String ||
-                    item.ValueKind == JsonValueKind.Number ||
-                    item.ValueKind == JsonValueKind.True ||
-                    item.ValueKind == JsonValueKind.False {
-                    result[key] = item
-                }
-            }
-            return result
-        }
-
-        internal func Message(code string) string {
-            switch code {
-                case "invalid_arguments" {
-                    return "Invalid command arguments. Consult command help."
-                }
-                case "missing_tools" {
-                    return "Required tools are missing or failed diagnostics. Run doctor."
-                }
-                case "authentication_required" {
-                    return "Authentication is required with the appropriate account."
-                }
-                case "stale_approval" {
-                    return "Owner approval is absent or changed. Fresh owner approval is required."
-                }
-                case "invalid_state" {
-                    return "The saved run or command state does not permit this operation. Inspect its artifacts."
-                }
-                case "verification_failed" {
-                    return "Independent verification failed. Inspect the private verification artifact."
-                }
-                case "inference_failed" {
-                    return "Inference did not complete successfully. Inspect private events and report artifacts; fresh owner approval is required for another attempt."
-                }
-                case "output_too_large" {
-                    return "The complete result cannot fit within 64 KiB. Use focused help or private artifacts for details."
-                }
-                default {
-                    return "Command failed. Inspect relevant state and private artifacts before any explicit next action."
-                }
-            }
+        internal func Message(code string) string -> switch code {
+            case "invalid_arguments": "Invalid command arguments. Consult command help."
+            case "missing_tools": "Required tools are missing or failed diagnostics. Run doctor."
+            case "namespace_disabled": "User namespaces are disabled. Ask an administrator to review the host or container namespace policy."
+            case "namespace_restricted": "Namespace startup was denied while AppArmor namespace restrictions are enabled. Ask an administrator to review the relevant AppArmor denials."
+            case "namespace_unavailable": "Namespace startup failed. Ask an administrator to review kernel support, namespace limits and host or container security policy."
+            case "authentication_required": "Authentication is required with the appropriate account."
+            case "stale_approval": "Owner approval is absent or changed. Fresh owner approval is required."
+            case "invalid_state": "The saved run or command state does not permit this operation. Inspect its artifacts."
+            case "verification_failed": "Independent verification failed. Inspect the private verification artifact."
+            case "inference_failed": "Inference did not complete successfully. Inspect private events and report artifacts; fresh owner approval is required for another attempt."
+            case "endpoint_unavailable": "Selected local endpoint did not provide valid bounded metadata advertising the exact model ID. No inference started."
+            case "output_too_large": "The complete result cannot fit within 64 KiB. Use focused help or private artifacts for details."
+            default: "Command failed. Inspect relevant state and private artifacts before any explicit next action."
         }
 
         internal func Tools(tools List[ToolCheck]) {
@@ -81,7 +60,8 @@ internal class PublicOutput {
                         "status": tool.Status,
                         "path": tool.Path,
                         "hint": tool.Hint,
-                        "detail": tool.Detail
+                        "detail": tool.Detail,
+                        "code": tool.Code
                     }
                 )
             }
@@ -99,7 +79,7 @@ internal class PublicOutput {
             }
             for i in 0 ... Math.Min(64, count) {
                 let item = value[i]
-                let row = Select(item, keys)
+                let row = J.Select(item, keys)
                 if arguments {
                     let command = J.Get(item, "command")
                     if command.ValueKind == JsonValueKind.Array {
@@ -122,20 +102,24 @@ internal class PublicOutput {
         private func KnownReason(reason string) bool -> Array.IndexOf(
             []string{
                 "missing_tools",
+                "namespace_disabled",
+                "namespace_restricted",
+                "namespace_unavailable",
                 "authentication_required",
                 "stale_approval",
                 "invalid_state",
                 "verification_failed",
                 "inference_failed",
+                "endpoint_unavailable",
                 "command_failed"
             },
             reason
         ) >= 0
 
         internal func Policy(value JsonElement) Object {
-            let result = Select(
+            let result = J.Select(
                 value,
-                "version,max_seconds,allow_network,reservation_seconds,approval_scope,eligibility,target_branch,pr_text,close_message"
+                "version,max_seconds,allow_network,allow_unlimited,reservation_seconds,approval_scope,eligibility,target_branch,pr_text,close_message"
             )
             result["close_message"] = Policy.CloseMessage(value)
             let mode = J.Text(value, "model_policy")
@@ -176,34 +160,39 @@ internal class PublicOutput {
             let tools = J.Get(value, "allowed_tools")
             if tools.ValueKind == JsonValueKind.Array {
                 result["allowed_tools"] = Rows(tools, "harness,provider")
-                result["allowed_tools_count"] = J.Items(tools).Count
+                result["allowed_tools_count"] = J.Count(tools)
             }
             return result
         }
 
         internal func RunSummary(directory string) Dictionary[string, Object?] {
             let run = Data.Load(directory)
+            if run.Number("version") != 2 {
+                throw CliFailure("invalid_state", "Unsupported saved run protocol")
+            }
             let value = run.Element()
-            let result = Select(
+            let result = J.Select(
                 value,
-                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,recovered,recovery_seconds,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
+                "version,id,repo,issue,donor,donor_id,head_repo,approval,base,base_branch,policy_hash,model,effort,seconds,verification_reserve,unlimited,network,branch,state,state_sha,publication_uuid,source,commit,pr,pr_url,elapsed_seconds,codex_version,output_truncated,error_truncated,preparation_version,preparation_complete,checkout_prepared,attempt"
             )
-            if run.Number("version") == 1 || run.Text("source") == "tokate" {
-                result["coding_seconds"] = run.Number("seconds") - run.Number("verification_reserve")
+            if run.Text("source") == "tokate" {
+                result["coding_seconds"] = run.Flag("unlimited") ? nil: run.Number("seconds") - run.Number(
+                    "verification_reserve"
+                )
                 result["verification_reserve"] = run.Number("verification_reserve")
             }
             result["run"] = directory
             result["storage"] = RunStorage.Summary(directory, run)
             let verification = J.Get(value, "verification")
             result["verification"] = Rows(verification, "state,exit_code,output_truncated,error_truncated", true)
-            result["verification_count"] = J.Items(verification).Count
+            result["verification_count"] = J.Count(verification)
             if J.Get(value, "reconciliation").ValueKind == JsonValueKind.Object {
-                let local = Select(J.Get(value, "reconciliation"), "phase,previous,upstream,start,target,candidate")
+                let local = J.Select(J.Get(value, "reconciliation"), "phase,previous,upstream,start,target,candidate")
                 local["local"] = true
                 local["verified"] = false
                 result["reconciliation"] = local
             }
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 result["predecessor"] = J.Get(value, "continuation")
                 result["continuation_phase"] = run.Text("continuation_phase")
             }
@@ -221,12 +210,12 @@ internal class PublicOutput {
             let tools = J.Get(value, "tools")
             if tools.ValueKind == JsonValueKind.Array {
                 result["tools"] = Rows(tools, "harness,provider,model,effort,version")
-                result["tool_count"] = J.Items(tools).Count
+                result["tool_count"] = J.Count(tools)
             }
             let amendments = J.Get(value, "amendments")
             if amendments.ValueKind == JsonValueKind.Array {
                 result["amendments"] = Rows(amendments, "id,previous,head")
-                result["amendment_count"] = J.Items(amendments).Count
+                result["amendment_count"] = J.Count(amendments)
             }
             let correctionPath = Path.Combine(directory, "correction.json")
             if File.Exists(correctionPath) {
@@ -242,9 +231,7 @@ internal class PublicOutput {
                         "failure_reason"
                     ) == "inference_interrupted"
                 ) ? "inference_failed": run.Text("failure_reason")
-                let code = Recovery.Eligible(run) ? "verification_failed": (
-                    KnownReason(reason) ? reason: "command_failed"
-                )
+                let code = KnownReason(reason) ? reason: "command_failed"
                 result["failure_reason"] = code
                 result["error"] = map[string, Object?]{"code": code, "message": Message(code)}
             }
@@ -294,16 +281,16 @@ internal class PublicOutput {
 
         internal func ChangeSummary(change Data, directory string) Object {
             let value = change.Element()
-            let result = Select(
+            let result = J.Select(
                 value,
                 "id,uuid,previous,commit,tree,patch_sha256,seconds,state,pr,elapsed_seconds,verification_seconds"
             )
             let tools = J.Get(value, "tools")
             result["tools"] = Rows(tools, "harness,provider,model,effort,version")
-            result["tool_count"] = J.Items(tools).Count
+            result["tool_count"] = J.Count(tools)
             let checks = J.Get(value, "verification")
             result["verification"] = Rows(checks, "state,exit_code,output_truncated,error_truncated", true)
-            result["verification_count"] = J.Items(checks).Count
+            result["verification_count"] = J.Count(checks)
             let reason = change.Text("failure_reason")
             let failed = change.Text("state") == "failed" || reason != ""
             if failed || change.Fields.ContainsKey("error") || change.Fields.ContainsKey("publication_error") {
@@ -318,47 +305,42 @@ internal class PublicOutput {
         }
 
         internal func Coordination(value JsonElement, sha string) Object {
-            let result = Select(value, "version,repo,issue,approval_id,revoked")
+            let result = J.Select(value, "version,repo,issue,approval_id,revoked")
             result["identity"] = J.Get(value, "identity")
             result["sha"] = sha
             let approval = J.Get(value, "approval")
-            let summary = Select(
+            let summary = J.Select(
                 approval,
                 "repo,repo_id,issue,donor,approval_scope,eligibility,base,base_branch,authority_branch,policy_hash,template_hash"
             )
             if Decree.HasSnapshot(approval) {
-                summary["decree"] = Select(J.Get(approval, "decree"), "present,sha256")
+                summary["decree"] = J.Select(J.Get(approval, "decree"), "present,sha256")
             }
             result["approval"] = summary
-            result["reservation"] = Select(
+            result["reservation"] = J.Select(
                 J.Get(value, "reservation"),
                 "reservation,lease,donor,actor,created,expires,status,attempt"
             )
-            result["contribution"] = Select(
+            result["contribution"] = J.Select(
                 J.Get(CoordinationState.Current(value), "outcome"),
                 "pr,url,head,reservation"
             )
-            result["outcome_count"] = J.Items(J.Get(value, "outcomes")).Count
+            result["outcome_count"] = J.Count(J.Get(value, "outcomes"))
             return result
         }
 
-        internal func Checks(run Data, rows JsonElement, status string) {
-            let result = Select(run.Element(), "repo,pr,pr_url,commit")
+        internal func Checks(run Data, rows JsonElement, status string, facts Dictionary[string, Object?]) {
+            let result = J.Select(run.Element(), "repo,pr,pr_url,commit")
+            for fact in facts {
+                result[fact.Key] = fact.Value
+            }
             result["checks_status"] = status
             result["checks"] = Rows(rows, "name,state,bucket,link,workflow")
-            result["check_count"] = J.Items(rows).Count
+            result["check_count"] = J.Count(rows)
             ResultData = result
         }
 
         internal func Next(options Args?, code string) {
-            if options != nil && options.Command == "repair" && code == "" {
-                Actions.Add(
-                    []string{"tokate", "verify-pr", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
-                )
-                Actions.Add(
-                    []string{"tokate", "checks", "--repo", options.Get("repo"), "--pr", options.Get("pr"), "--json"}
-                )
-            }
             if RunDirectory != "" {
                 try {
                     let run = Data.Load(RunDirectory)
@@ -387,20 +369,13 @@ internal class PublicOutput {
                         code != "stale_approval" {
                         Actions.Add([]string{"tokate", "prepare", "--run", RunDirectory, "--json"})
                     }
-                    if code == "" && run.Text("state") == "claimed" &&
-                        (run.Number("version") == 1 || run.Text("source") == "tokate") {
+                    if code == "" && run.Text("state") == "claimed" && (run.Text("source") == "tokate") {
                         Actions.Add([]string{"tokate", "work", "--run", RunDirectory, "--json"})
                     }
                     if code != "stale_approval" && code != "invalid_state" {
-                        let correction = Path.Combine(RunDirectory, "correction.json")
-                        let original = Path.Combine(RunDirectory, "original-evidence")
-                        if Recovery.Eligible(run) && !File.Exists(correction) && !Directory.Exists(original) {
-                            Actions.Add([]string{"tokate", "recover", "--run", RunDirectory, "--json"})
-                        } else if run.Text("state") == "generated" && run.Number("version") == 1 {
-                            Actions.Add([]string{"tokate", "publish", "--run", RunDirectory, "--json"})
-                        } else if run.Number("pr") > 0 {
+                        if run.Number("pr") > 0 {
                             Actions.Add([]string{"tokate", "checks", "--run", RunDirectory, "--json"})
-                        } else if run.Text("state") == "generated" && run.Number("version") == 2 {
+                        } else if run.Text("state") == "generated" {
                             Actions.Add([]string{"tokate", "submit", "--run", RunDirectory, "--json"})
                         }
                     }
@@ -416,11 +391,10 @@ internal class PublicOutput {
                 if Command != "doctor" {
                     let diagnostic = Startup.NeedsCatalog(Command, options) ? "--managed": (
                         Command == "external" ||
-                            Command == "repair" ||
                             Command == "amend" ||
                             Command == "recover" ||
                             Command == "submit" ||
-                            Command == "publish" ? "--external": "--owner"
+                            Command == "submit" ? "--external": "--owner"
                     )
                     Actions.Add([]string{"tokate", "doctor", diagnostic, "--json"})
                 }

@@ -196,7 +196,7 @@ internal class ExternalContribution {
 
         internal func External(args Args) {
             let directory = Path.GetFullPath(args.Need("run"))
-            using let lease = Preparation.Lease(directory)
+            using let lease = RunStorage.Lease(directory)
             let run = Data.Load(directory)
             let retry = run.Text("state") == "failed"
             if run.Number("version") != 2 || run.Text("source") != "external" ||
@@ -206,7 +206,7 @@ internal class ExternalContribution {
             if !retry && (args.Get("seconds") != "" || args.Get("tools") != "") {
                 throw Exception("--seconds and --tools require a failed external verification")
             }
-            let record = ContributionClaim.RecheckV2(run)
+            let record = ContributionAuthority.Recheck(run)
             let commit = RepositoryIdentity.CommitSha(args.Need("commit"))
             let summary = PublicSummary.FileSummary(args.Get("summary"), commit)
             var seconds = run.Number("seconds")
@@ -222,7 +222,7 @@ internal class ExternalContribution {
                 policy.ValidateBudget(seconds, run.Flag("network"))
                 policy.ValidateTools(tools, "external")
                 KeepTools(J.Get(run.Element(), "tools"), tools)
-                if J.Items(tools).Count == J.Items(J.Get(run.Element(), "tools")).Count {
+                if J.Count(tools) == J.Count(J.Get(run.Element(), "tools")) {
                     throw Exception("External correction must append at least one tool declaration")
                 }
                 Unpublished(directory, run)
@@ -358,7 +358,7 @@ internal class ExternalContribution {
                 ) != "" {
                     throw Exception("Independent verification changed the declared commit or checkout")
                 }
-                ContributionClaim.RecheckV2(run)
+                ContributionAuthority.Recheck(run)
                 if retry {
                     RepositoryAccess.ValidateFork(run.Text("repo"), metadata, J.Get(run.Element(), "donor_id"))
                     Unpublished(directory, run)

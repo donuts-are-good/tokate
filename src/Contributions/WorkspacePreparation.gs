@@ -6,30 +6,19 @@ import System.Collections.Generic
 import System.IO
 import System.Text.Json
 
-internal class Preparation {
+internal class WorkspacePreparation {
     shared {
         internal func RunDirectory(args Args, id string) string {
-            let root = Path.GetFullPath(
-                args.Get(
-                    "runs",
-                    Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        ".local",
-                        "state",
-                        "tokate",
-                        "runs"
-                    )
-                )
-            )
+            let root = Path.GetFullPath(args.Get("runs", RunStorage.Root()))
             return Path.Combine(root, id)
         }
 
-        private func Identity(run Data, normalized bool = true) string -> Data.Hash(
+        private func Identity(run Data) string -> Data.Hash(
             J.Write(
                 map[string, Object?]{
                     "version": run.Number("version"),
                     "id": run.Text("id"),
-                    "repo": normalized ? run.Text("repo").ToLowerInvariant(): run.Text("repo"),
+                    "repo": run.Text("repo").ToLowerInvariant(),
                     "issue": run.Number("issue"),
                     "donor_id": J.Get(run.Element(), "donor_id"),
                     "approval": run.Text("approval"),
@@ -38,26 +27,35 @@ internal class Preparation {
                     "base_branch": run.Text("base_branch"),
                     "branch": run.Text("branch"),
                     "source": run.Text("source"),
-                    "fork": normalized ? run.Text("requested_fork").ToLowerInvariant(): run.Text("requested_fork"),
-                    "head_repo": normalized ? run.Text("head_repo").ToLowerInvariant(): run.Text("head_repo")
+                    "fork": run.Text("requested_fork").ToLowerInvariant(),
+                    "head_repo": run.Text("head_repo").ToLowerInvariant()
                 }
             )
         )
 
         private func Identified(run Data) bool {
             let identity = run.Text("preparation_identity")
-            return identity == BoundIdentity(run) || identity == BoundIdentity(run, false)
+            return identity == BoundIdentity(run)
         }
 
-        private func BoundIdentity(run Data, normalized bool = true) string {
-            let identity = Identity(run, normalized)
-            if run.Text("attempt") != "" {
-                return Data.Hash(identity + ":" + run.Text("attempt"))
+        internal func CheckIdentity(run Data) {
+            if run.Number("preparation_version") != 1 || !Identified(run) {
+                throw Exception("Saved preparation identity changed; import provenance cannot be removed or rebound")
             }
-            return V1Continuation.Has(run) ? Data.Hash(
+        }
+
+        private func BoundIdentity(run Data) string {
+            var identity = Identity(run)
+            if run.Text("harness_path") != "" {
+                identity = Data.Hash(identity + ":" + run.Text("harness_path"))
+            }
+            identity = Data.Hash(identity + ":" + run.Text("attempt"))
+            return AttemptContinuation.Has(run) ? Data.Hash(
                 identity + ":" + run.Text("continuation_source") + ":" + RequestData.Canonical(
                     J.Get(run.Element(), "continuation")
-                )
+                ) +
+                    ":" +
+                    run.Text("continuation_source_metadata_sha256")
             ): identity
         }
 
@@ -114,7 +112,7 @@ internal class Preparation {
                     Reject(directory)
                 }
             }
-            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,network,harness,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
+            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,unlimited,network,harness,harness_path,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
                 .Split(',') {
                 if !RequestData.Same(J.Get(pending.Element(), key), J.Get(run.Element(), key)) {
                     Reject(directory)
@@ -135,40 +133,8 @@ internal class Preparation {
             )
         }
 
-        internal func ControlPaths(directory string) {
-            try {
-                LocalPaths.DirectoryPath(directory)
-            } catch (error Exception) {
-                throw Exception(error.Message + "; saved run directory: " + directory, error)
-            }
-            for name in[]string{".lock", "run.json", "run.json.tmp", "claim.posting.json"} {
-                let path = Path.Combine(directory, name)
-                if FileInfo(path).LinkTarget != nil {
-                    Reject(directory)
-                }
-                if File.Exists(path) || Directory.Exists(path) {
-                    let status = [256]byte
-                    if RuntimeMetadataStat(-100, path, 256, 5, status) != 0 ||
-                        (BitConverter.ToUInt32(status, 0) & 5) != 5 ||
-                        (BitConverter.ToUInt16(status, 28) & 61440) != 32768 ||
-                        BitConverter.ToUInt32(status, 16) != 1 {
-                        Reject(directory)
-                    }
-                }
-            }
-        }
-
-        internal func Lease(directory string) FileStream {
-            ControlPaths(directory)
-            return File.Open(
-                Path.Combine(directory, ".lock"),
-                FileMode.OpenOrCreate,
-                FileAccess.ReadWrite,
-                FileShare.None
-            )
-        }
-
         internal func Complete(directory string, run Data) {
+            AttemptContinuation.Location(directory, run)
             let savedState = run.Text("state")
             let fields = run.Fields
             let failure = "prepare --run requires recorded pre-inference preparation for this contribution; old runs and coding cannot be adopted"
@@ -186,9 +152,9 @@ internal class Preparation {
             if File.Exists(eventsPath) || File.Exists(reportPath) {
                 throw Exception(failure)
             }
-            let record = ContributionClaim.Recheck(run)
-            if V1Continuation.Has(run) && run.Text("continuation_phase") == "" {
-                V1Continuation.Capture(directory, run, record)
+            let record = ContributionAuthority.Recheck(run)
+            if AttemptContinuation.Has(run) && run.Text("continuation_phase") == "" {
+                ContinuationImport.Capture(directory, run, record)
             }
             let upstream = GitHub.Api("repos/" + RepositoryIdentity.Repo(run.Text("repo")))
             if run.Fields.ContainsKey("preparation_repo_id") && J.Get(upstream, "id").ToString() != J.Get(
@@ -203,12 +169,12 @@ internal class Preparation {
             Fork(directory, run, upstream)
             Branch(directory, run)
             let checkout = Checkout(directory, run)
-            ContributionClaim.Recheck(run)
+            ContributionAuthority.Recheck(run)
             CheckFork(run, upstream)
             CheckBranch(run)
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 Source(checkout, run)
-                V1Continuation.Import(directory, run, record)
+                ContinuationImport.Import(directory, run, record)
             } else {
                 Clean(checkout, run)
             }
@@ -222,6 +188,7 @@ internal class Preparation {
         }
 
         internal func Ready(directory string, run Data) {
+            AttemptContinuation.Location(directory, run)
             if !run.Flag("preparation_complete") || !Identified(run) {
                 throw Exception("Preparation is incomplete; use prepare --run " + directory + " before work")
             }
@@ -232,12 +199,12 @@ internal class Preparation {
             CheckFork(run, upstream)
             CheckBranch(run)
             let checkout = Path.Combine(directory, run.Text("source") == "external" ? "coding": "checkout")
-            if V1Continuation.Has(run) {
+            if AttemptContinuation.Has(run) {
                 Source(checkout, run)
                 if run.Text("continuation_phase") != "imported" {
                     throw Exception("Continuation import is incomplete; use prepare --run " + directory)
                 }
-                V1Continuation.Check(directory, run, ContributionClaim.Recheck(run))
+                ContinuationImport.Check(directory, run, ContributionAuthority.Recheck(run))
             } else {
                 Clean(checkout, run)
             }
@@ -425,10 +392,7 @@ internal class Preparation {
                 )
             }
             if J.Text(J.Get(reference, "object"), "sha") != run.Text("base") {
-                if run.Text("attempt") != "" {
-                    throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
-                }
-                Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
+                throw Exception("Existing branch work is preserved; continuation remains unsupported until #14")
             }
         }
 
@@ -436,10 +400,7 @@ internal class Preparation {
             let reference = Reference(run)
             if !run.Flag("branch_creation_attempted") {
                 if reference.ValueKind != JsonValueKind.Undefined {
-                    if run.Text("attempt") == "" {
-                        Reject("https://github.com/" + run.Text("head_repo") + "/tree/" + run.Text("branch"))
-                    }
-                    ContributionClaim.RecheckV2(run)
+                    ContributionAuthority.Recheck(run)
                     CheckBranch(run)
                     let pulls = J.Items(
                         GitHub.Api(
@@ -597,13 +558,13 @@ internal class Preparation {
             let checkout = Path.Combine(directory, name)
             let staging = Path.Combine(directory, name + ".staging")
             if Directory.Exists(checkout) || File.Exists(checkout) || FileInfo(checkout).LinkTarget != nil {
-                if V1Continuation.Has(run) &&
+                if AttemptContinuation.Has(run) &&
                     (run.Text("continuation_phase") == "importing" || run.Text("continuation_phase") == "imported") {
                     Source(checkout, run)
-                    V1Continuation.Check(
+                    ContinuationImport.Check(
                         directory,
                         run,
-                        ContributionClaim.Recheck(run),
+                        ContributionAuthority.Recheck(run),
                         run.Text("continuation_phase") == "importing"
                     )
                 } else {

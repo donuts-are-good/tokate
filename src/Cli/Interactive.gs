@@ -1,7 +1,8 @@
 package Tokate
 
 import System
-import System.Text.Json
+import System.Collections.Generic
+import System.IO
 
 internal class Interactive {
     shared {
@@ -10,153 +11,202 @@ internal class Interactive {
             !Console.IsOutputRedirected &&
             !Console.IsErrorRedirected
 
-        private func Options(command string, repo string, issue string = "") Args {
-            let args = issue == "" ? Args([]string{command, "--repo", repo}): Args(
-                []string{command, "--repo", repo, "--issue", issue}
-            )
-            Cli.Validate(args)
-            return args
+        private func Execute(options Args) int32 {
+            PublicOutput.Reset(options.Command)
+            Cli.Validate(options)
+            if options.Get("run") != "" {
+                PublicOutput.RunDirectory = options.Need("run")
+            }
+            var result int32
+            try {
+                result = Dispatch(options)
+            } finally {
+                DonationView.Close()
+                WizardScreen.Close()
+            }
+            PublicOutput.Next(options, result == 0 ? "": "command_failed")
+            Terminal.RunOutcome(result, "")
+            return result
         }
 
-        private func Repository() string {
-            var inferred = ""
-            try {
-                inferred = RepositoryInput.Local()
-            } catch (error Exception) {
-                Terminal.Message(error.Message, "yellow")
-            }
+        private func Continue(directory string) {
             while true {
-                Terminal.Message(
-                    inferred == "" ? "Repository OWNER/REPO or URL (blank cancels):":
-                    "Repository [" + inferred + "] (Enter keeps it, another repo corrects it, exit cancels):",
-                    "default"
+                PublicOutput.Reset("status")
+                PublicOutput.RunDirectory = directory
+                let summary = J.Parse(J.Write(PublicOutput.RunSummary(directory)))
+                let options = Args([]string{"status", "--run", directory})
+                PublicOutput.Next(options, "")
+                let commands = List[string]()
+                let labels = List[string]()
+                if J.Text(summary, "state") == "claim_pending" {
+                    commands.Add("prepare")
+                    labels.Add("Check reservation and prepare work")
+                }
+                for action in PublicOutput.Actions {
+                    let command = action[1]
+                    let label = switch command {
+                        case "work": "Start reserved donation"
+                        case "prepare": "Continue preparation"
+                        case "submit": "Submit verified work for a draft PR"
+                        case "checks": "Check PR review and CI"
+                        case "recover": "Prepare an explicit correction"
+                        default: ""
+                    }
+                    if label != "" {
+                        commands.Add(command)
+                        labels.Add(label)
+                    }
+                }
+                commands.Add("status")
+                labels.Add("Inspect saved status and evidence")
+                labels.Add("Back to home")
+                let next = commands.Count == 1 ?
+                "No local work can start from this state. Inspect status for the next required action.":
+                "Choose the next action. Nothing starts automatically."
+                let selected = WizardScreen.Choose(
+                    "Continue contribution",
+                    J.Text(summary, "repo") + " #" + J.Number(summary, "issue").ToString() + "\nState  " + J.Text(
+                        summary,
+                        "state"
+                    ) +
+                        "\nModel  " +
+                        J.Text(summary, "model") + "\n\n" + next,
+                    labels.ToArray()
                 )
-                Console.Write("repo> ")
-                let answer = Console.ReadLine()?.Trim()
-                if answer == nil || String.Equals(answer, "exit", StringComparison.OrdinalIgnoreCase) {
-                    return ""
+                if selected > commands.Count {
+                    return
                 }
-                if answer == "" {
-                    return inferred
+                let command = commands[selected - 1]
+                let args = Args([]string{command, "--run", directory})
+                if command == "work" {
+                    let reserve = J.Number(summary, "verification_reserve")
+                    if WizardScreen.Choose(
+                        "Start reserved donation",
+                        "Model  " + J.Text(summary, "model") + " / " + J.Text(summary, "effort") +
+                            "\nCoding  " +
+                            ((J.Number(summary, "seconds") - reserve) / 60.0).ToString("0.##") +
+                            " minutes\nVerification  " +
+                            (reserve / 60.0).ToString("0.##") +
+                            " minutes\nProject network  " +
+                            (J.Bool(summary, "network") ? "allowed": "offline") +
+                            "\n\nUses your selected coding tool and allowance. Authority is rechecked before starting.",
+                        []string{"Start donation", "Back"}
+                    ) != 1 {
+                        continue
+                    }
+                    args.Values["--yes"] = "true"
                 }
-                try {
-                    return RepositoryInput.Repo(answer)
-                } catch (error Exception) {
-                    Terminal.Message(error.Message, "red")
+                if command == "recover" {
+                    args.Values["--seconds"] = (
+                        int32.Parse(
+                            WizardScreen.Read(
+                                "Verification time",
+                                "Runs owner checks without inference.",
+                                "Minutes",
+                                "30"
+                            )
+                        ) * 60
+                    ).ToString()
+                }
+                Execute(args)
+                Console.Error.Write("Enter returns to this contribution: ")
+                if Console.ReadLine() == nil {
+                    throw OperationCanceledException("Cancelled")
                 }
             }
         }
 
-        private func Selection(repo string) Args? {
-            Terminal.Message("Issue number, issue URL, or repository (all clears, blank cancels):", "default")
-            Console.Write("issue> ")
-            let answer = Console.ReadLine()?.Trim()
-            if answer == nil || answer == "" {
-                return nil
+        private func Saved() {
+            let saved = RunStorage.Discover()
+            let rows = J.Items(J.Get(saved, "runs"))
+            if rows.Count == 0 {
+                WizardScreen.Read(
+                    "Saved contributions",
+                    "No readable saved contributions were found." +
+                        (J.Bool(saved, "truncated") ? "\nShowing the first 128 inspected entries.": ""),
+                    "Enter to return"
+                )
+                return
             }
-            var options Args
-            if String.Equals(answer, "all", StringComparison.OrdinalIgnoreCase) {
-                options = Options("status", repo)
-            } else if answer.Contains("/") && !answer.Contains("/issues/") {
-                options = Options("status", answer)
-            } else if answer.StartsWith("https://", StringComparison.OrdinalIgnoreCase) {
-                options = Args([]string{"status", "--issue", answer})
-                Cli.Validate(options)
+            let labels = List[string]()
+            for row in rows {
+                labels.Add(
+                    J.Text(row, "repo") + " #" + J.Number(row, "issue").ToString() + " | " + J.Text(row, "model") +
+                        " | " +
+                        J.Text(row, "state") + " | " + Path.GetFileName(J.Text(row, "run")) +
+                        (J.Text(row, "storage") == "previous" ? " (previous storage)": "")
+                )
+            }
+            var note = "Saved work on this computer. No network access is needed to list it."
+            if J.Number(saved, "skipped") > 0 {
+                note += "\nUnreadable entries skipped: " + J.Number(saved, "skipped").ToString()
+            }
+            if J.Bool(saved, "truncated") {
+                note += "\nShowing the first 128 inspected entries."
+            }
+            let selected = WizardScreen.Choose("Saved contributions", note, labels.ToArray())
+            Continue(J.Text(rows[selected - 1], "run"))
+        }
+
+        private func Start(command string) {
+            let options = Args([]string{command})
+            options.Guided = true
+            if command == "init" {
+                GuidedWork.Repository(options)
+            }
+            Cli.Validate(options, guided: true)
+            GuidedWork.Fill(options)
+            Execute(options)
+            let directory = PublicOutput.RunDirectory
+            if directory != "" {
+                Continue(directory)
             } else {
-                options = Options("status", repo, answer)
-            }
-            return options
-        }
-
-        private func Read(repo string, issue string) JsonElement {
-            try {
-                let options = Options("status", repo, issue)
-                Startup.Check(options)
-                let snapshot = ContributionStatus.Snapshot(options)
-                if let failure = snapshot.Failure {
-                    Error(failure)
-                }
-                return J.Parse(J.Write(snapshot.Result))
-            } catch (error Exception) {
-                Error(error)
-                return JsonElement{}
+                WizardScreen.Read(
+                    "Project setup",
+                    "Review and commit the configuration before approving work. Every contribution still needs owner review.",
+                    "Enter to return"
+                )
             }
         }
-
-        private func Status(repo string, issue string, snapshot JsonElement) {
-            Terminal.Row("Selection", repo + (issue == "" ? " / approved work": " #" + issue))
-            if snapshot.ValueKind == JsonValueKind.Object {
-                Terminal.ContributionStatus(snapshot)
-            } else {
-                Terminal.Message("Status unavailable. Correct the selection or choose refresh.", "yellow")
-            }
-        }
-
-        private func PolicyRead(repo string) {
-            let options = Options("policy", repo)
-            Startup.Check(options)
-            let info = GitHub.Api("repos/" + repo)
-            Terminal.Json(Policy.Load(repo, J.Text(info, "default_branch")).Value, "Repository policy")
-        }
-
-        private func Error(error Exception) -> Terminal.Message(
-            "tokate: " + (error is CliFailure failure ? failure.Summary: error.Message),
-            "red"
-        )
 
         internal func Run() int32 {
             if !OperatingSystem.IsLinux() {
                 throw Exception("This release supports Linux")
             }
-            Terminal.InteractiveHeading()
-            var repo = Repository()
-            if repo == "" {
-                return 0
-            }
-            var issue = ""
-            var snapshot = Read(repo, issue)
-            Status(repo, issue, snapshot)
             while true {
-                Terminal.Message("status / issue / refresh / policy / help / exit", "default")
-                Console.Write("tokate> ")
-                let answer = Console.ReadLine()?.Trim().ToLowerInvariant()
-                if answer == nil || answer == "exit" {
-                    return 0
-                }
                 try {
-                    switch answer {
-                        case "status" {
-                            Status(repo, issue, snapshot)
-                        }
-                        case "refresh" {
-                            snapshot = Read(repo, issue)
-                            Status(repo, issue, snapshot)
-                        }
-                        case "issue" {
-                            if let selection = Selection(repo) {
-                                repo = selection.Need("repo")
-                                issue = selection.Get("issue")
-                                snapshot = Read(repo, issue)
-                                Status(repo, issue, snapshot)
-                            }
-                        }
-                        case "policy" {
-                            PolicyRead(repo)
-                        }
-                        case "help" {
-                            Terminal.Message(
-                                "status shows this snapshot. refresh reads current contribution state. issue selects a number, issue URL, or repository. A repository change clears the issue. policy reads owner policy. exit closes this view. Use tokate help for command help.",
-                                "default"
-                            )
-                        }
-                        default {
-                            if answer != "" {
-                                Terminal.Message("Choose status, issue, refresh, policy, help, or exit.", "yellow")
-                            }
-                        }
+                    let action = WizardScreen.Choose(
+                        "Welcome",
+                        "What would you like to do?",
+                        []string{
+                            "Donate AI time          Work on an approved issue",
+                            "Set up my project       Let people contribute",
+                            "Continue existing work  Find a saved contribution"
+                        },
+                        "Choose the job you want to do. Tokate fills in details it can find."
+                    )
+                    if action == 3 {
+                        Saved()
+                    } else {
+                        Start(action == 1 ? "work": "init")
                     }
+                } catch (error WizardHome) {
+                    continue
+                } catch (error OperationCanceledException) {
+                    return 0
                 } catch (error Exception) {
-                    Error(error)
+                    Terminal.Message(
+                        "tokate: " + (error is CliFailure failure ? failure.Summary: error.Message),
+                        "red",
+                        true
+                    )
+                    try {
+                        WizardScreen.Read("Action needs attention", error.Message, "Enter to return home")
+                    } catch (cancel OperationCanceledException) {
+                        return 0
+                    } catch (home WizardHome) { }
+                } finally {
+                    PublicOutput.Reset()
                 }
             }
         }

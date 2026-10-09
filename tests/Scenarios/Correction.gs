@@ -25,18 +25,7 @@ internal class CorrectionChecks {
         private func Commit(flow NativeFixture, run string, message string = "Explicit correction") string {
             let checkout = Path.Combine(run, "checkout")
             flow.Git("-C", checkout, "add", "-A")
-            flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "--allow-empty",
-                "-m",
-                message
-            )
+            flow.DonorGit(checkout, "commit", "--allow-empty", "-m", message)
             return flow.Git("-C", checkout, "rev-parse", "HEAD")
         }
 
@@ -46,13 +35,33 @@ internal class CorrectionChecks {
             commit string,
             code int32 = 0,
             tools string = "",
-            seconds string = "30"
+            seconds string = "30",
+            json bool = false
         ) Result {
             let args = List[string]{"recover", "--run", run, "--commit", commit, "--seconds", seconds}
             if tools != "" {
                 args.AddRange([]string{"--tools", tools})
             }
+            if json {
+                args.Add("--json")
+            }
             return flow.Call(args.ToArray(), code)
+        }
+
+        private func RecoverAndSubmit(
+            flow NativeFixture,
+            run string,
+            commit string,
+            code int32 = 0,
+            tools string = "",
+            seconds string = "30",
+            json bool = false
+        ) Result {
+            let result = Recover(flow, run, commit, code, tools, seconds, json)
+            if code == 0 {
+                flow.Publish(run)
+            }
+            return result
         }
 
         private func Prepared(flow NativeFixture, run string) string {
@@ -60,10 +69,18 @@ internal class CorrectionChecks {
             let failed = File.Exists(Path.Combine(run, "verification.json")) ? File.ReadAllText(
                 Path.Combine(run, "verification.json")
             ): ""
-            flow.Call([]string{"recover", "--run", run, "--prepare"})
+            let prepared = Check.Envelope(
+                flow.Call([]string{"recover", "--run", run, "--prepare", "--json"}),
+                "recover",
+                "ok"
+            )
             Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == original, "Preparation rewrote saved work")
             Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Preparation created an attempt")
             let archive = Path.Combine(run, "original-evidence")
+            Check.That(
+                Check.Text(prepared["data"]?["artifacts"]?["original_evidence"]) == archive,
+                "Prepared JSON lost original artifact"
+            )
             Check.That(File.ReadAllText(Path.Combine(archive, "run.json")) == original, "Original record lost")
             for file in[]string{"events.jsonl", "report.md", "stderr.log"} {
                 Check.That(
@@ -130,7 +147,7 @@ internal class CorrectionChecks {
             File.Delete(Path.Combine(checkout, "outside-link"))
             File.Delete(Path.Combine(checkout, "untracked.bin"))
             let commit = Correct(flow, run)
-            Recover(flow, run, commit)
+            RecoverAndSubmit(flow, run, commit)
             Once(flow, 1)
             Check.That(
                 File.ReadAllText(Path.Combine(archive, "manifest.json")) == manifest,
@@ -145,15 +162,12 @@ internal class CorrectionChecks {
                 "Missing tools did not declare manual editing"
             )
             Check.That(saved["previous_published_head"] == nil, "Unpublished candidate treated as previous PR")
-            Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "manual/unknown")
-            Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "cover only the original completed turn")
-            Check.That(
-                !File.ReadAllText(Path.Combine(run, "pr-body.md")).Contains("Fresh v1 attempt seeded"),
-                "Ordinary correction invented interrupted origin"
-            )
+            Check.Contains(flow.Body(), "manual/unknown")
+            Check.Contains(flow.Body(), "cover only the original completed turn")
+            Check.That(!flow.Body().Contains("Fresh attempt seeded"), "Ordinary correction invented interrupted origin")
             flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
             flow.Call([]string{"recover", "--run", run, "--prepare"}, 1)
-            Recover(flow, run, commit, 1)
+            RecoverAndSubmit(flow, run, commit, 1)
             Once(flow, 1)
         }
 
@@ -199,7 +213,7 @@ internal class CorrectionChecks {
             )
             let commit = Correct(flow, run)
             let tree = flow.Git("-C", checkout, "rev-parse", "HEAD^{tree}")
-            Recover(flow, run, commit, seconds: "120")
+            RecoverAndSubmit(flow, run, commit, seconds: "120")
             let correction = Read(run, "correction.json")
             let patch = Path.Combine(run, "correction-" + Check.Text(correction["uuid"]), "candidate.patch")
             Reconstruct(flow, run, patch, tree, "corrected-replay")
@@ -231,6 +245,7 @@ internal class CorrectionChecks {
             let run = flow.Claim()
             flow.Mode("verification_fail")
             flow.Call([]string{"work", "--run", run}, 1)
+            let originalRun = File.ReadAllText(Path.Combine(run, "run.json"))
             let original = File.ReadAllText(Path.Combine(run, "candidate.patch"))
             let failed = File.ReadAllText(Path.Combine(run, "verification.json"))
             Prepared(flow, run)
@@ -238,7 +253,16 @@ internal class CorrectionChecks {
             let bad = Correct(flow, run, "")
             File.Delete(Path.Combine(checkout, "result.txt"))
             let failing = Commit(flow, run, "Still fails")
-            Check.Contains(Recover(flow, run, failing, 1).Error, "verification_failed")
+            let rejected = Check.Envelope(
+                RecoverAndSubmit(flow, run, failing, 1, json: true),
+                "recover",
+                "error",
+                "verification_failed"
+            )
+            Check.That(
+                Check.Text(rejected["data"]?["run_state"]?["correction"]?["state"]) == "failed",
+                "JSON correction lost failed attempt"
+            )
             let attempt = Read(run, "correction.json")
             Check.That(
                 attempt["verification"]?.AsArray().Count == 2,
@@ -246,15 +270,25 @@ internal class CorrectionChecks {
             )
             Check.Contains(Check.Text(attempt["verification"]?[1]?["output"]), "second-original-check")
             let savedAttempt = File.ReadAllText(Path.Combine(run, "correction.json"))
-            Recover(flow, run, failing, 1)
+            RecoverAndSubmit(flow, run, failing, 1)
             Check.That(
                 File.ReadAllText(Path.Combine(run, "correction.json")) == savedAttempt,
                 "Failed correction retried implicitly"
             )
             let commit = Correct(flow, run)
             Check.That(commit != bad && commit != failing, "New attempt lacks a new explicit commit")
-            Recover(flow, run, commit)
+            let published = Check.Envelope(RecoverAndSubmit(flow, run, commit, json: true), "recover", "ok")
+            Check.That(
+                Check.Text(published["data"]?["commit"]) == commit && Check.Text(
+                    published["data"]?["correction"]?["commit"]
+                ) == commit,
+                "JSON correction lost exact head"
+            )
             Once(flow, 1)
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == originalRun,
+                "JSON correction changed original"
+            )
             Check.That(
                 File.ReadAllText(Path.Combine(run, "original-evidence/candidate.patch")) == original,
                 "Original saved candidate replaced"
@@ -291,7 +325,7 @@ internal class CorrectionChecks {
                 flow.Git("-C", checkout, "diff", "--binary", Check.Text(Read(run)["base"]), commit) == original,
                 "Commit changed the original candidate patch"
             )
-            Recover(flow, run, commit)
+            RecoverAndSubmit(flow, run, commit)
             Once(flow, 1)
             Check.That(Check.Text(Read(run, "correction.json")["tree"]) == tree, "Correction verified a different tree")
             for path in[]string{"candidate.patch", "original-evidence/candidate.patch"} {
@@ -348,7 +382,7 @@ internal class CorrectionChecks {
                     Check.Contains(flow.Call([]string{"recover", "--run", run, "--prepare"}, 1).Error, "physical PR")
                     Check.That(!Directory.Exists(Path.Combine(run, "original-evidence")), "Published work was prepared")
                 } else {
-                    Check.Contains(Recover(flow, run, commit, 1).Error, "physical PR")
+                    Check.Contains(RecoverAndSubmit(flow, run, commit, 1).Error, "physical PR")
                     Check.That(Read(run, "correction.json")["verification"] == nil, "Published work reached checks")
                 }
                 Once(flow, 1)
@@ -371,17 +405,17 @@ internal class CorrectionChecks {
                     path,
                     "[{\"harness\":\"claude\",\"provider\":\"anthropic\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\"}]"
                 )
-                Recover(flow, run, commit, 1, path)
+                RecoverAndSubmit(flow, run, commit, 1, path)
                 File.WriteAllText(
                     path,
                     "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"not-allowed\",\"effort\":\"high\"}]"
                 )
-                Recover(flow, run, commit, 1, path)
+                RecoverAndSubmit(flow, run, commit, 1, path)
                 File.WriteAllText(
                     path,
                     declared ? "[{\"harness\":\"codex\",\"provider\":\"openai\",\"model\":\"gpt-6.1-sol\",\"effort\":\"high\",\"usage\":{\"input_tokens\":7},\"coding_seconds\":2}]": "[]"
                 )
-                Recover(flow, run, commit, tools: path)
+                RecoverAndSubmit(flow, run, commit, tools: path)
                 Once(flow, 1)
                 let correction = Read(run, "correction.json")
                 Check.That(correction["tools"]?.AsArray().Count == (declared ? 1: 0), "Tool declaration lost")
@@ -389,7 +423,7 @@ internal class CorrectionChecks {
                     Check.Text(Read(run)["usage"]?["input_tokens"]) == "100",
                     "Correction usage replaced original usage"
                 )
-                let body = File.ReadAllText(Path.Combine(run, "pr-body.md"))
+                let body = flow.Body()
                 Check.Contains(body, declared ? "Donor-reported correction tools": "manual/unknown")
             }
         }
@@ -418,15 +452,15 @@ internal class CorrectionChecks {
             }
             Prepared(flow, run)
             let commit = Correct(flow, run)
-            Recover(flow, run, commit, 1, seconds: "86400")
-            Recover(flow, run, commit, 1, seconds: "0")
-            Recover(flow, run, String('0', 40), 1)
+            RecoverAndSubmit(flow, run, commit, 1, seconds: "86400")
+            RecoverAndSubmit(flow, run, commit, 1, seconds: "0")
+            RecoverAndSubmit(flow, run, String('0', 40), 1)
             let current = File.ReadAllText(Path.Combine(run, "correction.json"))
             flow.Reload()
             let issue = flow.State["issue"] ?? throw Exception("Missing issue")
             issue["labels"] = JsonArray()
             flow.Save()
-            Recover(flow, run, commit, 1)
+            RecoverAndSubmit(flow, run, commit, 1)
             Check.That(
                 File.ReadAllText(Path.Combine(run, "correction.json")) == current,
                 "Revocation changed correction progress"
@@ -477,7 +511,7 @@ internal class CorrectionChecks {
                     File.WriteAllText(Path.Combine(checkout, "scripts/verify.sh"), "exit 0\n")
                 }
                 let commit = Correct(flow, run)
-                Check.Contains(Recover(flow, run, commit, 1).Error, "protected owner path")
+                Check.Contains(RecoverAndSubmit(flow, run, commit, 1).Error, "protected owner path")
                 Check.That(Read(run, "correction.json")["verification"] == nil, "Protected verifier executed")
                 Check.That(
                     File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
@@ -498,7 +532,7 @@ internal class CorrectionChecks {
                 flow.Git("-C", checkout, "update-index", flag, "result.txt")
                 File.AppendAllText(Path.Combine(checkout, "result.txt"), "Hidden correction change\n")
                 Check.That(flow.Git("-C", checkout, "status", "--porcelain") == "", "Index flag must hide change")
-                let result = Recover(flow, run, commit, 1)
+                let result = RecoverAndSubmit(flow, run, commit, 1)
                 Check.Contains(result.Error, "candidate_invalid")
                 Check.Contains(result.Error, "index contains")
                 Check.That(Read(run, "correction.json")["verification"] == nil, "Hidden index reached verification")
@@ -527,7 +561,7 @@ internal class CorrectionChecks {
                     )
                 }
                 let protectedCommit = Correct(flow, run)
-                Check.Contains(Recover(flow, run, protectedCommit, 1).Error, "protected")
+                Check.Contains(RecoverAndSubmit(flow, run, protectedCommit, 1).Error, "protected")
                 Check.That(Read(run, "correction.json")["verification"] == nil, "Protected rename reached verification")
                 Once(flow)
             }
@@ -540,65 +574,12 @@ internal class CorrectionChecks {
             flow.Call([]string{"work", "--run", run}, 1)
             Prepared(flow, run)
             let commit = Correct(flow, run)
-            Check.Contains(Recover(flow, run, commit, 1).Error, "candidate_changed")
+            Check.Contains(RecoverAndSubmit(flow, run, commit, 1).Error, "candidate_changed")
             Check.That(
                 Check.Text(Read(run, "correction.json")["verification"]?[0]?["exit_code"]) == "0",
                 "Expected check to pass before exact-candidate refusal"
             )
             Once(flow)
-        }
-
-        private func InterruptedNative(binary string) {
-            for mode in[]string{"push_fail_after_write", "pr_fail_after_create", "pr_fail"} {
-                using let flow = NativeFixture(binary)
-                flow.Initialize()
-                flow.Approve()
-                let run = flow.Claim()
-                flow.Mode("staged_whitespace")
-                flow.Call([]string{"work", "--run", run}, 1)
-                Prepared(flow, run)
-                let commit = Correct(flow, run)
-                flow.Mode(mode)
-                Recover(flow, run, commit, mode == "pr_fail_after_create" ? 0: 1)
-                let checks = Check.Text(Read(run, "correction.json")["verification"])
-                let archive = File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json"))
-                flow.Mode("")
-                if mode == "pr_fail" {
-                    Check.Contains(Recover(flow, run, commit, 1).Error, "blind write retry")
-                    flow.Call([]string{"publish", "--run", run}, 1)
-                    Once(flow)
-                    flow.Reload()
-                    Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "Uncertain missing PR was retried")
-                } else {
-                    if mode == "push_fail_after_write" {
-                        let reportPath = Path.Combine(run, "original-evidence/report.md")
-                        let report = File.ReadAllText(reportPath)
-                        let stamp = File.GetLastWriteTimeUtc(reportPath)
-                        File.WriteAllText(reportPath, String('x', report.Length))
-                        File.SetLastWriteTimeUtc(reportPath, stamp)
-                        Check.Contains(flow.Call([]string{"publish", "--run", run}, 1).Error, "archive changed")
-                        Check.Contains(Recover(flow, run, commit, 1).Error, "archive changed")
-                        File.WriteAllText(reportPath, report)
-                        Recover(flow, run, commit)
-                    }
-                    flow.Call([]string{"publish", "--run", run})
-                    Once(flow, 1)
-                    flow.Reload()
-                    Check.That(Check.Text(flow.State["pr_create_count"]) == "1", "Publication duplicated a PR")
-                    let pulls = flow.State["pulls"]?.AsArray() ?? throw Exception("Missing PR")
-                    pulls.Add(pulls[0]?.DeepClone())
-                    flow.Save()
-                    flow.Call([]string{"publish", "--run", run}, 1)
-                }
-                Check.That(
-                    Check.Text(Read(run, "correction.json")["verification"]) == checks,
-                    "Publication resume repeated checks"
-                )
-                Check.That(
-                    File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
-                    "Publication resume changed archive"
-                )
-            }
         }
 
         private func ManagedRun(flow CoordinationFixture, mode string) string {
@@ -650,7 +631,7 @@ internal class CorrectionChecks {
             let corrected = Correct(flow, run)
             Recover(flow, run, corrected)
             Check.That(Directory.GetDirectories(run, "correction-*").Length == 2, "Interrupted attempt evidence lost")
-            Once(flow, 1)
+            Once(flow)
         }
 
         private func ChangedCandidate(binary string) {
@@ -679,7 +660,7 @@ internal class CorrectionChecks {
             }
         }
 
-        private func LegacyAndArchive(binary string) {
+        private func ArchiveTampering(binary string) {
             using let flow = NativeFixture(binary)
             flow.Initialize()
             flow.Approve()
@@ -689,23 +670,12 @@ internal class CorrectionChecks {
             let head = flow.Git("-C", Path.Combine(run, "checkout"), "rev-parse", "HEAD")
             Check.Contains(Recover(flow, run, head, 1).Error, "original-evidence")
             Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Missing archive accepted a candidate")
-            let legacy = Read(run)
-            for key in[]string{
-                "turn_completed",
-                "inference_exit_code",
-                "usage",
-                "execution_seconds",
-                "failure_reason",
-                "failure_stage"
-            } {
-                legacy.AsObject().Remove(key)
-            }
-            File.WriteAllText(Path.Combine(run, "run.json"), legacy.ToJsonString())
             Prepared(flow, run)
             let commit = Correct(flow, run)
             let original = File.ReadAllText(Path.Combine(run, "run.json"))
-            legacy["execution_seconds"] = JsonValue.Create(12345)
-            File.WriteAllText(Path.Combine(run, "run.json"), legacy.ToJsonString())
+            let tampered = Read(run)
+            tampered["execution_seconds"] = JsonValue.Create(12345)
+            File.WriteAllText(Path.Combine(run, "run.json"), tampered.ToJsonString())
             Check.Contains(Recover(flow, run, commit, 1).Error, "execution attribution changed: execution_seconds")
             File.WriteAllText(Path.Combine(run, "run.json"), original)
             let reportPath = Path.Combine(run, "original-evidence/report.md")
@@ -714,48 +684,17 @@ internal class CorrectionChecks {
             Check.Contains(Recover(flow, run, commit, 1).Error, "archive changed")
             Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Changed archive accepted a candidate")
             File.WriteAllText(reportPath, report)
-            Recover(flow, run, commit)
-            Check.Contains(File.ReadAllText(Path.Combine(run, "pr-body.md")), "unknown (original runtime not recorded)")
+            RecoverAndSubmit(flow, run, commit)
             Once(flow, 1)
-            using let compatibility = NativeFixture(binary)
-            compatibility.Initialize()
-            compatibility.Approve()
-            let failed = compatibility.Claim()
-            compatibility.Mode("verification_fail")
-            compatibility.Call([]string{"work", "--run", failed}, 1)
-            let record = Read(failed)
-            record.AsObject().Remove("failure_reason")
-            record.AsObject().Remove("failure_stage")
-            record["error"] = JsonValue.Create(
-                "Owner verification failed. See verification.json. No PR will be opened."
-            )
-            File.WriteAllText(Path.Combine(failed, "run.json"), record.ToJsonString())
-            File.WriteAllText(
-                Path.Combine(failed, "checkout/result.txt"),
-                "Disclosed edit requires explicit correction\n"
-            )
-            Check.Contains(
-                compatibility.Call([]string{"recover", "--run", failed}, 1).Error,
-                "Saved candidate patch changed"
-            )
-            Once(compatibility)
         }
 
         private func ForkIdentity(binary string) {
-            for v2 in[]bool{false, true} {
+            for v2 in[]bool{true} {
                 using let test = CoordinationFixture(binary)
                 let flow = test.Flow
                 var run string
-                if v2 {
-                    test.Initialize()
-                    run = ManagedRun(test, "staged_whitespace")
-                } else {
-                    flow.Initialize()
-                    flow.Approve()
-                    run = flow.Claim()
-                    flow.Mode("staged_whitespace")
-                    flow.Call([]string{"work", "--run", run}, 1)
-                }
+                test.Initialize()
+                run = ManagedRun(test, "staged_whitespace")
                 let original = Prepared(flow, run)
                 let commit = Correct(flow, run)
                 RepositoryFaults.Reject(
@@ -769,11 +708,9 @@ internal class CorrectionChecks {
                 )
                 Check.That(!File.Exists(Path.Combine(run, "correction.json")), "Fork refusal created a correction")
                 Recover(flow, run, commit)
-                flow.Call([]string{v2 ? "submit": "publish", "--run", run})
-                if v2 {
-                    flow.Reload()
-                    test.Coordinate(test.Event(Check.PostedRequest(flow.State)))
-                }
+                flow.Call([]string{"submit", "--run", run})
+                flow.Reload()
+                test.Coordinate(test.Event(Check.PostedRequest(flow.State)))
                 flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"}, owner: true)
                 Once(flow, 1)
             }
@@ -789,7 +726,7 @@ internal class CorrectionChecks {
             let original = Prepared(flow, run)
             let commit = Correct(flow, run)
             using let baseline = FixtureSnapshot(flow.Temp.Root)
-            for change in[]string{"approval", "template", "policy", "assignment", "branch", "fork"} {
+            for change in[]string{"approval", "template", "policy", "access", "branch", "fork"} {
                 baseline.Restore()
                 flow.Reload()
                 switch change {
@@ -810,11 +747,11 @@ internal class CorrectionChecks {
                         File.WriteAllText(path, policy.ToJsonString())
                         flow.Commit("Changed policy")
                     }
-                    case "assignment" {
-                        flow.Reload()
-                        let issue = flow.State["issue"] ?? throw Exception("Missing issue")
-                        issue["assignees"] = Check.Json("[{\"login\":\"other\"}]")
-                        flow.Save()
+                    case "access" {
+                        flow.Call(
+                            []string{"access", "--repo", "owner/project", "--operation", "deny", "--donor", "donor"},
+                            owner: true
+                        )
                     }
                     case "branch" {
                         let fork = Path.Combine(flow.Bin, "fork")
@@ -1252,103 +1189,66 @@ internal class CorrectionChecks {
             Once(flow, 1)
         }
 
-        private func CorrectedAmendmentsV1(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            flow.ProtectedPolicy()
-            flow.Approve()
-            let run = flow.Claim()
-            flow.Mode("staged_whitespace")
-            flow.Call([]string{"work", "--run", run}, 1)
-            let archive = Prepared(flow, run)
-            Recover(flow, run, Correct(flow, run))
-            AmendCorrected(flow, run, archive)
-        }
-
         private func DecreeEdits(binary string) {
-            for version in[]int32{1, 2} {
-                for legacy in[]bool{false, true} {
-                    using let test = DecreeFlow(binary, version)
-                    test.Initialize()
-                    test.Text("Approved owner instructions\n")
-                    test.Flow.Approve()
-                    if legacy {
-                        test.Legacy()
-                    }
-                    let run = test.Start()
-                    test.Flow.Mode("staged_whitespace")
-                    test.Flow.Call([]string{"work", "--run", run}, 1)
-                    let archive = Prepared(test.Flow, run)
-                    let original = File.ReadAllText(Path.Combine(run, "run.json"))
-                    let decree = Path.Combine(run, "checkout/DECREE.md")
-                    File.WriteAllText(decree, "Corrected instruction edit\n")
-                    var commit = Correct(test.Flow, run)
-                    if !legacy {
-                        Check.Contains(Recover(test.Flow, run, commit, 1).Error, "approved root DECREE.md")
-                        let refused = Read(run, "correction.json")
-                        Check.That(refused["verification"] == nil, "Protected correction reached verification")
-                        Check.That(
-                            Check.Text(refused["failure_stage"]) == "candidate_validation",
-                            "Protected correction passed candidate validation"
-                        )
-                        Check.That(
-                            File.ReadAllText(Path.Combine(run, "run.json")) == original,
-                            "Refused correction rewrote original run"
-                        )
-                        test.Flow.NoPr()
-                        File.WriteAllText(decree, "Approved owner instructions\n")
-                        commit = Correct(test.Flow, run)
-                    }
-                    Recover(test.Flow, run, commit)
-                    if let coordinator = test.V2 {
-                        test.Flow.Call([]string{"submit", "--run", run})
-                        test.Flow.Reload()
-                        let request = Check.PostedRequest(test.Flow.State)
-                        coordinator.Coordinate(coordinator.Event(request))
-                        test.Flow.Call([]string{"submit", "--run", run})
-                    }
-                    let saved = File.ReadAllText(Path.Combine(run, "run.json"))
-                    let correction = File.ReadAllText(Path.Combine(run, "correction.json"))
-                    let previous = Check.Text(Read(run)["commit"])
-                    File.WriteAllText(decree, "Amended instruction edit\n")
-                    commit = Correct(test.Flow, run, "Amendment with instruction edit\n")
-                    let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
-                    if legacy {
-                        test.Flow.Call(args)
-                        if let coordinator = test.V2 {
-                            test.Flow.Reload()
-                            let request = Check.PostedRequest(test.Flow.State)
-                            coordinator.Coordinate(coordinator.Event(request))
-                            test.Flow.Call(args)
-                        }
-                        test.Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", "10"})
-                    } else {
-                        Check.Contains(test.Flow.Call(args, 1).Error, "approved root DECREE.md")
-                        Check.That(
-                            !Directory.Exists(Path.Combine(run, "amendments", commit)),
-                            "Protected amendment reached verification"
-                        )
-                        Check.That(
-                            File.ReadAllText(Path.Combine(run, "run.json")) == saved,
-                            "Refused amendment rewrote saved run"
-                        )
-                        Check.That(
-                            File.ReadAllText(Path.Combine(run, "correction.json")) == correction,
-                            "Refused amendment changed correction evidence"
-                        )
-                        test.Flow.Reload()
-                        Check.That(
-                            Check.Text(test.Flow.State["pulls"]?[0]?["head"]?["sha"]) == previous,
-                            "Protected amendment published"
-                        )
-                    }
-                    Check.That(
-                        File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
-                        "Instruction edit changed original archive"
-                    )
-                    Once(test.Flow, 1)
-                }
-            }
+            using let test = DecreeFlow(binary, 2)
+            test.Initialize()
+            test.Text("Approved owner instructions\n")
+            test.Flow.Approve()
+            let run = test.Start()
+            test.Flow.Mode("staged_whitespace")
+            test.Flow.Call([]string{"work", "--run", run}, 1)
+            let archive = Prepared(test.Flow, run)
+            let original = File.ReadAllText(Path.Combine(run, "run.json"))
+            let decree = Path.Combine(run, "checkout/DECREE.md")
+            File.WriteAllText(decree, "Corrected instruction edit\n")
+            var commit = Correct(test.Flow, run)
+            Check.Contains(Recover(test.Flow, run, commit, 1).Error, "approved root DECREE.md")
+            let refused = Read(run, "correction.json")
+            Check.That(refused["verification"] == nil, "Protected correction reached verification")
+            Check.That(
+                Check.Text(refused["failure_stage"]) == "candidate_validation",
+                "Protected correction passed candidate validation"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "run.json")) == original,
+                "Refused correction rewrote original run"
+            )
+            test.Flow.NoPr()
+            File.WriteAllText(decree, "Approved owner instructions\n")
+            commit = Correct(test.Flow, run)
+            Recover(test.Flow, run, commit)
+            let coordinator = test.Coordination
+            test.Flow.Call([]string{"submit", "--run", run})
+            test.Flow.Reload()
+            let request = Check.PostedRequest(test.Flow.State)
+            coordinator.Coordinate(coordinator.Event(request))
+            test.Flow.Call([]string{"submit", "--run", run})
+            let saved = File.ReadAllText(Path.Combine(run, "run.json"))
+            let correction = File.ReadAllText(Path.Combine(run, "correction.json"))
+            let previous = Check.Text(Read(run)["commit"])
+            File.WriteAllText(decree, "Amended instruction edit\n")
+            commit = Correct(test.Flow, run, "Amendment with instruction edit\n")
+            let args = []string{"amend", "--run", run, "--commit", commit, "--seconds", "30"}
+            Check.Contains(test.Flow.Call(args, 1).Error, "approved root DECREE.md")
+            Check.That(
+                !Directory.Exists(Path.Combine(run, "amendments", commit)),
+                "Protected amendment reached verification"
+            )
+            Check.That(File.ReadAllText(Path.Combine(run, "run.json")) == saved, "Refused amendment rewrote saved run")
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "correction.json")) == correction,
+                "Refused amendment changed correction evidence"
+            )
+            test.Flow.Reload()
+            Check.That(
+                Check.Text(test.Flow.State["pulls"]?[0]?["head"]?["sha"]) == previous,
+                "Protected amendment published"
+            )
+            Check.That(
+                File.ReadAllText(Path.Combine(run, "original-evidence/manifest.json")) == archive,
+                "Instruction edit changed original archive"
+            )
+            Once(test.Flow, 1)
         }
 
         private func CorrectedAmendmentsV2(binary string) {
@@ -1367,91 +1267,40 @@ internal class CorrectionChecks {
             AmendCorrected(flow.Flow, run, archive, flow)
         }
 
-        private func Structured(binary string) {
-            using let flow = NativeFixture(binary)
-            flow.Initialize()
-            let policyPath = Path.Combine(flow.Upstream, ".github/tokate.json")
-            let policy = Check.Json(File.ReadAllText(policyPath))
-            policy["verification"] = Check.Json("[[\"/bin/sh\",\"-c\",\"test -s result.txt\"]]")
-            File.WriteAllText(policyPath, policy.ToJsonString())
-            flow.Commit("Correction JSON checks")
-            flow.Git("-C", flow.Upstream, "push", Path.Combine(flow.Bin, "fork"), "main")
-            flow.Approve()
-            let run = flow.Claim()
-            flow.Mode("staged_whitespace")
-            Check.Contains(flow.Call([]string{"work", "--run", run}, 1).Error, "trailing whitespace")
-            let original = File.ReadAllText(Path.Combine(run, "run.json"))
-            let prepared = Check.Envelope(
-                flow.Call([]string{"recover", "--run", run, "--prepare", "--json"}),
-                "recover",
-                "ok"
-            )
-            Check.That(
-                Check.Text(prepared["data"]?["artifacts"]?["original_evidence"]) == Path.Combine(
-                    run,
-                    "original-evidence"
-                ),
-                "Prepared JSON lost original artifact"
-            )
-            let failedCommit = Correct(flow, run, "")
-            let failed = Check.Envelope(
-                flow.Call([]string{"recover", "--run", run, "--commit", failedCommit, "--seconds", "30", "--json"}, 1),
-                "recover",
-                "error",
-                "verification_failed"
-            )
-            Check.That(
-                Check.Text(failed["data"]?["run_state"]?["correction"]?["state"]) == "failed",
-                "JSON correction lost failed attempt"
-            )
-            let commit = Correct(flow, run)
-            let published = Check.Envelope(
-                flow.Call([]string{"recover", "--run", run, "--commit", commit, "--seconds", "30", "--json"}),
-                "recover",
-                "ok"
-            )
-            Check.That(
-                Check.Text(published["data"]?["commit"]) == commit && Check.Text(
-                    published["data"]?["correction"]?["commit"]
-                ) == commit,
-                "JSON correction lost exact head"
-            )
-            Check.That(
-                File.ReadAllText(Path.Combine(run, "original-evidence/run.json")) == original,
-                "JSON correction changed original"
-            )
-            Once(flow, 1)
-        }
-
         internal func All(binary string, selected string = "") {
             var matched bool
-            for name in[]string{
-                "DecreeEdits",
-                "Structured",
-                "CorrectedAmendmentsV1",
-                "CorrectedAmendmentsV2",
-                "Whitespace",
-                "BinaryRename",
-                "FirstVerification",
-                "OriginalTimeout",
-                "WrongTarget",
-                "Tools",
-                "Refusals",
-                "Incomplete",
-                "ProtectedAndExact",
-                "InterruptedNative",
-                "ManagedAbsent",
-                "Managed",
-                "InterruptedManaged",
-                "PublicationResponses",
-                "PublicationOutcomes",
-                "ChangedCandidate",
-                "LegacyAndArchive",
-                "AuthorityChanges",
-                "ForkIdentity",
-                "ManagedRefusals",
-                "InterruptedVerification"
+            for test in[]TestCase[string]{
+                TestCase[string]("DecreeEdits", async (value string) -> DecreeEdits(value)),
+                TestCase[string]("CorrectedAmendmentsV2", async (value string) -> CorrectedAmendmentsV2(value)),
+                TestCase[string]("Whitespace", async (value string) -> Whitespace(value)),
+                TestCase[string]("BinaryRename", async (value string) -> BinaryRename(value)),
+                TestCase[string]("FirstVerification", async (value string) -> FirstVerification(value)),
+                TestCase[string]("OriginalTimeout", async (value string) -> OriginalTimeout(value)),
+                TestCase[string]("WrongTarget", async (value string) -> WrongTarget(value)),
+                TestCase[string]("Tools", async (value string) -> Tools(value)),
+                TestCase[string]("Refusals", async (value string) -> Refusals(value)),
+                TestCase[string]("Incomplete", async (value string) -> Incomplete(value)),
+                TestCase[string]("ProtectedAndExact", async (value string) -> ProtectedAndExact(value)),
+                TestCase[string](
+                    "ManagedAbsent",
+                    async (value string) -> {
+                        for mode in[]string{"whitelist", "unrestricted"} {
+                            Managed(value, mode)
+                        }
+                    }
+                ),
+                TestCase[string]("Managed", async (value string) -> Managed(value)),
+                TestCase[string]("InterruptedManaged", async (value string) -> InterruptedManaged(value)),
+                TestCase[string]("PublicationResponses", async (value string) -> PublicationResponses(value)),
+                TestCase[string]("PublicationOutcomes", async (value string) -> PublicationOutcomes(value)),
+                TestCase[string]("ChangedCandidate", async (value string) -> ChangedCandidate(value)),
+                TestCase[string]("ArchiveTampering", async (value string) -> ArchiveTampering(value)),
+                TestCase[string]("AuthorityChanges", async (value string) -> AuthorityChanges(value)),
+                TestCase[string]("ForkIdentity", async (value string) -> ForkIdentity(value)),
+                TestCase[string]("ManagedRefusals", async (value string) -> ManagedRefusals(value)),
+                TestCase[string]("InterruptedVerification", async (value string) -> InterruptedVerification(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
@@ -1459,85 +1308,7 @@ internal class CorrectionChecks {
                 if !CiShard.Include("Correction/" + name) {
                     continue
                 }
-                switch name {
-                    case "DecreeEdits" {
-                        DecreeEdits(binary)
-                    }
-                    case "Structured" {
-                        Structured(binary)
-                    }
-                    case "CorrectedAmendmentsV1" {
-                        CorrectedAmendmentsV1(binary)
-                    }
-                    case "CorrectedAmendmentsV2" {
-                        CorrectedAmendmentsV2(binary)
-                    }
-                    case "Whitespace" {
-                        Whitespace(binary)
-                    }
-                    case "BinaryRename" {
-                        BinaryRename(binary)
-                    }
-                    case "FirstVerification" {
-                        FirstVerification(binary)
-                    }
-                    case "OriginalTimeout" {
-                        OriginalTimeout(binary)
-                    }
-                    case "WrongTarget" {
-                        WrongTarget(binary)
-                    }
-                    case "Tools" {
-                        Tools(binary)
-                    }
-                    case "Refusals" {
-                        Refusals(binary)
-                    }
-                    case "Incomplete" {
-                        Incomplete(binary)
-                    }
-                    case "ProtectedAndExact" {
-                        ProtectedAndExact(binary)
-                    }
-                    case "InterruptedNative" {
-                        InterruptedNative(binary)
-                    }
-                    case "ManagedAbsent" {
-                        for mode in[]string{"whitelist", "unrestricted"} {
-                            Managed(binary, mode)
-                        }
-                    }
-                    case "Managed" {
-                        Managed(binary)
-                    }
-                    case "PublicationOutcomes" {
-                        PublicationOutcomes(binary)
-                    }
-                    case "PublicationResponses" {
-                        PublicationResponses(binary)
-                    }
-                    case "InterruptedManaged" {
-                        InterruptedManaged(binary)
-                    }
-                    case "ChangedCandidate" {
-                        ChangedCandidate(binary)
-                    }
-                    case "LegacyAndArchive" {
-                        LegacyAndArchive(binary)
-                    }
-                    case "ForkIdentity" {
-                        ForkIdentity(binary)
-                    }
-                    case "AuthorityChanges" {
-                        AuthorityChanges(binary)
-                    }
-                    case "ManagedRefusals" {
-                        ManagedRefusals(binary)
-                    }
-                    case "InterruptedVerification" {
-                        InterruptedVerification(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS correction " + name)
             }
             Check.That(matched, "Unknown correction selector: " + selected)

@@ -24,10 +24,12 @@ func Main(args[]string) int32 {
         }
         options = Args(args)
         traffic = options.Get("traffic") == "true"
+        Cli.Validate(options, guided: DonorSelection.Interactive(options))
+        GuidedWork.Fill(options)
         Cli.Validate(options)
         validated = true
         PublicOutput.Command = options.Command
-        if options.Get("run") != "" && options.Command != "repair" {
+        if options.Get("run") != "" {
             PublicOutput.RunDirectory = Path.GetFullPath(options.Need("run"))
             PublicOutput.FailureCode = "invalid_state"
         }
@@ -44,6 +46,8 @@ func Main(args[]string) int32 {
             )
         }
     } catch (error Exception) {
+        DonationView.Close()
+        WizardScreen.Close()
         exitCode = 1
         code = !validated ? "invalid_arguments": PublicOutput.FailureCode
         if error is CliFailure failure {
@@ -61,6 +65,8 @@ func Main(args[]string) int32 {
             Terminal.Message(Cli.ErrorUsage(args), error: true)
         }
     } finally {
+        DonationView.Close()
+        WizardScreen.Close()
         if traffic {
             ApiTransport.Report()
         }
@@ -117,139 +123,153 @@ func Dispatch(options Args) int32 {
         DonorSelection.ApplyDefaults(options)
         Startup.Check(options)
     }
-    if options.Command == "doctor" {
-        return Startup.Doctor(options)
-    } else if options.Command == "defaults" {
-        let value = DonorDefaults.Run(options)
-        if PublicOutput.Enabled {
-            PublicOutput.ResultData = value
-        } else {
-            Terminal.Json(value, "Donor defaults")
+    switch options.Command {
+        case "doctor" {
+            return Startup.Doctor(options)
         }
-    } else if options.Command == "select" {
-        let repo = RepositoryIdentity.Repo(options.Need("repo"))
-        let info = GitHub.Api("repos/" + repo)
-        let selection = DonorSelection.Resolve(options, Policy.Load(repo, J.Text(info, "default_branch")))
-        if PublicOutput.Enabled {
-            PublicOutput.ResultData = PublicOutput.Select(
-                selection,
-                "harness,provider,model,effort,source,policy_hash,policy_eligible,capability,availability,availability_evidence"
-            )
-        } else {
-            Terminal.Json(selection, "Donor selection")
-        }
-    } else if options.Command == "init" {
-        OwnerSetup.Run(options)
-    } else if options.Command == "coordinator-setup" {
-        CoordinatorSetup.Run(options)
-        PublicOutput.ResultData = map[string, Object?]{
-            "repo": options.Get("repo"),
-            "output": Path.GetFullPath(options.Need("output"))
-        }
-    } else if options.Command == "access" {
-        AccessState.Run(options)
-    } else if options.Command == "coordinate" {
-        Coordinator.Run(options)
-    } else if options.Command == "admit" {
-        Admission.Run(options)
-    } else if options.Command == "coordination" {
-        let state = CoordinationState.Load(RepositoryIdentity.Repo(options.Need("repo")), options.Number("issue"))
-        if PublicOutput.Enabled {
-            PublicOutput.ResultData = PublicOutput.Coordination(state.Value(), state.Sha)
-        } else {
-            Terminal.Json(
-                J.Parse(J.Write(map[string, Object?]{"sha": state.Sha, "state": state.Value()})),
-                "Contribution coordination"
-            )
-        }
-    } else if options.Command == "request" {
-        Submission.Request(options)
-    } else if options.Command == "prepare" {
-        let directory = V2Preparation.Prepare(options)
-        if Data.Load(directory).Text("state") == "claim_pending" {
-            return 8
-        }
-    } else if options.Command == "external" {
-        ExternalContribution.External(options)
-    } else if options.Command == "reconcile" {
-        Reconciliation.Run(options)
-        return 0
-    } else if options.Command == "authorize-sync" {
-        Synchronization.Authorize(options)
-    } else if options.Command == "revoke-sync" {
-        Synchronization.Revoke(options)
-    } else if options.Command == "amend" {
-        Amendment.Run(options)
-    } else if options.Command == "repair" {
-        Repair.Run(options)
-    } else if options.Command == "submit" {
-        Submission.Submit(options)
-    } else if options.Command == "approve" || options.Command == "assign" {
-        OwnerApproval.Approve(options)
-    } else if options.Command == "revoke" {
-        OwnerApproval.Revoke(options)
-    } else if options.Command == "claim" {
-        let directory = V2Preparation.Acquire(options)
-        if Data.Load(directory).Text("state") == "claim_pending" {
-            return 8
-        }
-    } else if options.Command == "work" {
-        let directory = options.Get("run") == "" ? V2Preparation.Acquire(options): Path.GetFullPath(options.Need("run"))
-        PublicOutput.RunDirectory = directory
-        if Data.Load(directory).Text("state") == "claim_pending" {
-            if options.Get("run") != "" {
-                V2Preparation.ResumePending(directory, options)
+        case "defaults" {
+            let value = DonorDefaults.Run(options)
+            if PublicOutput.Enabled {
+                PublicOutput.ResultData = value
+            } else {
+                Terminal.Json(value, "Donor defaults")
             }
+        }
+        case "select" {
+            let repo = RepositoryIdentity.Repo(options.Need("repo"))
+            let info = GitHub.Api("repos/" + repo)
+            let selection = DonorSelection.Resolve(options, Policy.Load(repo, J.Text(info, "default_branch")))
+            if PublicOutput.Enabled {
+                PublicOutput.ResultData = J.Select(
+                    selection,
+                    "harness,provider,model,effort,source,policy_hash,policy_eligible,capability,availability,availability_evidence"
+                )
+            } else {
+                Terminal.Json(selection, "Donor selection")
+            }
+        }
+        case "init" {
+            OwnerSetup.Run(options)
+        }
+        case "coordinator-setup" {
+            CoordinatorSetup.Run(options)
+            PublicOutput.ResultData = map[string, Object?]{
+                "repo": options.Get("repo"),
+                "output": Path.GetFullPath(options.Need("output"))
+            }
+        }
+        case "access" {
+            AccessState.Run(options)
+        }
+        case "coordinate" {
+            Coordinator.Run(options)
+        }
+        case "admit" {
+            Admission.Run(options)
+        }
+        case "coordination" {
+            let state = CoordinationState.Load(RepositoryIdentity.Repo(options.Need("repo")), options.Number("issue"))
+            if PublicOutput.Enabled {
+                PublicOutput.ResultData = PublicOutput.Coordination(state.Value(), state.Sha)
+            } else {
+                Terminal.Json(
+                    J.Parse(J.Write(map[string, Object?]{"sha": state.Sha, "state": state.Value()})),
+                    "Contribution coordination"
+                )
+            }
+        }
+        case "request" {
+            Submission.Request(options)
+        }
+        case "prepare" {
+            let directory = ContributionPreparation.Prepare(options)
             if Data.Load(directory).Text("state") == "claim_pending" {
                 return 8
             }
         }
-        let ready = Data.Load(directory)
-        if ready.Number("version") == 2 {
+        case "external" {
+            ExternalContribution.External(options)
+        }
+        case "reconcile" {
+            Reconciliation.Run(options)
+            return 0
+        }
+        case "authorize-sync" {
+            Synchronization.Authorize(options)
+        }
+        case "revoke-sync" {
+            Synchronization.Revoke(options)
+        }
+        case "amend" {
+            Amendment.Run(options)
+        }
+        case "submit" {
+            Submission.Submit(options)
+        }
+        case "approve" {
+            OwnerApproval.Approve(options)
+        }
+        case "revoke" {
+            OwnerApproval.Revoke(options)
+        }
+        case "claim" {
+            let directory = ContributionPreparation.Acquire(options)
+            if Data.Load(directory).Text("state") == "claim_pending" {
+                return 8
+            }
+        }
+        case "work" {
+            let directory = options.Get("run") == "" ? ContributionPreparation.Acquire(options): Path.GetFullPath(
+                options.Need("run")
+            )
+            PublicOutput.RunDirectory = directory
+            if Data.Load(directory).Text("state") == "claim_pending" {
+                if options.Get("run") != "" {
+                    ContributionPreparation.ResumePending(directory, options)
+                }
+                if Data.Load(directory).Text("state") == "claim_pending" {
+                    return 8
+                }
+            }
+            let ready = Data.Load(directory)
             Overlaps.RequireDependencies(ready.Text("repo"), ready.Number("issue"))
-        }
-        Worker.Execute(directory, options)
-        PublicOutput.FailureCode = "command_failed"
-        if Data.Load(directory).Number("version") == 2 {
-            Submission.Commit(directory)
-        } else {
-            Publication.Publish(directory)
-        }
-    } else if options.Command == "recover" {
-        let directory = Path.GetFullPath(options.Need("run"))
-        if options.Get("prepare") == "true" || options.Get("commit") != "" {
-            Correction.Recover(options)
-        } else {
-            Recovery.Run(directory, options.Number("seconds", "300"))
+            Worker.Execute(directory, options)
             PublicOutput.FailureCode = "command_failed"
-            Publication.Publish(directory)
+            Submission.Commit(directory)
         }
-    } else if options.Command == "publish" {
-        Publication.Publish(Path.GetFullPath(options.Need("run")))
-    } else if options.Command == "overlaps" {
-        Overlaps.Run(options)
-    } else if options.Command == "checks" {
-        return Checks.Run(options)
-    } else if options.Command == "policy" {
-        let repo = RepositoryIdentity.Repo(options.Need("repo"))
-        let info = GitHub.Api("repos/" + repo)
-        let value = Policy.Load(repo, J.Text(info, "default_branch")).Value
-        if PublicOutput.Enabled {
-            PublicOutput.ResultData = map[string, Object?]{"repo": repo, "policy": PublicOutput.Policy(value)}
-        } else {
-            Terminal.Json(value, "Repository policy")
+        case "recover" {
+            Correction.Recover(options)
         }
-    } else if options.Command == "verify-pr" {
-        let run = ReceiptVerification.Verify(RepositoryIdentity.Repo(options.Need("repo")), options.Number("pr"))
-        PublicOutput.ResultData = PublicOutput.Select(run.Element(), "repo,pr,pr_url,commit")
-        Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
-    } else if options.Command == "status" && options.Get("run") == "" {
-        ContributionStatus.Run(options)
-    } else if options.Command == "status" && !PublicOutput.Enabled {
-        let summary = PublicOutput.RunSummary(Path.GetFullPath(options.Need("run")))
-        summary["truncated"] = PublicOutput.Truncated
-        PublicOutput.Next(options, "")
-        Terminal.SavedRun(J.Parse(J.Write(summary)))
+        case "overlaps" {
+            Overlaps.Run(options)
+        }
+        case "checks" {
+            return Checks.Run(options)
+        }
+        case "policy" {
+            let repo = RepositoryIdentity.Repo(options.Need("repo"))
+            let info = GitHub.Api("repos/" + repo)
+            let value = Policy.Load(repo, J.Text(info, "default_branch")).Value
+            if PublicOutput.Enabled {
+                PublicOutput.ResultData = map[string, Object?]{"repo": repo, "policy": PublicOutput.Policy(value)}
+            } else {
+                Terminal.Json(value, "Repository policy")
+            }
+        }
+        case "verify-pr" {
+            let run = ReceiptVerification.Verify(RepositoryIdentity.Repo(options.Need("repo")), options.Number("pr"))
+            PublicOutput.ResultData = J.Select(run.Element(), "repo,pr,pr_url,commit")
+            Terminal.Message("PR receipt matches owner approval and policy. Model usage remains donor-reported.")
+        }
+        case "status" when options.Get("run") == "" {
+            ContributionStatus.Run(options)
+        }
+        case "status" when !PublicOutput.Enabled {
+            let summary = PublicOutput.RunSummary(Path.GetFullPath(options.Need("run")))
+            summary["truncated"] = PublicOutput.Truncated
+            PublicOutput.Next(options, "")
+            Terminal.SavedRun(J.Parse(J.Write(summary)))
+        }
     }
     if PublicOutput.Enabled && PublicOutput.RunDirectory != "" {
         PublicOutput.ResultData = PublicOutput.RunSummary(PublicOutput.RunDirectory)

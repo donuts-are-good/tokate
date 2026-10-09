@@ -8,19 +8,54 @@ import System.Runtime.ExceptionServices
 internal class Installation {
     shared {
         internal func Run(command string) int32 {
-            let info = ProcessStartInfo("/bin/sh")
+            if MachineSetup.NixManaged() {
+                throw CliFailure(
+                    "invalid_state",
+                    "Nix manages this installation. Use nix profile upgrade/remove or update your NixOS configuration."
+                )
+            }
+            return Execute(
+                LocalPaths.NeedSystemTool("sh"),
+                []string{"-s", "--", command, Environment.ProcessPath ?? ""},
+                ApplicationInfo.Resource("install.sh")
+            )
+        }
+
+        internal func Execute(
+            executable string,
+            args[]string,
+            input string? = nil,
+            capture bool = false,
+            pathVariables[]string = nil
+        ) int32 {
+            let info = ProcessStartInfo(executable)
             info.UseShellExecute = false
-            info.RedirectStandardInput = true
-            info.RedirectStandardOutput = PublicOutput.Enabled
-            info.RedirectStandardError = PublicOutput.Enabled
-            info.ArgumentList.Add("-s")
-            info.ArgumentList.Add("--")
-            info.ArgumentList.Add(command)
-            info.ArgumentList.Add(Environment.ProcessPath ?? "")
+            info.RedirectStandardInput = input != nil
+            info.RedirectStandardOutput = PublicOutput.Enabled || capture
+            info.RedirectStandardError = PublicOutput.Enabled || capture
+            for arg in args {
+                info.ArgumentList.Add(arg)
+            }
             info.Environment.Clear()
-            for key in[]string{"HOME", "PATH", "SHELL", "LANG", "ZDOTDIR", "XDG_CONFIG_HOME", "TMPDIR"} {
+            for key in[]string{
+                "HOME",
+                "PATH",
+                "SHELL",
+                "LANG",
+                "TERM",
+                "ZDOTDIR",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "TMPDIR"
+            } {
                 if let value = Environment.GetEnvironmentVariable(key) {
                     info.Environment[key] = value
+                }
+            }
+            for key in pathVariables ?? []string{} {
+                let path = Environment.GetEnvironmentVariable(key) ?? ""
+                if path != "" {
+                    info.Environment[key] = LocalPaths.RuntimePath(path)
                 }
             }
             let started = Chan[Process?](1)
@@ -34,6 +69,17 @@ internal class Installation {
                 throw <-exited ?? Exception("Cannot start the installer")
             }
             using let process = launched
+            let cancel = ConsoleCancelEventHandler(
+                (sender Object?, event ConsoleCancelEventArgs) -> {
+                    event.Cancel = true
+                    try {
+                        if !process.HasExited {
+                            process.Kill(true)
+                        }
+                    } catch (failure Exception) { }
+                }
+            )
+            Console.CancelKeyPress += cancel
             var outputStarted bool
             var errorStarted bool
             var exitDone bool
@@ -49,8 +95,10 @@ internal class Installation {
                     go Commands.Read(process.StandardError, error, failed)
                     errorStarted = true
                 }
-                process.StandardInput.Write(ApplicationInfo.Resource("install.sh"))
-                process.StandardInput.Close()
+                if input != nil {
+                    process.StandardInput.Write(input)
+                    process.StandardInput.Close()
+                }
                 select {
                     case let failure = <- exited {
                         terminal = failure
@@ -63,6 +111,7 @@ internal class Installation {
             } catch (failure Exception) {
                 terminal = failure
             } finally {
+                Console.CancelKeyPress -= cancel
                 try {
                     if !process.HasExited {
                         try {
@@ -78,7 +127,9 @@ internal class Installation {
                     terminal = terminal ?? failure
                 }
                 try {
-                    process.StandardInput.Close()
+                    if info.RedirectStandardInput {
+                        process.StandardInput.Close()
+                    }
                 } catch (failure Exception) {
                     terminal = terminal ?? failure
                 }

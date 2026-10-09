@@ -122,14 +122,16 @@ internal class PreparationChecks {
                     "--model",
                     "gpt-6.1-sol",
                     "--effort",
-                    "high"
+                    "high",
+                    "--seconds",
+                    "30"
                 }
                 let success = mode == "renamed" || mode == "explicit"
                 if mode == "explicit" {
                     args.AddRange([]string{"--fork", "donor/custom"})
                 }
                 args.AddRange([]string{"--runs", Path.Combine(flow.Temp.Root, "runs")})
-                flow.Call(args.ToArray(), success ? 0: 1)
+                flow.Acquire(args.ToArray(), success ? 0: 1)
                 if success {
                     let saved = Check.Json(File.ReadAllText(Path.Combine(RunPath(flow), "run.json")))
                     Check.That(
@@ -181,13 +183,8 @@ internal class PreparationChecks {
             File.WriteAllText(Path.Combine(flow.Upstream, "donor-dirty.txt"), "private donor work")
             let base = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD")
             let tree = flow.Git("-C", flow.Upstream, "rev-parse", "HEAD^{tree}")
-            let unrelated = flow.Git(
-                "-C",
+            let unrelated = flow.DonorGit(
                 flow.Upstream,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
                 "commit-tree",
                 tree,
                 "-p",
@@ -268,21 +265,6 @@ internal class PreparationChecks {
         }
 
         private func Ownership(binary string) {
-            using let v1 = NativeFixture(binary)
-            v1.Initialize()
-            v1.ApproveSelf()
-            let claimed = v1.SameRepositoryClaim()
-            let index = claimed.Output.LastIndexOf("Run: ")
-            Check.That(index >= 0, "Owner v1 preparation failed")
-            let directory = claimed.Output.Substring(index + 5).Trim()
-            let path = Path.Combine(directory, "run.json")
-            let saved = Check.Json(File.ReadAllText(path))
-            saved.AsObject().Remove("preparation_version")
-            saved.AsObject().Remove("preparation_identity")
-            File.WriteAllText(path, saved.ToJsonString())
-            let old = File.ReadAllText(path)
-            Resume(v1, directory, 1)
-            Check.That(File.ReadAllText(path) == old, "Old v1 record was migrated")
             for owner in[]bool{true, false} {
                 using let test = CoordinationFixture(binary)
                 test.Initialize(false)
@@ -392,13 +374,13 @@ internal class PreparationChecks {
             Resume(external.Flow, directory, 1)
             Check.That(File.ReadAllText(path) == original, "Old v2 run was migrated")
             let commit = external.Candidate(claim)
-            external.Flow.Call([]string{"external", "--run", directory, "--commit", commit})
+            external.Flow.Call([]string{"external", "--run", directory, "--commit", commit}, 1)
             external.Flow.NoInference()
             external.Flow.NoPr()
         }
 
         private func LinkedControls(binary string) {
-            for v2 in[]bool{false, true} {
+            for v2 in[]bool{true} {
                 using let test = CoordinationFixture(binary)
                 let flow = test.Flow
                 var run string
@@ -435,12 +417,10 @@ internal class PreparationChecks {
                             "work",
                             "external",
                             "submit",
-                            "publish",
                             "recover",
                             "correction",
                             "amend",
                             "submit-correction",
-                            "publish-correction"
                         } {
                             let corrected = command.EndsWith("-correction")
                             if corrected {
@@ -450,7 +430,7 @@ internal class PreparationChecks {
                                 command == "correction" ? "recover": command
                             )
                             let args = List[string]{name, "--run", run}
-                            if command == "correction" {
+                            if command == "correction" || command == "recover" {
                                 args.Add("--prepare")
                             }
                             if command == "external" || command == "amend" {
@@ -682,6 +662,29 @@ internal class PreparationChecks {
             )
             flow.Reload()
             let comment = flow.State["request_comments"]?.AsArray()[0] ?? throw Exception("Missing posted claim")
+            let body = Check.Text(comment["body"])
+            Check.That(body.StartsWith("/tokate claim\n"), "Claim did not expose its action")
+            Check.Contains(body, "Pending coordinator review.")
+            Check.Contains(body, "Requested by the author of this comment.")
+            Check.Contains(body, "<summary>Coordination data</summary>")
+            Check.Contains(body, "`tokate status`")
+            let id = Check.Text(comment["id"])
+            for changed in[]string{
+                body.Replace("Pending coordinator review.", "Reservation accepted."),
+                body.Replace("/tokate claim\n", "/tokate publish\n"),
+                body + "\nExtra request",
+                body.Replace("\n```\n</details>", " trailing\n```\n</details>")
+            } {
+                comment["body"] = JsonValue.Create(changed)
+                flow.Reload()
+                (flow.State["comments"] ?? throw Exception("Missing comments"))[id] = comment.DeepClone()
+                flow.Save()
+                test.Coordinate(PostedEvent(test, comment), 1)
+            }
+            comment["body"] = JsonValue.Create(body)
+            flow.Reload()
+            (flow.State["comments"] ?? throw Exception("Missing comments"))[id] = comment.DeepClone()
+            flow.Save()
             test.Coordinate(PostedEvent(test, comment))
             flow.Call([]string{"work", "--run", run})
             let saved = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
@@ -816,66 +819,95 @@ internal class PreparationChecks {
             test.Flow.NoPr()
         }
 
+        private func Guided(binary string) {
+            using let test = CoordinationFixture(binary)
+            test.Initialize()
+            let flow = test.Flow
+            flow.Temp.Env["TERM"] = "dumb"
+            flow.Temp.Env["NO_COLOR"] = "1"
+            flow.Call([]string{"defaults", "set", "--profile", "ready", "--model", "gpt-6.1-sol", "--effort", "high"})
+            flow.Call(
+                []string{"defaults", "set", "--profile", "rejected", "--model", "not-allowed", "--effort", "high"}
+            )
+            flow.Temp.Env["XDG_STATE_HOME"] = Path.Combine(flow.Temp.Root, "new state")
+            let runRoot = Path.Combine(flow.Temp.Env["XDG_STATE_HOME"], "tokate/runs")
+            let args = []string{"work", "owner/project"}
+            let cancelled = TestTerminal.Pty(binary, args, flow.Temp, 80, "q\n")
+            Check.That(cancelled.Code == 1, cancelled.Output + cancelled.Error)
+            Check.Contains(cancelled.Output, "Choose an issue")
+            Check.Contains(cancelled.Output, "Cancelled")
+            let declined = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
+            Check.That(declined.Code == 1, declined.Output + declined.Error)
+            Check.Contains(declined.Output, "Review donation")
+            Check.Contains(declined.Output, "owner/project #1")
+            Check.Contains(declined.Output, "1 minutes")
+            Check.Contains(declined.Output, "Project commands offline")
+            Check.Contains(declined.Output, "Cancelled")
+            Check.That(!declined.Output.Contains("rejected |"), "Guided menu offered an owner-rejected profile")
+            flow.Reload()
+            Check.That(
+                flow.State["request_count"] == nil && flow.State["fork_creations"] == nil,
+                "Cancelled wizard wrote remotely"
+            )
+            Check.That(!Directory.Exists(runRoot), "Cancelled wizard created a run")
+            flow.NoInference()
+            let owner = TestTerminal.Pty(binary, []string{}, flow.Temp, 60, "2\nq\n")
+            Check.Success(owner)
+            Check.Contains(owner.Output, "Project")
+            Check.That(
+                !Directory.Exists(Path.Combine(flow.Temp.Root, ".github")),
+                "Cancelled owner setup wrote configuration"
+            )
+            flow.Call([]string{"work", "owner/project", "--non-interactive"}, 1)
+            flow.Call([]string{"work", "owner/project", "--json"}, 1)
+            let accepted = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\n1\n")
+            Check.That(accepted.Code == 8, accepted.Output + accepted.Error)
+            let runs = Directory.GetDirectories(runRoot)
+            Check.That(runs.Length == 1, "Guided claim did not use the selected state root")
+            let run = runs[0]
+            let pending = Check.Json(File.ReadAllText(Path.Combine(run, "run.json")))
+            Check.That(Check.Text(pending["state"]) == "claim_pending", "Guided work lost pending state")
+            Check.That(
+                Check.Text(pending["seconds"]) == "120" && Check.Text(pending["verification_reserve"]) == "60",
+                "Guided budget changed"
+            )
+            flow.Reload()
+            let comment = flow.State["request_comments"]?[0] ?? throw Exception("Missing guided claim")
+            Check.That(Check.Text(flow.State["request_count"]) == "1", "Guided work posted more than once")
+            flow.NoInference()
+            test.Coordinate(PostedEvent(test, comment))
+            let unavailable = TestTerminal.Pty(binary, args, flow.Temp, 40, "1\n1\n1\n1\n1\n")
+            Check.That(unavailable.Code == 1, unavailable.Output + unavailable.Error)
+            Check.Contains(
+                unavailable.Output.Replace("\r\n", " ").Replace("\n", " "),
+                "An unexpired reservation already owns"
+            )
+            flow.NoInference()
+            flow.NoPr()
+        }
+
         internal func All(binary string, selected string = "") {
-            for name in[]string{
-                "Acquisition",
-                "PendingClaim",
-                "ClaimGates",
-                "PendingAuthority",
-                "ClaimRecovery",
-                "Creation",
-                "Selection",
-                "Interruptions",
-                "Preservation",
-                "External",
-                "Ownership",
-                "Authority",
-                "LinkedControls"
+            for test in[]TestCase[string]{
+                TestCase[string]("Guided", async (value string) -> Guided(value)),
+                TestCase[string]("Acquisition", async (value string) -> Acquisition(value)),
+                TestCase[string]("PendingClaim", async (value string) -> PendingClaim(value)),
+                TestCase[string]("ClaimGates", async (value string) -> ClaimGates(value)),
+                TestCase[string]("PendingAuthority", async (value string) -> PendingAuthority(value)),
+                TestCase[string]("ClaimRecovery", async (value string) -> ClaimRecovery(value)),
+                TestCase[string]("Creation", async (value string) -> Creation(value)),
+                TestCase[string]("Selection", async (value string) -> Selection(value)),
+                TestCase[string]("Interruptions", async (value string) -> Interruptions(value)),
+                TestCase[string]("Preservation", async (value string) -> Preservation(value)),
+                TestCase[string]("External", async (value string) -> External(value)),
+                TestCase[string]("Ownership", async (value string) -> Ownership(value)),
+                TestCase[string]("Authority", async (value string) -> Authority(value)),
+                TestCase[string]("LinkedControls", async (value string) -> LinkedControls(value))
             } {
+                let name = test.Name
                 if selected != "" && selected != name {
                     continue
                 }
-                switch name {
-                    case "Acquisition" {
-                        Acquisition(binary)
-                    }
-                    case "PendingClaim" {
-                        PendingClaim(binary)
-                    }
-                    case "ClaimGates" {
-                        ClaimGates(binary)
-                    }
-                    case "PendingAuthority" {
-                        PendingAuthority(binary)
-                    }
-                    case "ClaimRecovery" {
-                        ClaimRecovery(binary)
-                    }
-                    case "Creation" {
-                        Creation(binary)
-                    }
-                    case "Selection" {
-                        Selection(binary)
-                    }
-                    case "Interruptions" {
-                        Interruptions(binary)
-                    }
-                    case "Preservation" {
-                        Preservation(binary)
-                    }
-                    case "External" {
-                        External(binary)
-                    }
-                    case "Ownership" {
-                        Ownership(binary)
-                    }
-                    case "LinkedControls" {
-                        LinkedControls(binary)
-                    }
-                    case "Authority" {
-                        Authority(binary)
-                    }
-                }
+                test.Run(binary)
                 Console.WriteLine("PASS preparation " + name)
             }
         }

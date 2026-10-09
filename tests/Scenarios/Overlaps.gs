@@ -21,11 +21,7 @@ internal class OverlapFlow : IDisposable {
 
     internal func Initialize(layout string) {
         let version = Version
-        if version == 2 {
-            Test.Initialize()
-        } else {
-            Flow.Initialize()
-        }
+        Test.Initialize()
         File.WriteAllText(Path.Combine(Flow.Upstream, "old.txt"), "Original rename endpoint\n")
         Flow.Commit("Original source")
         Flow.Git("-C", Flow.Bin + "/fork", "fetch", Flow.Upstream, "main")
@@ -58,38 +54,21 @@ internal class OverlapFlow : IDisposable {
             Test.Issue = issue
             let target = layout == "targets" && issue == 2 ? "release": "main"
             Flow.Call(
-                []string{
-                    "approve",
-                    "--repo",
-                    "owner/project",
-                    "--issue",
-                    issue.ToString(),
-                    "--donor",
-                    "donor",
-                    "--base-branch",
-                    target
-                },
+                []string{"approve", "--repo", "owner/project", "--issue", issue.ToString(), "--base-branch", target},
                 owner: true
             )
             var approval JsonNode
             var revision string
             var claim JsonNode? = nil
-            if version == 2 {
-                let state = Test.State()
-                approval = state["state"]?["approval"] ?? throw Exception("Missing approval")
-                revision = Check.Text(state["state"]?["approval_id"])
-                claim = Test.ClaimRequest()
-                Test.Coordinate(Test.Event(claim))
-                Claims.Add(claim)
-            } else {
-                revision = Flow.Git("-C", Flow.Upstream, "rev-parse", "tokate/approvals/" + issue.ToString())
-                approval = Check.Json(Flow.Git("-C", Flow.Upstream, "show", revision + ":.github/tokate-approval.json"))
-            }
+            let state = Test.State()
+            approval = state["state"]?["approval"] ?? throw Exception("Missing approval")
+            revision = Check.Text(state["state"]?["approval_id"])
+            claim = Test.ClaimRequest()
+            Test.Coordinate(Test.Event(claim))
+            Claims.Add(claim)
             let base = Check.Text(approval["base"])
             Bases.Add(base)
-            let branch = version == 2 ? "tokate/v2-" + Check.Text(claim?["uuid"]): "tokate/issue-" + issue.ToString() +
-                "-" +
-                revision.Substring(0, 12)
+            let branch = "tokate/v2-" + Check.Text(claim["uuid"])
             let checkout = Path.Combine(Flow.Temp.Root, "candidate-" + issue.ToString())
             Flow.Git("clone", Flow.Upstream, checkout)
             Flow.Git("-C", checkout, "checkout", "-b", branch, base)
@@ -105,75 +84,11 @@ internal class OverlapFlow : IDisposable {
                 )
             }
             Flow.Git("-C", checkout, "add", ".")
-            Flow.Git(
-                "-C",
-                checkout,
-                "-c",
-                "user.name=Donor",
-                "-c",
-                "user.email=donor@example.test",
-                "commit",
-                "-m",
-                "Candidate"
-            )
+            Flow.DonorGit(checkout, "commit", "-m", "Candidate")
             let head = Flow.Git("-C", checkout, "rev-parse", "HEAD")
             Heads.Add(head)
             Flow.Git("-C", checkout, "push", Path.Combine(Flow.Bin, "fork"), "HEAD:refs/heads/" + branch)
-            if version == 2 {
-                Test.Coordinate(Test.Event(Test.PublishRequest(claim ?? throw Exception("Missing claim"), head)))
-            } else {
-                let receipt = Check.Map(
-                    "version",
-                    1,
-                    "repo",
-                    "owner/project",
-                    "issue",
-                    issue,
-                    "donor",
-                    "donor",
-                    "approval",
-                    revision,
-                    "head",
-                    head,
-                    "model",
-                    "gpt-6.1-sol",
-                    "effort",
-                    "high",
-                    "seconds",
-                    30,
-                    "network",
-                    false,
-                    "policy",
-                    Check.Text(approval["policy_hash"])
-                )
-                Flow.Reload()
-                let pulls = Flow.State["pulls"]?.AsArray() ?? JsonArray()
-                pulls.Add(
-                    Check.Map(
-                        "number",
-                        issue + 9,
-                        "body",
-                        "<!-- tokate-receipt:" + receipt.ToJsonString() + " -->",
-                        "html_url",
-                        "https://github.com/owner/project/pull/" + (issue + 9).ToString(),
-                        "user",
-                        Check.Map("login", "donor"),
-                        "head",
-                        Check.Map(
-                            "sha",
-                            head,
-                            "ref",
-                            branch,
-                            "repo",
-                            Check.Map("full_name", "donor/project", "owner", Check.Map("login", "donor"))
-                        ),
-                        "base",
-                        Check.Map("ref", target)
-                    )
-                )
-                Flow.State["pulls"] = pulls
-                Flow.Save()
-            }
+            Test.Coordinate(Test.Event(Test.PublishRequest(claim ?? throw Exception("Missing claim"), head)))
         }
         Flow.Reload()
         Flow.State["checks"] = Check.Json("[{\"name\":\"verify\",\"bucket\":\"pass\"}]")
@@ -211,18 +126,7 @@ internal class OverlapFlow : IDisposable {
                 Test.Issue = issue
                 let checkout = Path.Combine(Flow.Temp.Root, "candidate-" + issue.ToString())
                 Flow.Git("-C", checkout, "fetch", Flow.Upstream, upstream)
-                Flow.Git(
-                    "-C",
-                    checkout,
-                    "-c",
-                    "user.name=Donor",
-                    "-c",
-                    "user.email=donor@example.test",
-                    "merge",
-                    "--no-ff",
-                    "--no-edit",
-                    upstream
-                )
+                Flow.DonorGit(checkout, "merge", "--no-ff", "--no-edit", upstream)
                 let candidate = Flow.Git("-C", checkout, "rev-parse", "HEAD")
                 let grant = Check.Text(
                     Check
@@ -258,28 +162,16 @@ internal class OverlapFlow : IDisposable {
                 let pull = Flow.State["pulls"]?[issue - 1] ?? throw Exception("Missing pull")
                 let head = pull["head"] ?? throw Exception("Missing head")
                 head["sha"] = JsonValue.Create(candidate)
-                if Version == 1 {
-                    let receipt = Check.Json(Check.Text(pull["body"]).Split("tokate-receipt:")[1].Split(" -->")[0])
-                    let history = receipt["synchronizations"]?.AsArray() ?? JsonArray()
-                    history.Add(Check.Map("grant", grant, "candidate", candidate, "upstream", upstream))
-                    if receipt["synchronizations"] == nil {
-                        receipt["synchronizations"] = history
-                    }
-                    receipt["head"] = JsonValue.Create(candidate)
-                    pull["body"] = JsonValue.Create("<!-- tokate-receipt:" + receipt.ToJsonString() + " -->")
-                }
                 Flow.Save()
-                if Version == 2 {
-                    let request = Test.PublishRequest(Claims[issue - 1], candidate)
-                    request["action"] = JsonValue.Create("amend")
-                    let metadata = request["metadata"] ?? throw Exception("Missing metadata")
-                    metadata.AsObject().Remove("source")
-                    metadata["previous"] = JsonValue.Create(Heads[issue - 1])
-                    metadata["pr"] = JsonValue.Create(issue + 9)
-                    metadata["seconds"] = JsonValue.Create(30)
-                    metadata["sync"] = JsonValue.Create(grant)
-                    Test.Coordinate(Test.Event(request))
-                }
+                let request = Test.PublishRequest(Claims[issue - 1], candidate)
+                request["action"] = JsonValue.Create("amend")
+                let metadata = request["metadata"] ?? throw Exception("Missing metadata")
+                metadata.AsObject().Remove("source")
+                metadata["previous"] = JsonValue.Create(Heads[issue - 1])
+                metadata["pr"] = JsonValue.Create(issue + 9)
+                metadata["seconds"] = JsonValue.Create(30)
+                metadata["sync"] = JsonValue.Create(grant)
+                Test.Coordinate(Test.Event(request))
                 Heads[issue - 1] = candidate
                 Flow.Call([]string{"verify-pr", "--repo", "owner/project", "--pr", (issue + 9).ToString()}, owner: true)
             }
@@ -483,10 +375,6 @@ internal class OverlapChecks {
                         pulls.Add(copy)
                     }
                     test.Flow.Save()
-                    if version == 1 {
-                        let maximum = test.Report("10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25")
-                        Check.That(maximum["data"]?["pairs"]?.AsArray().Count == 120, "16-PR limit lost pairs")
-                    }
                 }
                 Console.WriteLine("PASS V" + version.ToString() + " overlap files: " + layout)
             }
@@ -730,7 +618,7 @@ internal class OverlapChecks {
             if CiShard.Include("Overlaps/Inputs") {
                 Inputs(binary)
             }
-            for version in[]int32{1, 2} {
+            for version in[]int32{2} {
                 let prefix = "Overlaps/V" + version.ToString() + "/"
                 if CiShard.Include(prefix + "Files") {
                     Files(binary, version)
