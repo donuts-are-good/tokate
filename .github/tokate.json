@@ -25,7 +25,9 @@
   "allow_network": true,
   "allow_unlimited": true,
   "required_checks": [
-    "verify"
+    "verify",
+    "musl",
+    "runtime"
   ],
   "verification": [
     [
