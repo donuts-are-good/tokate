@@ -182,7 +182,7 @@ internal class Cli {
                 "Run storage; default: tokate/runs under XDG_STATE_HOME, or ~/.local/state/tokate/runs"
             ),
             CliOption("run", "DIR", "Saved run directory"),
-            CliOption("from-pr", "N", "Seed an external donation from another donor's last coordinated PR commit"),
+            CliOption("from-pr", "N", "Seed a donation from another donor's last coordinated PR commit"),
             CliOption(
                 "continue-from",
                 "DIR",
@@ -779,8 +779,8 @@ internal class Cli {
             let command = Find(args.Command)
             if args.Get("from-pr") != "" &&
                 !args.Help &&
-                (args.Get("source") != "external" || args.Get("continue-from") != "" || args.Number("from-pr") < 1) {
-                throw Exception("--from-pr requires external tools, a positive PR number and no local continuation")
+                (args.Get("continue-from") != "" || args.Number("from-pr") < 1) {
+                throw Exception("--from-pr requires a positive PR number and no local continuation")
             }
             if args.Command == "request" && !args.Help {
                 if args.Get("run") != "" {

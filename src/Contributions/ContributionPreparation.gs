@@ -135,9 +135,6 @@ internal class ContributionPreparation {
                 }
             )
             if args.Get("from-pr") != "" {
-                if source != "external" {
-                    throw Exception("Published handoff uses explicit external tools and their own coding budget")
-                }
                 run.Fields["handoff"] = ContributionHandoff.Read(
                     state,
                     J.Get(viewer, "id"),

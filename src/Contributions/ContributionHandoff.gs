@@ -7,6 +7,11 @@ internal class ContributionHandoff {
     shared {
         internal func Has(run Data) bool -> J.Get(run.Element(), "handoff").ValueKind != JsonValueKind.Undefined
 
+        internal func StartHead(run Data) string -> Has(run) ? J.Text(
+            J.Get(run.Element(), "handoff"),
+            "head"
+        ): run.Text("base")
+
         internal func Declaration(value JsonElement) {
             if value.ValueKind == JsonValueKind.Undefined {
                 return

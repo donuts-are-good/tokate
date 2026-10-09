@@ -115,7 +115,7 @@ internal class WorkspacePreparation {
                     Reject(directory)
                 }
             }
-            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,unlimited,network,harness,harness_path,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request"
+            for key in "version,repo,issue,donor,donor_id,approval,base,base_branch,policy_hash,source,tools,seconds,verification_reserve,unlimited,network,harness,harness_path,provider,model,effort,selection,pi_endpoint,pi_root,pi_node,requested_fork,claim_request,handoff"
                 .Split(',') {
                 if !RequestData.Same(J.Get(pending.Element(), key), J.Get(run.Element(), key)) {
                     Reject(directory)
@@ -532,8 +532,7 @@ internal class WorkspacePreparation {
             Verification.Candidate(checkout)
             Metadata(checkout)
             let head = Commands.Git(checkout, "rev-parse", "HEAD")
-            let source = J.Get(run.Element(), "handoff")
-            let expected = ContributionHandoff.Has(run) ? J.Text(source, "head"): run.Text("base")
+            let expected = ContributionHandoff.StartHead(run)
             if head != expected &&
                 !(ContributionHandoff.Has(run) && run.Text("state") == "preparing" && head == run.Text("base")) {
                 Reject(checkout)

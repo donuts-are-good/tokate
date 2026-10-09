@@ -292,12 +292,6 @@ internal class RequestData {
                 }
                 Tools(J.Get(metadata, "tools"))
                 ContributionHandoff.Declaration(J.Get(metadata, "handoff"))
-                if J.Get(metadata, "handoff").ValueKind != JsonValueKind.Undefined && J.Text(
-                    metadata,
-                    "source"
-                ) != "external" {
-                    throw Exception("Published handoffs currently require external coding tools")
-                }
                 AttemptContinuation.Declaration(metadata)
                 let correction = J.Get(metadata, "correction")
                 if correction.ValueKind != JsonValueKind.Undefined {

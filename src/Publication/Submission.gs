@@ -23,14 +23,15 @@ internal class Submission {
             }
             let checkout = Verification.Candidate(Path.Combine(directory, "checkout"))
             let head = Commands.Git(checkout, "rev-parse", "HEAD")
-            let recovered = incomplete && head != run.Text("base") && Commands.Git(
+            let start = ContributionHandoff.StartHead(run)
+            let recovered = incomplete && head != start && Commands.Git(
                 checkout,
                 "show",
                 "-s",
                 "--format=%P",
                 "HEAD"
-            ) == run.Text("base")
-            if head != run.Text("base") && !recovered {
+            ) == start
+            if head != start && !recovered {
                 throw Exception("Verified base changed")
             }
             Commands.Git(checkout, "diff", "--exit-code")

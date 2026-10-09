@@ -118,7 +118,7 @@ internal class Contribution {
         internal func Snapshot(checkout string, run Data, budget RuntimeBudget) string {
             Verification.Candidate(checkout, budget)
             let head = budget.Git(checkout, "rev-parse", "HEAD")
-            if head != run.Text("base") {
+            if head != ContributionHandoff.StartHead(run) {
                 throw Exception("Agent changed Git history")
             }
             budget.Git(checkout, "add", "-A")
