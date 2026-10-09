@@ -146,6 +146,37 @@ internal class DonorSelectionChecks {
             File.WriteAllText(named, original)
             flow.Call([]string{"defaults", "remove", "--profile", "local"})
             Check.That(!File.Exists(named), "Named profile was not removed")
+            flow.Call([]string{"defaults", "set", "--profile", "codex-only", "--harness", "codex"})
+            flow.Call([]string{"defaults", "set", "--profile", "pi-only", "--harness", "pi"})
+            flow.Call([]string{"defaults", "use", "--profile", "codex-only"})
+            Check.That(
+                Check.Text(
+                    Check.Json(flow.Call([]string{"defaults", "read"}).Output)["default"]?["harness"]
+                ) == "codex",
+                "Named Codex profile was not selected"
+            )
+            flow.Call([]string{"defaults", "use", "--profile", "pi-only"})
+            Check.That(
+                Check.Text(Check.Json(flow.Call([]string{"defaults", "read"}).Output)["default"]?["harness"]) == "pi",
+                "Named Pi profile was not selected"
+            )
+            Check.That(
+                Check.Text(
+                    Check.Json(flow.Call([]string{"defaults", "read", "--profile", "codex-only"}).Output)["default"]?[
+                        "harness"
+                    ]
+                ) == "codex",
+                "Changing defaults overwrote another profile"
+            )
+            flow.Call([]string{"defaults", "use", "--profile", "missing"}, 1)
+            flow.Call([]string{"defaults", "set", "--harness", "omp"})
+            Check.That(
+                Check.Text(Check.Json(flow.Call([]string{"defaults", "read"}).Output)["default"]?["provider"]) == "",
+                "External harness default invented managed support"
+            )
+            flow.Call([]string{"defaults", "set", "--harness", "unknown"}, 1)
+            flow.Call([]string{"defaults", "set", "--harness", "pi", "--provider", "openai"}, 1)
+            flow.Call([]string{"defaults", "remove"})
             let privateFile = Path.Combine(flow.Temp.Root, "private-config")
             File.WriteAllText(privateFile, "synthetic-private-account-data")
             File.CreateSymbolicLink(path, privateFile)
@@ -169,6 +200,11 @@ internal class DonorSelectionChecks {
             let chosen = Select(flow, []string{})
             Check.That(Check.Text(chosen["source"]) == "saved donor default", "Eligible default did not win")
             Check.That(Check.Text(chosen["availability"]) == "unknown", "Catalog presence proved availability")
+            flow.Call([]string{"defaults", "set", "--harness", "codex"})
+            Check.That(
+                File.ReadAllText(Settings(flow)) == original,
+                "Selecting the same harness erased its model settings"
+            )
             let overridden = Select(
                 flow,
                 []string{"--model", "gpt-6.1-sol", "--effort", "xhigh", "--availability", "available"}

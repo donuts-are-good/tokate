@@ -110,6 +110,12 @@ internal class PiChecks {
                 for tool in diagnosis["data"]?["tools"]?.AsArray() ?? JsonArray() {
                     Check.That(Check.Text(tool["name"]) != "codex", "Pi diagnostics required Codex")
                 }
+                flow.Call([]string{"defaults", "set", "--harness", "pi", "--pi-root", root, "--node", node})
+                let inherited = Check.Envelope(flow.Call([]string{"doctor", "--managed", "--json"}), "doctor", "ok")
+                for tool in inherited["data"]?["tools"]?.AsArray() ?? JsonArray() {
+                    Check.That(Check.Text(tool["name"]) != "codex", "Managed diagnostics ignored the chosen Pi default")
+                }
+                flow.Call([]string{"defaults", "remove"})
             } finally {
                 File.Move(hiddenCodex, codex)
             }

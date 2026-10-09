@@ -235,10 +235,10 @@ internal class Diagnostics {
             Check.That(Check.Text(Row(missing, "codex")["status"]) == "missing", "Missing Codex not distinguished")
             Check.That(Check.Text(Row(missing, "sandbox")["status"]) == "skipped", "Skipped probe passed")
             Tool(temp, "codex", "exit 17\n")
-            let broken = Call(binary, temp, []string{"doctor"}, "error", "missing_tools")
+            let broken = Call(binary, temp, []string{"doctor", "--managed"}, "error", "missing_tools")
             Check.That(Check.Text(Row(broken, "codex")["status"]) == "failed", "Broken Codex accepted")
             File.WriteAllText(Path.Combine(temp.Root, "bin/codex"), "#!/missing/interpreter\n")
-            let cannotStart = Call(binary, temp, []string{"doctor"}, "error", "missing_tools")
+            let cannotStart = Call(binary, temp, []string{"doctor", "--managed"}, "error", "missing_tools")
             Check.Contains(Check.Text(Row(cannotStart, "codex")["detail"]), "could not start")
             Tool(temp, "codex", "test \"$1\" = --version && exit 0\nprintf '%s\\n' 'Logged in using ChatGPT'\nexit 0\n")
             let donorAuth = Call(binary, temp, []string{"doctor", "--managed", "--auth"}, "error", "missing_tools")
@@ -551,6 +551,64 @@ internal class Diagnostics {
                 Check.Text(Row(verification, "sandbox")["status"]) == "ready",
                 "Independent verification probe did not pass"
             )
+            let installMarker = Path.Combine(flow.Temp.Root, "unexpected-install")
+            let curl = Path.Combine(flow.Bin, "curl")
+            File.WriteAllText(curl, "#!/bin/sh\nprintf called > '" + installMarker + "'\nexit 17\n")
+            File.SetUnixFileMode(curl, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            let common = Check.Envelope(flow.Call([]string{"doctor", "--fix", "--yes", "--json"}), "doctor", "ok")
+            Check.That(Check.Text(common["data"]?["scope"]) == "external", "Default doctor selected a harness")
+            Check.That(common["data"]?["harnesses"]?.AsArray().Count == 0, "Default doctor invented a harness")
+            Check.That(!File.Exists(installMarker), "Default doctor downloaded a harness")
+            Check.Envelope(
+                flow.Call([]string{"doctor", "--managed", "--fix", "--yes", "--json"}, 1),
+                "doctor",
+                "error",
+                "missing_tools"
+            )
+            Check.That(!File.Exists(installMarker), "Managed scope silently selected a harness to install")
+            flow.Call([]string{"defaults", "set", "--harness", "codex"})
+            Check.Envelope(
+                flow.Call([]string{"doctor", "--managed", "--fix", "--yes", "--json"}, 1),
+                "doctor",
+                "error",
+                "missing_tools"
+            )
+            Check.That(!File.Exists(installMarker), "A missing saved default was installed without an explicit choice")
+            flow.Call([]string{"defaults", "remove"})
+            Check.Envelope(
+                flow.Call([]string{"doctor", "--harness", "codex", "--fix", "--yes", "--json"}, 1),
+                "doctor",
+                "error",
+                "command_failed"
+            )
+            Check.That(File.Exists(installMarker), "Explicit Codex choice did not reach installation")
+            File.Delete(installMarker)
+            for name in[]string{"codex", "pi", "claude", "omp", "hermes"} {
+                File.Copy(curl, Path.Combine(flow.Bin, name))
+                File.SetUnixFileMode(
+                    Path.Combine(flow.Bin, name),
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                )
+            }
+            let discovered = Check.Envelope(flow.Call([]string{"doctor", "--fix", "--yes", "--json"}), "doctor", "ok")
+            Check.That(
+                discovered["data"]?["harnesses"]?.AsArray().Count == 5,
+                "Installed harnesses were not discovered"
+            )
+            Check.That(!File.Exists(installMarker), "Default discovery ran a harness or installer")
+            let preference = Check.Envelope(
+                flow.Call([]string{"doctor", "--set-default", "--harness", "omp", "--json"}),
+                "doctor",
+                "ok"
+            )
+            Check.That(
+                Check.Text(preference["data"]?["default_harness"]) == "omp",
+                "Explicit default was not remembered"
+            )
+            Check.That(!File.Exists(installMarker), "Saving a default ran its harness")
+            let remembered = Check.Envelope(flow.Call([]string{"doctor", "--json"}), "doctor", "ok")
+            Check.That(Check.Text(remembered["data"]?["default_harness"]) == "omp", "Default was not reused")
+            Check.That(!File.Exists(installMarker), "Remembering a default ran its harness")
             flow.Temp.Env["TMPDIR"] = Path.Combine(flow.Temp.Root, "unavailable-temporary-storage")
             let unavailable = Check.Envelope(
                 TestProcess.Run(binary, []string{"doctor", "--external", "--json"}, flow.Temp.Env, cwd: flow.Upstream),

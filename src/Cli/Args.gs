@@ -13,6 +13,7 @@ internal class Args {
     internal var Target string = ""
     internal var Guided bool
     internal var SavedDefaults JsonElement
+    internal var HarnessFromDefault bool
     internal init(args[]string) {
         if args.Length == 0 {
             Help = true

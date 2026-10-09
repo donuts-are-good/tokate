@@ -43,7 +43,7 @@ internal class Completion {
                     "    completion) COMPREPLY=( $$(compgen -W 'bash zsh fish --help -h --traffic' -- \"$$cur\") ); return ;;"
                 )
                 text.AppendLine(
-                    "    defaults) if (( COMP_CWORD == 2 )) && [[ $$cur != --* ]]; then COMPREPLY=( $$(compgen -W 'set read remove' -- \"$$cur\") ); return; fi; opts='" +
+                    "    defaults) if (( COMP_CWORD == 2 )) && [[ $$cur != --* ]]; then COMPREPLY=( $$(compgen -W 'set read remove list use' -- \"$$cur\") ); return; fi; opts='" +
                         Words("defaults") +
                         "' ;;"
                 )
@@ -107,7 +107,7 @@ internal class Completion {
                     }
                     text.Append("        " + command.Name + ") _arguments '-h[Show help]'")
                     if command.Name == "defaults" {
-                        text.Append(" '1:operation:(set read remove)'")
+                        text.Append(" '1:operation:(set read remove list use)'")
                     }
                     for option in Cli.Options {
                         if !command.Has(option.Name) {
@@ -152,7 +152,7 @@ internal class Completion {
                     }
                     if command.Name == "defaults" {
                         text.AppendLine(
-                            "complete -c tokate -n '__fish_seen_subcommand_from defaults' -a 'set read remove'"
+                            "complete -c tokate -n '__fish_seen_subcommand_from defaults' -a 'set read remove list use'"
                         )
                     }
                     for option in Cli.Options {

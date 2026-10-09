@@ -43,6 +43,13 @@ internal class DonorSelection {
             let provider = J.Text(saved, "provider")
             let compatible = (args.Get("harness") == "" || args.Get("harness") == harness) &&
                 (args.Get("provider") == "" || args.Get("provider") == provider)
+            if compatible && harness != "" && J.Text(saved, "model") == "" && !Supported(saved) {
+                throw Exception(
+                    "The selected " +
+                        harness +
+                        " profile uses external work. Use that harness for external work or override --harness with a managed tool. No inference started."
+                )
+            }
             if !Supported(saved) || !compatible {
                 if profile != "" {
                     throw Exception(

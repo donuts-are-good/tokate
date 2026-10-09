@@ -76,7 +76,8 @@ internal class GuidedWork {
         }
 
         private func Eligible(value JsonElement, policy Policy) bool ->
-        DonorSelection.Supported(value) && policy.Allows(J.Text(value, "model"), J.Text(value, "effort")) &&
+        DonorSelection.Supported(value) &&
+            (J.Text(value, "model") == "" || policy.Allows(J.Text(value, "model"), J.Text(value, "effort"))) &&
             (policy.AllowsTool(J.Text(value, "harness"), J.Text(value, "provider")))
 
         internal func Profile(args Args, policy Policy) {
@@ -108,7 +109,9 @@ internal class GuidedWork {
                             args.Values["--" + field.Name] = field.Value.GetString() ?? ""
                         }
                     }
-                    return
+                    if args.Get("model") != "" {
+                        return
+                    }
                 }
             }
             let tools = List[string]()
@@ -124,7 +127,8 @@ internal class GuidedWork {
             if tools.Count == 0 {
                 throw Exception("The owner policy allows no supported managed coding tools")
             }
-            let tool = WizardScreen.Choose(
+            let preferred = routes.IndexOf(args.Get("harness"))
+            let tool = preferred >= 0 ? preferred + 1: WizardScreen.Choose(
                 "Your coding tool",
                 "Choose one permitted tool. Availability is checked before starting.",
                 tools.ToArray()
@@ -140,7 +144,7 @@ internal class GuidedWork {
                     "Local model",
                     "Use your existing model server or local tunnel.",
                     "Endpoint URL",
-                    "",
+                    args.Get("endpoint"),
                     "No-auth loopback Chat Completions URL, including /v1. Tokate does not start a server."
                 )
                 args.Values["--model"] = WizardScreen.Read(
@@ -194,9 +198,11 @@ internal class GuidedWork {
             }
         }
 
-        private func Label(value JsonElement, name string) string -> name + " | " + J.Text(value, "provider") +
-            " / " +
-            J.Text(value, "harness") +
+        private func Label(value JsonElement, name string) string -> J.Text(value, "model") == "" ?
+        name + " | " + J.Text(value, "harness"): name + " | " + J.Text(value, "provider") + " / " + J.Text(
+            value,
+            "harness"
+        ) +
             (J.Text(value, "harness") == "pi" ? " | Local | ": " | Subscription | ") +
             J.Text(value, "model") + " / " + J.Text(value, "effort") + " | availability unknown"
 

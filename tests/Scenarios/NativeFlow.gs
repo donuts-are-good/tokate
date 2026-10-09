@@ -24,9 +24,10 @@ internal partial class NativeFlow : NativeFixture {
         Check.That(!(help.Output + help.Error).Contains('\u001b'), "Redirected output contains ANSI")
         let doctor = Call([]string{"doctor"}, 1)
         Check.Contains(doctor.Output, "sandbox: skipped")
-        for name in[]string{"git", "gh", "codex", "setsid", "bwrap"} {
+        for name in[]string{"git", "gh", "setsid"} {
             Check.Contains(doctor.Output, name + ": missing")
         }
+        Check.That(!doctor.Output.Contains("codex: missing"), "Default doctor required Codex")
         let work = Call(
             []string{"work", "--repo", "owner/project", "--issue", "1", "--model", "model", "--effort", "high"},
             1

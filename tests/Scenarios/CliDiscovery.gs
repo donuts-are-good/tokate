@@ -476,8 +476,8 @@ internal class CliDiscovery {
             Check.That(Check.Text(defaults?["effects"]?["local_write"]) == "true", "Defaults write effect missing")
             Check.That(
                 JsonNode.DeepEquals(
-                    defaults?["operations"]?[0]?["required_inputs"],
-                    Check.Json("[\"model\",\"effort\"]")
+                    defaults?["operations"]?[0]?["required_input_sets"],
+                    Check.Json("[[\"harness\"],[\"model\",\"effort\"]]")
                 ),
                 "Defaults set required inputs differ"
             )
@@ -561,7 +561,7 @@ internal class CliDiscovery {
             temp.Env["PATH"] = empty
             let doctor = TestProcess.Run(binary, []string{"doctor", "--json"}, temp.Env)
             let diagnosis = Check.Envelope(doctor, "doctor", "error", "missing_tools")
-            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 11, "Doctor omitted checks")
+            Check.That(diagnosis["data"]?["tools"]?.AsArray().Count == 9, "Doctor omitted common checks")
             Check.That(!doctor.Output.Contains("Tokate environment"), "Doctor emitted prose stdout")
             let blocked = Check.Envelope(
                 TestProcess.Run(binary, []string{"policy", "--repo", "owner/project", "--json"}, temp.Env),

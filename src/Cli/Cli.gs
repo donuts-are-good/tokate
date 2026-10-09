@@ -86,8 +86,13 @@ internal class Cli {
             CliOption("claude-profile", "DIR", "Private clean native-login profile; metadata and native status only"),
             CliOption("sole-use", "", "Attest this native-login profile is solely used for Claude capability checks"),
             CliOption("owner", "", "Diagnose owner GitHub tooling without Codex or donor sandboxes"),
-            CliOption("managed", "", "Diagnose the selected managed harness and sandbox; default scope"),
-            CliOption("external", "", "Diagnose external donor tools and independent verification without Codex"),
+            CliOption(
+                "set-default",
+                "",
+                "Choose an installed harness as the default; use --harness for a noninteractive choice"
+            ),
+            CliOption("managed", "", "Diagnose the selected managed harness and sandbox"),
+            CliOption("external", "", "Diagnose common tools and independent verification; default scope"),
             CliOption("auth", "", "Explicitly check tool-owned authentication status; never print credential values"),
             CliOption("fix", "", "Offer installation or an existing path for missing prerequisites"),
             CliOption("repo", "OWNER/REPO", "Repository; default: issue URL or unique local GitHub remote"),
@@ -229,10 +234,10 @@ internal class Cli {
             ),
             CliCommand(
                 "doctor",
-                "owner,managed,external,auth,harness,harness-path,pi-root,node,fix,yes",
+                "owner,managed,external,auth,harness,harness-path,pi-root,node,fix,yes,set-default",
                 "",
                 "Check prerequisites; --fix offers confirmed setup; no inference.",
-                "[--owner|--managed|--external] [--harness codex|pi] [--auth] [--fix [--yes]]",
+                "[--owner|--managed|--external] [--harness HARNESS] [--auth] [--fix [--yes]] [--set-default]",
                 "doctor",
                 effects: "local_read local_write"
             ),
@@ -258,8 +263,8 @@ internal class Cli {
                 "defaults",
                 "profile,harness,provider,model,effort,endpoint,pi-root,node,harness-path",
                 "",
-                "Local nonsecret donor choices; set infers known harness/provider pairs, default codex/openai; no discovery or inference.",
-                "set [--profile NAME] --model MODEL --effort EFFORT [options]\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
+                "Save harness and model profiles, or use a named profile as the default; no inference.",
+                "set [--profile NAME] --harness HARNESS [options]\n       tokate defaults use --profile NAME\n       tokate defaults read|remove [--profile NAME]\n       tokate defaults list",
                 "defaults set --model gpt-6.1-sol --effort high",
                 effects: "local_read local_write"
             ),
@@ -577,14 +582,18 @@ internal class Cli {
                 }
                 let modes = List[Object]()
                 if command.Name == "defaults" {
-                    for mode in[]string{"set", "read", "remove", "list"} {
+                    for mode in[]string{"set", "read", "remove", "list", "use"} {
                         modes.Add(
                             map[string, Object?]{
                                 "name": mode,
-                                "required_inputs": mode == "set" ? []string{"model", "effort"}: []string{},
+                                "required_inputs": mode == "use" ? []string{"profile"}: []string{},
+                                "required_input_sets": mode == "set" ? [][]string{
+                                    []string{"harness"},
+                                    []string{"model", "effort"}
+                                }: [][]string{},
                                 "effects": map[string, Object?]{
                                     "local_read": true,
-                                    "local_write": mode == "set" || mode == "remove",
+                                    "local_write": mode == "set" || mode == "remove" || mode == "use",
                                     "github_read": false,
                                     "github_write": false
                                 }
@@ -609,7 +618,7 @@ internal class Cli {
                     }
                 }
                 let positional = if command.Name == "defaults" {
-                    []string{"set|read|remove|list"}
+                    []string{"set|read|remove|list|use"}
                 } else if command.Name == "help" {
                     []string{"COMMAND"}
                 } else if command.Name == "completion" {
@@ -815,6 +824,10 @@ internal class Cli {
                 }
             }
             if args.Command == "doctor" {
+                if args.Get("set-default") == "true" && args.Get("harness") == "" &&
+                    (args.Get("json") == "true" || !DonorSelection.Interactive(args)) {
+                    throw Exception("Choose --harness when setting a default noninteractively")
+                }
                 if args.Get("yes") == "true" && args.Get("fix") != "true" {
                     throw Exception("doctor --yes requires --fix")
                 }
@@ -827,7 +840,13 @@ internal class Cli {
                 if scopes > 1 {
                     throw Exception("Choose one doctor scope: --owner, --managed or --external")
                 }
-                if args.Get("harness") != "" && args.Get("harness") != "codex" && args.Get("harness") != "pi" {
+                if args.Get("harness") != "" && args.Get("harness") != "codex" && args.Get("harness") != "pi" &&
+                    !(
+                    args.Get("set-default") == "true" && Array.IndexOf(
+                        DonorDefaults.Harnesses,
+                        args.Get("harness")
+                    ) >= 0
+                ) {
                     throw Exception("Managed diagnostics support codex or pi")
                 }
                 for key in[]string{"harness", "harness-path", "pi-root", "node"} {
@@ -944,16 +963,23 @@ internal class Cli {
                 return
             }
             if args.Command == "defaults" {
-                if args.Subject != "set" &&
+                if args.Subject != "use" &&
+                    args.Subject != "set" &&
                     args.Subject != "read" &&
                     args.Subject != "remove" &&
                     args.Subject != "list" {
-                    throw Exception("Required defaults operation: set, read, list or remove")
+                    throw Exception("Required defaults operation: set, read, list, use or remove")
                 }
                 if args.Subject == "list" && args.Get("profile") != "" {
                     throw Exception("defaults list does not take --profile")
                 }
-                if args.Subject == "set" {
+                if args.Subject == "use" {
+                    args.Need("profile")
+                }
+                let partial = args.Subject == "set" && args.Get("harness") != "" && args.Get("model") == "" && args.Get(
+                    "effort"
+                ) == ""
+                if args.Subject == "set" && !partial {
                     DonorDefaults.NormalizePair(args)
                 }
                 for key in[]string{
@@ -967,9 +993,12 @@ internal class Cli {
                     "harness-path"
                 } {
                     if args.Subject == "set" {
-                        if key == "harness" || key == "provider" || key == "model" || key == "effort" {
+                        if !partial && (key == "harness" || key == "provider" || key == "model" || key == "effort") {
                             args.Need(key)
-                        } else if key != "harness-path" && args.Get("harness") != "pi" && args.Get(key) != "" {
+                        } else if (key == "endpoint" || key == "pi-root" || key == "node") && args.Get(
+                            "harness"
+                        ) != "pi" &&
+                            args.Get(key) != "" {
                             throw Exception("Pi runtime options require the pi harness")
                         }
                     } else if args.Get(key) != "" {
