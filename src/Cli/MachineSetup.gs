@@ -240,6 +240,10 @@ internal class MachineSetup {
         }
 
         internal func Harness(options Args) bool {
+            if options.Get("harness") == "" || (options.Command == "doctor" && options.HarnessFromDefault) {
+                Terminal.Message("Choose --harness codex or --harness pi to install a harness.", error: true)
+                return false
+            }
             let name = options.Get("harness", "codex")
             if name != "codex" && name != "pi" {
                 return false

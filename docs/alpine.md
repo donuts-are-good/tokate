@@ -6,7 +6,7 @@ The CLI does not require an installed .NET runtime.
 
 ```sh
 tokate doctor --external --fix
-tokate doctor --fix
+tokate doctor --harness codex --fix
 ```
 
 Setup previews the required `apk` packages and asks before installation. It uses

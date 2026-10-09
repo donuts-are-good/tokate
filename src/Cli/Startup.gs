@@ -3,6 +3,7 @@ package Tokate
 import System
 import System.Collections.Generic
 import System.IO
+import System.Text.Json
 
 internal class ToolCheck {
     internal var Name string = ""
@@ -67,13 +68,18 @@ internal class Startup {
             command == "work" ||
             (command == "prepare" && options?.Get("source") == "tokate")
 
+        private func DoctorScope(options Args) string -> options.Get("owner") == "true" ? "owner":
+        options.Get("external") == "true" ||
+            (options.Get("harness") != "" && DonorDefaults.Provider(options.Get("harness")) == "") ? "external":
+        options.Get("managed") == "true" || options.Get("harness") != "" || options.Get("harness-path") != "" ?
+        "managed": "external"
+
         internal func Requirements(options Args)[]string {
             let command = options.Command
             if command == "doctor" {
+                let doctorScope = DoctorScope(options)
                 let selected = Args(
-                    []string{
-                        options.Get("owner") == "true" ? "init": options.Get("external") == "true" ? "external": "work"
-                    }
+                    []string{doctorScope == "owner" ? "init": doctorScope == "external" ? "external": "work"}
                 )
                 for key in[]string{"harness", "harness-path", "pi-root", "node"} {
                     if options.Get(key) != "" {
@@ -316,10 +322,95 @@ internal class Startup {
             tools.Add(check)
         }
 
+        private func DoctorHarnesses(options Args) {
+            let installed = List[ToolCheck]()
+            for name in DonorDefaults.Harnesses {
+                let path = LocalPaths.Harness(name, options.Get("harness") == name ? options.Get("harness-path"): "")
+                if path != "" && LocalPaths.Executable(path) {
+                    installed.Add(ToolCheck{Name: name, Path: path})
+                    Terminal.Row(name, "Detected at " + path)
+                }
+            }
+            var saved JsonElement
+            try {
+                saved = DonorDefaults.Read()
+            } catch (error Exception) {
+                Terminal.Message(error.Message, error: true)
+            }
+            var selected = options.Get("set-default") == "true" ? options.Get("harness"): ""
+            if selected == "" && DonorSelection.Interactive(options) &&
+                installed.Count > 0 &&
+                (
+                options.Get("set-default") == "true" || (options.Get("fix") == "true" && J.Text(saved, "harness") == "")
+            ) {
+                Terminal.Message("Choose your default harness (blank keeps the current choice):", error: true)
+                for i in 0 ... installed.Count {
+                    let name = installed[i].Name
+                    Terminal.Message(
+                        (i + 1).ToString() +
+                            ") " +
+                            name +
+                            (DonorDefaults.Provider(name) == "" ? " (external work)": ""),
+                        error: true
+                    )
+                }
+                Console.Error.Write("Choice: ")
+                let choice = Console.ReadLine() ?? ""
+                var index int32
+                if choice != "" {
+                    if !Int32.TryParse(choice, out index) || index < 1 || index > installed.Count {
+                        throw Exception("Choose one of the discovered harnesses")
+                    }
+                    selected = installed[index - 1].Name
+                }
+            }
+            if selected != "" {
+                var choice ToolCheck? = nil
+                for tool in installed {
+                    if tool.Name == selected {
+                        choice = tool
+                    }
+                }
+                if choice == nil {
+                    throw CliFailure(
+                        "missing_tools",
+                        "The selected default harness was not found. Install it first, or supply --harness-path."
+                    )
+                }
+                DonorDefaults.Run(
+                    Args([]string{"defaults", "set", "--harness", selected, "--harness-path", choice.Path})
+                )
+                saved = DonorDefaults.Read()
+                Terminal.Row("Default harness", selected)
+            }
+            if PublicOutput.ResultData is Dictionary[string, Object?]fields {
+                let rows = List[Object]()
+                for tool in installed {
+                    rows.Add(map[string, Object?]{"name": tool.Name, "path": tool.Path})
+                }
+                fields["harnesses"] = rows.ToArray()
+                fields["default_harness"] = J.Text(saved, "harness")
+            }
+        }
+
         internal func Doctor(options Args) int32 {
-            let doctorScope = options.Get("owner") == "true" ? "owner": (
-                options.Get("external") == "true" ? "external": "managed"
-            )
+            if options.Get("managed") == "true" && options.Get("harness") == "" {
+                let saved = DonorDefaults.Read()
+                if J.Text(saved, "harness") != "" {
+                    if !DonorSelection.Supported(saved) {
+                        throw Exception(
+                            "The default harness uses external work. Choose --harness codex or --harness pi for managed diagnostics."
+                        )
+                    }
+                    for key in[]string{"harness", "harness-path", "pi-root", "node"} {
+                        if options.Get(key) == "" && J.Text(saved, key) != "" {
+                            options.Values["--" + key] = J.Text(saved, key)
+                        }
+                    }
+                    options.HarnessFromDefault = true
+                }
+            }
+            let doctorScope = DoctorScope(options)
             let pi = doctorScope == "managed" && options.Get("harness") == "pi"
             let tools = Inspect(options)
             if options.Get("fix") == "true" && MachineSetup.TryFix(options, tools) {
@@ -422,6 +513,11 @@ internal class Startup {
             }
             Terminal.Heading("Tokate " + doctorScope + " diagnostics")
             Show(tools)
+            if (doctorScope == "external" && options.Get("external") != "true") || options.Get(
+                "set-default"
+            ) == "true" {
+                DoctorHarnesses(options)
+            }
             Terminal.Message(
                 "Checked capabilities are listed above. No inference was run. PATH, startup, login and catalog data do not prove model availability or subscription allowance. Repository dependencies and builds were not checked.",
                 "grey"

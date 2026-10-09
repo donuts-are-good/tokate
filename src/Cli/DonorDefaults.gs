@@ -8,7 +8,22 @@ import System.Text.RegularExpressions
 
 internal class DonorDefaults {
     shared {
+        internal let Harnesses[]string = []string{"codex", "pi", "claude", "omp", "hermes"}
+
         internal func NormalizePair(args Args) {
+            if args.Command == "defaults" && args.Subject == "set" && args.Get("harness") == "" && args.Get(
+                "provider"
+            ) == "" {
+                var saved = Read(args.Get("profile"), allowMissing: true)
+                if saved.ValueKind == JsonValueKind.Undefined && args.Get("profile") != "" {
+                    saved = Read()
+                }
+                for key in[]string{"harness", "provider", "endpoint", "pi-root", "node", "harness-path"} {
+                    if args.Get(key) == "" && J.Text(saved, key) != "" {
+                        args.Values["--" + key] = J.Text(saved, key)
+                    }
+                }
+            }
             if args.Get("harness") == "" && args.Get("provider") == "" {
                 args.Values["--harness"] = "codex"
             }
@@ -42,7 +57,7 @@ internal class DonorDefaults {
             return path
         }
 
-        internal func Read(profile string = "") JsonElement {
+        internal func Read(profile string = "", allowMissing bool = false) JsonElement {
             var value JsonElement
             for directory in LocalPaths.StateDirectories() {
                 let path = Location(profile, directory)
@@ -52,7 +67,7 @@ internal class DonorDefaults {
                 }
             }
             if value.ValueKind == JsonValueKind.Undefined {
-                if profile != "" {
+                if profile != "" && !allowMissing {
                     throw Exception(
                         "Named donor profile is missing; use defaults set --profile NAME. No inference started."
                     )
@@ -65,9 +80,35 @@ internal class DonorDefaults {
                     throw Exception("Donor profile fields must be strings")
                 }
             }
-            for key in[]string{"harness", "provider", "effort"} {
-                RequestData.Token(J.Text(value, key))
+            let partial = J.Get(value, "model").ValueKind == JsonValueKind.Undefined && J.Get(value, "effort")
+                .ValueKind == JsonValueKind.Undefined
+            RequestData.Token(J.Text(value, "harness"))
+            if !partial {
+                RequestData.Token(J.Text(value, "provider"))
             }
+            if partial {
+                if Array.IndexOf(Harnesses, J.Text(value, "harness")) < 0 ||
+                    Provider(J.Text(value, "harness")) != J.Text(value, "provider") {
+                    throw Exception("Unsupported harness default")
+                }
+                if J.Text(value, "harness-path") != "" {
+                    LocalPaths.RuntimePath(J.Text(value, "harness-path"))
+                }
+                if J.Text(value, "harness") == "pi" {
+                    if J.Text(value, "endpoint") != "" {
+                        PiBoundary.Endpoint(J.Text(value, "endpoint"))
+                    }
+                    for key in[]string{"pi-root", "node"} {
+                        if J.Text(value, key) != "" {
+                            LocalPaths.RuntimePath(J.Text(value, key))
+                        }
+                    }
+                } else {
+                    RequestData.Keys(value, "harness,provider,harness-path")
+                }
+                return value
+            }
+            RequestData.Token(J.Text(value, "effort"))
             if J.Text(value, "harness") == "pi" {
                 if J.Text(value, "provider") != "local-chat-completions" {
                     throw Exception("Pi profiles require local-chat-completions")
@@ -87,6 +128,43 @@ internal class DonorDefaults {
                 LocalPaths.RuntimePath(J.Text(value, "harness-path"))
             }
             return value
+        }
+
+        internal func Provider(harness string) string -> switch harness {
+            case "codex": "openai"
+            case "pi": "local-chat-completions"
+            default: ""
+        }
+
+        private func Write(value JsonElement, profile string = "") {
+            let path = Location(profile)
+            Directory.CreateDirectory(
+                Path.GetDirectoryName(path) ?? "",
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            File.SetUnixFileMode(
+                Path.GetDirectoryName(path) ?? "",
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+            )
+            let temporary = path + "." + Guid.NewGuid().ToString("N")
+            try {
+                {
+                    using let file = FileStream(
+                        temporary,
+                        FileStreamOptions{
+                            Mode: FileMode.CreateNew,
+                            Access: FileAccess.Write,
+                            Share: FileShare.None,
+                            UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
+                        }
+                    )
+                    using let writer = StreamWriter(file)
+                    writer.Write(J.Write(value))
+                }
+                File.Move(temporary, path, true)
+            } finally {
+                File.Delete(temporary)
+            }
         }
 
         private func Summary(value JsonElement) Object? -> value.ValueKind == JsonValueKind.Undefined ? nil:
@@ -124,7 +202,6 @@ internal class DonorDefaults {
             if args.Subject == "read" {
                 return J.Parse(J.Write(map[string, Object?]{"profile": profile, "default": Summary(Read(profile))}))
             }
-            let path = Location(profile)
             if args.Subject == "remove" {
                 let paths = List[string]()
                 for storage in LocalPaths.StateDirectories() {
@@ -136,6 +213,35 @@ internal class DonorDefaults {
                     File.Delete(candidate)
                 }
                 return J.Parse(J.Write(map[string, Object?]{"profile": profile, "removed": existed}))
+            }
+            if args.Subject == "use" {
+                let selected = Read(args.Need("profile"))
+                Write(selected)
+                return J.Parse(J.Write(map[string, Object?]{"profile": profile, "default": Summary(selected)}))
+            }
+            if args.Get("model") == "" && args.Get("effort") == "" {
+                let harness = args.Need("harness")
+                let provider = Provider(harness)
+                if Array.IndexOf(Harnesses, harness) < 0 ||
+                    (args.Get("provider") != "" && args.Get("provider") != provider) {
+                    throw Exception("Unsupported harness default")
+                }
+                let previous = Read(profile, allowMissing: true)
+                let choice = J.Text(previous, "harness") == harness && J.Text(previous, "provider") == provider ?
+                J.Select(previous, "harness,provider,model,effort,endpoint,pi-root,node,harness-path"):
+                map[string, Object?]{"harness": harness}
+                if provider != "" {
+                    choice["provider"] = provider
+                }
+                for key in[]string{"harness-path", "pi-root", "node", "endpoint"} {
+                    if args.Get(key) != "" {
+                        choice[key] = key == "endpoint" ? PiBoundary.Endpoint(args.Get(key)):
+                        LocalPaths.RuntimePath(args.Get(key))
+                    }
+                }
+                let selected = RequestData.Parse(J.Write(choice), 16 * 1024)
+                Write(selected, profile)
+                return J.Parse(J.Write(map[string, Object?]{"profile": profile, "default": Summary(selected)}))
             }
             let choice = map[string, Object?]{}
             for key in[]string{"harness", "provider", "model", "effort"} {
@@ -157,33 +263,7 @@ internal class DonorDefaults {
                 choice["harness-path"] = LocalPaths.RuntimePath(args.Need("harness-path"))
             }
             let value = RequestData.Parse(J.Write(choice), 16 * 1024)
-            Directory.CreateDirectory(
-                Path.GetDirectoryName(path) ?? "",
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            )
-            File.SetUnixFileMode(
-                Path.GetDirectoryName(path) ?? "",
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
-            )
-            let temporary = path + "." + Guid.NewGuid().ToString("N")
-            try {
-                {
-                    using let file = FileStream(
-                        temporary,
-                        FileStreamOptions{
-                            Mode: FileMode.CreateNew,
-                            Access: FileAccess.Write,
-                            Share: FileShare.None,
-                            UnixCreateMode: UnixFileMode.UserRead | UnixFileMode.UserWrite
-                        }
-                    )
-                    using let writer = StreamWriter(file)
-                    writer.Write(J.Write(value))
-                }
-                File.Move(temporary, path, true)
-            } finally {
-                File.Delete(temporary)
-            }
+            Write(value, profile)
             return J.Parse(J.Write(map[string, Object?]{"profile": profile, "default": Summary(value)}))
         }
     }

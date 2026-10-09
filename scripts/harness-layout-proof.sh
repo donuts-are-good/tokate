@@ -30,7 +30,7 @@ PY
 curl -qfsSL --proto '=https' --proto-redir '=https' https://pi.dev/install.sh -o "$proof/pi-install.sh"
 sha256sum "$proof/pi-install.sh"
 mkdir -p "$proof/native-codex"
-run "$proof/native-codex" CODEX_INSTALL_DIR="$proof/native-codex/bin" CODEX_HOME="$proof/native-codex/state" "$binary" doctor --managed --fix --yes --json > "$proof/native-codex/setup.json"
+run "$proof/native-codex" CODEX_INSTALL_DIR="$proof/native-codex/bin" CODEX_HOME="$proof/native-codex/state" "$binary" doctor --managed --harness codex --fix --yes --json > "$proof/native-codex/setup.json"
 probe "$proof/native-codex" codex CODEX_INSTALL_DIR="$proof/native-codex/bin" CODEX_HOME="$proof/native-codex/state"
 run "$proof/native-codex" "$proof/native-codex/bin/codex" --version
 mkdir -p "$proof/native-pi/bin"
