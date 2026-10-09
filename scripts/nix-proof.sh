@@ -32,7 +32,7 @@ binary="$proof/profile/bin/tokate"
 (cd "$proof"; "$binary" doctor --managed --harness-path "$proof/tools/bin/codex" --json) > "$proof/managed.json"
 (cd "$proof"; PATH="$proof/tools/bin:$PATH" "$proof/tools/bin/bwrap" --bind / / --proc /proc --dev /dev \
   --tmpfs /tmp --bind "$proof" "$proof" \
-  --ro-bind /dev/null /bin/bash --ro-bind /dev/null /usr/bin/bwrap -- \
+  --tmpfs /usr/bin --tmpfs /bin --ro-bind "$proof/tools/bin/bash" /bin/sh -- \
   "$binary" doctor --managed --harness pi --harness-path "$proof/tools/bin/pi" --json) > "$proof/pi.json"
 if "$binary" update --json > "$proof/update.json"; then
   exit 1

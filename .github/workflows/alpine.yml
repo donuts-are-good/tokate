@@ -17,9 +17,18 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Permit user namespaces in the test container
+        run: |
+          sudo tee /etc/apparmor.d/tokate-alpine-tests <<'EOF'
+          abi <abi/4.0>,
+          profile tokate-alpine-tests flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/tokate-alpine-tests
       - name: Build and test on Alpine as an ordinary user
         run: |
-          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
+          docker run --rm --security-opt seccomp=unconfined --security-opt apparmor=tokate-alpine-tests \
             -v "$PWD:/src" -w /src \
             mcr.microsoft.com/dotnet/sdk:10.0.401-alpine3.24@sha256:3cc3bbbbf93d82104892f42aa9106b6be4d120346dea0649643a97c801525256 \
             /bin/sh -ec '
@@ -29,6 +38,7 @@ jobs:
               su -s /bin/bash tester -c "set -e
                 export TOKATE_RUNTIME_IDENTIFIER=linux-musl-x64
                 export TOKATE_BINARY=/src/artifacts/linux-musl-x64/tokate
+                unshare --map-current-user --pid --fork --kill-child --mount-proc -- /bin/true
                 bash scripts/build.sh
                 artifacts/tests-musl/tokate-tests --shell /bin/sh
                 artifacts/tests-musl/tokate-tests --cli-setup
