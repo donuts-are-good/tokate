@@ -16,6 +16,13 @@ internal class Installer {
             let source = Path.Combine(bundle, "tokate/SKILL.md")
             File.Copy(Path.Combine(project, "plugins/tokate/SKILL.md"), source)
             let original = File.ReadAllText(source)
+            let omp = Path.Combine(temp.Root, "bin/omp")
+            File.WriteAllText(
+                omp,
+                "#!/bin/sh\n[ \"$*\" = 'config path' ] || exit 1\nprintf '%s\\n' \"$$TOKATE_TEST_OMP_DIR\"\nexit \"$${TOKATE_TEST_OMP_EXIT:-0}\"\n"
+            )
+            File.SetUnixFileMode(omp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)
+            temp.Env["TOKATE_TEST_OMP_DIR"] = Path.Combine(temp.Env["HOME"], ".omp/agent")
             let homes = []string{".agents", ".claude", ".pi/agent", ".omp/agent", ".hermes"}
             let harnesses = []string{"codex", "claude", "pi", "omp", "hermes"}
             for i in 0 ... harnesses.Length {
@@ -51,10 +58,40 @@ internal class Installer {
                     .Code == 1,
                 "Installer replaced an unrelated skill"
             )
-            temp.Env["OMP_PROFILE"] = "donor"
+            let resolved = Path.Combine(temp.Root, "omp config/active")
+            temp.Env["TOKATE_TEST_OMP_DIR"] = resolved
+            temp.Env["PI_CONFIG_DIR"] = ".custom-omp"
+            temp.Env["PI_CODING_AGENT_DIR"] = Path.Combine(temp.Root, "other agent")
+            temp.Env["PI_PROFILE"] = "legacy"
+            for profile in[]string{"default", " \t ", "donor", ""} {
+                temp.Env["OMP_PROFILE"] = profile
+                Check.Success(TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env))
+                Check.That(
+                    File.ReadAllText(Path.Combine(resolved, "skills/tokate/SKILL.md")) == original,
+                    "Installer ignored OMP's resolved agent directory"
+                )
+            }
+            for invalid in[]string{"", "relative"} {
+                temp.Env["TOKATE_TEST_OMP_DIR"] = invalid
+                Check.That(
+                    TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env).Code == 1,
+                    "Installer accepted an invalid OMP directory"
+                )
+            }
+            let failed = Path.Combine(temp.Root, "failed omp")
+            temp.Env["TOKATE_TEST_OMP_DIR"] = failed
+            temp.Env["TOKATE_TEST_OMP_EXIT"] = "17"
             Check.That(
-                TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env).Code == 1,
-                "Installer guessed a named profile directory"
+                TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env).Code == 17 && !Directory.Exists(failed),
+                "Installer ignored OMP discovery failure"
+            )
+            File.Delete(omp)
+            Check.Success(
+                TestProcess.Run("/bin/sh", []string{script, "omp", Path.Combine(temp.Root, "explicit omp")}, temp.Env)
+            )
+            Check.That(
+                TestProcess.Run("/bin/sh", []string{script, "omp"}, temp.Env).Code != 0,
+                "Installer guessed a directory without OMP"
             )
             Check.That(
                 TestProcess.Run("/bin/sh", []string{script, "unknown"}, temp.Env).Code == 1,
