@@ -1,19 +1,16 @@
 ---
 name: tokate
-description: Guide a Tokate donation, inspect saved contribution progress, or submit verified work from the user's coding harness. Use when the user wants to contribute to a Tokate-approved GitHub issue.
+description: Coordinate donor work on a Tokate-approved GitHub issue, or inspect, continue and submit a saved contribution.
 ---
 
-Use the installed Tokate CLI as the authority for policy, coordination, verification and publication. Run `tokate help --json` for current commands and `tokate help COMMAND --json` for their inputs. Use `--json` for operations and read `status`, `error`, `data` and `next_actions`. Pending is not accepted or complete. Do not automatically repeat a mutating command.
+# Tokate donor workflow
 
-Confirm the GitHub account with `gh api user --jq .login`. Read the issue, repository instructions and `tokate policy --repo OWNER/REPO --json`. Request only missing choices. Keep harness authentication in the harness. Never read credential files, mixed settings or environment dumps to discover a model. Use supported nonsecret metadata or ask for the exact harness, provider, model and effort. Never infer managed-adapter support from this skill being loaded.
+Help a donor take an approved issue to a verified draft PR. Tokate coordinates and verifies work. The donor's chosen harness codes. The owner controls policy, acceptance and merging.
 
-Before coding, obtain authorization for the task, tool selection, time allocation and command network access. A saved profile does not authorize a budget. Keep the user's current harness unless they choose another.
+Use installed CLI help for command details. Read the [donor guide](https://github.com/obselate/tokate/blob/main/docs/donors.md), [recovery guide](https://github.com/obselate/tokate/blob/main/docs/recovery.md), [public summary format](https://github.com/obselate/tokate/blob/main/AGENTS.md#write-public-pr-summaries) or [data boundaries](https://github.com/obselate/tokate/blob/main/docs/security.md) when relevant.
 
-- For a supported managed selection, use `select`, then `claim` with the approved budget. Save the returned run directory. After coordinator acceptance, `work --run DIR` runs the selected adapter and independent checks. Do not also implement the task in this session.
-- To work in the current harness outside a supported managed adapter, use `claim --source external --tools FILE --seconds N`. The JSON file contains the user's nonsecret tool declarations, with `harness`, `provider`, `model` and `effort`. N is the independent verification allowance, not a measured coding limit. Agree on coding time separately and stop when it is exhausted. Include `usage` or `coding_seconds` only when observed, never estimated.
-
-A pending claim has no work authority. Inspect `status --run DIR`, then resume the same request with `prepare --run DIR` after acceptance. Do not claim again. For external work, use the saved run's `coding` directory, follow its approved scope, retain original attribution and push the exact candidate to the saved donor branch. Write a short public summary bound to the candidate head. Run `external --run DIR --commit SHA --summary FILE` to verify that exact commit independently. Never describe external work as managed or its usage as independently attested.
-
-After successful verification, use `submit --run DIR` only when publication is authorized. Pending publication is not a PR. Inspect the saved state and follow its explicit continuation action without redoing coding or verification. The owner reviews and merges. On cancellation, failure or stale authority, preserve the run and work, report the actual state and ask only for the decision needed to continue. Never silently extend a budget, switch models or retry inference.
-
-Use `request --run DIR --operation ACTION` for an explicitly chosen pause, resume, renewal or release. Resuming a reservation does not restart coding. Useful stopped managed work can become an explicitly authorized incomplete draft with `submit --incomplete`. Continue another donor's published work with `claim --from-pr N`; preserve their commits. For the same donor's published work, use `amend --resume` with a new verification allowance after the reservation resumes.
+- Honor consent for the task, harness/model/effort, time and command network access. Ask only for missing choices. A profile supplies settings, not consent.
+- Distinguish a managed harness launch from coding in this session. Loading the skill proves no adapter support or permission to launch another process. Declare external work and later editing tools accurately.
+- Preserve saved work and inspect its state before repeating a write. Pending grants no coding authority. Never bypass failure with another run. Retries, tool changes and budget extensions need consent.
+- Keep authentication with the harness. Never inspect credential files, mixed settings or environment dumps for model discovery.
+- Publish only when authorized. Report the actual contribution state and who must act next. A successful status read does not prove successful work.
