@@ -860,6 +860,7 @@ internal class PreparationChecks {
                     policy["max_seconds"] = JsonValue.Create(limit)
                     File.WriteAllText(path, policy.ToJsonString())
                     flow.Commit("Set owner budget")
+                    flow.Approve()
                     let budget = TestTerminal.Pty(binary, args, flow.Temp, 80, "1\n1\n1\n1\nq\n")
                     Check.That(budget.Code == 1, budget.Output + budget.Error)
                     Check.Contains(budget.Output, "Owner limit: " + (limit / 60).ToString() + " minutes")
