@@ -1546,7 +1546,7 @@ internal class PreparationChecks {
                 TestCase[string]("LinkedControls", async (value string) -> LinkedControls(value))
             } {
                 let name = test.Name
-                if selected != "" && selected != name {
+                if selected != "" && selected != name || selected == "" && !CiShard.Include("Preparation/" + name) {
                     continue
                 }
                 test.Run(binary)

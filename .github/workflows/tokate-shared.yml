@@ -23,6 +23,7 @@ jobs:
     concurrency:
       group: tokate-coordinate-${{ github.event.issue.number }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       issues: read

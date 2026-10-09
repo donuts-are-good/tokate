@@ -36,9 +36,7 @@ internal class SuiteCatalog {
                     if CiShard.Include("Verification") {
                         VerificationChecks.All(binary)
                     }
-                    if CiShard.Include("PublicDescriptions") {
-                        PublicDescriptions.All(binary)
-                    }
+                    PublicDescriptions.All(binary)
                     for name in NativeFlow.SerialGroups {
                         if CiShard.Include("Native/" + name) {
                             NativeFlow.All(binary, name)
@@ -80,9 +78,7 @@ internal class SuiteCatalog {
                     OverlapChecks.All(binary)
                 }
                 case "Preparation" {
-                    if CiShard.Include("Preparation") {
-                        PreparationChecks.All(binary)
-                    }
+                    PreparationChecks.All(binary)
                 }
                 case "Continuation" {
                     AttemptContinuationChecks.All(binary)

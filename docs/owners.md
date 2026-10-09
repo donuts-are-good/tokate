@@ -20,7 +20,8 @@ its checks in branch protection.
 Setup uses a matching stable release. It creates `.github/tokate.json` and a small,
 immutable shared-workflow entry. Existing configuration is preserved. Allow its
 `issue_comment`, `pull_request_target` and `workflow_call` events in GitHub Actions
-policies, including external actors. The coordinator does not execute donor code.
+policies, including external actors. Enable "Allow GitHub Actions to create and
+approve pull requests" in Actions settings. The coordinator does not execute donor code.
 It can close PRs without current owner authorization. Review that behavior before
 enabling the workflow.
 
