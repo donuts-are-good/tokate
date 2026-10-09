@@ -40,7 +40,9 @@ class CommandRunner {
             if let process = active {
                 try {
                     if !process.HasExited {
-                        SignalCommand(process.Id, 2)
+                        if SignalCommand(-process.Id, 2) != 0 {
+                            SignalCommand(process.Id, 2)
+                        }
                     }
                 } catch (error InvalidOperationException) { }
             }
@@ -84,6 +86,11 @@ class CommandRunner {
             if directory != "" {
                 start.WorkingDirectory = directory
             }
+            let executable = start.FileName
+            start.FileName = "/usr/bin/setsid"
+            start.ArgumentList.Add("--wait")
+            start.ArgumentList.Add("--")
+            start.ArgumentList.Add(executable)
             for argument in arguments {
                 start.ArgumentList.Add(argument)
             }
@@ -114,6 +121,7 @@ class CommandRunner {
                 while !finished {
                     select {
                         case await exited {
+                            SignalCommand(-process.Id, 9)
                             finished = true
                         }
                         case <- pulse { }
@@ -132,6 +140,7 @@ class CommandRunner {
                     }
                     if interruptedAt >= 0 && elapsed.ElapsedMilliseconds - interruptedAt >= 5000 {
                         process.Kill(true)
+                        SignalCommand(-process.Id, 9)
                         await exited
                         break
                     }

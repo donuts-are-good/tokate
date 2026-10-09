@@ -201,6 +201,9 @@ partial class Desktop {
             body.Children.Add(waiting)
             return body
         }
+        if message != "" {
+            body.Children.Add(Label(message, 17))
+        }
         if renderedOutput != donationOutput || renderedTheme != twilight.Value || activityLines.Count == 0 {
             renderedOutput = donationOutput
             renderedTheme = twilight.Value

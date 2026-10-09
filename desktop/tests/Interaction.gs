@@ -394,6 +394,10 @@ func DonateFlow(host TestHost, window Window, adapter TestAccessibility) {
         Activate(window, adapter, "Start this donation")
         AwaitControl(host, adapter, AccessibilityRole.Status, "Donation running")
         AwaitControl(host, adapter, AccessibilityRole.Text, "Command output")
+        window.RequestClose()
+        Settle(host)
+        Require(window.IsOpen, "Closing the window terminated active work")
+        Require(FindText(adapter.Root, "A command is active"), "Blocked close did not explain how to stop safely")
         let transcript = Stopwatch.StartNew()
         while !FindText(adapter.Root, "Output line 50") && transcript.Elapsed.TotalSeconds < 5 {
             Settle(host)
@@ -512,9 +516,52 @@ func TestDesktop() {
     DonateFlow(host, window, adapter)
 }
 
-func Main() {
+func TestCommandLifecycle() {
+    let marker = Path.Combine(Path.GetTempPath(), "tokate-child-" + Guid.NewGuid().ToString("N"))
+    var child = 0
+    try {
+        let clock = Stopwatch.StartNew()
+        let result = CommandRunner().Run(
+            []string{
+                "-c",
+                "sleep 30 </dev/null >/dev/null 2>&1 & printf '%s' \"$$!\" > \"$1\"; trap 'exit 0' INT; while :; do sleep .05; done",
+                "fixture",
+                marker,
+            },
+            "/bin/sh",
+            seconds: 1
+        )
+        Require(result.Error.Contains("timed out"), "Lifecycle probe did not time out")
+        child = int32.Parse(File.ReadAllText(marker))
+        var alive = false
+        try {
+            using let process = Process.GetProcessById(child)
+            alive = !process.HasExited
+        } catch (error ArgumentException) { }
+        Require(!alive, "Cancellation left a child process running")
+        Require(clock.Elapsed.TotalSeconds < 8, "Cancellation did not finish promptly")
+    } finally {
+        if child > 0 {
+            try {
+                using let process = Process.GetProcessById(child)
+                if !process.HasExited {
+                    process.Kill(true)
+                }
+            } catch (error ArgumentException) { }
+        }
+        File.Delete(marker)
+    }
+}
+
+func Main(args[]string) {
+    if Array.IndexOf(args, "--lifecycle") >= 0 {
+        TestCommandLifecycle()
+        Console.WriteLine("PASS: command descendants and timeout cleanup")
+        return
+    }
     TestDesktop()
     WorkspaceFlow()
+    TestCommandLifecycle()
     let literal = CommandRunner().Run([]string{"%s", "{\"value\":\"$(literal); *\"}"}, "/usr/bin/printf")
     Require(
         literal.Error == "" && TextOf(literal.Value, "value") == "$(literal); *",
