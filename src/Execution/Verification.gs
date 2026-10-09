@@ -68,7 +68,7 @@ internal class Verification {
                     30
                 )
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
-                    throw Exception("Independent verification sandbox probe failed")
+                    throw LinuxSandbox.ProbeFailure(result, "Independent verification sandbox probe failed")
                 }
                 if pinned {
                     try {

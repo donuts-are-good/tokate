@@ -606,9 +606,15 @@ internal class Commands {
                 throw CommandInterrupted(error, result)
             }
             if !pidNamespace && result.Code != 0 {
+                for prefix in[]string{"setsid: failed to execute ", "unshare: failed to execute "} {
+                    if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
+                        throw CliFailure(
+                            "missing_tools",
+                            "A PID namespace command helper could not execute. Repair the helper, then run tokate doctor."
+                        )
+                    }
+                }
                 for prefix in[]string{
-                    "setsid: failed to execute ",
-                    "unshare: failed to execute ",
                     "unshare: unshare failed:",
                     "unshare: mount /proc failed:",
                     "unshare: mount proc on /proc failed:",
@@ -618,11 +624,7 @@ internal class Commands {
                     "unshare: setgroups failed:"
                 } {
                     if result.Error.StartsWith(prefix, StringComparison.Ordinal) {
-                        throw CliFailure(
-                            "missing_tools",
-                            "Cannot start a PID namespace with unshare",
-                            summary: "PID namespace prerequisite is unavailable"
-                        )
+                        throw LinuxSandbox.NamespaceFailure()
                     }
                 }
             }

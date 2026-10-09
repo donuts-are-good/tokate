@@ -186,8 +186,8 @@ internal class Worker {
                 }
                 let result = Run(directory, args.ToArray(), harnessPath: harnessPath)
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
-                    throw CliFailure(
-                        "verification_failed",
+                    throw LinuxSandbox.ProbeFailure(
+                        result,
                         "Managed sandbox isolation probe failed. Check bubblewrap user namespace support and native Codex permission profiles. Tokate does not change security settings."
                     )
                 }

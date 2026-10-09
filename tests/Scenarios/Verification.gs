@@ -130,7 +130,7 @@ internal class VerificationChecks {
                     temp.Root,
                     "--ro-bind",
                     source,
-                    "/etc/resolv.conf",
+                    File.ResolveLinkTarget("/etc/resolv.conf", true)?.FullName ?? "/etc/resolv.conf",
                     "--",
                     tests,
                     "--runtime-files-parent",

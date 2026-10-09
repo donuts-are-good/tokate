@@ -38,6 +38,9 @@ internal class PublicOutput {
         internal func Message(code string) string -> switch code {
             case "invalid_arguments": "Invalid command arguments. Consult command help."
             case "missing_tools": "Required tools are missing or failed diagnostics. Run doctor."
+            case "namespace_disabled": "User namespaces are disabled. Ask an administrator to review the host or container namespace policy."
+            case "namespace_restricted": "Namespace startup was denied while AppArmor namespace restrictions are enabled. Ask an administrator to review the relevant AppArmor denials."
+            case "namespace_unavailable": "Namespace startup failed. Ask an administrator to review kernel support, namespace limits and host or container security policy."
             case "authentication_required": "Authentication is required with the appropriate account."
             case "stale_approval": "Owner approval is absent or changed. Fresh owner approval is required."
             case "invalid_state": "The saved run or command state does not permit this operation. Inspect its artifacts."
@@ -57,7 +60,8 @@ internal class PublicOutput {
                         "status": tool.Status,
                         "path": tool.Path,
                         "hint": tool.Hint,
-                        "detail": tool.Detail
+                        "detail": tool.Detail,
+                        "code": tool.Code
                     }
                 )
             }
@@ -98,6 +102,9 @@ internal class PublicOutput {
         private func KnownReason(reason string) bool -> Array.IndexOf(
             []string{
                 "missing_tools",
+                "namespace_disabled",
+                "namespace_restricted",
+                "namespace_unavailable",
                 "authentication_required",
                 "stale_approval",
                 "invalid_state",

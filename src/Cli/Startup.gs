@@ -10,6 +10,7 @@ internal class ToolCheck {
     internal var Hint string = ""
     internal var Status string = "missing"
     internal var Detail string = ""
+    internal var Code string = ""
 }
 
 internal class Startup {
@@ -184,6 +185,10 @@ internal class Startup {
                 } catch (error CliFailure) {
                     tool.Status = "failed"
                     tool.Detail = error.Summary
+                    tool.Code = error.Code
+                    if error.Code.StartsWith("namespace_", StringComparison.Ordinal) {
+                        tool.Hint = "Ask an administrator to review the host or container namespace policy."
+                    }
                 } catch (error Exception) {
                     tool.Status = "failed"
                     tool.Detail = "Tool could not start or complete --version. Repair or reinstall it. " + tool.Hint
@@ -234,6 +239,11 @@ internal class Startup {
                 }
                 PublicOutput.Tools(blockers)
                 Show(blockers, true)
+                for tool in blockers {
+                    if tool.Code.StartsWith("namespace_", StringComparison.Ordinal) {
+                        throw CliFailure(tool.Code, tool.Detail)
+                    }
+                }
                 throw CliFailure(
                     "missing_tools",
                     "Install or repair the tools needed for this command, then run the relevant tokate doctor scope."
@@ -336,6 +346,9 @@ internal class Startup {
                         runtime.Detail = "Pi " + J.Text(versions, "version") + ", Node " + J.Text(versions, "node")
                     } catch (error Exception) {
                         runtime.Status = "failed"
+                        if error is CliFailure failure {
+                            runtime.Code = failure.Code
+                        }
                         runtime.Detail = error.Message +
                             (SetupUserId() == 0 ? ". If running as root, retry as a regular user.": "")
                         if options.Get("fix") == "true" {
@@ -374,6 +387,7 @@ internal class Startup {
                         } else {
                             sandbox.Status = "failed"
                             sandbox.Detail = error.Summary
+                            sandbox.Code = error.Code
                         }
                     } catch (error Exception) {
                         sandbox.Status = "failed"
@@ -404,10 +418,12 @@ internal class Startup {
             var code = ""
             for tool in tools {
                 if tool.Status != "ready" {
-                    let failure = tool.Status == "authentication_required" ? "authentication_required": (
+                    let failure = tool.Code.StartsWith("namespace_", StringComparison.Ordinal) ? tool.Code:
+                    tool.Status == "authentication_required" ? "authentication_required": (
                         tool.Name == "sandbox" ? "verification_failed": "missing_tools"
                     )
-                    if code == "" || failure == "missing_tools" {
+                    if code == "" || failure.StartsWith("namespace_", StringComparison.Ordinal) ||
+                        (failure == "missing_tools" && !code.StartsWith("namespace_", StringComparison.Ordinal)) {
                         code = failure
                     }
                 }

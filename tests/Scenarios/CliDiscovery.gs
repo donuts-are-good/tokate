@@ -1128,11 +1128,37 @@ internal class CliDiscovery {
                 temp.Env,
                 cwd: temp.Root
             )
-            let blocked = Check.Envelope(unavailable, "policy", "error", "missing_tools")
-            Check.Contains(Check.Text(blocked["error"]?["message"]), "PID namespace")
+            let blocked = Check.Envelope(unavailable, "policy", "error", "namespace_unavailable")
+            Check.Contains(Check.Text(blocked["error"]?["message"]), "Namespace startup failed")
             Check.That(
                 !File.Exists(Path.Combine(temp.Root, "namespace-command-started")),
                 "Git ran without a namespace"
+            )
+            let doctor = TestProcess.Run(
+                "/usr/bin/bwrap",
+                []string{
+                    "--unshare-user",
+                    "--disable-userns",
+                    "--bind",
+                    "/",
+                    "/",
+                    "--",
+                    binary,
+                    "doctor",
+                    "--external",
+                    "--json"
+                },
+                temp.Env,
+                cwd: temp.Root
+            )
+            let restricted = Check.Envelope(doctor, "doctor", "error", "namespace_unavailable")
+            Check.That(
+                Check.Text(restricted["data"]?["tools"]?[0]?["code"]) == "namespace_unavailable",
+                "Doctor mislabeled namespace failure as missing tools"
+            )
+            Check.That(
+                restricted["next_actions"]?.AsArray().Count == 0,
+                "Doctor offered installation for blocked namespaces"
             )
             File.Delete(Path.Combine(bin, "git"))
             File.CreateSymbolicLink(Path.Combine(bin, "git"), "/usr/bin/git")

@@ -293,7 +293,8 @@ internal class PiBoundary {
                     pidNamespace: true
                 )
                 if result.Code != 0 || result.Truncated || result.ReadFailed {
-                    throw Exception(
+                    throw LinuxSandbox.ProbeFailure(
+                        result,
                         "Pi SDK or outer/nested isolation probe failed. Update pi and Node, then retry the probe. No inference started"
                     )
                 }
