@@ -30,7 +30,7 @@ binary="$proof/profile/bin/tokate"
 "$binary" --version
 (cd "$proof"; "$binary" doctor --external --json) > "$proof/external.json"
 (cd "$proof"; "$binary" doctor --managed --harness-path "$proof/tools/bin/codex" --json) > "$proof/managed.json"
-(cd "$proof"; PATH="$proof/tools/bin:$PATH" "$proof/tools/bin/bwrap" --ro-bind / / --proc /proc --dev /dev \
+(cd "$proof"; PATH="$proof/tools/bin:$PATH" "$proof/tools/bin/bwrap" --bind / / --proc /proc --dev /dev \
   --tmpfs /tmp --bind "$proof" "$proof" \
   --ro-bind /dev/null /bin/bash --ro-bind /dev/null /usr/bin/bwrap -- \
   "$binary" doctor --managed --harness pi --harness-path "$proof/tools/bin/pi" --json) > "$proof/pi.json"
